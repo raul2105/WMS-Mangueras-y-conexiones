@@ -1,0 +1,43 @@
+{
+  "name": "wms-rigentec",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3002",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "lint": "eslint",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push --accept-data-loss",
+    "db:setup": "npm run db:push && npm run db:seed",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset --force",
+    "import:products": "node scripts/import-products-from-csv.cjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.0.0",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
+    "csv-parse": "^5.6.0",
+    "next": "16.1.6",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "prisma": "^6.0.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.cjs"
+  }
+}

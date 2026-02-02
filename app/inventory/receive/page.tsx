@@ -1,0 +1,113 @@
+import prisma from "@/lib/prisma";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import InventoryCodeField from "@/components/InventoryCodeField";
+
+export const dynamic = "force-dynamic";
+
+async function receiveStock(formData: FormData) {
+  "use server";
+
+  const code = String(formData.get("code") ?? "").trim();
+  const location = String(formData.get("location") ?? "").trim() || null;
+  const reference = String(formData.get("reference") ?? "").trim() || null;
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const qtyRaw = String(formData.get("quantity") ?? "").trim();
+  const quantity = qtyRaw ? Number(qtyRaw.replace(",", ".")) : NaN;
+
+  if (!code || !Number.isFinite(quantity) || quantity <= 0) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Datos inválidos (código/cantidad)")}`);
+  }
+
+  const product = await prisma.product.findFirst({
+    where: {
+      OR: [{ sku: code }, { referenceCode: code }],
+    },
+    select: { id: true },
+  });
+
+  if (!product) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Producto no encontrado (SKU/Referencia)")}`);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const inv = await tx.inventory.findFirst({ where: { productId: product.id, location }, select: { id: true, quantity: true } });
+    if (inv) {
+      await tx.inventory.update({ where: { id: inv.id }, data: { quantity: inv.quantity + quantity } });
+    } else {
+      await tx.inventory.create({ data: { productId: product.id, location, quantity } });
+    }
+
+    await tx.inventoryMovement.create({
+      data: {
+        productId: product.id,
+        type: "IN",
+        quantity,
+        location,
+        reference,
+        notes,
+      },
+    });
+  });
+
+  redirect(`/inventory/receive?ok=1`);
+}
+
+export default async function ReceivePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ok?: string; error?: string }>;
+}) {
+  const sp = await searchParams;
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Recepción (Entrada)</h1>
+          <p className="text-slate-400 mt-1">Suma existencias al inventario y guarda el movimiento.</p>
+        </div>
+        <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Inventario</Link>
+      </div>
+
+      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
+      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Entrada registrada.</div>}
+
+      <form action={receiveStock} className="glass-card space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <InventoryCodeField
+            name="code"
+            label="SKU o Referencia *"
+            placeholder="CON-R1AT-04"
+            required
+          />
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Cantidad *</span>
+            <input name="quantity" required inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="10" />
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Ubicación</span>
+            <input name="location" className="w-full px-4 py-3 glass rounded-lg" placeholder="A-12-04" />
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Referencia documento</span>
+            <input name="reference" className="w-full px-4 py-3 glass rounded-lg" placeholder="Factura/OC/Remisión" />
+          </label>
+
+          <label className="space-y-1 md:col-span-2">
+            <span className="text-sm text-slate-400">Notas</span>
+            <textarea name="notes" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-end gap-3">
+          <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Cancelar</Link>
+          <button type="submit" className="btn-primary">Registrar entrada</button>
+        </div>
+      </form>
+    </div>
+  );
+}

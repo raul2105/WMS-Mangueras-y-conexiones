@@ -1,0 +1,16 @@
+
+> wms-rigentec@0.1.0 lint
+> eslint
+
+
+C:\Users\raul_\OneDrive\Escritorio\VS CODE Projects\WMS-Mangueras-y-conexiones\app\catalog\[id]\page.tsx
+  1:25  warning  'Product' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\raul_\OneDrive\Escritorio\VS CODE Projects\WMS-Mangueras-y-conexiones\app\layout.tsx
+  2:8  warning  'localFont' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\raul_\OneDrive\Escritorio\VS CODE Projects\WMS-Mangueras-y-conexiones\lib\mockData.ts
+  10:33  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 3 problems (1 error, 2 warnings)
+

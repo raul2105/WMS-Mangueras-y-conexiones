@@ -1,0 +1,4 @@
+sku,name,type,description,brand,base_cost,price,category,quantity,location,attributes,referenceCode,imageUrl
+CON-R1AT-04,"Manguera Hidráulica SAE 100 R1AT 1/4 in",HOSE,"Manguera de alta presión con refuerzo de una malla de acero.",Continental,45.50,85.00,Hidráulica,150,A-12-04,"{""pressure_psi"":3263,""inner_diameter"":""1/4 in"",""temp_range"":""-40°C a +100°C"",""norm"":""SAE 100 R1AT""}",REF-CON-R1AT-04,
+FIT-JIC-04-04,"Conexión JIC Hembra Giratoria 1/4 in x 1/4 in",FITTING,"Conexión prensable acero al carbón.",Gates,12.00,25.00,Conexiones Hidráulicas,500,B-01-01,"{""material"":""Acero"",""thread"":""JIC"",""angle"":""Straight""}",REF-FIT-JIC-04-04,
+ENS-EXCAV-001,"Ensamble Manguera Brazo Excavadora",ASSEMBLY,"Ensamble 3/4 in R12 con proteccion espiral.",Rigentec,450.00,950.00,Ensambles,5,C-03-02,"{""length_mm"":1200,""components"": [""HOSE-R12-12"",""FIT-JIC-12"",""FIT-JIC-12-90""]}",REF-ENS-EXCAV-001,

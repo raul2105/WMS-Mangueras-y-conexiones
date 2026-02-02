@@ -1,0 +1,96 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Next.js dev server",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "DB: Setup (push + seed)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"db:setup"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "DB: Seed",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"db:seed"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "DB: Studio",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"db:studio"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "DB: Reset (danger)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"db:reset"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Import Products: CSV",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"import:products",
+				"--",
+				"--file",
+				"data/products.sample.csv"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Run Next.js dev server (after DB changes)",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run Next.js dev server",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

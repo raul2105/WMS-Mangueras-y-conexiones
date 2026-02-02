@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0f172a;
+  /* Slate 900 */
+  --foreground: #f8fafc;
+  /* Slate 50 */
+  --primary: #06b6d4;
+  /* Cyan 500 */
+  --primary-glow: rgba(6, 182, 212, 0.5);
+  --glass-bg: rgba(30, 41, 59, 0.7);
+  /* Slate 800 with opacity */
+  --glass-border: rgba(255, 255, 255, 0.1);
+  /* Typography defaults */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  margin: 0;
+  /* Subtle ambient gradients */
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 20%),
+    radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.1) 0%, transparent 20%);
+}
+
+/* Glassmorphism Utilities */
+.glass,
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.glass-card {
+  @apply rounded-xl;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px var(--primary-glow);
+  transform: translateY(-2px);
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: #fff;
+}
+
+/* Form Elements */
+input,
+select,
+textarea {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--glass-border);
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  width: 100%;
+  transition: all 0.2s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.2);
+  background: rgba(15, 23, 42, 0.8);
+}
+
+/* Buttons */
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), #3b82f6);
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
+  transition: all 0.2s;
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 20px var(--primary-glow);
+}

@@ -7,8 +7,7 @@ export type Product = {
     brand?: string;
     base_cost?: number;
     price?: number;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    attributes?: Record<string, any>; // Parsed JSON
+    attributes?: Record<string, string | number | boolean | string[]>; // Parsed JSON with typed values
     categoryName?: string;
     stock?: number;
 };

@@ -1,36 +1,179 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WMS Rigentec - Sistema de Gestión de Almacenes
 
-## Getting Started
+Sistema completo de gestión de almacenes (WMS) especializado en mangueras y conexiones industriales, construido con Next.js, TypeScript, Prisma y Tailwind CSS.
 
-First, run the development server:
+## 🚀 Quick Start
+
+### Prerrequisitos
+- Node.js 20+ y npm
+- Git
+
+### Instalación
 
 ```bash
+# 1. Clonar el repositorio
+git clone <repo-url>
+cd WMS-Mangueras-y-conexiones
+
+# 2. Instalar dependencias
+npm install
+
+# 3. Configurar base de datos (SQLite)
+npm run db:setup
+
+# 4. Iniciar servidor de desarrollo
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abre [http://localhost:3002](http://localhost:3002) en tu navegador.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📁 Estructura del Proyecto
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+/app                    → Next.js App Router
+  /catalog              → Gestión de productos y categorías
+  /inventory            → Control de existencias y movimientos
+  /page.tsx             → Dashboard principal
+/components             → Componentes reutilizables
+/lib                    → Utilidades y cliente Prisma
+/prisma
+  /schema.prisma        → Modelo de datos
+  /migrations           → Historial de migraciones
+  /seed.cjs             → Datos iniciales
+/docs
+  /ADR                  → Architecture Decision Records
+/scripts                → Scripts de automatización
+/.github/workflows      → CI/CD con GitHub Actions
+```
 
-## Learn More
+## 🛠️ Scripts Disponibles
 
-To learn more about Next.js, take a look at the following resources:
+### Desarrollo
+```bash
+npm run dev              # Servidor de desarrollo (puerto 3002)
+npm run build            # Build de producción
+npm run start            # Servidor de producción
+npm run lint             # Linter (ESLint)
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Base de Datos
+```bash
+npm run db:setup         # Setup inicial (push + seed)
+npm run db:migrate       # Crear migración
+npm run db:push          # Push schema sin migración
+npm run db:seed          # Poblar datos de ejemplo
+npm run db:studio        # GUI Prisma Studio (puerto 5555)
+npm run db:reset         # Reset completo de BD
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Importación
+```bash
+npm run import:products -- --file data/products.csv     # Importar productos desde CSV
+npm run import:products -- --file data/products.csv --dry-run  # Simulación (sin escribir)
+```
 
-## Deploy on Vercel
+Ver [IMPORT_PRODUCTS_CSV.md](./IMPORT_PRODUCTS_CSV.md) para detalles del formato CSV.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🏗️ Módulos del Sistema
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### ✅ Implementado
+- **Catálogo Maestro**: Productos (SKU, atributos técnicos), categorías
+- **Inventario**: Movimientos IN/OUT, stock por ubicación, trazabilidad
+- **Scanner QR/Barcode**: Captura ágil de códigos con cámara
+- **Import CSV**: Carga masiva de productos e inventario inicial
+
+### 🚧 En Desarrollo
+- **Almacenes y Ubicaciones**: Gestión de bodegas, zonas, bins/racks
+- **Transferencias Internas**: Movimientos entre ubicaciones
+- **Ajustes de Inventario**: Con auditoría y razón de ajuste
+- **Validación Server-Side**: Zod schemas para robustez
+
+### 🔮 Roadmap
+- **Autenticación y RBAC**: NextAuth.js + roles (admin/operador/supervisor)
+- **Audit Log**: Trazabilidad completa (quién, qué, cuándo)
+- **Recepción PO**: Validación vs orden de compra, put-away sugerido
+- **Picking/Packing**: Olas, picklists, confirmaciones
+- **Dashboard KPIs**: Fill rate, exactitud de inventario, rotación
+- **Reportes y Exports**: Inventario, movimientos, análisis
+
+## 🎨 Stack Tecnológico
+
+- **Framework:** Next.js 16 (App Router + Turbopack)
+- **Lenguaje:** TypeScript 5
+- **UI:** React 19 + Tailwind CSS v4 (glassmorphism design)
+- **Base de Datos:** SQLite (dev) → PostgreSQL (prod)
+- **ORM:** Prisma 6
+- **Scanner:** ZXing (QR/Barcode)
+- **Linter:** ESLint 9
+- **CI/CD:** GitHub Actions
+
+## 📚 Documentación
+
+- [Setup Manual de Base de Datos](./DB_SETUP_MANUAL.md)
+- [Importación de Productos CSV](./IMPORT_PRODUCTS_CSV.md)
+- [Architecture Decision Records](./docs/ADR/README.md)
+  - [ADR-001: Arquitectura Base](./docs/ADR/001-arquitectura-base.md)
+
+## 🔒 Quality Gates
+
+Todo código debe pasar:
+1. ✅ Linter (ESLint)
+2. ✅ TypeScript check (`tsc --noEmit`)
+3. ✅ Build exitoso (`npm run build`)
+4. ✅ Prisma validate
+5. ✅ Code review obligatorio en PRs
+
+CI/CD automatizado en `.github/workflows/ci.yml`
+
+## 🤝 Contribuir
+
+1. Crea un branch desde `main`: `git checkout -b feature/mi-funcionalidad`
+2. Haz tus cambios y commits con mensajes descriptivos
+3. Ejecuta `npm run lint` y `npm run build` para validar
+4. Crea un Pull Request con descripción clara
+5. Espera code review y aprobación
+
+## 📝 Convenciones
+
+- **Archivos:** kebab-case (`product-list.tsx`)
+- **Componentes:** PascalCase (`ProductCard`)
+- **Variables:** camelCase (`productId`)
+- **Constantes:** UPPER_SNAKE_CASE (`MAX_ITEMS`)
+- **Commits:** Mensajes claros en español/inglés
+
+## 🐛 Troubleshooting
+
+### Build Error: "Cannot apply unknown utility class `glass`"
+✅ **Solucionado** en último commit. Si persiste, ejecuta:
+```bash
+npm install
+npm run build
+```
+
+### Error de Prisma Client
+```bash
+npx prisma generate
+```
+
+### Puerto 3002 ya en uso
+```bash
+# Windows
+npx kill-port 3002
+
+# Linux/Mac
+lsof -ti:3002 | xargs kill
+```
+
+## 📄 Licencia
+
+Privado - Rigentec © 2026
+
+## 🙋 Soporte
+
+Para dudas o problemas, contactar al Tech Lead o abrir un issue en el repositorio.
+
+---
+
+**Versión:** 0.1.0  
+**Última actualización:** 2026-02-03  
+**Próxima release:** v0.2.0 (Módulo Warehouse + Tests)

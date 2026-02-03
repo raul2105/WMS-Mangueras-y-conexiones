@@ -27,9 +27,8 @@ body {
     radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.1) 0%, transparent 20%);
 }
 
-/* Glassmorphism Utilities */
-.glass,
-.glass-card {
+/* Glassmorphism Utilities - Fixed for Tailwind v4 */
+.glass {
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -38,7 +37,12 @@ body {
 }
 
 .glass-card {
-  @apply rounded-xl;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border-radius: 0.75rem; /* rounded-xl */
   padding: 1.5rem;
   transition: all 0.3s ease;
 }

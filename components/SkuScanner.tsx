@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
+import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
 
 type Props = {
   onDetected: (value: string) => void;
@@ -10,6 +10,7 @@ type Props = {
 
 export default function SkuScanner({ onDetected, className }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,12 +19,12 @@ export default function SkuScanner({ onDetected, className }: Props) {
   useEffect(() => {
     return () => {
       try {
-        reader.reset();
+        controlsRef.current?.stop();
       } catch {
         // ignore
       }
     };
-  }, [reader]);
+  }, []);
 
   async function start() {
     setError(null);
@@ -38,6 +39,7 @@ export default function SkuScanner({ onDetected, className }: Props) {
       const preferred = devices.find((d) => /back|rear|environment/i.test(d.label))?.deviceId ?? devices[0]?.deviceId;
 
       await reader.decodeFromVideoDevice(preferred, video, (result, err, controls) => {
+        controlsRef.current = controls;
         if (result) {
           const text = result.getText();
           onDetected(text);
@@ -56,7 +58,7 @@ export default function SkuScanner({ onDetected, className }: Props) {
 
   function stop() {
     try {
-      reader.reset();
+      controlsRef.current?.stop();
     } catch {
       // ignore
     }

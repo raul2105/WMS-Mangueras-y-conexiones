@@ -81,12 +81,19 @@ async function createProduct(formData: FormData) {
     select: { id: true },
   });
 
+  // Handle inventory creation with location
+  const location = locationRaw
+    ? await prisma.location.findUnique({ where: { code: locationRaw }, select: { id: true } })
+    : null;
+
   await prisma.inventory.deleteMany({ where: { productId: product.id } });
   await prisma.inventory.create({
     data: {
       productId: product.id,
+      locationId: location?.id ?? null,
       quantity: Number.isFinite(quantity) ? quantity : 0,
-      location: locationRaw || null,
+      reserved: 0,
+      available: Number.isFinite(quantity) ? quantity : 0,
     },
   });
 

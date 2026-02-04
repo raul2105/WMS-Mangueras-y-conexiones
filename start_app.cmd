@@ -55,7 +55,7 @@ if exist ".next\\dev\\lock" (
 
 :: Start Next.js Server (in a new window to avoid locking this launcher)
 echo Starting Development Server...
-start "Next.js Dev Server" cmd /c "npm run dev"
+start "Next.js Dev Server" cmd /c "set NEXT_DISABLE_TURBOPACK=1 && npm run dev"
 
 :: Wait until a dev port opens, then open the browser
 for /l %%I in (1,1,30) do (

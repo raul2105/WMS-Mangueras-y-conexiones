@@ -25,20 +25,21 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     const params = await searchParams;
     const typeFilter = params.type;
 
-    const products = await prisma.product.findMany({
-        where: typeFilter ? { type: typeFilter } : undefined,
-        orderBy: { updatedAt: "desc" },
-        include: {
-            category: true,
-            inventory: true,
-        },
-    });
-
-    // Calculate counts for all product types from a single aggregation query
-    const allProducts = await prisma.product.groupBy({
-        by: ['type'],
-        _count: { type: true },
-    });
+    // Run queries in parallel for better performance
+    const [products, productCounts] = await Promise.all([
+        prisma.product.findMany({
+            where: typeFilter ? { type: typeFilter } : undefined,
+            orderBy: { updatedAt: "desc" },
+            include: {
+                category: true,
+                inventory: true,
+            },
+        }),
+        prisma.product.groupBy({
+            by: ['type'],
+            _count: { type: true },
+        }),
+    ]);
     
     const counts: Record<string, number> = {
         total: 0,
@@ -47,7 +48,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         ASSEMBLY: 0,
     };
     
-    allProducts.forEach((group) => {
+    productCounts.forEach((group) => {
         counts[group.type] = group._count.type;
         counts.total += group._count.type;
     });

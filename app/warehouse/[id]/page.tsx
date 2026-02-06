@@ -5,39 +5,44 @@ import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 
 interface PageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default async function WarehouseDetailPage({ params }: PageProps) {
+  const { id } = await params;
+  if (!id) {
+    notFound();
+  }
+
   const warehouse = await prisma.warehouse.findUnique({
-    where: { id: params.id },
-    include: {
-      locations: {
-        orderBy: [{ zone: "asc" }, { aisle: "asc" }, { rack: "asc" }],
-        include: {
-          _count: {
-            select: { inventory: true },
-          },
-        },
-      },
-    },
+    where: { id },
   });
 
   if (!warehouse) {
     notFound();
   }
 
-  const totalLocations = warehouse.locations.length;
-  const activeLocations = warehouse.locations.filter((l) => l.isActive).length;
-  const occupiedLocations = warehouse.locations.filter((l) => l._count.inventory > 0).length;
+  const locations = await prisma.location.findMany({
+    where: { warehouseId: warehouse.id },
+    orderBy: [{ zone: "asc" }, { aisle: "asc" }, { rack: "asc" }],
+    include: {
+      _count: {
+        select: { inventory: true },
+      },
+    },
+  });
+
+  const totalLocations = locations.length;
+  const activeLocations = locations.filter((l) => l.isActive).length;
+  const occupiedLocations = locations.filter((l) => l._count.inventory > 0).length;
 
   // Group locations by zone
-  const locationsByZone = warehouse.locations.reduce((acc, loc) => {
+  const locationsByZone = locations.reduce((acc, loc) => {
     const zone = loc.zone || "SIN ZONA";
     if (!acc[zone]) acc[zone] = [];
     acc[zone].push(loc);
     return acc;
-  }, {} as Record<string, typeof warehouse.locations>);
+  }, {} as Record<string, typeof locations>);
 
   return (
     <div className="space-y-8">

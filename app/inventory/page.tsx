@@ -43,9 +43,17 @@ export default async function InventoryHomePage() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 font-mono text-slate-200">{r.sku}</td>
+                  <td className="py-3 font-mono text-slate-200">
+                    <Link href={`/inventory/${r.id}`} className="hover:text-cyan-300">
+                      {r.sku}
+                    </Link>
+                  </td>
                   <td className="py-3 font-mono text-slate-400">{r.referenceCode ?? "--"}</td>
-                  <td className="py-3 text-slate-200">{r.name}</td>
+                  <td className="py-3 text-slate-200">
+                    <Link href={`/inventory/${r.id}`} className="hover:text-cyan-300">
+                      {r.name}
+                    </Link>
+                  </td>
                   <td className="py-3 text-slate-400">{r.type}</td>
                   <td className="py-3 text-right font-bold text-white">{r.stock}</td>
                 </tr>

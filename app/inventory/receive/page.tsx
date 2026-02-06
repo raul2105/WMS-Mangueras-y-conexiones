@@ -1,7 +1,10 @@
 import prisma from "@/lib/prisma";
+import { promises as fs } from "fs";
+import path from "path";
+import crypto from "crypto";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import InventoryCodeField from "@/components/InventoryCodeField";
+import ReceiveForm from "@/components/ReceiveForm";
 
 export const dynamic = "force-dynamic";
 
@@ -9,14 +12,30 @@ async function receiveStock(formData: FormData) {
   "use server";
 
   const code = String(formData.get("code") ?? "").trim();
-  const locationCode = String(formData.get("location") ?? "").trim() || null;
+  const warehouseId = String(formData.get("warehouseId") ?? "").trim() || null;
+  const locationId = String(formData.get("locationId") ?? "").trim() || null;
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
+  const referenceFile = formData.get("referenceFile");
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
   const quantity = qtyRaw ? Number(qtyRaw.replace(",", ".")) : NaN;
 
   if (!code || !Number.isFinite(quantity) || quantity <= 0) {
-    redirect(`/inventory/receive?error=${encodeURIComponent("Datos inválidos (código/cantidad)")}`);
+    redirect(`/inventory/receive?error=${encodeURIComponent("Datos inválidos (codigo/cantidad)")}`);
+  }
+
+  if (!warehouseId || !locationId || !reference) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Faltan campos obligatorios")}`);
+  }
+
+  if (referenceFile && referenceFile instanceof File && referenceFile.size > 0) {
+    const allowed = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
+    if (!allowed.includes(referenceFile.type)) {
+      redirect(`/inventory/receive?error=${encodeURIComponent("Archivo no valido (solo PDF o imagen)")}`);
+    }
+    if (referenceFile.size > 10 * 1024 * 1024) {
+      redirect(`/inventory/receive?error=${encodeURIComponent("Archivo excede 10 MB")}`);
+    }
   }
 
   const product = await prisma.product.findFirst({
@@ -30,13 +49,62 @@ async function receiveStock(formData: FormData) {
     redirect(`/inventory/receive?error=${encodeURIComponent("Producto no encontrado (SKU/Referencia)")}`);
   }
 
-  // Find location by code if provided
-  const location = locationCode
-    ? await prisma.location.findUnique({ where: { code: locationCode }, select: { id: true, code: true } })
+  const warehouse = warehouseId
+    ? await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true } })
     : null;
 
-  if (locationCode && !location) {
-    redirect(`/inventory/receive?error=${encodeURIComponent(`Ubicación no encontrada: ${locationCode}`)}`);
+  if (warehouseId && !warehouse) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Almacen no encontrado")}`);
+  }
+
+  const location = locationId
+    ? await prisma.location.findUnique({ where: { id: locationId }, select: { id: true, code: true, warehouseId: true } })
+    : null;
+
+  if (locationId && !location) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Ubicación no encontrada")}`);
+  }
+
+  if (warehouseId && location && location.warehouseId !== warehouseId) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("La ubicación no pertenece al almacén seleccionado")}`);
+  }
+
+  let referenceFileMeta: {
+    path: string;
+    name: string;
+    mime: string;
+    size: number;
+  } | null = null;
+
+  if (referenceFile && referenceFile instanceof File && referenceFile.size > 0) {
+    const mimeMap: Record<string, string> = {
+      "application/pdf": ".pdf",
+      "image/png": ".png",
+      "image/jpeg": ".jpg",
+      "image/webp": ".webp",
+      "image/gif": ".gif",
+    };
+
+    const uploadDir = path.join(process.cwd(), "public", "uploads", "receipts");
+    await fs.mkdir(uploadDir, { recursive: true });
+
+    const rawName = referenceFile.name || "document";
+    const safeName = rawName.replace(/[^A-Za-z0-9._-]/g, "_");
+    const extFromName = path.extname(safeName);
+    const baseName = (extFromName ? safeName.slice(0, -extFromName.length) : safeName) || "document";
+    const ext = extFromName || mimeMap[referenceFile.type] || "";
+    const fileName = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${baseName.slice(0, 40)}${ext}`;
+    const filePath = path.join(uploadDir, fileName);
+    const bytes = Buffer.from(await referenceFile.arrayBuffer());
+
+    await fs.writeFile(filePath, bytes);
+
+    referenceFileMeta = {
+      path: `/uploads/receipts/${fileName}`,
+      name: referenceFile.name || fileName,
+      mime: referenceFile.type || "application/octet-stream",
+      size: referenceFile.size,
+    };
   }
 
   await prisma.$transaction(async (tx) => {
@@ -74,6 +142,10 @@ async function receiveStock(formData: FormData) {
         quantity,
         reference,
         notes,
+        referenceFilePath: referenceFileMeta?.path ?? null,
+        referenceFileName: referenceFileMeta?.name ?? null,
+        referenceFileMime: referenceFileMeta?.mime ?? null,
+        referenceFileSize: referenceFileMeta?.size ?? null,
       },
     });
   });
@@ -87,6 +159,20 @@ export default async function ReceivePage({
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
   const sp = await searchParams;
+  const warehouses = await prisma.warehouse.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      locations: {
+        where: { isActive: true },
+        orderBy: { code: "asc" },
+        select: { id: true, code: true, name: true, warehouseId: true },
+      },
+    },
+  });
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -101,41 +187,7 @@ export default async function ReceivePage({
       {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
       {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Entrada registrada.</div>}
 
-      <form action={receiveStock} className="glass-card space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <InventoryCodeField
-            name="code"
-            label="SKU o Referencia *"
-            placeholder="CON-R1AT-04"
-            required
-          />
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Cantidad *</span>
-            <input name="quantity" required inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="10" />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicación</span>
-            <input name="location" className="w-full px-4 py-3 glass rounded-lg" placeholder="A-12-04" />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Referencia documento</span>
-            <input name="reference" className="w-full px-4 py-3 glass rounded-lg" placeholder="Factura/OC/Remisión" />
-          </label>
-
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Notas</span>
-            <textarea name="notes" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
-          </label>
-        </div>
-
-        <div className="flex items-center justify-end gap-3">
-          <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Cancelar</Link>
-          <button type="submit" className="btn-primary">Registrar entrada</button>
-        </div>
-      </form>
+      <ReceiveForm action={receiveStock} warehouses={warehouses} />
     </div>
   );
 }

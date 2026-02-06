@@ -28,6 +28,7 @@ model Product {
   
   inventory   Inventory[]
   movements   InventoryMovement[]
+  productionOrderItems ProductionOrderItem[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -52,6 +53,7 @@ model Warehouse {
   isActive    Boolean    @default(true)
   
   locations   Location[]
+  productionOrders ProductionOrder[]
   
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -74,6 +76,7 @@ model Location {
   
   inventory   Inventory[]
   movements   InventoryMovement[]
+  productionOrderItems ProductionOrderItem[]
   
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -105,12 +108,24 @@ enum InventoryMovementType {
   ADJUSTMENT   // Inventory adjustment (cycle count, damage)
 }
 
+enum ProductionOrderStatus {
+  BORRADOR
+  ABIERTA
+  EN_PROCESO
+  COMPLETADA
+  CANCELADA
+}
+
 model InventoryMovement {
   id        String                @id @default(uuid())
   type      InventoryMovementType
   quantity  Float
   reference String?                // PO, SO, Transfer Order, etc.
   notes     String?
+  referenceFilePath String?
+  referenceFileName String?
+  referenceFileMime String?
+  referenceFileSize Int?
   
   productId  String
   product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -128,4 +143,45 @@ model InventoryMovement {
   @@index([locationId])
   @@index([type])
   @@index([createdAt])
+}
+
+model ProductionOrder {
+  id           String                @id @default(uuid())
+  code         String                @unique
+  status       ProductionOrderStatus @default(BORRADOR)
+  priority     Int                   @default(3)
+  customerName String?
+  dueDate      DateTime?
+  notes        String?
+
+  warehouseId String
+  warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  items ProductionOrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([warehouseId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ProductionOrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  productId String
+  locationId String
+  quantity  Float
+
+  order    ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  location Location        @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, productId, locationId])
+  @@index([orderId])
+  @@index([productId])
+  @@index([locationId])
 }

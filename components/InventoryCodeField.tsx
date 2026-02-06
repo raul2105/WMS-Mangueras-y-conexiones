@@ -8,9 +8,10 @@ type Props = {
   label: string;
   placeholder?: string;
   required?: boolean;
+  error?: string;
 };
 
-export default function InventoryCodeField({ name, label, placeholder, required }: Props) {
+export default function InventoryCodeField({ name, label, placeholder, required, error }: Props) {
   const [value, setValue] = useState("");
 
   return (
@@ -31,6 +32,7 @@ export default function InventoryCodeField({ name, label, placeholder, required 
           className="w-full px-4 py-3 glass rounded-lg font-mono"
           placeholder={placeholder}
         />
+        {error && <p className="text-xs text-red-400">{error}</p>}
       </label>
     </div>
   );

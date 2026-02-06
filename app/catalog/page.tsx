@@ -34,19 +34,22 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         },
     });
 
-    // Calculate counts for all product types
-    const allProducts = await prisma.product.findMany({ select: { type: true } });
+    // Calculate counts for all product types from a single aggregation query
+    const allProducts = await prisma.product.groupBy({
+        by: ['type'],
+        _count: { type: true },
+    });
+    
     const counts: Record<string, number> = {
-        total: allProducts.length,
+        total: 0,
         HOSE: 0,
         FITTING: 0,
         ASSEMBLY: 0,
-        ACCESSORY: 0,
     };
-    allProducts.forEach((p) => {
-        if (counts[p.type] !== undefined) {
-            counts[p.type]++;
-        }
+    
+    allProducts.forEach((group) => {
+        counts[group.type] = group._count.type;
+        counts.total += group._count.type;
     });
 
     return (

@@ -3,20 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 interface PageProps {
-    params: { id: string };
+    params: Promise<{ id: string }>;
 }
 
 export default async function ProductDetailPage({ params }: PageProps) {
+    const { id } = await params;
     const product = await prisma.product.findUnique({
-        where: { id: params.id },
-        include: {
-            category: true,
-            inventory: {
-                include: {
-                    location: true,
-                },
-            },
-        },
+        where: { id },
+        include: { category: true, inventory: true },
     });
 
     if (!product) {

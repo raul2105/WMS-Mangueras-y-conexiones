@@ -42,32 +42,90 @@ model Category {
   updatedAt DateTime @updatedAt
 }
 
+// Warehouse entity for multi-location support
+model Warehouse {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  name        String
+  description String?
+  address     String?
+  isActive    Boolean    @default(true)
+  
+  locations   Location[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+// Location entity for bin/rack/zone management
+model Location {
+  id          String     @id @default(uuid())
+  code        String     @unique // e.g., "A-12-04" or "ZONE-A-RACK-12-BIN-04"
+  name        String
+  zone        String?    // e.g., "A", "B", "Receiving"
+  aisle       String?    // e.g., "12"
+  rack        String?    // e.g., "04"
+  level       String?    // e.g., "01" (shelf level)
+  isActive    Boolean    @default(true)
+  capacity    Float?     // Max capacity in units or volume
+  
+  warehouseId String
+  warehouse   Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  
+  inventory   Inventory[]
+  movements   InventoryMovement[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
 model Inventory {
   id        String   @id @default(uuid())
-  quantity  Float    @default(0)
-  location  String?
+  quantity  Float    @default(0)     // On-hand quantity
+  reserved  Float    @default(0)     // Reserved for orders
+  available Float    @default(0)     // Available = quantity - reserved
   
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
+  
+  @@unique([productId, locationId])
+  @@index([productId])
+  @@index([locationId])
 }
 
 enum InventoryMovementType {
-  IN
-  OUT
+  IN           // Receiving/Entry
+  OUT          // Picking/Exit
+  TRANSFER     // Internal transfer between locations
+  ADJUSTMENT   // Inventory adjustment (cycle count, damage)
 }
 
 model InventoryMovement {
   id        String                @id @default(uuid())
   type      InventoryMovementType
   quantity  Float
-  location  String?
-  reference String?
+  reference String?                // PO, SO, Transfer Order, etc.
   notes     String?
-
-  productId String
-  product   Product               @relation(fields: [productId], references: [id])
+  
+  productId  String
+  product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  locationId String?
+  location   Location?             @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  
+  // For TRANSFER type: track from/to locations
+  fromLocationCode String?
+  toLocationCode   String?
 
   createdAt DateTime              @default(now())
+  
+  @@index([productId])
+  @@index([locationId])
+  @@index([type])
+  @@index([createdAt])
 }

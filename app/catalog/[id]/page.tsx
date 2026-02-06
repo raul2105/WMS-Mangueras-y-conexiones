@@ -18,7 +18,11 @@ export default async function ProductDetailPage({ params }: PageProps) {
     }
 
     const stock = product.inventory.reduce((acc, row) => acc + (typeof row.quantity === "number" ? row.quantity : 0), 0);
-    const location = product.inventory.find((row) => row.location)?.location ?? "--";
+    const locationCodes = product.inventory
+        .filter((row) => row.location)
+        .map((row) => row.location?.code)
+        .filter(Boolean)
+        .join(", ") || "--";
     let attributes: Record<string, unknown> | undefined;
     if (product.attributes) {
         try {
@@ -71,8 +75,8 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             <p className="text-2xl font-bold text-white">{stock} <span className="text-sm font-normal text-slate-400">unidades</span></p>
                         </div>
                         <div className="glass p-4 rounded-lg">
-                            <p className="text-xs text-slate-400 uppercase font-bold">Ubicación</p>
-                            <p className="text-lg text-white">{location}</p>
+                            <p className="text-xs text-slate-400 uppercase font-bold">Ubicaciones</p>
+                            <p className="text-lg text-white">{locationCodes}</p>
                         </div>
                     </div>
                 </div>

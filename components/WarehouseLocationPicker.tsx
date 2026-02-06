@@ -67,7 +67,7 @@ export default function WarehouseLocationPicker({
           required={requiredLocation}
           className="w-full px-4 py-3 glass rounded-lg"
         >
-          <option value="">Sin ubicacion</option>
+          <option value="">Selecciona ubicacion</option>
           {locations.map((location) => (
             <option key={location.id} value={location.id}>
               {location.code} - {location.name}

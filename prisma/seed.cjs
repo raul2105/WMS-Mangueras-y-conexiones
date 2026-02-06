@@ -126,6 +126,27 @@ async function main() {
     console.log(`  ✓ Location: ${loc.code} - ${loc.name}`);
   }
 
+  console.log('📍 Ensuring staging locations...');
+  const stagingMap = {};
+  for (const wh of seedWarehouses) {
+    const warehouse = warehouseMap[wh.code];
+    if (!warehouse) continue;
+    const stagingCode = `STAGING-${wh.code}`;
+    const staging = await prisma.location.upsert({
+      where: { code: stagingCode },
+      create: {
+        code: stagingCode,
+        name: `Staging - ${wh.name}`,
+        zone: 'STAGING',
+        isActive: true,
+        warehouseId: warehouse.id,
+      },
+      update: {},
+    });
+    stagingMap[wh.code] = staging;
+    console.log(`  ✓ Staging: ${staging.code}`);
+  }
+
   // 3. Seed Products with Inventory
   console.log('🔧 Creating products...');
   for (const p of seedProducts) {
@@ -166,13 +187,13 @@ async function main() {
     // Keep seed idempotent: replace inventory rows for this product.
     await prisma.inventory.deleteMany({ where: { productId: product.id } });
 
-    const location = locationMap[p.locationCode];
+    const location = locationMap[p.locationCode] ?? stagingMap[seedWarehouses[0].code];
     const quantity = typeof p.stock === 'number' ? p.stock : 0;
-    
+
     await prisma.inventory.create({
       data: {
         productId: product.id,
-        locationId: location?.id ?? null,
+        locationId: location.id,
         quantity,
         reserved: 0,
         available: quantity, // available = quantity - reserved

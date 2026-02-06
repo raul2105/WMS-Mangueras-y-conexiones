@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parse } = require('csv-parse/sync');
 const { PrismaClient } = require('@prisma/client');
+const { InventoryService } = require('../lib/inventory-service');
 
 const prisma = new PrismaClient();
 
@@ -79,14 +80,8 @@ function asProductType(typeValue) {
   return allowed.has(t) ? t : null;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help || !args.file) {
-    console.log(usage());
-    process.exit(args.help ? 0 : 1);
-  }
-
-  const csvPath = path.isAbsolute(args.file) ? args.file : path.join(process.cwd(), args.file);
+async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
+  const csvPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
   if (!fs.existsSync(csvPath)) {
     throw new Error(`CSV file not found: ${csvPath}`);
   }
@@ -171,8 +166,6 @@ async function main() {
     const bucket = bySku.get(sku);
     const locKey = location ?? '__NO_LOCATION__';
     bucket.inventoryByLocation.set(locKey, (bucket.inventoryByLocation.get(locKey) ?? 0) + quantity);
-    // Keep last seen location text if it exists.
-    if (location) bucket.inventoryByLocation.set(locKey, bucket.inventoryByLocation.get(locKey));
   }
 
   if (errors.length) {
@@ -185,21 +178,71 @@ async function main() {
   const skus = Array.from(bySku.keys());
   console.log(`Parsed ${normalizedRows.length} CSV rows -> ${skus.length} unique SKUs.`);
 
-  if (args.dryRun) {
+  if (dryRun) {
     console.log('Dry run enabled; no DB writes performed.');
     return;
   }
 
+  const prismaToUse = prismaClient ?? prisma;
+  const service = new InventoryService(prismaToUse);
+
   let upsertedProducts = 0;
   let createdCategories = 0;
-  let inventoryRowsCreated = 0;
+  let inventoryRowsUpdated = 0;
+
+  const defaultWarehouse = await prismaToUse.warehouse.upsert({
+    where: { code: 'DEFAULT' },
+    create: {
+      code: 'DEFAULT',
+      name: 'Default Warehouse',
+      description: 'Auto-created for CSV imports',
+      isActive: true,
+    },
+    update: {},
+  });
+
+  const stagingLocation = await prismaToUse.location.upsert({
+    where: { code: 'STAGING-DEFAULT' },
+    create: {
+      code: 'STAGING-DEFAULT',
+      name: 'Staging - DEFAULT',
+      zone: 'STAGING',
+      isActive: true,
+      warehouseId: defaultWarehouse.id,
+    },
+    update: {},
+  });
+
+  async function resolveLocationId(locationCode) {
+    if (!locationCode) return stagingLocation.id;
+
+    const existing = await prismaToUse.location.findUnique({
+      where: { code: locationCode },
+      select: { id: true },
+    });
+
+    if (existing) return existing.id;
+
+    const created = await prismaToUse.location.create({
+      data: {
+        code: locationCode,
+        name: `Ubicacion ${locationCode}`,
+        zone: 'DEFAULT',
+        isActive: true,
+        warehouseId: defaultWarehouse.id,
+      },
+      select: { id: true },
+    });
+
+    return created.id;
+  }
 
   for (const sku of skus) {
     const { productData, inventoryByLocation } = bySku.get(sku);
 
     const categoryName = productData.category;
     const category = categoryName
-      ? await prisma.category.upsert({
+      ? await prismaToUse.category.upsert({
           where: { name: categoryName },
           create: { name: categoryName },
           update: {},
@@ -211,7 +254,7 @@ async function main() {
       createdCategories++;
     }
 
-    const product = await prisma.product.upsert({
+    const product = await prismaToUse.product.upsert({
       where: { sku: productData.sku },
       create: {
         sku: productData.sku,
@@ -241,36 +284,63 @@ async function main() {
       select: { id: true },
     });
 
-    // Replace inventory for this product so repeated imports are clean.
-    await prisma.inventory.deleteMany({ where: { productId: product.id } });
+    const existingInventory = await prismaToUse.inventory.findMany({
+      where: { productId: product.id },
+      select: { id: true, locationId: true, quantity: true, reserved: true },
+    });
+    const existingByLocation = new Map(existingInventory.map((row) => [row.locationId, row]));
 
-    const inventoryCreates = [];
+    const desiredByLocation = new Map();
     for (const [locKey, qty] of inventoryByLocation.entries()) {
-      const location = locKey === '__NO_LOCATION__' ? null : locKey;
-      inventoryCreates.push({
-        productId: product.id,
-        location,
-        quantity: qty,
-      });
+      const locationCode = locKey === '__NO_LOCATION__' ? null : locKey;
+      const locationId = await resolveLocationId(locationCode);
+      desiredByLocation.set(locationId, (desiredByLocation.get(locationId) ?? 0) + qty);
     }
 
-    if (inventoryCreates.length) {
-      await prisma.inventory.createMany({ data: inventoryCreates });
-      inventoryRowsCreated += inventoryCreates.length;
+    for (const [locationId, desiredQty] of desiredByLocation.entries()) {
+      const existing = existingByLocation.get(locationId);
+      const currentQty = existing?.quantity ?? 0;
+      const delta = desiredQty - currentQty;
+      if (delta !== 0) {
+        await service.adjustStock(product.id, locationId, delta, 'Import CSV');
+        inventoryRowsUpdated++;
+      }
+      existingByLocation.delete(locationId);
+    }
+
+    for (const leftover of existingByLocation.values()) {
+      if (leftover.quantity !== 0) {
+        await service.adjustStock(product.id, leftover.locationId, -leftover.quantity, 'Import CSV cleanup');
+        inventoryRowsUpdated++;
+      }
     }
 
     upsertedProducts++;
   }
 
-  console.log(`Imported: ${upsertedProducts} products; ${inventoryRowsCreated} inventory rows.`);
+  console.log(`Imported: ${upsertedProducts} products; ${inventoryRowsUpdated} inventory adjustments.`);
 }
 
-main()
-  .then(async () => {
-    await prisma.$disconnect();
-  })
-  .catch(async (e) => {
-    console.error(e);
-    await prisma.$disconnect();
-    process.exit(1);
-  });
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help || !args.file) {
+    console.log(usage());
+    process.exit(args.help ? 0 : 1);
+  }
+
+  await importProductsFromCsv({ filePath: args.file, dryRun: args.dryRun });
+}
+
+if (require.main === module) {
+  main()
+    .then(async () => {
+      await prisma.$disconnect();
+    })
+    .catch(async (e) => {
+      console.error(e);
+      await prisma.$disconnect();
+      process.exit(1);
+    });
+}
+
+module.exports = { importProductsFromCsv };

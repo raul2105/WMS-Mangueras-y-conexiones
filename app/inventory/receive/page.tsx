@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import InventoryService, { InventoryServiceError } from "@/lib/inventory-service";
 import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -12,9 +13,9 @@ async function receiveStock(formData: FormData) {
   "use server";
 
   const code = String(formData.get("code") ?? "").trim();
-  const warehouseId = String(formData.get("warehouseId") ?? "").trim() || null;
-  const locationId = String(formData.get("locationId") ?? "").trim() || null;
-  const reference = String(formData.get("reference") ?? "").trim() || null;
+  const warehouseId = String(formData.get("warehouseId") ?? "").trim();
+  const locationId = String(formData.get("locationId") ?? "").trim();
+  const reference = String(formData.get("reference") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const referenceFile = formData.get("referenceFile");
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
@@ -49,17 +50,13 @@ async function receiveStock(formData: FormData) {
     redirect(`/inventory/receive?error=${encodeURIComponent("Producto no encontrado (SKU/Referencia)")}`);
   }
 
-  const warehouse = warehouseId
-    ? await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true } })
-    : null;
+  const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true } });
 
   if (warehouseId && !warehouse) {
     redirect(`/inventory/receive?error=${encodeURIComponent("Almacen no encontrado")}`);
   }
 
-  const location = locationId
-    ? await prisma.location.findUnique({ where: { id: locationId }, select: { id: true, code: true, warehouseId: true } })
-    : null;
+  const location = await prisma.location.findUnique({ where: { id: locationId }, select: { id: true, code: true, warehouseId: true } });
 
   if (locationId && !location) {
     redirect(`/inventory/receive?error=${encodeURIComponent("Ubicación no encontrada")}`);
@@ -107,48 +104,22 @@ async function receiveStock(formData: FormData) {
     };
   }
 
-  await prisma.$transaction(async (tx) => {
-    const inv = await tx.inventory.findFirst({
-      where: { productId: product.id, locationId: location?.id ?? null },
-      select: { id: true, quantity: true, reserved: true },
-    });
+  const service = new InventoryService(prisma);
 
-    if (inv) {
-      const newQty = inv.quantity + quantity;
-      await tx.inventory.update({
-        where: { id: inv.id },
-        data: {
-          quantity: newQty,
-          available: newQty - inv.reserved, // Update available
-        },
-      });
-    } else {
-      await tx.inventory.create({
-        data: {
-          productId: product.id,
-          locationId: location?.id ?? null,
-          quantity,
-          reserved: 0,
-          available: quantity,
-        },
-      });
+  try {
+    await service.receiveStock(product.id, location.id, quantity, reference, {
+      notes,
+      referenceFilePath: referenceFileMeta?.path ?? null,
+      referenceFileName: referenceFileMeta?.name ?? null,
+      referenceFileMime: referenceFileMeta?.mime ?? null,
+      referenceFileSize: referenceFileMeta?.size ?? null,
+    });
+  } catch (error) {
+    if (error instanceof InventoryServiceError) {
+      redirect(`/inventory/receive?error=${encodeURIComponent("No se pudo registrar la entrada")}`);
     }
-
-    await tx.inventoryMovement.create({
-      data: {
-        productId: product.id,
-        locationId: location?.id ?? null,
-        type: "IN",
-        quantity,
-        reference,
-        notes,
-        referenceFilePath: referenceFileMeta?.path ?? null,
-        referenceFileName: referenceFileMeta?.name ?? null,
-        referenceFileMime: referenceFileMeta?.mime ?? null,
-        referenceFileSize: referenceFileMeta?.size ?? null,
-      },
-    });
-  });
+    throw error;
+  }
 
   redirect(`/inventory/receive?ok=1`);
 }

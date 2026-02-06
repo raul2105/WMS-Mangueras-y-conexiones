@@ -43,26 +43,7 @@ export default async function InventoryDetailPage({ params }: PageProps) {
   }
 
   const grouped = new Map<string, WarehouseGroup>();
-  const unassigned: WarehouseGroup = {
-    id: "unassigned",
-    name: "Sin almacen",
-    code: "--",
-    rows: [],
-  };
-
   for (const inv of product.inventory) {
-    if (!inv.location || !inv.location.warehouse) {
-      unassigned.rows.push({
-        id: inv.id,
-        code: inv.location?.code ?? "--",
-        name: inv.location?.name ?? "Sin ubicacion",
-        quantity: inv.quantity ?? 0,
-        reserved: inv.reserved ?? 0,
-        available: inv.available ?? 0,
-      });
-      continue;
-    }
-
     const warehouse = inv.location.warehouse;
     if (!grouped.has(warehouse.id)) {
       grouped.set(warehouse.id, {
@@ -84,10 +65,6 @@ export default async function InventoryDetailPage({ params }: PageProps) {
   }
 
   const warehouses = Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name));
-  if (unassigned.rows.length > 0) {
-    warehouses.push(unassigned);
-  }
-
   const totals = product.inventory.reduce(
     (acc, row) => {
       acc.quantity += row.quantity ?? 0;

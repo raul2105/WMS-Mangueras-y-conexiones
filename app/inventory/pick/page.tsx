@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import InventoryService, { InventoryServiceError } from "@/lib/inventory-service";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import InventoryCodeField from "@/components/InventoryCodeField";
@@ -9,7 +10,7 @@ async function pickStock(formData: FormData) {
   "use server";
 
   const code = String(formData.get("code") ?? "").trim();
-  const locationCode = String(formData.get("location") ?? "").trim() || null;
+  const locationCode = String(formData.get("location") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
@@ -17,6 +18,10 @@ async function pickStock(formData: FormData) {
 
   if (!code || !Number.isFinite(quantity) || quantity <= 0) {
     redirect(`/inventory/pick?error=${encodeURIComponent("Datos inválidos (código/cantidad)")}`);
+  }
+
+  if (!locationCode) {
+    redirect(`/inventory/pick?error=${encodeURIComponent("Selecciona una ubicación")}`);
   }
 
   const product = await prisma.product.findFirst({
@@ -29,52 +34,25 @@ async function pickStock(formData: FormData) {
   }
 
   // Find location by code if provided
-  const location = locationCode
-    ? await prisma.location.findUnique({ where: { code: locationCode }, select: { id: true, code: true } })
-    : null;
+  const location = await prisma.location.findUnique({ where: { code: locationCode }, select: { id: true, code: true } });
 
   if (locationCode && !location) {
     redirect(`/inventory/pick?error=${encodeURIComponent(`Ubicación no encontrada: ${locationCode}`)}`);
   }
 
-  await prisma.$transaction(async (tx) => {
-    const inv = await tx.inventory.findFirst({
-      where: { productId: product.id, locationId: location?.id ?? null },
-      select: { id: true, quantity: true, reserved: true, available: true },
-    });
-    const currentAvailable = inv?.available ?? 0;
+  const service = new InventoryService(prisma);
 
-    if (currentAvailable < quantity) {
-      throw new Error("STOCK_INSUFFICIENT");
+  try {
+    await service.pickStock(product.id, location.id, quantity, reference, { notes });
+  } catch (error) {
+    if (error instanceof InventoryServiceError) {
+      const message = error.code === "INSUFFICIENT_AVAILABLE"
+        ? "Stock insuficiente en esa ubicación"
+        : "No se pudo registrar la salida";
+      redirect(`/inventory/pick?error=${encodeURIComponent(message)}`);
     }
-
-    if (inv) {
-      const newQty = inv.quantity - quantity;
-      await tx.inventory.update({
-        where: { id: inv.id },
-        data: {
-          quantity: newQty,
-          available: newQty - inv.reserved, // Update available
-        },
-      });
-    }
-
-    await tx.inventoryMovement.create({
-      data: {
-        productId: product.id,
-        locationId: location?.id ?? null,
-        type: "OUT",
-        quantity,
-        reference,
-        notes,
-      },
-    });
-  }).catch((e) => {
-    if (e instanceof Error && e.message === "STOCK_INSUFFICIENT") {
-      redirect(`/inventory/pick?error=${encodeURIComponent("Stock insuficiente en esa ubicación")}`);
-    }
-    throw e;
-  });
+    throw error;
+  }
 
   redirect(`/inventory/pick?ok=1`);
 }
@@ -114,9 +92,9 @@ export default async function PickPage({
           </label>
 
           <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicación</span>
-            <input name="location" className="w-full px-4 py-3 glass rounded-lg" placeholder="A-12-04" />
-            <p className="text-xs text-slate-500 mt-1">Recomendado: especifica ubicación para evitar salidas incorrectas.</p>
+            <span className="text-sm text-slate-400">Ubicación *</span>
+            <input name="location" required className="w-full px-4 py-3 glass rounded-lg" placeholder="A-12-04" />
+            <p className="text-xs text-slate-500 mt-1">Obligatorio para garantizar integridad de inventario.</p>
           </label>
 
           <label className="space-y-1">

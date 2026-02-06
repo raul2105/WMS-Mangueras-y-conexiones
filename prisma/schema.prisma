@@ -91,8 +91,8 @@ model Inventory {
   productId  String
   product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   
-  locationId String?
-  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  locationId String
+  location   Location  @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   updatedAt DateTime @updatedAt
   

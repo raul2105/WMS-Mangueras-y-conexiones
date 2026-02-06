@@ -1,5 +1,6 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
+import CatalogFilters from "@/components/CatalogFilters";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +17,36 @@ function sumStock(inventory: Array<{ quantity: number }>) {
     return inventory.reduce((acc, row) => acc + (typeof row.quantity === "number" ? row.quantity : 0), 0);
 }
 
-export default async function CatalogPage() {
+interface PageProps {
+    searchParams: Promise<{ type?: string }>;
+}
+
+export default async function CatalogPage({ searchParams }: PageProps) {
+    const params = await searchParams;
+    const typeFilter = params.type;
+
     const products = await prisma.product.findMany({
+        where: typeFilter ? { type: typeFilter } : undefined,
         orderBy: { updatedAt: "desc" },
         include: {
             category: true,
             inventory: true,
         },
+    });
+
+    // Calculate counts for all product types
+    const allProducts = await prisma.product.findMany({ select: { type: true } });
+    const counts: Record<string, number> = {
+        total: allProducts.length,
+        HOSE: 0,
+        FITTING: 0,
+        ASSEMBLY: 0,
+        ACCESSORY: 0,
+    };
+    allProducts.forEach((p) => {
+        if (counts[p.type] !== undefined) {
+            counts[p.type]++;
+        }
     });
 
     return (
@@ -36,9 +60,6 @@ export default async function CatalogPage() {
                     <p className="text-slate-400 mt-1">Gestión de Mangueras, Conexiones y Ensambles</p>
                 </div>
                 <div className="flex gap-3">
-                    <button className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white hover:border-cyan-500/50 transition-colors">
-                        Filtrar
-                    </button>
                     <Link href="/catalog/new" className="btn-primary">
                         + Nuevo Artículo
                     </Link>
@@ -46,14 +67,7 @@ export default async function CatalogPage() {
             </div>
 
             {/* Stats/Quick Filters */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {['Todos', 'Mangueras', 'Conexiones', 'Ensambles'].map((cat) => (
-                    <button key={cat} className="glass p-4 rounded-xl text-left hover:bg-white/5 transition-all group">
-                        <span className="text-sm text-slate-400 group-hover:text-cyan-400 block uppercase tracking-wider font-semibold">{cat}</span>
-                        <span className="text-2xl font-bold text-white mt-1">--</span>
-                    </button>
-                ))}
-            </div>
+            <CatalogFilters counts={counts} />
 
             {/* Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

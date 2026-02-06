@@ -9,7 +9,7 @@ async function pickStock(formData: FormData) {
   "use server";
 
   const code = String(formData.get("code") ?? "").trim();
-  const location = String(formData.get("location") ?? "").trim() || null;
+  const locationCode = String(formData.get("location") ?? "").trim() || null;
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
@@ -28,24 +28,43 @@ async function pickStock(formData: FormData) {
     redirect(`/inventory/pick?error=${encodeURIComponent("Producto no encontrado (SKU/Referencia)")}`);
   }
 
-  await prisma.$transaction(async (tx) => {
-    const inv = await tx.inventory.findFirst({ where: { productId: product.id, location }, select: { id: true, quantity: true } });
-    const currentQty = inv?.quantity ?? 0;
+  // Find location by code if provided
+  const location = locationCode
+    ? await prisma.location.findUnique({ where: { code: locationCode }, select: { id: true, code: true } })
+    : null;
 
-    if (currentQty < quantity) {
+  if (locationCode && !location) {
+    redirect(`/inventory/pick?error=${encodeURIComponent(`Ubicación no encontrada: ${locationCode}`)}`);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const inv = await tx.inventory.findFirst({
+      where: { productId: product.id, locationId: location?.id ?? null },
+      select: { id: true, quantity: true, reserved: true, available: true },
+    });
+    const currentAvailable = inv?.available ?? 0;
+
+    if (currentAvailable < quantity) {
       throw new Error("STOCK_INSUFFICIENT");
     }
 
     if (inv) {
-      await tx.inventory.update({ where: { id: inv.id }, data: { quantity: currentQty - quantity } });
+      const newQty = inv.quantity - quantity;
+      await tx.inventory.update({
+        where: { id: inv.id },
+        data: {
+          quantity: newQty,
+          available: newQty - inv.reserved, // Update available
+        },
+      });
     }
 
     await tx.inventoryMovement.create({
       data: {
         productId: product.id,
+        locationId: location?.id ?? null,
         type: "OUT",
         quantity,
-        location,
         reference,
         notes,
       },

@@ -2,6 +2,35 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+// Warehouse and Location seed data
+const seedWarehouses = [
+  {
+    code: 'WH-01',
+    name: 'Almacén Principal',
+    description: 'Almacén central de Rigentec',
+    address: 'Av. Industrial 1234, Ciudad',
+    isActive: true,
+  },
+  {
+    code: 'WH-02',
+    name: 'Almacén Secundario',
+    description: 'Bodega de respaldo',
+    address: 'Calle Comercio 567',
+    isActive: true,
+  },
+];
+
+const seedLocations = [
+  // Warehouse 1 locations
+  { warehouseCode: 'WH-01', code: 'A-12-04', name: 'Pasillo A - Rack 12 - Nivel 04', zone: 'A', aisle: '12', rack: '04', level: '04' },
+  { warehouseCode: 'WH-01', code: 'B-01-01', name: 'Pasillo B - Rack 01 - Nivel 01', zone: 'B', aisle: '01', rack: '01', level: '01' },
+  { warehouseCode: 'WH-01', code: 'C-03-02', name: 'Pasillo C - Rack 03 - Nivel 02', zone: 'C', aisle: '03', rack: '02', level: '02' },
+  { warehouseCode: 'WH-01', code: 'RECV-01', name: 'Zona de Recepción 01', zone: 'RECEIVING', isActive: true },
+  { warehouseCode: 'WH-01', code: 'SHIP-01', name: 'Zona de Envío 01', zone: 'SHIPPING', isActive: true },
+  // Warehouse 2 locations
+  { warehouseCode: 'WH-02', code: 'A-01-01', name: 'Pasillo A - Rack 01 - Nivel 01', zone: 'A', aisle: '01', rack: '01', level: '01' },
+];
+
 const seedProducts = [
   {
     sku: 'CON-R1AT-04',
@@ -19,7 +48,7 @@ const seedProducts = [
     },
     categoryName: 'Hidráulica',
     stock: 150,
-    location: 'A-12-04',
+    locationCode: 'A-12-04',
   },
   {
     sku: 'FIT-JIC-04-04',
@@ -36,7 +65,7 @@ const seedProducts = [
     },
     categoryName: 'Conexiones Hidráulicas',
     stock: 500,
-    location: 'B-01-01',
+    locationCode: 'B-01-01',
   },
   {
     sku: 'ENS-EXCAV-001',
@@ -52,11 +81,53 @@ const seedProducts = [
     },
     categoryName: 'Ensambles',
     stock: 5,
-    location: 'C-03-02',
+    locationCode: 'C-03-02',
   },
 ];
 
 async function main() {
+  console.log('🌱 Seeding database...');
+
+  // 1. Seed Warehouses
+  console.log('📦 Creating warehouses...');
+  const warehouseMap = {};
+  for (const wh of seedWarehouses) {
+    const warehouse = await prisma.warehouse.upsert({
+      where: { code: wh.code },
+      create: wh,
+      update: wh,
+    });
+    warehouseMap[wh.code] = warehouse;
+    console.log(`  ✓ Warehouse: ${wh.name}`);
+  }
+
+  // 2. Seed Locations
+  console.log('📍 Creating locations...');
+  const locationMap = {};
+  for (const loc of seedLocations) {
+    const warehouse = warehouseMap[loc.warehouseCode];
+    if (!warehouse) {
+      console.warn(`  ⚠️  Warehouse not found: ${loc.warehouseCode}`);
+      continue;
+    }
+    const { warehouseCode, ...locData } = loc;
+    const location = await prisma.location.upsert({
+      where: { code: loc.code },
+      create: {
+        ...locData,
+        warehouseId: warehouse.id,
+      },
+      update: {
+        ...locData,
+        warehouseId: warehouse.id,
+      },
+    });
+    locationMap[loc.code] = location;
+    console.log(`  ✓ Location: ${loc.code} - ${loc.name}`);
+  }
+
+  // 3. Seed Products with Inventory
+  console.log('🔧 Creating products...');
   for (const p of seedProducts) {
     const category = p.categoryName
       ? await prisma.category.upsert({
@@ -94,14 +165,24 @@ async function main() {
 
     // Keep seed idempotent: replace inventory rows for this product.
     await prisma.inventory.deleteMany({ where: { productId: product.id } });
+
+    const location = locationMap[p.locationCode];
+    const quantity = typeof p.stock === 'number' ? p.stock : 0;
+    
     await prisma.inventory.create({
       data: {
         productId: product.id,
-        quantity: typeof p.stock === 'number' ? p.stock : 0,
-        location: p.location ?? null,
+        locationId: location?.id ?? null,
+        quantity,
+        reserved: 0,
+        available: quantity, // available = quantity - reserved
       },
     });
+
+    console.log(`  ✓ Product: ${p.sku} - ${p.name} (Stock: ${quantity})`);
   }
+
+  console.log('✅ Seed completed successfully!');
 }
 
 main()
@@ -109,7 +190,7 @@ main()
     await prisma.$disconnect();
   })
   .catch(async (e) => {
-    console.error(e);
+    console.error('❌ Seed failed:', e);
     await prisma.$disconnect();
     process.exit(1);
   });

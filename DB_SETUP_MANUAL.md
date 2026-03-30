@@ -1,76 +1,90 @@
-# Database Setup Manual (WMS Rigentec)
+# Manual de configuración de base de datos
 
-This project uses Prisma + SQLite for local development. The database lives at `prisma/dev.db`.
+El proyecto usa Prisma con SQLite para desarrollo local. La base vive en `prisma/dev.db`.
 
-## Prerequisites
-- Ensure you are in the project root: `WMS-Mangueras-y-conexiones`
-- Ensure Node.js and NPM are installed.
+## Requisitos previos
 
-## 1. Verify Configuration
-Check `prisma/schema.prisma` serves the SQLite provider:
+- Estar en la raíz del proyecto `WMS-Mangueras-y-conexiones`.
+- Tener Node.js y npm instalados.
+
+## Verificar configuración
+
+Confirma que `prisma/schema.prisma` apunte a SQLite:
+
 ```prisma
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db" 
+  url      = "file:./dev.db"
 }
 ```
 
-## 2. Generate Prisma Client
-Run this to create the TypeScript types:
+## Generar Prisma Client
+
 ```powershell
 npx prisma generate
 ```
 
-Alternatively, you can use the npm script:
+O usando el script del proyecto:
+
 ```powershell
 npm run prisma:generate
 ```
 
-## 3. Run Migration
-Run this command to create the database file (`dev.db`) and tables:
-```powershell
-npx prisma migrate dev --name init
-```
-*If this fails, try this alternative which skips migration history:*
-```powershell
-npx prisma db push
-```
+## Crear base y tablas
 
-Recommended (one-click / non-interactive):
+Opción recomendada para entorno local:
+
 ```powershell
 npm run db:setup
 ```
 
-If you specifically want migration files (interactive):
+Alternativas:
+
 ```powershell
 npm run db:migrate
-```
-
-Seed sample data (optional):
-```powershell
+npm run db:push
 npm run db:seed
 ```
 
-## 4. Verify Database
-You should see a `prisma/dev.db` file appear. You can explore it using:
+## Verificar la base
+
+Después del setup debe existir `prisma/dev.db`.
+
+Para inspeccionarla:
+
 ```powershell
 npx prisma studio
 ```
-This will open a web interface at `http://localhost:5555`.
 
-Or:
+O:
+
 ```powershell
 npm run db:studio
 ```
 
-## VS Code one-click tasks
-Use **Terminal → Run Task…** and pick:
-- `DB: Setup (push + seed)`
-- `DB: Seed`
-- `DB: Studio`
+Prisma Studio abre en `http://localhost:5555`.
+
+## Datos de ejemplo
+
+El seed crea:
+
+- 2 almacenes
+- ubicaciones operativas y de staging
+- productos de ejemplo
+- inventario inicial por ubicación
+
+Esto sirve para validar catálogo, recepción, picking y producción en local.
 
 ## Troubleshooting
-If you see errors about "Remove-Item" or "Permission denied":
-1. Close any VS Code terminals or processes using the db.
-2. Delete the `prisma/dev.db` file (if it exists) manually.
-3. Try running the command again.
+
+Si aparecen errores de permisos o bloqueo del archivo:
+
+1. Cierra procesos que estén usando la base.
+2. Cierra Prisma Studio si está abierto.
+3. Reintenta `npm run db:setup`.
+
+Si Prisma Client queda desactualizado:
+
+```powershell
+npx prisma generate
+```

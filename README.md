@@ -1,179 +1,142 @@
-# WMS Rigentec - Sistema de Gestión de Almacenes
+# WMS Rigentec
 
-Sistema completo de gestión de almacenes (WMS) especializado en mangueras y conexiones industriales, construido con Next.js, TypeScript, Prisma y Tailwind CSS.
+Sistema web de gestión de almacenes para mangueras, conexiones y ensambles industriales. El proyecto está construido con Next.js, React, Prisma y SQLite para operación local y validación de flujos de inventario por ubicación.
 
-## 🚀 Quick Start
+## Estado de la rama `main`
 
-### Prerrequisitos
-- Node.js 20+ y npm
+La rama estable/publicada es `main`.
+
+Flujo recomendado para actualizar el repositorio:
+
+1. Crear una rama de trabajo desde `main`.
+2. Implementar y validar cambios en esa rama.
+3. Abrir Pull Request hacia `main`.
+4. Integrar a `main` después de revisión.
+
+Este flujo evita mezclar cambios locales no relacionados y mantiene trazabilidad sobre lo que realmente se publica.
+
+## Alcance funcional actual
+
+Implementado en `main`:
+
+- Catálogo maestro de productos y categorías.
+- Almacenes y ubicaciones con detalle por almacén.
+- Inventario por ubicación con campos `quantity`, `reserved` y `available`.
+- Recepción de inventario con referencia documental y adjuntos.
+- Picking con validación de stock disponible por ubicación.
+- Órdenes de producción con reserva y consumo de inventario.
+- Importación masiva de productos desde CSV.
+- Pruebas de integridad para inventario e importación.
+
+No implementado todavía en `main`:
+
+- Ajustes de inventario con UI dedicada.
+- Transferencias internas entre ubicaciones.
+- Kardex/exportación.
+- Compras, proveedores y recepción contra orden de compra.
+- Auth/RBAC.
+
+## Stack técnico
+
+- Next.js 16.1.6
+- React 19.2.3
+- TypeScript 5
+- Prisma 6
+- SQLite para desarrollo local
+- Tailwind CSS 4
+- ESLint 9
+- Vitest 3
+- GitHub Actions para CI
+
+## Requisitos
+
+- Node.js 20+
+- npm
 - Git
 
-### Instalación
+## Puesta en marcha local
 
 ```bash
-# 1. Clonar el repositorio
-git clone <repo-url>
+git clone https://github.com/raul2105/WMS-Mangueras-y-conexiones.git
 cd WMS-Mangueras-y-conexiones
-
-# 2. Instalar dependencias
 npm install
-
-# 3. Configurar base de datos (SQLite)
 npm run db:setup
-
-# 4. Iniciar servidor de desarrollo
 npm run dev
 ```
 
-Abre [http://localhost:3002](http://localhost:3002) en tu navegador.
+La aplicación arranca en `http://localhost:3002`.
 
-## 📁 Estructura del Proyecto
+## Scripts disponibles
 
-```
-/app                    → Next.js App Router
-  /catalog              → Gestión de productos y categorías
-  /inventory            → Control de existencias y movimientos
-  /page.tsx             → Dashboard principal
-/components             → Componentes reutilizables
-/lib                    → Utilidades y cliente Prisma
-/prisma
-  /schema.prisma        → Modelo de datos
-  /migrations           → Historial de migraciones
-  /seed.cjs             → Datos iniciales
-/docs
-  /ADR                  → Architecture Decision Records
-/scripts                → Scripts de automatización
-/.github/workflows      → CI/CD con GitHub Actions
-```
+### Aplicación
 
-## 🛠️ Scripts Disponibles
-
-### Desarrollo
 ```bash
-npm run dev              # Servidor de desarrollo (puerto 3002)
-npm run build            # Build de producción
-npm run start            # Servidor de producción
-npm run lint             # Linter (ESLint)
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run test
 ```
 
-### Base de Datos
+### Prisma y base de datos
+
 ```bash
-npm run db:setup         # Setup inicial (push + seed)
-npm run db:migrate       # Crear migración
-npm run db:push          # Push schema sin migración
-npm run db:seed          # Poblar datos de ejemplo
-npm run db:studio        # GUI Prisma Studio (puerto 5555)
-npm run db:reset         # Reset completo de BD
+npm run prisma:generate
+npm run db:setup
+npm run db:migrate
+npm run db:push
+npm run db:seed
+npm run db:studio
+npm run db:reset
 ```
 
 ### Importación
+
 ```bash
-npm run import:products -- --file data/products.csv     # Importar productos desde CSV
-npm run import:products -- --file data/products.csv --dry-run  # Simulación (sin escribir)
+npm run import:products -- --file data/products.csv
+npm run import:products -- --file data/products.csv --dry-run
 ```
 
-Ver [IMPORT_PRODUCTS_CSV.md](./IMPORT_PRODUCTS_CSV.md) para detalles del formato CSV.
+## Estructura principal
 
-## 🏗️ Módulos del Sistema
-
-### ✅ Implementado
-- **Catálogo Maestro**: Productos (SKU, atributos técnicos), categorías
-- **Inventario**: Movimientos IN/OUT, stock por ubicación, trazabilidad
-- **Scanner QR/Barcode**: Captura ágil de códigos con cámara
-- **Import CSV**: Carga masiva de productos e inventario inicial
-
-### 🚧 En Desarrollo
-- **Almacenes y Ubicaciones**: Gestión de bodegas, zonas, bins/racks
-- **Transferencias Internas**: Movimientos entre ubicaciones
-- **Ajustes de Inventario**: Con auditoría y razón de ajuste
-- **Validación Server-Side**: Zod schemas para robustez
-
-### 🔮 Roadmap
-- **Autenticación y RBAC**: NextAuth.js + roles (admin/operador/supervisor)
-- **Audit Log**: Trazabilidad completa (quién, qué, cuándo)
-- **Recepción PO**: Validación vs orden de compra, put-away sugerido
-- **Picking/Packing**: Olas, picklists, confirmaciones
-- **Dashboard KPIs**: Fill rate, exactitud de inventario, rotación
-- **Reportes y Exports**: Inventario, movimientos, análisis
-
-## 🎨 Stack Tecnológico
-
-- **Framework:** Next.js 16 (App Router + Turbopack)
-- **Lenguaje:** TypeScript 5
-- **UI:** React 19 + Tailwind CSS v4 (glassmorphism design)
-- **Base de Datos:** SQLite (dev) → PostgreSQL (prod)
-- **ORM:** Prisma 6
-- **Scanner:** ZXing (QR/Barcode)
-- **Linter:** ESLint 9
-- **CI/CD:** GitHub Actions
-
-## 📚 Documentación
-
-- [Setup Manual de Base de Datos](./DB_SETUP_MANUAL.md)
-- [Importación de Productos CSV](./IMPORT_PRODUCTS_CSV.md)
-- [Architecture Decision Records](./docs/ADR/README.md)
-  - [ADR-001: Arquitectura Base](./docs/ADR/001-arquitectura-base.md)
-
-## 🔒 Quality Gates
-
-Todo código debe pasar:
-1. ✅ Linter (ESLint)
-2. ✅ TypeScript check (`tsc --noEmit`)
-3. ✅ Build exitoso (`npm run build`)
-4. ✅ Prisma validate
-5. ✅ Code review obligatorio en PRs
-
-CI/CD automatizado en `.github/workflows/ci.yml`
-
-## 🤝 Contribuir
-
-1. Crea un branch desde `main`: `git checkout -b feature/mi-funcionalidad`
-2. Haz tus cambios y commits con mensajes descriptivos
-3. Ejecuta `npm run lint` y `npm run build` para validar
-4. Crea un Pull Request con descripción clara
-5. Espera code review y aprobación
-
-## 📝 Convenciones
-
-- **Archivos:** kebab-case (`product-list.tsx`)
-- **Componentes:** PascalCase (`ProductCard`)
-- **Variables:** camelCase (`productId`)
-- **Constantes:** UPPER_SNAKE_CASE (`MAX_ITEMS`)
-- **Commits:** Mensajes claros en español/inglés
-
-## 🐛 Troubleshooting
-
-### Build Error: "Cannot apply unknown utility class `glass`"
-✅ **Solucionado** en último commit. Si persiste, ejecuta:
-```bash
-npm install
-npm run build
+```text
+app/                  App Router y pantallas
+components/           Componentes reutilizables
+lib/                  Prisma y lógica de inventario
+prisma/               Schema, migraciones y seed
+scripts/              Automatización operativa
+tests/                Pruebas con Vitest
+docs/                 Documentación técnica y de operación
 ```
 
-### Error de Prisma Client
-```bash
-npx prisma generate
-```
+## Calidad y validación
 
-### Puerto 3002 ya en uso
-```bash
-# Windows
-npx kill-port 3002
+Controles esperados:
 
-# Linux/Mac
-lsof -ti:3002 | xargs kill
-```
+- `npm run lint`
+- `npx tsc --noEmit`
+- `npm run build`
+- `npx prisma validate`
+- `npm run test`
 
-## 📄 Licencia
+Hallazgos actuales de mantenimiento:
 
-Privado - Rigentec © 2026
+- La documentación histórica del repo quedó desfasada frente al código y fue reemplazada por esta versión.
+- El workspace local del usuario contiene cambios no publicados que van más adelante que `origin/main`; este README documenta únicamente lo que corresponde a `main`.
+- En un checkout limpio sin dependencias instaladas, `npm test` falla hasta ejecutar `npm install`.
+- `npm run build` falla hoy en `main` por un error de tipos existente en `app/catalog/[id]/page.tsx` relacionado con `row.location`.
 
-## 🙋 Soporte
+## Documentación
 
-Para dudas o problemas, contactar al Tech Lead o abrir un issue en el repositorio.
+- [Índice documental](./docs/README.md)
+- [Estado de capacidades](./docs/WMS_CAPABILITIES_STATUS.md)
+- [Resumen técnico de implementación](./docs/IMPLEMENTATION_SUMMARY.md)
+- [Manual de base de datos](./DB_SETUP_MANUAL.md)
+- [Guía de importación CSV](./IMPORT_PRODUCTS_CSV.md)
+- [ADRs](./docs/ADR/README.md)
 
----
+## Notas operativas
 
-**Versión:** 0.1.0  
-**Última actualización:** 2026-02-03  
-**Próxima release:** v0.2.0 (Módulo Warehouse + Tests)
+- El seed crea almacenes, ubicaciones y productos de ejemplo para demo local.
+- El importador CSV crea categorías y ubicaciones faltantes cuando aplica.
+- Las rutas y comportamientos documentados aquí están validados contra el código de la rama `main`.

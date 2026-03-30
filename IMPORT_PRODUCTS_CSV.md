@@ -1,49 +1,62 @@
-# Import products from CSV
+# Importación de productos desde CSV
 
-This project includes a CSV importer that upserts products/categories and replaces inventory per SKU.
+El proyecto incluye un importador que hace upsert de productos y categorías, y reemplaza el inventario por SKU usando ubicaciones.
 
-## Quick start
+## Uso rápido
 
-1. Put your CSV file somewhere in the repo (recommended: `data/products.csv`).
-2. Run:
+1. Coloca el archivo CSV dentro del repo. Recomendado: `data/products.csv`.
+2. Ejecuta:
 
 ```powershell
 npm run import:products -- --file data/products.csv
 ```
 
-Dry-run (validates + shows counts, no DB writes):
+Simulación sin escribir en base:
 
 ```powershell
 npm run import:products -- --file data/products.csv --dry-run
 ```
 
-## CSV format
+## Encabezados esperados
 
-A header row is required.
+El archivo debe traer fila de encabezado.
 
-Columns:
-- `sku` (required, unique key)
-- `name` (required)
-- `type` (required): `HOSE` | `FITTING` | `ASSEMBLY` | `ACCESSORY`
-- `description` (optional)
-- `brand` (optional)
-- `base_cost` (optional number)
-- `price` (optional number)
-- `category` (optional; creates/links `Category` by name)
-- `quantity` (optional number; defaults to 0)
-- `location` (optional; if multiple rows share the same sku, quantities are summed by location)
-- `attributes` (optional; JSON string; stored into `Product.attributes`)
+Columnas soportadas:
 
-See the template at `data/products.sample.csv`.
+- `sku` obligatorio y único.
+- `name` obligatorio.
+- `type` obligatorio: `HOSE`, `FITTING`, `ASSEMBLY`, `ACCESSORY`.
+- `description` opcional.
+- `brand` opcional.
+- `base_cost` opcional numérico.
+- `price` opcional numérico.
+- `category` opcional; crea o vincula `Category`.
+- `quantity` opcional; si falta usa `0`.
+- `location` opcional; si el SKU se repite, la cantidad se agrupa por ubicación.
+- `attributes` opcional; acepta JSON y se guarda como cadena JSON.
+- `referenceCode` opcional.
+- `imageUrl` opcional.
 
-## Behavior
+Consulta la plantilla en `data/products.sample.csv`.
 
-- Products are **upserted** by `sku`.
-- Categories are **upserted** by `name`.
-- Inventory is **replaced per SKU** on each import (so imports are idempotent).
+## Comportamiento
+
+- Los productos se actualizan por `sku`.
+- Las categorías se actualizan por nombre.
+- Si una ubicación no existe, se crea en el almacén `DEFAULT`.
+- Si el CSV no trae ubicación, se usa `STAGING-DEFAULT`.
+- El inventario se reemplaza por SKU en cada importación, así que el proceso es idempotente.
+- La importación usa `InventoryService.adjustStock` para mantener consistencia en movimientos y cantidades.
+
+## Validaciones relevantes
+
+- Si falta `sku`, `name` o `type`, la importación falla.
+- Si `type` no coincide con los valores permitidos, falla.
+- Si un mismo SKU trae conflictos de datos base entre filas, falla.
+- Si `attributes` no es JSON válido, se conserva como texto dentro de un objeto JSON.
 
 ## Troubleshooting
 
-- If your CSV uses commas inside fields, ensure those fields are quoted.
-- If you get type errors, verify `type` matches exactly one of the allowed values.
-- If a SKU appears multiple times with conflicting `name/type/brand/category`, the importer will fail validation.
+- Si el CSV trae comas dentro de campos, usa comillas.
+- Si trabajas con separador decimal por coma, el importador intenta normalizarlo.
+- Si quieres validar estructura sin tocar base, usa `--dry-run`.

@@ -2,14 +2,42 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+const PAGE_SIZE = 50;
 
-export default async function ProductionOrdersPage() {
-  const orders = await prisma.productionOrder.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      warehouse: { select: { id: true, name: true, code: true } },
-    },
-  });
+function parsePage(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "1", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export default async function ProductionOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const sp = await searchParams;
+  const currentPage = parsePage(sp.page);
+
+  const [totalCount, orders] = await Promise.all([
+    prisma.productionOrder.count(),
+    prisma.productionOrder.findMany({
+      orderBy: { createdAt: "desc" },
+      skip: (currentPage - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        customerName: true,
+        priority: true,
+        dueDate: true,
+        warehouse: { select: { id: true, name: true, code: true } },
+      },
+    }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const buildHref = (page: number) => (page > 1 ? `/production/orders?page=${page}` : "/production/orders");
 
   return (
     <div className="space-y-8">
@@ -74,6 +102,26 @@ export default async function ProductionOrdersPage() {
           </table>
         </div>
       </div>
+
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+          <Link
+            href={buildHref(Math.max(1, safePage - 1))}
+            className={`px-4 py-2 glass rounded-lg ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
+          >
+            ← Anterior
+          </Link>
+          <span className="text-slate-500">
+            Página {safePage} de {totalPages}
+          </span>
+          <Link
+            href={buildHref(Math.min(totalPages, safePage + 1))}
+            className={`px-4 py-2 glass rounded-lg ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
+          >
+            Siguiente →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

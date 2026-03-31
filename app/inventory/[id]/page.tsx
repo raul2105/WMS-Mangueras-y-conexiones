@@ -27,11 +27,24 @@ export default async function InventoryDetailPage({ params }: PageProps) {
 
   const product = await prisma.product.findUnique({
     where: { id },
-    include: {
+    select: {
+      id: true,
+      sku: true,
+      referenceCode: true,
+      name: true,
       inventory: {
-        include: {
+        select: {
+          id: true,
+          quantity: true,
+          reserved: true,
+          available: true,
           location: {
-            include: { warehouse: true },
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              warehouse: { select: { id: true, name: true, code: true } },
+            },
           },
         },
       },

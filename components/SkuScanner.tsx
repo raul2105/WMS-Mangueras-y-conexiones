@@ -52,7 +52,11 @@ export default function SkuScanner({ onDetected, className }: Props) {
       });
     } catch (e) {
       setIsScanning(false);
-      setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof Error && (e.name === "NotAllowedError" || e.message.toLowerCase().includes("permission"))) {
+        setError("Permiso de cámara denegado. Actívalo en la configuración del navegador o ingresa el código manualmente.");
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     }
   }
 

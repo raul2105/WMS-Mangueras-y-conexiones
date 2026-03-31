@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
+import Script from "next/script";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const geistSans = { variable: 'font-sans' };
 const geistMono = { variable: 'font-mono' };
@@ -16,10 +18,28 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased flex bg-slate-900`}
-      >
+    <html lang="es" suppressHydrationWarning>
+      <head>
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var stored = localStorage.getItem('wms-theme');
+                  var theme = stored === 'dark' || stored === 'light'
+                    ? stored
+                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+                  document.documentElement.setAttribute('data-theme', theme);
+                  document.documentElement.style.colorScheme = theme;
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased flex`}>
         {/* Sidebar */}
         <aside className="w-64 fixed h-full glass border-r border-white/10 hidden md:flex flex-col z-50">
           <div className="p-6">
@@ -46,6 +66,10 @@ export default function RootLayout({
               <span className="w-5 h-5 bg-slate-500/20 rounded flex items-center justify-center group-hover:bg-cyan-500/20 group-hover:text-cyan-400">📊</span>
               Inventario
             </Link>
+            <Link href="/purchasing" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white transition-all group">
+              <span className="w-5 h-5 bg-slate-500/20 rounded flex items-center justify-center group-hover:bg-orange-500/20 group-hover:text-orange-400">🛒</span>
+              Compras
+            </Link>
             <Link href="/production" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white transition-all group">
               <span className="w-5 h-5 bg-slate-500/20 rounded flex items-center justify-center group-hover:bg-cyan-500/20 group-hover:text-cyan-400">🔧</span>
               Ensamble
@@ -53,6 +77,9 @@ export default function RootLayout({
           </nav>
 
           <div className="p-4 border-t border-white/10">
+            <div className="px-4 py-2">
+              <ThemeToggle />
+            </div>
             <div className="flex items-center gap-3 px-4 py-2">
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600"></div>
               <div>

@@ -1,62 +1,65 @@
-# Importación de productos desde CSV
+# Import products from CSV
 
-El proyecto incluye un importador que hace upsert de productos y categorías, y reemplaza el inventario por SKU usando ubicaciones.
+This project includes a CSV importer that upserts products/categories and replaces inventory per SKU.
 
-## Uso rápido
+## Quick start
 
-1. Coloca el archivo CSV dentro del repo. Recomendado: `data/products.csv`.
-2. Ejecuta:
+1. Put your CSV file somewhere in the repo (recommended: `data/products.csv`).
+2. Run:
 
 ```powershell
 npm run import:products -- --file data/products.csv
 ```
 
-Simulación sin escribir en base:
+Dry-run (validates + shows counts, no DB writes):
 
 ```powershell
 npm run import:products -- --file data/products.csv --dry-run
 ```
 
-## Encabezados esperados
+## CSV format
 
-El archivo debe traer fila de encabezado.
+A header row is required.
 
-Columnas soportadas:
+Columns:
+- `sku` (required, unique key)
+- `name` (required)
+- `type` (required): `HOSE` | `FITTING` | `ASSEMBLY` | `ACCESSORY`
+- `description` (optional)
+- `brand` (optional)
+- `base_cost` (optional number)
+- `price` (optional number)
+- `category` (optional; creates/links `Category` by name)
+- `subcategory` (optional; stored directly on `Product.subcategory`)
+- `quantity` (optional number; defaults to 0)
+- `location` (optional; if multiple rows share the same sku, quantities are summed by location)
+- `attributes` (optional; JSON string; stored into `Product.attributes`)
+- `referenceCode` (optional; alias for scans/OCR)
+- `imageUrl` (optional; local path or URL for the product image)
 
-- `sku` obligatorio y único.
-- `name` obligatorio.
-- `type` obligatorio: `HOSE`, `FITTING`, `ASSEMBLY`, `ACCESSORY`.
-- `description` opcional.
-- `brand` opcional.
-- `base_cost` opcional numérico.
-- `price` opcional numérico.
-- `category` opcional; crea o vincula `Category`.
-- `quantity` opcional; si falta usa `0`.
-- `location` opcional; si el SKU se repite, la cantidad se agrupa por ubicación.
-- `attributes` opcional; acepta JSON y se guarda como cadena JSON.
-- `referenceCode` opcional.
-- `imageUrl` opcional.
+See the template at `data/products.sample.csv`.
 
-Consulta la plantilla en `data/products.sample.csv`.
+## Behavior
 
-## Comportamiento
+- Products are **upserted** by `sku`.
+- Categories are **upserted** by `name`.
+- Subcategory is updated directly on the product row.
+- Inventory is **replaced per SKU** on each import (so imports are idempotent).
 
-- Los productos se actualizan por `sku`.
-- Las categorías se actualizan por nombre.
-- Si una ubicación no existe, se crea en el almacén `DEFAULT`.
-- Si el CSV no trae ubicación, se usa `STAGING-DEFAULT`.
-- El inventario se reemplaza por SKU en cada importación, así que el proceso es idempotente.
-- La importación usa `InventoryService.adjustStock` para mantener consistencia en movimientos y cantidades.
+## Images
 
-## Validaciones relevantes
+- You can set `imageUrl` directly in the CSV, for example `/uploads/products/PKR-HOS-201-4.jpg`.
+- You can also drop image files into `public/uploads/products` and link them in bulk:
 
-- Si falta `sku`, `name` o `type`, la importación falla.
-- Si `type` no coincide con los valores permitidos, falla.
-- Si un mismo SKU trae conflictos de datos base entre filas, falla.
-- Si `attributes` no es JSON válido, se conserva como texto dentro de un objeto JSON.
+```powershell
+npm run link:product-images -- --dir public/uploads/products --dry-run
+npm run link:product-images -- --dir public/uploads/products
+```
+
+- The file name without extension must match `sku` or `referenceCode`.
 
 ## Troubleshooting
 
-- Si el CSV trae comas dentro de campos, usa comillas.
-- Si trabajas con separador decimal por coma, el importador intenta normalizarlo.
-- Si quieres validar estructura sin tocar base, usa `--dry-run`.
+- If your CSV uses commas inside fields, ensure those fields are quoted.
+- If you get type errors, verify `type` matches exactly one of the allowed values.
+- If a SKU appears multiple times with conflicting `name/type/brand/category/subcategory`, the importer will fail validation.

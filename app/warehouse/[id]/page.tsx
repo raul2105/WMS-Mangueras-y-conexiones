@@ -16,6 +16,14 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
 
   const warehouse = await prisma.warehouse.findUnique({
     where: { id },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      description: true,
+      address: true,
+      isActive: true,
+    },
   });
 
   if (!warehouse) {
@@ -25,7 +33,16 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
   const locations = await prisma.location.findMany({
     where: { warehouseId: warehouse.id },
     orderBy: [{ zone: "asc" }, { aisle: "asc" }, { rack: "asc" }],
-    include: {
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      zone: true,
+      aisle: true,
+      rack: true,
+      level: true,
+      capacity: true,
+      isActive: true,
       _count: {
         select: { inventory: true },
       },
@@ -77,12 +94,14 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
               </span>
             </div>
           </div>
-          <Link
-            href={`/warehouse/${warehouse.id}/locations/new`}
-            className="btn-primary"
-          >
-            + Nueva Ubicación
-          </Link>
+          <div className="flex gap-2">
+            <Link href={`/warehouse/${warehouse.id}/edit`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white text-sm">
+              ✏️ Editar
+            </Link>
+            <Link href={`/warehouse/${warehouse.id}/locations/new`} className="btn-primary">
+              + Nueva Ubicación
+            </Link>
+          </div>
         </div>
 
         {warehouse.description && (

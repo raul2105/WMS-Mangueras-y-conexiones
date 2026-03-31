@@ -8,6 +8,8 @@ import Link from "next/link";
 type Props = {
   action: (formData: FormData) => void;
   warehouses: WarehouseOption[];
+  codeSuggestions?: string[];
+  referenceSuggestions?: string[];
 };
 
 type FormErrors = {
@@ -18,14 +20,13 @@ type FormErrors = {
   reference?: string;
 };
 
-export default function ReceiveForm({ action, warehouses }: Props) {
+export default function ReceiveForm({ action, warehouses, codeSuggestions, referenceSuggestions }: Props) {
   const [errors, setErrors] = useState<FormErrors>({});
 
   return (
     <form
       action={action}
       className="glass-card space-y-6"
-      encType="multipart/form-data"
       onSubmit={(event) => {
         const formData = new FormData(event.currentTarget);
         const code = String(formData.get("code") ?? "").trim();
@@ -59,6 +60,8 @@ export default function ReceiveForm({ action, warehouses }: Props) {
           placeholder="CON-R1AT-04"
           required
           error={errors.code}
+          suggestions={codeSuggestions}
+          showDetails
         />
 
         <label className="space-y-1">
@@ -86,9 +89,17 @@ export default function ReceiveForm({ action, warehouses }: Props) {
           <input
             name="reference"
             required
+            list={referenceSuggestions && referenceSuggestions.length > 0 ? "receive-reference-options" : undefined}
             className="w-full px-4 py-3 glass rounded-lg"
             placeholder="Factura/OC/Remision"
           />
+          {referenceSuggestions && referenceSuggestions.length > 0 && (
+            <datalist id="receive-reference-options">
+              {referenceSuggestions.map((reference) => (
+                <option key={reference} value={reference} />
+              ))}
+            </datalist>
+          )}
           {errors.reference && <p className="text-xs text-red-400">{errors.reference}</p>}
         </label>
 

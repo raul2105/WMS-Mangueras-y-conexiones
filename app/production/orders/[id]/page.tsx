@@ -2,8 +2,57 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import ProductionOrderItemForm from "@/components/ProductionOrderItemForm";
+import type { Prisma } from "@prisma/client";
+import {
+  firstErrorMessage,
+  parseDueDate,
+  parsePriority,
+  productionOrderItemSchema,
+  productionOrderUpdateSchema,
+} from "@/lib/schemas/wms";
+import { createAuditLogSafe } from "@/lib/audit-log";
+import { assertCanSetOrderInProcess, reconcileProductionReservations } from "@/lib/reservation-policy";
 
 export const dynamic = "force-dynamic";
+
+type TxClient = Prisma.TransactionClient;
+
+async function consumeOrderItems(tx: TxClient, order: {
+  code: string;
+  items: { productId: string; locationId: string; quantity: number }[];
+}) {
+  for (const item of order.items) {
+    const inv = await tx.inventory.findUnique({
+      where: { productId_locationId: { productId: item.productId, locationId: item.locationId } },
+    });
+
+    if (!inv || inv.quantity < item.quantity) {
+      redirect(`/production/orders?error=${encodeURIComponent("Inventario insuficiente para consumir")}`);
+    }
+
+    const newQty = inv.quantity - item.quantity;
+    const newReserved = Math.max(0, inv.reserved - item.quantity);
+    await tx.inventory.update({
+      where: { id: inv.id },
+      data: {
+        quantity: newQty,
+        reserved: newReserved,
+        available: newQty - newReserved,
+      },
+    });
+
+    await tx.inventoryMovement.create({
+      data: {
+        productId: item.productId,
+        locationId: item.locationId,
+        type: "OUT",
+        quantity: item.quantity,
+        reference: order.code,
+        notes: "Consumo ensamble",
+      },
+    });
+  }
+}
 
 async function updateOrder(formData: FormData) {
   "use server";
@@ -12,121 +61,98 @@ async function updateOrder(formData: FormData) {
   const status = String(formData.get("status") ?? "").trim();
   const customerName = String(formData.get("customerName") ?? "").trim() || null;
   const priorityRaw = String(formData.get("priority") ?? "").trim();
-  const priority = priorityRaw ? Number(priorityRaw) : 3;
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
-  const dueDate = dueDateRaw ? new Date(dueDateRaw) : null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
   if (!id) {
     redirect("/production/orders");
   }
 
-  if (!Number.isFinite(priority) || priority < 1 || priority > 5) {
-    redirect(`/production/orders/${id}?error=${encodeURIComponent("Prioridad invalida (1-5)")}`);
+  const parsed = productionOrderUpdateSchema.safeParse({
+    id,
+    status,
+    customerName: customerName ?? undefined,
+    priorityRaw,
+    dueDateRaw,
+    notes: notes ?? undefined,
+  });
+
+  if (!parsed.success) {
+    redirect(`/production/orders/${id}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  await prisma.$transaction(async (tx) => {
+  const priority = parsePriority(priorityRaw, 3);
+  if (priority === null) {
+    redirect(`/production/orders/${id}?error=${encodeURIComponent("Prioridad invalida (1-5)")}`);
+  }
+  const dueDate = parseDueDate(dueDateRaw);
+
+  await prisma.$transaction(
+    async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id },
-      include: { items: true },
+      select: {
+        code: true,
+        status: true,
+        customerName: true,
+        priority: true,
+        dueDate: true,
+        notes: true,
+        items: { select: { productId: true, locationId: true, quantity: true } },
+      },
     });
 
     if (!order) {
       redirect("/production/orders");
     }
 
-    if (status === "EN_PROCESO" && order.status !== "EN_PROCESO") {
-      for (const item of order.items) {
-        const inv = await tx.inventory.findUnique({
-          where: { productId_locationId: { productId: item.productId, locationId: item.locationId } },
-        });
-
-        if (!inv || inv.available < item.quantity) {
-          redirect(`/production/orders/${id}?error=${encodeURIComponent("Inventario insuficiente para reservar")}`);
-        }
-
-        const newReserved = inv.reserved + item.quantity;
-        await tx.inventory.update({
-          where: { id: inv.id },
-          data: {
-            reserved: newReserved,
-            available: inv.quantity - newReserved,
-          },
-        });
+    if (parsed.data.status === "EN_PROCESO") {
+      const reservationCheck = await assertCanSetOrderInProcess(tx, id);
+      if (!reservationCheck.ok) {
+        redirect(`/production/orders/${id}?error=${encodeURIComponent(reservationCheck.message)}`);
       }
     }
 
-    if (status === "COMPLETADA" && order.status !== "COMPLETADA") {
-      for (const item of order.items) {
-        const inv = await tx.inventory.findUnique({
-          where: { productId_locationId: { productId: item.productId, locationId: item.locationId } },
-        });
-
-        if (!inv || inv.quantity < item.quantity || inv.reserved < item.quantity) {
-          redirect(`/production/orders/${id}?error=${encodeURIComponent("Inventario insuficiente para consumir")}`);
-        }
-
-        const newQty = inv.quantity - item.quantity;
-        const newReserved = inv.reserved - item.quantity;
-        await tx.inventory.update({
-          where: { id: inv.id },
-          data: {
-            quantity: newQty,
-            reserved: newReserved,
-            available: newQty - newReserved,
-          },
-        });
-
-        await tx.inventoryMovement.create({
-          data: {
-            productId: item.productId,
-            locationId: item.locationId,
-            type: "OUT",
-            quantity: item.quantity,
-            reference: order.code,
-            notes: "Consumo ensamble",
-          },
-        });
-      }
-    }
-
-    if (status === "CANCELADA" && order.status !== "CANCELADA") {
-      for (const item of order.items) {
-        const inv = await tx.inventory.findUnique({
-          where: { productId_locationId: { productId: item.productId, locationId: item.locationId } },
-        });
-
-        if (!inv) {
-          continue;
-        }
-
-        const releaseQty = Math.min(inv.reserved, item.quantity);
-        if (releaseQty <= 0) {
-          continue;
-        }
-
-        const newReserved = inv.reserved - releaseQty;
-        await tx.inventory.update({
-          where: { id: inv.id },
-          data: {
-            reserved: newReserved,
-            available: inv.quantity - newReserved,
-          },
-        });
-      }
+    if (parsed.data.status === "COMPLETADA" && order.status !== "COMPLETADA") {
+      await consumeOrderItems(tx, order);
     }
 
     await tx.productionOrder.update({
       where: { id },
       data: {
-        status: status as any,
+        status: parsed.data.status,
         customerName,
         priority,
         dueDate,
         notes,
       },
     });
-  });
+
+    if (order.status !== parsed.data.status) {
+      await reconcileProductionReservations(tx, order.items.map((item) => ({
+        productId: item.productId,
+        locationId: item.locationId,
+      })));
+    }
+
+    await createAuditLogSafe({
+      entityType: "PRODUCTION_ORDER",
+      entityId: order.code,
+      action: "UPDATE_ORDER",
+      before: {
+        status: order.status,
+        customerName: order.customerName,
+        priority: order.priority,
+        dueDate: order.dueDate,
+        notes: order.notes,
+      },
+      after: { status, customerName, priority, dueDate, notes },
+      actor: "system",
+      source: "production/orders/[id]",
+    });
+    },
+    { timeout: 20000 }
+  );
 
   redirect(`/production/orders/${id}?ok=1`);
 }
@@ -139,7 +165,17 @@ async function deleteOrder(formData: FormData) {
     redirect("/production/orders");
   }
 
-  await prisma.productionOrder.delete({ where: { id } });
+  await prisma.$transaction(
+    async (tx) => {
+    const order = await tx.productionOrder.findUnique({
+      where: { id },
+      select: { items: { select: { productId: true, locationId: true } } },
+    });
+    await tx.productionOrder.delete({ where: { id } });
+    await reconcileProductionReservations(tx, order?.items);
+    },
+    { timeout: 20000 }
+  );
   redirect("/production/orders");
 }
 
@@ -150,13 +186,21 @@ async function addItem(formData: FormData) {
   const productId = String(formData.get("productId") ?? "").trim();
   const locationId = String(formData.get("locationId") ?? "").trim();
   const quantityRaw = String(formData.get("quantity") ?? "").trim();
-  const quantity = quantityRaw ? Number(quantityRaw.replace(",", ".")) : NaN;
+  const parsed = productionOrderItemSchema.safeParse({
+    orderId,
+    productId,
+    locationId,
+    quantityRaw,
+  });
 
-  if (!orderId || !productId || !locationId || !Number.isFinite(quantity) || quantity <= 0) {
-    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Datos invalidos del item")}`);
+  if (!parsed.success) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  await prisma.$transaction(async (tx) => {
+  const quantity = parsed.data.quantityRaw;
+
+  await prisma.$transaction(
+    async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: orderId },
       select: { id: true, warehouseId: true },
@@ -195,7 +239,32 @@ async function addItem(formData: FormData) {
       create: { orderId, productId, locationId, quantity },
       update: { quantity: { increment: quantity } },
     });
-  });
+
+    const orderStatus = await tx.productionOrder.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+
+    if (orderStatus?.status === "EN_PROCESO") {
+      const reservationCheck = await assertCanSetOrderInProcess(tx, orderId);
+      if (!reservationCheck.ok) {
+        redirect(`/production/orders/${orderId}?error=${encodeURIComponent(reservationCheck.message)}`);
+      }
+    }
+
+    await reconcileProductionReservations(tx, [{ productId, locationId }]);
+
+    await createAuditLogSafe({
+      entityType: "PRODUCTION_ORDER",
+      entityId: orderId,
+      action: "ADD_ORDER_ITEM",
+      after: { productId, locationId, quantity },
+      actor: "system",
+      source: "production/orders/[id]",
+    });
+    },
+    { timeout: 20000 }
+  );
 
   redirect(`/production/orders/${orderId}`);
 }
@@ -210,7 +279,27 @@ async function removeItem(formData: FormData) {
     redirect("/production/orders");
   }
 
-  await prisma.productionOrderItem.delete({ where: { id: itemId } });
+  await prisma.$transaction(
+    async (tx) => {
+    const existing = await tx.productionOrderItem.findUnique({
+      where: { id: itemId },
+      select: { id: true, productId: true, locationId: true, quantity: true },
+    });
+
+    await tx.productionOrderItem.delete({ where: { id: itemId } });
+    await reconcileProductionReservations(tx, existing ? [{ productId: existing.productId, locationId: existing.locationId }] : undefined);
+
+    await createAuditLogSafe({
+      entityType: "PRODUCTION_ORDER",
+      entityId: orderId,
+      action: "REMOVE_ORDER_ITEM",
+      before: existing ?? undefined,
+      actor: "system",
+      source: "production/orders/[id]",
+    });
+    },
+    { timeout: 20000 }
+  );
   redirect(`/production/orders/${orderId}`);
 }
 
@@ -226,10 +315,19 @@ export default async function ProductionOrderDetailPage({
 
   const order = await prisma.productionOrder.findUnique({
     where: { id },
-    include: {
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      customerName: true,
+      priority: true,
+      dueDate: true,
+      notes: true,
       warehouse: { select: { id: true, name: true, code: true } },
       items: {
-        include: {
+        select: {
+          id: true,
+          quantity: true,
           product: { select: { id: true, sku: true, name: true } },
           location: { select: { id: true, code: true, name: true } },
         },
@@ -242,17 +340,29 @@ export default async function ProductionOrderDetailPage({
     redirect("/production/orders");
   }
 
-  const inventoryOptions = await prisma.inventory.findMany({
-    where: {
-      available: { gt: 0 },
-      location: { warehouseId: order.warehouse.id, isActive: true },
-    },
-    include: {
-      product: { select: { id: true, sku: true, name: true } },
-      location: { select: { id: true, code: true, name: true } },
-    },
-    orderBy: { location: { code: "asc" } },
-  });
+  const [inventoryOptions, customers] = await Promise.all([
+    prisma.inventory.findMany({
+      where: {
+        available: { gt: 0 },
+        location: { warehouseId: order.warehouse.id, isActive: true },
+      },
+      select: {
+        available: true,
+        product: { select: { id: true, sku: true, name: true } },
+        location: { select: { id: true, code: true, name: true } },
+      },
+      orderBy: { location: { code: "asc" } },
+    }),
+    prisma.productionOrder.findMany({
+      where: { customerName: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+      select: { customerName: true },
+    }),
+  ]);
+  const customerSuggestions = Array.from(
+    new Set(customers.map((row) => row.customerName?.trim() ?? "").filter(Boolean))
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -311,9 +421,17 @@ export default async function ProductionOrderDetailPage({
             <span className="text-sm text-slate-400">Cliente</span>
             <input
               name="customerName"
+              list={customerSuggestions.length > 0 ? "production-customer-edit-options" : undefined}
               defaultValue={order.customerName ?? ""}
               className="w-full px-4 py-3 glass rounded-lg"
             />
+            {customerSuggestions.length > 0 && (
+              <datalist id="production-customer-edit-options">
+                {customerSuggestions.map((customer) => (
+                  <option key={customer} value={customer} />
+                ))}
+              </datalist>
+            )}
           </label>
 
           <label className="space-y-1">

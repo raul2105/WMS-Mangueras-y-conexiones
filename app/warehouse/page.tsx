@@ -2,16 +2,47 @@ import Link from "next/link";
 import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+const PAGE_SIZE = 24;
 
-export default async function WarehousePage() {
-  const warehouses = await prisma.warehouse.findMany({
-    orderBy: { name: "asc" },
-    include: {
-      _count: {
-        select: { locations: true },
+function parsePage(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "1", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export default async function WarehousePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const sp = await searchParams;
+  const currentPage = parsePage(sp.page);
+
+  const [totalCount, activeCount, totalLocations, warehouses] = await Promise.all([
+    prisma.warehouse.count(),
+    prisma.warehouse.count({ where: { isActive: true } }),
+    prisma.location.count(),
+    prisma.warehouse.findMany({
+      orderBy: { name: "asc" },
+      skip: (currentPage - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        description: true,
+        address: true,
+        isActive: true,
+        _count: {
+          select: { locations: true },
+        },
       },
-    },
-  });
+    }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+
+  const buildHref = (page: number) => (page > 1 ? `/warehouse?page=${page}` : "/warehouse");
 
   return (
     <div className="space-y-8">
@@ -34,19 +65,15 @@ export default async function WarehousePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass p-4 rounded-xl">
           <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold block">Total Almacenes</span>
-          <span className="text-2xl font-bold text-white mt-1">{warehouses.length}</span>
+          <span className="text-2xl font-bold text-white mt-1">{totalCount}</span>
         </div>
         <div className="glass p-4 rounded-xl">
           <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold block">Activos</span>
-          <span className="text-2xl font-bold text-green-400 mt-1">
-            {warehouses.filter((w) => w.isActive).length}
-          </span>
+          <span className="text-2xl font-bold text-green-400 mt-1">{activeCount}</span>
         </div>
         <div className="glass p-4 rounded-xl">
           <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold block">Total Ubicaciones</span>
-          <span className="text-2xl font-bold text-cyan-400 mt-1">
-            {warehouses.reduce((acc, w) => acc + w._count.locations, 0)}
-          </span>
+          <span className="text-2xl font-bold text-cyan-400 mt-1">{totalLocations}</span>
         </div>
       </div>
 
@@ -111,6 +138,26 @@ export default async function WarehousePage() {
           </div>
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+          <Link
+            href={buildHref(Math.max(1, safePage - 1))}
+            className={`px-4 py-2 glass rounded-lg ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
+          >
+            ← Anterior
+          </Link>
+          <span className="text-slate-500">
+            Página {safePage} de {totalPages}
+          </span>
+          <Link
+            href={buildHref(Math.min(totalPages, safePage + 1))}
+            className={`px-4 py-2 glass rounded-lg ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
+          >
+            Siguiente →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

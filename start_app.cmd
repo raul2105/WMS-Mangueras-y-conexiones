@@ -12,12 +12,43 @@ set "PREFERRED_PORT=3002"
 pushd "%~dp0"
 echo Working dir: %CD%
 
+:: Verify Node.js version (Next 16 + Prisma support Node 20/24)
+for /f "delims=" %%V in ('node -v 2^>nul') do set "NODE_VERSION=%%V"
+if not defined NODE_VERSION (
+    echo Node.js no encontrado en PATH. Instala Node 20 LTS o 24 y vuelve a intentar.
+    pause
+    exit /b 1
+)
+
+set "NODE_VERSION=%NODE_VERSION:v=%"
+for /f "tokens=1 delims=." %%M in ("%NODE_VERSION%") do set "NODE_MAJOR=%%M"
+if not "%NODE_MAJOR%"=="20" if not "%NODE_MAJOR%"=="24" (
+    echo Version de Node detectada: v%NODE_VERSION%.
+    echo Este proyecto requiere Node 20 LTS v20.x o Node 24 v24.x.
+    echo Cambia a Node 20 o 24 y vuelve a ejecutar este script.
+    pause
+    exit /b 1
+)
+
 :: Check if node_modules exists
 if not exist "node_modules" (
     echo node_modules not found. Installing dependencies...
     call npm install
     if %ERRORLEVEL% NEQ 0 (
         echo Error installing dependencies.
+        pause
+        exit /b %ERRORLEVEL%
+    )
+)
+
+:: Guard against corrupt/incomplete node_modules
+if not exist "node_modules\\next\\dist\\compiled\\commander\\package.json" (
+    echo node_modules parece incompleto. Reinstalando dependencias...
+    rmdir /s /q "node_modules" >nul 2>&1
+    del /f /q "package-lock.json" >nul 2>&1
+    call npm install
+    if %ERRORLEVEL% NEQ 0 (
+        echo Error reinstalling dependencies.
         pause
         exit /b %ERRORLEVEL%
     )
@@ -55,7 +86,7 @@ if exist ".next\\dev\\lock" (
 
 :: Start Next.js Server (in a new window to avoid locking this launcher)
 echo Starting Development Server...
-start "Next.js Dev Server" cmd /c "set NEXT_DISABLE_TURBOPACK=1 && npm run dev"
+start "Next.js Dev Server" cmd /c "npm run dev"
 
 :: Wait until a dev port opens, then open the browser
 for /l %%I in (1,1,30) do (

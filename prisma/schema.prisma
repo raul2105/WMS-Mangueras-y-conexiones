@@ -7,7 +7,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 model Product {
@@ -19,6 +19,7 @@ model Product {
   description String?
   type        String   // HOSE, FITTING, ASSEMBLY, ACCESSORY
   brand       String?
+  subcategory String?
   base_cost   Float?
   price       Float?
   attributes  String?  // JSON string for flexibility (Pressure, Diameter, Material)
@@ -28,10 +29,59 @@ model Product {
   
   inventory   Inventory[]
   movements   InventoryMovement[]
+  equivalencesFrom ProductEquivalence[] @relation("EquivalenceFrom")
+  equivalencesTo ProductEquivalence[]   @relation("EquivalenceTo")
+  technicalAttributes ProductTechnicalAttribute[]
   productionOrderItems ProductionOrderItem[]
+  supplierProducts     SupplierProduct[]
+  purchaseOrderLines   PurchaseOrderLine[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([type])
+  @@index([brand])
+  @@index([categoryId])
+  @@index([subcategory])
+}
+
+model ProductTechnicalAttribute {
+  id              String  @id @default(uuid())
+  productId       String
+  key             String
+  keyNormalized   String
+  value           String
+  valueNormalized String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, keyNormalized, valueNormalized])
+  @@index([productId])
+  @@index([keyNormalized])
+  @@index([keyNormalized, valueNormalized])
+  @@index([valueNormalized])
+}
+
+model ProductEquivalence {
+  id             String   @id @default(uuid())
+  productId      String
+  equivProductId String
+  basisNorm      String?
+  basisDash      Int?
+  sourceSheet    String?
+  notes          String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  product      Product @relation("EquivalenceFrom", fields: [productId], references: [id], onDelete: Cascade)
+  equivProduct Product @relation("EquivalenceTo", fields: [equivProductId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, equivProductId])
+  @@index([productId])
+  @@index([equivProductId])
+  @@index([active])
 }
 
 model Category {
@@ -77,9 +127,12 @@ model Location {
   inventory   Inventory[]
   movements   InventoryMovement[]
   productionOrderItems ProductionOrderItem[]
-  
+  purchaseReceipts     PurchaseReceipt[]
+
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+
+  @@index([warehouseId, isActive, code])
 }
 
 model Inventory {
@@ -184,4 +237,149 @@ model ProductionOrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([locationId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityType String
+  entityId   String?
+  action     String
+  before     String?
+  after      String?
+  actor      String?
+  source     String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType])
+  @@index([entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model ImportLog {
+  id        String   @id @default(uuid())
+  fileName  String
+  fileSize  Int?
+  rows      Int?
+  skus      Int?
+  dryRun    Boolean  @default(false)
+  status    String
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─── Módulo de Compras ────────────────────────────────────────────────────────
+
+enum PurchaseOrderStatus {
+  BORRADOR
+  CONFIRMADA
+  EN_TRANSITO
+  RECIBIDA
+  PARCIAL
+  CANCELADA
+}
+
+model Supplier {
+  id        String   @id @default(uuid())
+  code      String   @unique   // PROV-001
+  name      String
+  taxId     String?            // RFC
+  email     String?
+  phone     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products       SupplierProduct[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([isActive])
+}
+
+model SupplierProduct {
+  id           String   @id @default(uuid())
+  supplierId   String
+  productId    String
+  supplierSku  String?
+  unitPrice    Float?
+  currency     String   @default("MXN")
+  leadTimeDays Int?
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([supplierId, productId])
+  @@index([supplierId])
+  @@index([productId])
+}
+
+model PurchaseOrder {
+  id           String              @id @default(uuid())
+  folio        String              @unique   // OC-2026-0001
+  supplierId   String
+  status       PurchaseOrderStatus @default(BORRADOR)
+  expectedDate DateTime?
+  notes        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  supplier Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines    PurchaseOrderLine[]
+  receipts PurchaseReceipt[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PurchaseOrderLine {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  productId       String
+  qtyOrdered      Int
+  qtyReceived     Int      @default(0)
+  unitPrice       Float?
+  currency        String   @default("MXN")
+
+  purchaseOrder PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  receiptLines  PurchaseReceiptLine[]
+
+  @@unique([purchaseOrderId, productId])
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model PurchaseReceipt {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  locationId      String
+  receivedAt      DateTime @default(now())
+  notes           String?
+  referenceDoc    String?
+
+  purchaseOrder PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  location      Location             @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  lines         PurchaseReceiptLine[]
+
+  @@index([purchaseOrderId])
+  @@index([receivedAt])
+}
+
+model PurchaseReceiptLine {
+  id                  String @id @default(uuid())
+  purchaseReceiptId   String
+  purchaseOrderLineId String
+  productId           String
+  qtyReceived         Int
+
+  purchaseReceipt   PurchaseReceipt   @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseReceiptId])
+  @@index([purchaseOrderLineId])
 }

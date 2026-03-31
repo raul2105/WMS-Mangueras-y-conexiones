@@ -1,8 +1,12 @@
 import prisma from "@/lib/prisma";
-import InventoryService, { InventoryServiceError } from "@/lib/inventory-service";
+import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import InventoryCodeField from "@/components/InventoryCodeField";
+import { firstErrorMessage, pickStockSchema } from "@/lib/schemas/wms";
+import { createAuditLogSafe } from "@/lib/audit-log";
+import { formatEquivalentSuggestion, getEquivalentProducts } from "@/lib/product-equivalences";
+import { resolveProductInput } from "@/lib/product-search";
 
 export const dynamic = "force-dynamic";
 
@@ -14,42 +18,101 @@ async function pickStock(formData: FormData) {
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
-  const quantity = qtyRaw ? Number(qtyRaw.replace(",", ".")) : NaN;
+  const parsed = pickStockSchema.safeParse({
+    code,
+    locationCode,
+    reference: reference ?? undefined,
+    notes: notes ?? undefined,
+    quantityRaw: qtyRaw,
+  });
 
-  if (!code || !Number.isFinite(quantity) || quantity <= 0) {
-    redirect(`/inventory/pick?error=${encodeURIComponent("Datos inválidos (código/cantidad)")}`);
+  if (!parsed.success) {
+    redirect(`/inventory/pick?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  if (!locationCode) {
-    redirect(`/inventory/pick?error=${encodeURIComponent("Selecciona una ubicación")}`);
-  }
+  const quantity = parsed.data.quantityRaw;
 
-  const product = await prisma.product.findFirst({
-    where: { OR: [{ sku: code }, { referenceCode: code }] },
-    select: { id: true },
+  const { product, suggestions } = await resolveProductInput(prisma, code, {
+    select: {
+      id: true,
+      sku: true,
+      referenceCode: true,
+      name: true,
+      brand: true,
+      description: true,
+      type: true,
+      subcategory: true,
+      category: { select: { name: true } },
+      inventory: { select: { quantity: true, available: true } },
+      technicalAttributes: { take: 8, select: { keyNormalized: true, valueNormalized: true } },
+    },
   });
 
   if (!product) {
-    redirect(`/inventory/pick?error=${encodeURIComponent("Producto no encontrado (SKU/Referencia)")}`);
+    const hint = suggestions.length > 0
+      ? `Coincidencias: ${suggestions.slice(0, 3).map((row) => row.sku).join(", ")}`
+      : "Producto no encontrado (SKU/Referencia)";
+    redirect(`/inventory/pick?error=${encodeURIComponent(hint)}`);
   }
 
   // Find location by code if provided
-  const location = await prisma.location.findUnique({ where: { code: locationCode }, select: { id: true, code: true } });
+  const location = await prisma.location.findUnique({
+    where: { code: locationCode },
+    select: { id: true, code: true, warehouseId: true },
+  });
 
   if (locationCode && !location) {
     redirect(`/inventory/pick?error=${encodeURIComponent(`Ubicación no encontrada: ${locationCode}`)}`);
   }
 
+  if (!location) {
+    redirect(`/inventory/pick?error=${encodeURIComponent("Ubicación no encontrada")}`);
+  }
+
   const service = new InventoryService(prisma);
 
   try {
-    await service.pickStock(product.id, location.id, quantity, reference, { notes });
+    await service.pickStock(product.id, location.id, quantity, reference, {
+      notes,
+      actor: "system",
+      source: "inventory/pick",
+    });
+
+    await createAuditLogSafe({
+      entityType: "INVENTORY_MOVEMENT",
+      entityId: `${product.id}:${location.id}`,
+      action: "PICK_FORM_SUBMIT",
+      after: { quantity, reference, locationCode },
+      source: "inventory/pick",
+      actor: "system",
+    });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
-      const message = error.code === "INSUFFICIENT_AVAILABLE"
-        ? "Stock insuficiente en esa ubicación"
-        : "No se pudo registrar la salida";
-      redirect(`/inventory/pick?error=${encodeURIComponent(message)}`);
+      const messages: Record<string, string> = {
+        INSUFFICIENT_AVAILABLE: "Stock disponible insuficiente en esa ubicación",
+        INVENTORY_NOT_FOUND: "No hay inventario registrado en esa ubicación para ese producto",
+        RESERVED_EXCEEDS_QUANTITY: "No se puede despachar: la cantidad reservada supera el stock resultante",
+        INVALID_QTY: "Cantidad inválida",
+      };
+      const msg = messages[error.code] ?? `Error: ${error.message}`;
+
+      if (error.code === "INSUFFICIENT_AVAILABLE" || error.code === "INVENTORY_NOT_FOUND") {
+        const equivalents = await getEquivalentProducts(product.id, { warehouseId: location.warehouseId, limit: 1 });
+        if (equivalents.length > 0) {
+          const suggestion = formatEquivalentSuggestion(product, equivalents[0]);
+          redirect(
+            `/inventory/pick?error=${encodeURIComponent(msg)}&suggestion=${encodeURIComponent(suggestion)}&suggestedCode=${encodeURIComponent(equivalents[0].sku)}`
+          );
+        }
+
+        const registeredEquivalents = await getEquivalentProducts(product.id, { limit: 1, inStockOnly: false });
+        if (registeredEquivalents.length > 0) {
+          const fallback = `No hay sustituto con stock disponible, pero existe equivalencia registrada para ${product.sku}. Revisa el detalle del producto para consultar contratipos.`;
+          redirect(`/inventory/pick?error=${encodeURIComponent(msg)}&suggestion=${encodeURIComponent(fallback)}`);
+        }
+      }
+
+      redirect(`/inventory/pick?error=${encodeURIComponent(msg)}`);
     }
     throw error;
   }
@@ -60,9 +123,36 @@ async function pickStock(formData: FormData) {
 export default async function PickPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string }>;
+  searchParams: Promise<{ ok?: string; error?: string; suggestion?: string; suggestedCode?: string }>;
 }) {
   const sp = await searchParams;
+  const [locations, products, recentReferences] = await Promise.all([
+    prisma.location.findMany({
+      where: { isActive: true },
+      orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
+      select: {
+        code: true,
+        name: true,
+        warehouse: { select: { code: true } },
+      },
+    }),
+    prisma.product.findMany({
+      orderBy: { updatedAt: "desc" },
+      take: 250,
+      select: { sku: true, referenceCode: true, name: true, brand: true },
+    }),
+    prisma.inventoryMovement.findMany({
+      where: { reference: { not: null } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: { reference: true },
+    }),
+  ]);
+
+  const codeSuggestions = products.flatMap((p) => [p.sku, p.referenceCode ?? "", p.name, p.brand ?? ""]).filter(Boolean);
+  const referenceSuggestions = Array.from(
+    new Set(recentReferences.map((row) => row.reference?.trim() ?? "").filter(Boolean))
+  );
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -75,6 +165,12 @@ export default async function PickPage({
       </div>
 
       {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
+      {sp.suggestion && (
+        <div className="glass-card border border-amber-500/30 text-amber-100 space-y-2">
+          <p>{sp.suggestion}</p>
+          {sp.suggestedCode && <p className="text-xs text-amber-200/80">Prueba el codigo sugerido en el campo SKU o Referencia: {sp.suggestedCode}</p>}
+        </div>
+      )}
       {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Salida registrada.</div>}
 
       <form action={pickStock} className="glass-card space-y-6">
@@ -84,6 +180,8 @@ export default async function PickPage({
             label="SKU o Referencia *"
             placeholder="CON-R1AT-04"
             required
+            suggestions={codeSuggestions}
+            showDetails
           />
 
           <label className="space-y-1">
@@ -93,13 +191,32 @@ export default async function PickPage({
 
           <label className="space-y-1">
             <span className="text-sm text-slate-400">Ubicación *</span>
-            <input name="location" required className="w-full px-4 py-3 glass rounded-lg" placeholder="A-12-04" />
+            <select name="location" required className="w-full px-4 py-3 glass rounded-lg">
+              <option value="">Selecciona una ubicación</option>
+              {locations.map((location) => (
+                <option key={location.code} value={location.code}>
+                  {location.code} - {location.name} ({location.warehouse.code})
+                </option>
+              ))}
+            </select>
             <p className="text-xs text-slate-500 mt-1">Obligatorio para garantizar integridad de inventario.</p>
           </label>
 
           <label className="space-y-1">
             <span className="text-sm text-slate-400">Referencia pedido/OT</span>
-            <input name="reference" className="w-full px-4 py-3 glass rounded-lg" placeholder="Pedido/OT" />
+            <input
+              name="reference"
+              list={referenceSuggestions.length > 0 ? "pick-reference-options" : undefined}
+              className="w-full px-4 py-3 glass rounded-lg"
+              placeholder="Pedido/OT"
+            />
+            {referenceSuggestions.length > 0 && (
+              <datalist id="pick-reference-options">
+                {referenceSuggestions.map((reference) => (
+                  <option key={reference} value={reference} />
+                ))}
+              </datalist>
+            )}
           </label>
 
           <label className="space-y-1 md:col-span-2">

@@ -1,6 +1,8 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { firstErrorMessage, parseDueDate, parsePriority, productionOrderCreateSchema } from "@/lib/schemas/wms";
+import { createAuditLogSafe } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -12,18 +14,28 @@ async function createOrder(formData: FormData) {
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const customerName = String(formData.get("customerName") ?? "").trim() || null;
   const priorityRaw = String(formData.get("priority") ?? "").trim();
-  const priority = priorityRaw ? Number(priorityRaw) : 3;
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
-  const dueDate = dueDateRaw ? new Date(dueDateRaw) : null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
-  if (!code || !warehouseId) {
-    redirect(`/production/orders/new?error=${encodeURIComponent("Codigo y almacen son obligatorios")}`);
+  const parsed = productionOrderCreateSchema.safeParse({
+    code,
+    status,
+    warehouseId,
+    customerName: customerName ?? undefined,
+    priorityRaw,
+    dueDateRaw,
+    notes: notes ?? undefined,
+  });
+
+  if (!parsed.success) {
+    redirect(`/production/orders/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  if (!Number.isFinite(priority) || priority < 1 || priority > 5) {
+  const validPriority = parsePriority(priorityRaw, 3);
+  if (validPriority === null) {
     redirect(`/production/orders/new?error=${encodeURIComponent("Prioridad invalida (1-5)")}`);
   }
+  const dueDate = parseDueDate(dueDateRaw);
 
   const warehouse = await prisma.warehouse.findUnique({
     where: { id: warehouseId },
@@ -46,13 +58,28 @@ async function createOrder(formData: FormData) {
   await prisma.productionOrder.create({
     data: {
       code,
-      status: status as any,
+      status: parsed.data.status,
       warehouseId,
       customerName,
-      priority,
+      priority: validPriority,
       dueDate,
       notes,
     },
+  });
+
+  await createAuditLogSafe({
+    entityType: "PRODUCTION_ORDER",
+    entityId: code,
+    action: "CREATE_ORDER",
+    after: {
+      code,
+      status,
+      warehouseId,
+      priority: validPriority,
+      dueDate: dueDate ? dueDate.toISOString() : null,
+    },
+    source: "production/orders/new",
+    actor: "system",
   });
 
   redirect("/production/orders");
@@ -64,11 +91,22 @@ export default async function NewProductionOrderPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const sp = await searchParams;
-  const warehouses = await prisma.warehouse.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true, code: true },
-  });
+  const [warehouses, customers] = await Promise.all([
+    prisma.warehouse.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, code: true },
+    }),
+    prisma.productionOrder.findMany({
+      where: { customerName: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+      select: { customerName: true },
+    }),
+  ]);
+  const customerSuggestions = Array.from(
+    new Set(customers.map((row) => row.customerName?.trim() ?? "").filter(Boolean))
+  );
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -125,7 +163,19 @@ export default async function NewProductionOrderPage({
 
           <label className="space-y-1">
             <span className="text-sm text-slate-400">Cliente</span>
-            <input name="customerName" className="w-full px-4 py-3 glass rounded-lg" placeholder="Cliente" />
+            <input
+              name="customerName"
+              list={customerSuggestions.length > 0 ? "production-customer-options" : undefined}
+              className="w-full px-4 py-3 glass rounded-lg"
+              placeholder="Cliente"
+            />
+            {customerSuggestions.length > 0 && (
+              <datalist id="production-customer-options">
+                {customerSuggestions.map((customer) => (
+                  <option key={customer} value={customer} />
+                ))}
+              </datalist>
+            )}
           </label>
 
           <label className="space-y-1">

@@ -1,11 +1,14 @@
 import prisma from "@/lib/prisma";
-import InventoryService, { InventoryServiceError } from "@/lib/inventory-service";
+import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import ReceiveForm from "@/components/ReceiveForm";
+import { firstErrorMessage, receiveStockSchema } from "@/lib/schemas/wms";
+import { createAuditLogSafe } from "@/lib/audit-log";
+import { resolveProductInput } from "@/lib/product-search";
 
 export const dynamic = "force-dynamic";
 
@@ -19,15 +22,20 @@ async function receiveStock(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const referenceFile = formData.get("referenceFile");
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
-  const quantity = qtyRaw ? Number(qtyRaw.replace(",", ".")) : NaN;
+  const parsed = receiveStockSchema.safeParse({
+    code,
+    warehouseId,
+    locationId,
+    reference,
+    notes,
+    quantityRaw: qtyRaw,
+  });
 
-  if (!code || !Number.isFinite(quantity) || quantity <= 0) {
-    redirect(`/inventory/receive?error=${encodeURIComponent("Datos inválidos (codigo/cantidad)")}`);
+  if (!parsed.success) {
+    redirect(`/inventory/receive?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  if (!warehouseId || !locationId || !reference) {
-    redirect(`/inventory/receive?error=${encodeURIComponent("Faltan campos obligatorios")}`);
-  }
+  const quantity = parsed.data.quantityRaw;
 
   if (referenceFile && referenceFile instanceof File && referenceFile.size > 0) {
     const allowed = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -39,15 +47,27 @@ async function receiveStock(formData: FormData) {
     }
   }
 
-  const product = await prisma.product.findFirst({
-    where: {
-      OR: [{ sku: code }, { referenceCode: code }],
+  const { product, suggestions } = await resolveProductInput(prisma, code, {
+    select: {
+      id: true,
+      sku: true,
+      referenceCode: true,
+      name: true,
+      brand: true,
+      description: true,
+      type: true,
+      subcategory: true,
+      category: { select: { name: true } },
+      inventory: { select: { quantity: true, available: true } },
+      technicalAttributes: { take: 8, select: { keyNormalized: true, valueNormalized: true } },
     },
-    select: { id: true },
   });
 
   if (!product) {
-    redirect(`/inventory/receive?error=${encodeURIComponent("Producto no encontrado (SKU/Referencia)")}`);
+    const hint = suggestions.length > 0
+      ? `Coincidencias: ${suggestions.slice(0, 3).map((row) => row.sku).join(", ")}`
+      : "Producto no encontrado (SKU/Referencia)";
+    redirect(`/inventory/receive?error=${encodeURIComponent(hint)}`);
   }
 
   const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true } });
@@ -64,6 +84,10 @@ async function receiveStock(formData: FormData) {
 
   if (warehouseId && location && location.warehouseId !== warehouseId) {
     redirect(`/inventory/receive?error=${encodeURIComponent("La ubicación no pertenece al almacén seleccionado")}`);
+  }
+
+  if (!location) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Ubicación no encontrada")}`);
   }
 
   let referenceFileMeta: {
@@ -109,10 +133,21 @@ async function receiveStock(formData: FormData) {
   try {
     await service.receiveStock(product.id, location.id, quantity, reference, {
       notes,
+      actor: "system",
+      source: "inventory/receive",
       referenceFilePath: referenceFileMeta?.path ?? null,
       referenceFileName: referenceFileMeta?.name ?? null,
       referenceFileMime: referenceFileMeta?.mime ?? null,
       referenceFileSize: referenceFileMeta?.size ?? null,
+    });
+
+    await createAuditLogSafe({
+      entityType: "INVENTORY_MOVEMENT",
+      entityId: `${product.id}:${location.id}`,
+      action: "RECEIVE_FORM_SUBMIT",
+      after: { quantity, reference, warehouseId, locationId },
+      source: "inventory/receive",
+      actor: "system",
     });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
@@ -130,20 +165,38 @@ export default async function ReceivePage({
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
   const sp = await searchParams;
-  const warehouses = await prisma.warehouse.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      locations: {
-        where: { isActive: true },
-        orderBy: { code: "asc" },
-        select: { id: true, code: true, name: true, warehouseId: true },
+  const [warehouses, products, recentReferences] = await Promise.all([
+    prisma.warehouse.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        locations: {
+          where: { isActive: true },
+          orderBy: { code: "asc" },
+          select: { id: true, code: true, name: true, warehouseId: true },
+        },
       },
-    },
-  });
+    }),
+    prisma.product.findMany({
+      orderBy: { updatedAt: "desc" },
+      take: 250,
+      select: { sku: true, referenceCode: true, name: true, brand: true },
+    }),
+    prisma.inventoryMovement.findMany({
+      where: { reference: { not: null } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: { reference: true },
+    }),
+  ]);
+
+  const codeSuggestions = products.flatMap((p) => [p.sku, p.referenceCode ?? "", p.name, p.brand ?? ""]).filter(Boolean);
+  const referenceSuggestions = Array.from(
+    new Set(recentReferences.map((row) => row.reference?.trim() ?? "").filter(Boolean))
+  );
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -158,7 +211,12 @@ export default async function ReceivePage({
       {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
       {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Entrada registrada.</div>}
 
-      <ReceiveForm action={receiveStock} warehouses={warehouses} />
+      <ReceiveForm
+        action={receiveStock}
+        warehouses={warehouses}
+        codeSuggestions={codeSuggestions}
+        referenceSuggestions={referenceSuggestions}
+      />
     </div>
   );
 }

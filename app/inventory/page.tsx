@@ -190,14 +190,29 @@ export default async function InventoryHomePage({ searchParams }: PageProps) {
           <h1 className="text-3xl font-bold">Inventario</h1>
           <p className="text-slate-400 mt-1">Entradas, salidas y búsqueda operativa por SKU, referencia, nombre, marca y atributos.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Link href="/inventory/receive" className="btn-primary">+ Recepción</Link>
           <Link href="/inventory/pick" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">- Picking</Link>
           <Link href="/inventory/adjust" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">± Ajuste</Link>
           <Link href="/inventory/transfer" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">⇄ Transferir</Link>
           <Link href="/inventory/kardex" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Kardex</Link>
+          <Link href="/trace" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Trace</Link>
         </div>
       </div>
+
+      <form action="/trace" method="get" className="glass-card grid grid-cols-1 md:grid-cols-4 gap-3">
+        <label className="space-y-1 md:col-span-3">
+          <span className="text-sm text-slate-400">Resolver Trace ID</span>
+          <input
+            name="traceId"
+            className="w-full px-4 py-3 glass rounded-lg font-mono"
+            placeholder="TRC-REC-20260331-ABC123"
+          />
+        </label>
+        <div className="flex items-end">
+          <button type="submit" className="btn-primary w-full">Buscar trace</button>
+        </div>
+      </form>
 
       <form className="glass-card grid grid-cols-1 md:grid-cols-4 gap-4">
         <label className="space-y-1 md:col-span-2">

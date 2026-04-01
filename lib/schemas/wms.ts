@@ -20,6 +20,7 @@ export const receiveStockSchema = z.object({
   warehouseId: requiredText("Almacen"),
   locationId: requiredText("Ubicacion"),
   reference: requiredText("Referencia"),
+  operatorName: requiredText("Operador"),
   notes: z.string().trim().optional(),
   quantityRaw: decimalText("Cantidad"),
 });
@@ -27,6 +28,7 @@ export const receiveStockSchema = z.object({
 export const pickStockSchema = z.object({
   code: requiredText("Codigo"),
   locationCode: requiredText("Ubicacion"),
+  operatorName: requiredText("Operador"),
   reference: z.string().trim().optional(),
   notes: z.string().trim().optional(),
   quantityRaw: decimalText("Cantidad"),
@@ -63,9 +65,26 @@ export const productionOrderItemSchema = z.object({
   quantityRaw: decimalText("Cantidad"),
 });
 
+export const assemblyConfigSchema = z.object({
+  warehouseId: requiredText("Almacen"),
+  entryFittingProductId: requiredText("Conexion de entrada"),
+  hoseProductId: requiredText("Manguera"),
+  exitFittingProductId: requiredText("Conexion de salida"),
+  hoseLengthRaw: decimalText("Longitud de manguera"),
+  assemblyQuantityRaw: decimalText("Cantidad de ensambles"),
+  sourceDocumentRef: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+export const assemblyConsumeSchema = z.object({
+  orderId: requiredText("Orden"),
+  operatorName: requiredText("Operador"),
+});
+
 export const inventoryAdjustmentSchema = z.object({
   code: requiredText("Codigo"),
   locationCode: requiredText("Ubicacion"),
+  operatorName: requiredText("Operador"),
   reason: requiredText("Motivo"),
   deltaRaw: decimalText("Ajuste", true),
 });
@@ -138,6 +157,13 @@ export const purchaseOrderLineSchema = z.object({
 export const purchaseReceiptSchema = z.object({
   purchaseOrderId: requiredText("Orden de compra"),
   locationId: requiredText("Ubicación"),
+  referenceDoc: z.string().trim().max(100).optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+
+export const purchaseReceiptOperationSchema = z.object({
+  locationId: requiredText("Ubicación"),
+  operatorName: requiredText("Operador"),
   referenceDoc: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });

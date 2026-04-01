@@ -4,8 +4,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, inventoryAdjustmentSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
+import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,14 @@ async function adjustStock(formData: FormData) {
 
   const code = String(formData.get("code") ?? "").trim();
   const locationCode = String(formData.get("location") ?? "").trim();
+  const operatorName = String(formData.get("operatorName") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
   const deltaRaw = String(formData.get("delta") ?? "").trim();
 
   const parsed = inventoryAdjustmentSchema.safeParse({
     code,
     locationCode,
+    operatorName,
     reason,
     deltaRaw,
   });
@@ -61,17 +64,38 @@ async function adjustStock(formData: FormData) {
   }
 
   const service = new InventoryService(prisma);
+  let createdJobId: string | null = null;
 
   try {
-    await service.adjustStock(product.id, location.id, parsed.data.deltaRaw, reason);
-    await createAuditLogSafe({
-      entityType: "INVENTORY_MOVEMENT",
-      entityId: `${product.id}:${location.id}`,
-      action: "ADJUST_FORM_SUBMIT",
-      after: { delta: parsed.data.deltaRaw, reason },
-      source: "inventory/adjust",
-      actor: "system",
-    });
+    createdJobId = await prisma.$transaction(async (tx) => {
+      const result = await service.adjustStock(product.id, location.id, parsed.data.deltaRaw, reason, {
+        tx,
+        operatorName,
+        actor: operatorName,
+        source: "inventory/adjust",
+      });
+      if (!result.movementId) {
+        throw new Error("Movement ID missing after adjustment");
+      }
+      const { job } = await createMovementTraceAndLabelJob(tx, {
+        movementId: result.movementId,
+        labelType: "ADJUSTMENT",
+        sourceEntityType: "INVENTORY_MOVEMENT",
+        sourceEntityId: result.movementId,
+        operatorName,
+      });
+
+      await createAuditLogSafeWithDb({
+        entityType: "INVENTORY_MOVEMENT",
+        entityId: `${product.id}:${location.id}`,
+        action: "ADJUST_FORM_SUBMIT",
+        after: { delta: parsed.data.deltaRaw, reason },
+        source: "inventory/adjust",
+        actor: operatorName,
+      }, tx);
+
+      return job.id;
+    }, { timeout: 20000 });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {
@@ -86,7 +110,10 @@ async function adjustStock(formData: FormData) {
     throw error;
   }
 
-  redirect("/inventory/adjust?ok=1");
+  if (!createdJobId) {
+    redirect("/inventory/adjust?error=No%20se%20pudo%20generar%20etiqueta");
+  }
+  redirect(`/labels/jobs/${createdJobId}?next=${encodeURIComponent("/inventory/adjust?ok=1")}`);
 }
 
 export default async function AdjustPage({
@@ -152,6 +179,16 @@ export default async function AdjustPage({
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Operador *</span>
+            <input
+              name="operatorName"
+              required
+              className="w-full px-4 py-3 glass rounded-lg"
+              placeholder="Nombre del operador"
+            />
           </label>
 
           <label className="space-y-1 md:col-span-2">

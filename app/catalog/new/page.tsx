@@ -18,6 +18,7 @@ async function createProduct(formData: FormData) {
 
   const descriptionRaw = String(formData.get("description") ?? "").trim();
   const brandRaw = String(formData.get("brand") ?? "").trim();
+  const unitLabelRaw = String(formData.get("unitLabel") ?? "").trim();
   const referenceCodeRaw = String(formData.get("referenceCode") ?? "").trim();
   const imageUrlRaw = String(formData.get("imageUrl") ?? "").trim();
   const categoryRaw = String(formData.get("category") ?? "").trim();
@@ -87,6 +88,7 @@ async function createProduct(formData: FormData) {
       imageUrl,
       name,
       type: normalizedType,
+      unitLabel: unitLabelRaw || "unidad",
       description: descriptionRaw || null,
       brand: brandRaw || null,
       subcategory: subcategoryRaw || null,
@@ -98,6 +100,7 @@ async function createProduct(formData: FormData) {
     update: {
       name,
       type: normalizedType,
+      unitLabel: unitLabelRaw || "unidad",
       description: descriptionRaw || null,
       brand: brandRaw || null,
       referenceCode: referenceCodeRaw || null,
@@ -266,6 +269,16 @@ export default async function NewCatalogItemPage({
                 ))}
               </datalist>
             )}
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Unidad</span>
+            <input
+              name="unitLabel"
+              defaultValue="unidad"
+              className="w-full px-4 py-3 glass rounded-lg"
+              placeholder="pieza, m, kg"
+            />
           </label>
 
           <label className="space-y-1">

@@ -186,9 +186,17 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
                     <span className="text-sm text-slate-400">
                       {location._count.inventory} productos
                     </span>
-                    {location._count.inventory > 0 && (
-                      <span className="text-xs text-cyan-400">📦</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {location._count.inventory > 0 && (
+                        <span className="text-xs text-cyan-400">📦</span>
+                      )}
+                      <Link
+                        href={`/labels/location/${location.id}`}
+                        className="text-xs text-cyan-300 hover:underline"
+                      >
+                        Etiqueta
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ))}

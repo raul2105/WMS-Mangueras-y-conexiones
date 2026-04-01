@@ -20,6 +20,7 @@ async function updateProduct(id: string, formData: FormData) {
   const type = String(formData.get("type") ?? "").trim().toUpperCase();
   const description = String(formData.get("description") ?? "").trim() || null;
   const brand = String(formData.get("brand") ?? "").trim() || null;
+  const unitLabel = String(formData.get("unitLabel") ?? "").trim() || "unidad";
   const referenceCode = String(formData.get("referenceCode") ?? "").trim() || null;
   const imageUrl = String(formData.get("imageUrl") ?? "").trim() || null;
   const categoryRaw = String(formData.get("category") ?? "").trim();
@@ -85,6 +86,7 @@ async function updateProduct(id: string, formData: FormData) {
       type: normalizedType,
       description,
       brand,
+      unitLabel,
       referenceCode: referenceCode || null,
       imageUrl: resolvedImageUrl || null,
       subcategory,
@@ -102,7 +104,7 @@ async function updateProduct(id: string, formData: FormData) {
     entityId: id,
     action: "UPDATE_PRODUCT",
     before,
-    after: { name, type: normalizedType, brand },
+    after: { name, type: normalizedType, brand, unitLabel },
     source: "catalog/edit",
     actor: "system",
   });
@@ -174,6 +176,11 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
           <label className="space-y-1">
             <span className="text-sm text-slate-400">Marca</span>
             <input name="brand" defaultValue={product.brand ?? ""} className="w-full px-4 py-3 glass rounded-lg" />
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Unidad</span>
+            <input name="unitLabel" defaultValue={product.unitLabel ?? "unidad"} className="w-full px-4 py-3 glass rounded-lg" />
           </label>
 
           <label className="space-y-1">

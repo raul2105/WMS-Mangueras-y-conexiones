@@ -18,6 +18,7 @@ type FormErrors = {
   warehouseId?: string;
   locationId?: string;
   reference?: string;
+  operatorName?: string;
 };
 
 export default function ReceiveForm({ action, warehouses, codeSuggestions, referenceSuggestions }: Props) {
@@ -33,6 +34,7 @@ export default function ReceiveForm({ action, warehouses, codeSuggestions, refer
         const warehouseId = String(formData.get("warehouseId") ?? "").trim();
         const locationId = String(formData.get("locationId") ?? "").trim();
         const reference = String(formData.get("reference") ?? "").trim();
+        const operatorName = String(formData.get("operatorName") ?? "").trim();
         const qtyRaw = String(formData.get("quantity") ?? "").trim();
         const quantity = qtyRaw ? Number(qtyRaw.replace(",", ".")) : NaN;
 
@@ -43,6 +45,7 @@ export default function ReceiveForm({ action, warehouses, codeSuggestions, refer
         if (!warehouseId) nextErrors.warehouseId = "Selecciona un almacen.";
         if (!locationId) nextErrors.locationId = "Selecciona una ubicacion.";
         if (!reference) nextErrors.reference = "Referencia obligatoria.";
+        if (!operatorName) nextErrors.operatorName = "Operador obligatorio.";
 
         if (Object.keys(nextErrors).length > 0) {
           event.preventDefault();
@@ -101,6 +104,17 @@ export default function ReceiveForm({ action, warehouses, codeSuggestions, refer
             </datalist>
           )}
           {errors.reference && <p className="text-xs text-red-400">{errors.reference}</p>}
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-sm text-slate-400">Operador *</span>
+          <input
+            name="operatorName"
+            required
+            className="w-full px-4 py-3 glass rounded-lg"
+            placeholder="Nombre del operador"
+          />
+          {errors.operatorName && <p className="text-xs text-red-400">{errors.operatorName}</p>}
         </label>
 
         <label className="space-y-1">

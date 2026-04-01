@@ -1,306 +1,82 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import ProductionOrderItemForm from "@/components/ProductionOrderItemForm";
-import type { Prisma } from "@prisma/client";
-import {
-  firstErrorMessage,
-  parseDueDate,
-  parsePriority,
-  productionOrderItemSchema,
-  productionOrderUpdateSchema,
-} from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
-import { assertCanSetOrderInProcess, reconcileProductionReservations } from "@/lib/reservation-policy";
+import { InventoryServiceError } from "@/lib/inventory-service";
+import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
+import { confirmAssemblyPickTask, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
+import { assemblyConsumeSchema, firstErrorMessage } from "@/lib/schemas/wms";
 
 export const dynamic = "force-dynamic";
 
-type TxClient = Prisma.TransactionClient;
-
-async function consumeOrderItems(tx: TxClient, order: {
-  code: string;
-  items: { productId: string; locationId: string; quantity: number }[];
-}) {
-  for (const item of order.items) {
-    const inv = await tx.inventory.findUnique({
-      where: { productId_locationId: { productId: item.productId, locationId: item.locationId } },
-    });
-
-    if (!inv || inv.quantity < item.quantity) {
-      redirect(`/production/orders?error=${encodeURIComponent("Inventario insuficiente para consumir")}`);
-    }
-
-    const newQty = inv.quantity - item.quantity;
-    const newReserved = Math.max(0, inv.reserved - item.quantity);
-    await tx.inventory.update({
-      where: { id: inv.id },
-      data: {
-        quantity: newQty,
-        reserved: newReserved,
-        available: newQty - newReserved,
-      },
-    });
-
-    await tx.inventoryMovement.create({
-      data: {
-        productId: item.productId,
-        locationId: item.locationId,
-        type: "OUT",
-        quantity: item.quantity,
-        reference: order.code,
-        notes: "Consumo ensamble",
-      },
-    });
-  }
-}
-
-async function updateOrder(formData: FormData) {
+async function releaseAssemblyPick(formData: FormData) {
   "use server";
-
-  const id = String(formData.get("id") ?? "").trim();
-  const status = String(formData.get("status") ?? "").trim();
-  const customerName = String(formData.get("customerName") ?? "").trim() || null;
-  const priorityRaw = String(formData.get("priority") ?? "").trim();
-  const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "").trim() || null;
-
-  if (!id) {
-    redirect("/production/orders");
-  }
-
-  const parsed = productionOrderUpdateSchema.safeParse({
-    id,
-    status,
-    customerName: customerName ?? undefined,
-    priorityRaw,
-    dueDateRaw,
-    notes: notes ?? undefined,
-  });
-
-  if (!parsed.success) {
-    redirect(`/production/orders/${id}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
-  }
-
-  const priority = parsePriority(priorityRaw, 3);
-  if (priority === null) {
-    redirect(`/production/orders/${id}?error=${encodeURIComponent("Prioridad invalida (1-5)")}`);
-  }
-  const dueDate = parseDueDate(dueDateRaw);
-
-  await prisma.$transaction(
-    async (tx) => {
-    const order = await tx.productionOrder.findUnique({
-      where: { id },
-      select: {
-        code: true,
-        status: true,
-        customerName: true,
-        priority: true,
-        dueDate: true,
-        notes: true,
-        items: { select: { productId: true, locationId: true, quantity: true } },
-      },
-    });
-
-    if (!order) {
-      redirect("/production/orders");
-    }
-
-    if (parsed.data.status === "EN_PROCESO") {
-      const reservationCheck = await assertCanSetOrderInProcess(tx, id);
-      if (!reservationCheck.ok) {
-        redirect(`/production/orders/${id}?error=${encodeURIComponent(reservationCheck.message)}`);
-      }
-    }
-
-    if (parsed.data.status === "COMPLETADA" && order.status !== "COMPLETADA") {
-      await consumeOrderItems(tx, order);
-    }
-
-    await tx.productionOrder.update({
-      where: { id },
-      data: {
-        status: parsed.data.status,
-        customerName,
-        priority,
-        dueDate,
-        notes,
-      },
-    });
-
-    if (order.status !== parsed.data.status) {
-      await reconcileProductionReservations(tx, order.items.map((item) => ({
-        productId: item.productId,
-        locationId: item.locationId,
-      })));
-    }
-
-    await createAuditLogSafe({
-      entityType: "PRODUCTION_ORDER",
-      entityId: order.code,
-      action: "UPDATE_ORDER",
-      before: {
-        status: order.status,
-        customerName: order.customerName,
-        priority: order.priority,
-        dueDate: order.dueDate,
-        notes: order.notes,
-      },
-      after: { status, customerName, priority, dueDate, notes },
-      actor: "system",
-      source: "production/orders/[id]",
-    });
-    },
-    { timeout: 20000 }
-  );
-
-  redirect(`/production/orders/${id}?ok=1`);
-}
-
-async function deleteOrder(formData: FormData) {
-  "use server";
-
-  const id = String(formData.get("id") ?? "").trim();
-  if (!id) {
-    redirect("/production/orders");
-  }
-
-  await prisma.$transaction(
-    async (tx) => {
-    const order = await tx.productionOrder.findUnique({
-      where: { id },
-      select: { items: { select: { productId: true, locationId: true } } },
-    });
-    await tx.productionOrder.delete({ where: { id } });
-    await reconcileProductionReservations(tx, order?.items);
-    },
-    { timeout: 20000 }
-  );
-  redirect("/production/orders");
-}
-
-async function addItem(formData: FormData) {
-  "use server";
-
   const orderId = String(formData.get("orderId") ?? "").trim();
-  const productId = String(formData.get("productId") ?? "").trim();
-  const locationId = String(formData.get("locationId") ?? "").trim();
-  const quantityRaw = String(formData.get("quantity") ?? "").trim();
-  const parsed = productionOrderItemSchema.safeParse({
-    orderId,
-    productId,
-    locationId,
-    quantityRaw,
-  });
-
-  if (!parsed.success) {
-    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  if (!orderId) redirect("/production/orders");
+  try {
+    await releaseAssemblyPickList(prisma, orderId);
+    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Lista de surtido liberada")}`);
+  } catch (error) {
+    const message = error instanceof InventoryServiceError ? error.message : "No se pudo liberar surtido";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
-
-  const quantity = parsed.data.quantityRaw;
-
-  await prisma.$transaction(
-    async (tx) => {
-    const order = await tx.productionOrder.findUnique({
-      where: { id: orderId },
-      select: { id: true, warehouseId: true },
-    });
-
-    if (!order) {
-      redirect("/production/orders");
-    }
-
-    const location = await tx.location.findUnique({
-      where: { id: locationId },
-      select: { id: true, warehouseId: true },
-    });
-
-    if (!location || location.warehouseId !== order.warehouseId) {
-      redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Ubicacion invalida")}`);
-    }
-
-    const inventory = await tx.inventory.findUnique({
-      where: { productId_locationId: { productId, locationId } },
-      select: { available: true },
-    });
-
-    if (!inventory || inventory.available <= 0) {
-      redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Sin stock disponible en la ubicacion")}`);
-    }
-
-    if (quantity > inventory.available) {
-      redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Cantidad supera disponible")}`);
-    }
-
-    await tx.productionOrderItem.upsert({
-      where: {
-        orderId_productId_locationId: { orderId, productId, locationId },
-      },
-      create: { orderId, productId, locationId, quantity },
-      update: { quantity: { increment: quantity } },
-    });
-
-    const orderStatus = await tx.productionOrder.findUnique({
-      where: { id: orderId },
-      select: { status: true },
-    });
-
-    if (orderStatus?.status === "EN_PROCESO") {
-      const reservationCheck = await assertCanSetOrderInProcess(tx, orderId);
-      if (!reservationCheck.ok) {
-        redirect(`/production/orders/${orderId}?error=${encodeURIComponent(reservationCheck.message)}`);
-      }
-    }
-
-    await reconcileProductionReservations(tx, [{ productId, locationId }]);
-
-    await createAuditLogSafe({
-      entityType: "PRODUCTION_ORDER",
-      entityId: orderId,
-      action: "ADD_ORDER_ITEM",
-      after: { productId, locationId, quantity },
-      actor: "system",
-      source: "production/orders/[id]",
-    });
-    },
-    { timeout: 20000 }
-  );
-
-  redirect(`/production/orders/${orderId}`);
 }
 
-async function removeItem(formData: FormData) {
+async function confirmAssemblyTask(formData: FormData) {
   "use server";
-
-  const itemId = String(formData.get("itemId") ?? "").trim();
   const orderId = String(formData.get("orderId") ?? "").trim();
-
-  if (!itemId || !orderId) {
-    redirect("/production/orders");
+  const taskId = String(formData.get("taskId") ?? "").trim();
+  const pickedQty = Number(String(formData.get("pickedQty") ?? "").trim());
+  const shortReason = String(formData.get("shortReason") ?? "").trim() || null;
+  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  if (!orderId || !taskId || !Number.isFinite(pickedQty) || pickedQty < 0 || !operatorName) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Datos de picking invalidos")}`);
   }
 
-  await prisma.$transaction(
-    async (tx) => {
-    const existing = await tx.productionOrderItem.findUnique({
-      where: { id: itemId },
-      select: { id: true, productId: true, locationId: true, quantity: true },
-    });
+  try {
+    const result = await confirmAssemblyPickTask(prisma, { taskId, pickedQty, shortReason, operatorName });
+    if (result?.labelJobId) {
+      redirect(`/labels/jobs/${result.labelJobId}?next=${encodeURIComponent(`/production/orders/${orderId}?ok=1`)}`);
+    }
+    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Picking confirmado")}`);
+  } catch (error) {
+    const message = error instanceof InventoryServiceError ? error.message : "No se pudo confirmar picking";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
 
-    await tx.productionOrderItem.delete({ where: { id: itemId } });
-    await reconcileProductionReservations(tx, existing ? [{ productId: existing.productId, locationId: existing.locationId }] : undefined);
+async function consumeAssemblyOrder(formData: FormData) {
+  "use server";
+  const parsed = assemblyConsumeSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+    operatorName: String(formData.get("operatorName") ?? "").trim(),
+  });
+  if (!parsed.success) {
+    const orderId = String(formData.get("orderId") ?? "").trim();
+    const target = orderId ? `/production/orders/${orderId}` : "/production/orders";
+    redirect(`${target}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+  const orderId = parsed.data.orderId;
+  const operatorName = parsed.data.operatorName;
+  try {
+    await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName);
+    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cerrada y consumida")}`);
+  } catch (error) {
+    const message = error instanceof InventoryServiceError ? error.message : "No se pudo cerrar orden";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
 
-    await createAuditLogSafe({
-      entityType: "PRODUCTION_ORDER",
-      entityId: orderId,
-      action: "REMOVE_ORDER_ITEM",
-      before: existing ?? undefined,
-      actor: "system",
-      source: "production/orders/[id]",
-    });
-    },
-    { timeout: 20000 }
-  );
-  redirect(`/production/orders/${orderId}`);
+async function cancelAssemblyOrder(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  if (!orderId) redirect("/production/orders");
+  try {
+    await cancelAssemblyWorkOrder(prisma, orderId);
+    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cancelada y reservas liberadas")}`);
+  } catch (error) {
+    const message = error instanceof InventoryServiceError ? error.message : "No se pudo cancelar orden";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
 }
 
 export default async function ProductionOrderDetailPage({
@@ -319,231 +95,227 @@ export default async function ProductionOrderDetailPage({
       id: true,
       code: true,
       status: true,
-      customerName: true,
-      priority: true,
-      dueDate: true,
-      notes: true,
-      warehouse: { select: { id: true, name: true, code: true } },
+      kind: true,
+      warehouse: { select: { name: true, code: true } },
       items: {
         select: {
           id: true,
           quantity: true,
-          product: { select: { id: true, sku: true, name: true } },
-          location: { select: { id: true, code: true, name: true } },
+          product: { select: { sku: true, name: true } },
+          location: { select: { code: true, name: true } },
         },
         orderBy: { createdAt: "asc" },
       },
+      assemblyConfiguration: {
+        select: {
+          hoseLength: true,
+          assemblyQuantity: true,
+          totalHoseRequired: true,
+          sourceDocumentRef: true,
+          entryFittingProduct: { select: { sku: true, name: true } },
+          hoseProduct: { select: { sku: true, name: true } },
+          exitFittingProduct: { select: { sku: true, name: true } },
+        },
+      },
+      assemblyWorkOrder: {
+        select: {
+          reservationStatus: true,
+          pickStatus: true,
+          wipStatus: true,
+          consumptionStatus: true,
+          wipLocation: { select: { code: true, name: true } },
+          lines: {
+            select: {
+              id: true,
+              componentRole: true,
+              requiredQty: true,
+              reservedQty: true,
+              pickedQty: true,
+              wipQty: true,
+              consumedQty: true,
+              shortQty: true,
+              product: { select: { sku: true, name: true } },
+            },
+            orderBy: { createdAt: "asc" },
+          },
+          pickLists: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: {
+              id: true,
+              code: true,
+              status: true,
+              tasks: {
+                orderBy: { sequence: "asc" },
+                select: {
+                  id: true,
+                  sequence: true,
+                  reservedQty: true,
+                  pickedQty: true,
+                  status: true,
+                  shortReason: true,
+                  sourceLocation: { select: { code: true, name: true } },
+                  assemblyWorkOrderLine: { select: { componentRole: true, product: { select: { sku: true } } } },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
+  if (!order) redirect("/production/orders");
 
-  if (!order) {
-    redirect("/production/orders");
+  if (order.kind !== "ASSEMBLY_3PIECE" || !order.assemblyConfiguration || !order.assemblyWorkOrder) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Orden {order.code}</h1>
+            <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
+          </div>
+          <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Ordenes</Link>
+        </div>
+        <div className="glass-card border border-amber-500/30 text-amber-200">
+          Orden genérica: la edición manual permanece en ruta de mantenimiento temporal.
+        </div>
+        <table className="w-full text-sm glass-card">
+          <thead>
+            <tr className="text-slate-400 border-b border-white/10">
+              <th className="text-left py-2">SKU</th>
+              <th className="text-left py-2">Producto</th>
+              <th className="text-left py-2">Ubicación</th>
+              <th className="text-right py-2">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {order.items.map((item) => (
+              <tr key={item.id} className="border-b border-white/5">
+                <td className="py-2">{item.product.sku}</td>
+                <td className="py-2">{item.product.name}</td>
+                <td className="py-2">{item.location.code} - {item.location.name}</td>
+                <td className="py-2 text-right">{item.quantity}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
-  const [inventoryOptions, customers] = await Promise.all([
-    prisma.inventory.findMany({
-      where: {
-        available: { gt: 0 },
-        location: { warehouseId: order.warehouse.id, isActive: true },
-      },
-      select: {
-        available: true,
-        product: { select: { id: true, sku: true, name: true } },
-        location: { select: { id: true, code: true, name: true } },
-      },
-      orderBy: { location: { code: "asc" } },
-    }),
-    prisma.productionOrder.findMany({
-      where: { customerName: { not: null } },
-      orderBy: { updatedAt: "desc" },
-      take: 200,
-      select: { customerName: true },
-    }),
-  ]);
-  const customerSuggestions = Array.from(
-    new Set(customers.map((row) => row.customerName?.trim() ?? "").filter(Boolean))
-  );
+  const activePickList = order.assemblyWorkOrder.pickLists[0] ?? null;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Orden {order.code}</h1>
-          <p className="text-slate-400 mt-1">
-            {order.warehouse.name} ({order.warehouse.code})
-          </p>
+          <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
         </div>
-        <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-          ← Ordenes
-        </Link>
+        <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Ordenes</Link>
       </div>
 
-      {sp.error && (
-        <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>
-      )}
-      {sp.ok && (
-        <div className="glass-card border border-green-500/30 text-green-200">Orden actualizada.</div>
-      )}
+      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
+      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">{sp.ok}</div>}
 
-      <div className="glass-card space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="glass p-4 rounded-lg">
-            <p className="text-xs text-slate-400 uppercase font-bold">Estado</p>
-            <p className="text-lg text-white mt-1">{order.status.replace("_", " ")}</p>
-          </div>
-          <div className="glass p-4 rounded-lg">
-            <p className="text-xs text-slate-400 uppercase font-bold">Prioridad</p>
-            <p className="text-lg text-white mt-1">{order.priority}</p>
-          </div>
-          <div className="glass p-4 rounded-lg">
-            <p className="text-xs text-slate-400 uppercase font-bold">Entrega</p>
-            <p className="text-lg text-white mt-1">
-              {order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}
-            </p>
-          </div>
+      <div className="glass-card space-y-3">
+        <h2 className="text-xl font-semibold">Configuración</h2>
+        <p>{order.assemblyConfiguration.entryFittingProduct.sku} + {order.assemblyConfiguration.hoseProduct.sku} + {order.assemblyConfiguration.exitFittingProduct.sku}</p>
+        <p className="text-sm text-slate-400">Longitud {order.assemblyConfiguration.hoseLength}, cantidad {order.assemblyConfiguration.assemblyQuantity}, manguera total {order.assemblyConfiguration.totalHoseRequired}</p>
+        <p className="text-sm text-slate-400">Documento fuente: {order.assemblyConfiguration.sourceDocumentRef ?? "--"}</p>
+      </div>
+
+      <div className="glass-card space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Estado operativo</h2>
+          <form action={releaseAssemblyPick}>
+            <input type="hidden" name="orderId" value={order.id} />
+            <button type="submit" className="btn-primary" disabled={order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"}>Liberar surtido</button>
+          </form>
         </div>
+        <p className="text-sm text-slate-400">Reserva {order.assemblyWorkOrder.reservationStatus} | Picking {order.assemblyWorkOrder.pickStatus} | WIP {order.assemblyWorkOrder.wipStatus} | Consumo {order.assemblyWorkOrder.consumptionStatus}</p>
+        <p className="text-sm text-slate-400">WIP: {order.assemblyWorkOrder.wipLocation.code} - {order.assemblyWorkOrder.wipLocation.name}</p>
+      </div>
 
-        <form action={updateOrder} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input type="hidden" name="id" value={order.id} />
+      <table className="w-full text-sm glass-card">
+        <thead>
+          <tr className="text-slate-400 border-b border-white/10">
+            <th className="text-left py-2">Rol</th>
+            <th className="text-left py-2">Producto</th>
+            <th className="text-right py-2">Req</th>
+            <th className="text-right py-2">Reservado</th>
+            <th className="text-right py-2">WIP</th>
+            <th className="text-right py-2">Consumido</th>
+            <th className="text-right py-2">Faltante</th>
+          </tr>
+        </thead>
+        <tbody>
+          {order.assemblyWorkOrder.lines.map((line) => (
+            <tr key={line.id} className="border-b border-white/5">
+              <td className="py-2">{line.componentRole}</td>
+              <td className="py-2">{line.product.sku} - {line.product.name}</td>
+              <td className="py-2 text-right">{line.requiredQty}</td>
+              <td className="py-2 text-right">{line.reservedQty}</td>
+              <td className="py-2 text-right">{line.wipQty}</td>
+              <td className="py-2 text-right">{line.consumedQty}</td>
+              <td className="py-2 text-right">{line.shortQty}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Estado</span>
-            <select name="status" defaultValue={order.status} className="w-full px-4 py-3 glass rounded-lg">
-              <option value="BORRADOR">BORRADOR</option>
-              <option value="ABIERTA">ABIERTA</option>
-              <option value="EN_PROCESO">EN PROCESO</option>
-              <option value="COMPLETADA">COMPLETADA</option>
-              <option value="CANCELADA">CANCELADA</option>
-            </select>
-          </label>
+      {activePickList && (
+        <div className="glass-card space-y-3">
+          <h2 className="text-xl font-semibold">Picking {activePickList.code}</h2>
+          {activePickList.tasks.map((task) => {
+            const pendingQty = Math.max(0, task.reservedQty - task.pickedQty);
+            return (
+              <form key={task.id} action={confirmAssemblyTask} className="glass rounded-lg p-4 grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
+                <input type="hidden" name="orderId" value={order.id} />
+                <input type="hidden" name="taskId" value={task.id} />
+                <div className="md:col-span-2">
+                  <p className="text-xs text-slate-400">Ubicación</p>
+                  <p>{task.sequence}. {task.sourceLocation.code} - {task.sourceLocation.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Componente</p>
+                  <p>{task.assemblyWorkOrderLine.componentRole} ({task.assemblyWorkOrderLine.product.sku})</p>
+                </div>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-400">Cantidad surtida</span>
+                  <input name="pickedQty" type="number" min={0} max={pendingQty} step="0.0001" defaultValue={pendingQty} className="w-full px-3 py-2 glass rounded-lg" disabled={task.status === "COMPLETED" || task.status === "CANCELLED"} />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-400">Motivo faltante</span>
+                  <input name="shortReason" defaultValue={task.shortReason ?? ""} className="w-full px-3 py-2 glass rounded-lg" disabled={task.status === "COMPLETED" || task.status === "CANCELLED"} />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-400">Operador</span>
+                  <input name="operatorName" className="w-full px-3 py-2 glass rounded-lg" required disabled={task.status === "COMPLETED" || task.status === "CANCELLED"} />
+                </label>
+                <button type="submit" className="btn-primary" disabled={task.status === "COMPLETED" || task.status === "CANCELLED"}>Confirmar</button>
+              </form>
+            );
+          })}
+        </div>
+      )}
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Cliente</span>
-            <input
-              name="customerName"
-              list={customerSuggestions.length > 0 ? "production-customer-edit-options" : undefined}
-              defaultValue={order.customerName ?? ""}
-              className="w-full px-4 py-3 glass rounded-lg"
-            />
-            {customerSuggestions.length > 0 && (
-              <datalist id="production-customer-edit-options">
-                {customerSuggestions.map((customer) => (
-                  <option key={customer} value={customer} />
-                ))}
-              </datalist>
-            )}
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Prioridad (1-5)</span>
-            <input
-              name="priority"
-              type="number"
-              min={1}
-              max={5}
-              defaultValue={order.priority}
-              className="w-full px-4 py-3 glass rounded-lg"
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Fecha entrega</span>
-            <input
-              name="dueDate"
-              type="date"
-              defaultValue={order.dueDate ? new Date(order.dueDate).toISOString().slice(0, 10) : ""}
-              className="w-full px-4 py-3 glass rounded-lg"
-            />
-          </label>
-
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Notas</span>
-            <textarea
-              name="notes"
-              defaultValue={order.notes ?? ""}
-              className="w-full px-4 py-3 glass rounded-lg min-h-[96px]"
-            />
-          </label>
-
-          <div className="md:col-span-2 flex items-center justify-end gap-3">
-            <button type="submit" className="btn-primary">
-              Guardar cambios
-            </button>
-          </div>
+      <div className="flex justify-end gap-3">
+        <form action={cancelAssemblyOrder}>
+          <input type="hidden" name="orderId" value={order.id} />
+          <button type="submit" className="px-4 py-2 rounded-lg border border-red-500/40 text-red-300 hover:text-white hover:bg-red-500/20">Cancelar orden</button>
+        </form>
+        <form action={consumeAssemblyOrder}>
+          <input type="hidden" name="orderId" value={order.id} />
+          <input
+            name="operatorName"
+            required
+            className="px-3 py-2 glass rounded-lg mr-2"
+            placeholder="Operador cierre"
+          />
+          <button type="submit" className="btn-primary">Cerrar y consumir</button>
         </form>
       </div>
-
-      <div className="glass-card space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-xl font-bold">Materiales</h2>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-slate-400 border-b border-white/10">
-                <th className="text-left py-3">SKU</th>
-                <th className="text-left py-3">Producto</th>
-                <th className="text-left py-3">Ubicacion</th>
-                <th className="text-right py-3">Cantidad</th>
-                <th className="text-right py-3">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {order.items.map((item) => (
-                <tr key={item.id} className="border-b border-white/5">
-                  <td className="py-3 font-mono text-slate-200">{item.product.sku}</td>
-                  <td className="py-3 text-slate-300">{item.product.name}</td>
-                  <td className="py-3 text-slate-400">
-                    {item.location.code} - {item.location.name}
-                  </td>
-                  <td className="py-3 text-right text-slate-300">{item.quantity}</td>
-                  <td className="py-3 text-right">
-                    <form action={removeItem}>
-                      <input type="hidden" name="itemId" value={item.id} />
-                      <input type="hidden" name="orderId" value={order.id} />
-                      <button type="submit" className="text-red-300 hover:text-red-200">
-                        Quitar
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-              {order.items.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500">
-                    Agrega materiales para reservar inventario.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <ProductionOrderItemForm
-          orderId={order.id}
-          action={addItem}
-          inventoryOptions={inventoryOptions.map((row) => ({
-            productId: row.product.id,
-            productSku: row.product.sku,
-            productName: row.product.name,
-            locationId: row.location.id,
-            locationCode: row.location.code,
-            locationName: row.location.name,
-            available: row.available,
-          }))}
-        />
-      </div>
-
-      <form action={deleteOrder} className="flex justify-end">
-        <input type="hidden" name="id" value={order.id} />
-        <button
-          type="submit"
-          className="px-4 py-2 rounded-lg border border-red-500/40 text-red-300 hover:text-white hover:bg-red-500/20"
-        >
-          Eliminar orden
-        </button>
-      </form>
     </div>
   );
 }

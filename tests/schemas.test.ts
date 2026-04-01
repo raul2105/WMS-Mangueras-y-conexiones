@@ -5,13 +5,21 @@ import {
   inventoryAdjustmentSchema,
   transferStockSchema,
   productionOrderCreateSchema,
+  assemblyConfigSchema,
   parsePriority,
   parseDueDate,
   firstErrorMessage,
 } from "../lib/schemas/wms";
 
 describe("receiveStockSchema", () => {
-  const base = { code: "SKU-01", warehouseId: "wh-1", locationId: "loc-1", reference: "REF-01", quantityRaw: "5" };
+  const base = {
+    code: "SKU-01",
+    warehouseId: "wh-1",
+    locationId: "loc-1",
+    reference: "REF-01",
+    operatorName: "Operador 1",
+    quantityRaw: "5",
+  };
 
   it("accepts valid input", () => {
     const result = receiveStockSchema.safeParse(base);
@@ -43,7 +51,7 @@ describe("receiveStockSchema", () => {
 });
 
 describe("pickStockSchema", () => {
-  const base = { code: "SKU-01", locationCode: "LOC-01", quantityRaw: "2" };
+  const base = { code: "SKU-01", locationCode: "LOC-01", operatorName: "Operador 1", quantityRaw: "2" };
 
   it("accepts valid input", () => {
     expect(pickStockSchema.safeParse(base).success).toBe(true);
@@ -59,7 +67,13 @@ describe("pickStockSchema", () => {
 });
 
 describe("inventoryAdjustmentSchema", () => {
-  const base = { code: "SKU-01", locationCode: "LOC-01", reason: "CONTEO_CICLICO", deltaRaw: "3" };
+  const base = {
+    code: "SKU-01",
+    locationCode: "LOC-01",
+    operatorName: "Operador 1",
+    reason: "CONTEO_CICLICO",
+    deltaRaw: "3",
+  };
 
   it("accepts positive delta", () => {
     const result = inventoryAdjustmentSchema.safeParse(base);
@@ -79,6 +93,10 @@ describe("inventoryAdjustmentSchema", () => {
 
   it("rejects missing reason", () => {
     expect(inventoryAdjustmentSchema.safeParse({ ...base, reason: "" }).success).toBe(false);
+  });
+
+  it("rejects missing operator", () => {
+    expect(inventoryAdjustmentSchema.safeParse({ ...base, operatorName: "" }).success).toBe(false);
   });
 
   it("accepts comma as decimal separator", () => {
@@ -130,6 +148,26 @@ describe("productionOrderCreateSchema", () => {
 
   it("rejects code with spaces", () => {
     expect(productionOrderCreateSchema.safeParse({ ...base, code: "OP 001" }).success).toBe(false);
+  });
+});
+
+describe("assemblyConfigSchema", () => {
+  const base = {
+    warehouseId: "wh-1",
+    entryFittingProductId: "p1",
+    hoseProductId: "p2",
+    exitFittingProductId: "p3",
+    hoseLengthRaw: "2",
+    assemblyQuantityRaw: "5",
+  };
+
+  it("accepts valid assembly config", () => {
+    expect(assemblyConfigSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("rejects zero quantities", () => {
+    expect(assemblyConfigSchema.safeParse({ ...base, hoseLengthRaw: "0" }).success).toBe(false);
+    expect(assemblyConfigSchema.safeParse({ ...base, assemblyQuantityRaw: "0" }).success).toBe(false);
   });
 });
 

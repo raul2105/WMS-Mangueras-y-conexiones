@@ -1,19 +1,28 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import InventoryService from "@/lib/inventory-service";
+import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
+import { firstErrorMessage, purchaseReceiptOperationSchema } from "@/lib/schemas/wms";
 
 async function receiveItems(orderId: string, formData: FormData) {
   "use server";
 
-  const locationId = String(formData.get("locationId") ?? "").trim();
-  const referenceDoc = String(formData.get("referenceDoc") ?? "").trim() || null;
-  const notes = String(formData.get("notes") ?? "").trim() || null;
-
-  if (!locationId) {
-    redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Selecciona una ubicación de destino")}`);
+  const parsedHeader = purchaseReceiptOperationSchema.safeParse({
+    locationId: String(formData.get("locationId") ?? "").trim(),
+    referenceDoc: String(formData.get("referenceDoc") ?? "").trim() || undefined,
+    notes: String(formData.get("notes") ?? "").trim() || undefined,
+    operatorName: String(formData.get("operatorName") ?? "").trim(),
+  });
+  if (!parsedHeader.success) {
+    redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent(firstErrorMessage(parsedHeader.error))}`);
   }
+
+  const locationId = parsedHeader.data.locationId;
+  const referenceDoc = parsedHeader.data.referenceDoc?.trim() || null;
+  const notes = parsedHeader.data.notes?.trim() || null;
+  const operatorName = parsedHeader.data.operatorName;
 
   const order = await prisma.purchaseOrder.findUnique({
     where: { id: orderId },
@@ -64,70 +73,89 @@ async function receiveItems(orderId: string, formData: FormData) {
     redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Ingresa al menos una cantidad mayor a 0")}`);
   }
 
-  // Step 1: Call receiveStock for each line (each has its own transaction)
   const service = new InventoryService(prisma);
-  for (const item of linesToReceive) {
-    try {
-      await service.receiveStock(item.productId, locationId, item.qty, order.folio, {
-        source: "purchasing/receive",
-        notes: referenceDoc ? `Recepción OC ${order.folio} — ${referenceDoc}` : `Recepción OC ${order.folio}`,
+  try {
+    const receiptId = await prisma.$transaction(async (tx) => {
+      const receipt = await tx.purchaseReceipt.create({
+        data: { purchaseOrderId: orderId, locationId, referenceDoc, notes },
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Error al registrar entrada de inventario";
-      redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent(msg)}`);
-    }
-  }
+      const createdLines: Array<{ receiptLineId: string; productId: string; qty: number }> = [];
 
-  // Step 2: Update receipt records and OC status in a single transaction
-  await prisma.$transaction(async (tx) => {
-    const receipt = await tx.purchaseReceipt.create({
-      data: { purchaseOrderId: orderId, locationId, referenceDoc, notes },
-    });
+      for (const item of linesToReceive) {
+        const receiptLine = await tx.purchaseReceiptLine.create({
+          data: {
+            purchaseReceiptId: receipt.id,
+            purchaseOrderLineId: item.lineId,
+            productId: item.productId,
+            qtyReceived: item.qty,
+          },
+        });
+        createdLines.push({ receiptLineId: receiptLine.id, productId: item.productId, qty: item.qty });
 
-    for (const item of linesToReceive) {
-      await tx.purchaseReceiptLine.create({
-        data: {
-          purchaseReceiptId: receipt.id,
-          purchaseOrderLineId: item.lineId,
-          productId: item.productId,
-          qtyReceived: item.qty,
+        await tx.purchaseOrderLine.update({
+          where: { id: item.lineId },
+          data: { qtyReceived: { increment: item.qty } },
+        });
+      }
+
+      const updatedLines = await tx.purchaseOrderLine.findMany({
+        where: { purchaseOrderId: orderId },
+      });
+      const allDone = updatedLines.every((l) => l.qtyReceived >= l.qtyOrdered);
+      const anyDone = updatedLines.some((l) => l.qtyReceived > 0);
+      const newStatus = allDone ? "RECIBIDA" : anyDone ? "PARCIAL" : order.status;
+
+      await tx.purchaseOrder.update({
+        where: { id: orderId },
+        data: { status: newStatus as never },
+      });
+
+      for (const row of createdLines) {
+        const movement = await service.receiveStock(row.productId, locationId, row.qty, order.folio, {
+          tx,
+          source: "purchasing/receive",
+          actor: operatorName,
+          operatorName,
+          notes: referenceDoc ? `Recepción OC ${order.folio} — ${referenceDoc}` : `Recepción OC ${order.folio}`,
+          documentType: "PURCHASE_RECEIPT",
+          documentId: receipt.id,
+          documentLineId: row.receiptLineId,
+        });
+        if (!movement.movementId) {
+          throw new Error("No se pudo crear movimiento de inventario de recepción");
+        }
+        await createMovementTraceAndLabelJob(tx, {
+          movementId: movement.movementId,
+          labelType: "RECEIPT",
+          sourceEntityType: "PURCHASE_RECEIPT_LINE",
+          sourceEntityId: row.receiptLineId,
+          operatorName,
+        });
+      }
+
+      await createAuditLogSafeWithDb({
+        entityType: "PURCHASE_ORDER",
+        entityId: orderId,
+        action: "RECEIVE",
+        after: {
+          locationId,
+          referenceDoc,
+          lines: linesToReceive,
+          newStatus,
+          operatorName,
         },
-      });
+        source: "purchasing/receive",
+        actor: operatorName,
+      }, tx);
 
-      await tx.purchaseOrderLine.update({
-        where: { id: item.lineId },
-        data: { qtyReceived: { increment: item.qty } },
-      });
-    }
+      return receipt.id;
+    }, { timeout: 20000 });
 
-    // Recalculate OC status
-    const updatedLines = await tx.purchaseOrderLine.findMany({
-      where: { purchaseOrderId: orderId },
-    });
-    const allDone = updatedLines.every((l) => l.qtyReceived >= l.qtyOrdered);
-    const anyDone = updatedLines.some((l) => l.qtyReceived > 0);
-    const newStatus = allDone ? "RECIBIDA" : anyDone ? "PARCIAL" : order.status;
-
-    await tx.purchaseOrder.update({
-      where: { id: orderId },
-      data: { status: newStatus as never },
-    });
-
-    await createAuditLogSafe({
-      entityType: "PURCHASE_ORDER",
-      entityId: orderId,
-      action: "RECEIVE",
-      after: JSON.stringify({
-        locationId,
-        referenceDoc,
-        lines: linesToReceive,
-        newStatus,
-      }),
-      source: "purchasing/receive",
-    });
-  }, { timeout: 20000 });
-
-  redirect(`/purchasing/orders/${orderId}?ok=1`);
+    redirect(`/labels/document/PURCHASE_RECEIPT/${receiptId}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Error al registrar recepción";
+    redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent(msg)}`);
+  }
 }
 
 export const dynamic = "force-dynamic";
@@ -213,8 +241,8 @@ export default async function ReceivePage({
                 ))}
               </select>
             </label>
-            <label className="space-y-1">
-              <span className="text-sm text-slate-400">Remisión / Factura</span>
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Remisión / Factura</span>
               <input
                 name="referenceDoc"
                 maxLength={100}
@@ -231,6 +259,16 @@ export default async function ReceivePage({
               maxLength={500}
               placeholder="Observaciones sobre el estado de la mercancía…"
               className="w-full px-4 py-3 glass rounded-lg resize-none"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Operador *</span>
+            <input
+              name="operatorName"
+              required
+              maxLength={120}
+              placeholder="Nombre del operador"
+              className="w-full px-4 py-3 glass rounded-lg"
             />
           </label>
         </div>

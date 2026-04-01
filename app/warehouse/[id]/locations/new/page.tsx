@@ -111,8 +111,8 @@ export default async function NewLocationPage({
               required
               className="w-full px-4 py-3 glass rounded-lg uppercase"
               placeholder="A-12-04"
-              pattern="[A-Z0-9\-]+"
-              title="Solo letras mayúsculas, números y guiones"
+              pattern="[A-Za-z0-9-]+"
+              title="Solo letras, números y guiones"
             />
           </label>
 

@@ -13,9 +13,22 @@ foreach ($requiredPath in @($state.NodeExe, $state.AppServerPath)) {
 }
 
 if (-not (Test-Path $state.DbPath)) {
-  $message = "No se encontro la base de datos en $($state.DbPath). Ejecuta maintenance\init-local.cmd una sola vez."
-  Write-OpsLog -State $state -Level "ERROR" -Message $message
-  throw $message
+  if (-not (Test-Path $state.BootstrapDbPath)) {
+    $message = "No se encontro la base de datos ni el archivo inicial en $($state.BootstrapDbPath). El release puede estar incompleto."
+    Write-OpsLog -State $state -Level "ERROR" -Message $message
+    throw $message
+  }
+  Write-Host "Primera ejecucion: inicializando base de datos..."
+  Ensure-WmsStateDirectories -State $state -IncludeData
+  Copy-Item -LiteralPath $state.BootstrapDbPath -Destination $state.DbPath -Force
+  foreach ($suffix in @("-wal", "-shm")) {
+    $artifact = "$($state.DbPath)$suffix"
+    if (Test-Path $artifact) {
+      Remove-Item -LiteralPath $artifact -Force -ErrorAction SilentlyContinue
+    }
+  }
+  Write-OpsLog -State $state -Message "Base de datos inicializada automaticamente desde bootstrap."
+  Write-Host "Base de datos lista en $($state.DbPath)"
 }
 
 if (Test-Path $state.PidFile) {

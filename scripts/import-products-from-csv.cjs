@@ -2,7 +2,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parse } = require('csv-parse/sync');
 const { PrismaClient } = require('@prisma/client');
-const { InventoryService } = require('../lib/inventory-service');
 
 const prisma = new PrismaClient();
 
@@ -26,7 +25,7 @@ function usage() {
     '  node scripts/import-products-from-csv.cjs -f data/products.csv --dry-run',
     '',
     'Expected columns (header row required):',
-    '  sku,name,type,description,brand,base_cost,price,category,subcategory,quantity,location,attributes,referenceCode,imageUrl',
+    '  sku,name,type,description,brand,unitLabel,base_cost,price,category,subcategory,quantity,location,attributes,referenceCode,imageUrl',
     '',
     'Notes:',
     '  - type must be: HOSE | FITTING | ASSEMBLY | ACCESSORY',
@@ -159,6 +158,86 @@ function asProductType(typeValue) {
   return allowed.has(t) ? t : null;
 }
 
+async function adjustInventoryWithMovement(prismaToUse, { productId, locationId, delta, reason }) {
+  if (!Number.isFinite(delta) || delta === 0) return;
+
+  await prismaToUse.$transaction(async (tx) => {
+    const existing = await tx.inventory.findUnique({
+      where: { productId_locationId: { productId, locationId } },
+      select: { id: true, quantity: true, reserved: true, available: true },
+    });
+
+    if (!existing && delta < 0) {
+      throw new Error(`Cannot reduce non-existing inventory for product ${productId} at ${locationId}`);
+    }
+
+    const currentQty = existing?.quantity ?? 0;
+    const reserved = existing?.reserved ?? 0;
+    const nextQty = currentQty + delta;
+    if (nextQty < 0) {
+      throw new Error(`Negative stock detected for product ${productId} at ${locationId}`);
+    }
+    if (nextQty < reserved) {
+      throw new Error(`Reserved exceeds resulting stock for product ${productId} at ${locationId}`);
+    }
+
+    const nextAvailable = nextQty - reserved;
+    if (existing) {
+      await tx.inventory.update({
+        where: { id: existing.id },
+        data: { quantity: nextQty, available: nextAvailable },
+      });
+    } else {
+      await tx.inventory.create({
+        data: {
+          productId,
+          locationId,
+          quantity: nextQty,
+          reserved: 0,
+          available: nextAvailable,
+        },
+      });
+    }
+
+    await tx.inventoryMovement.create({
+      data: {
+        productId,
+        locationId,
+        type: 'ADJUSTMENT',
+        operatorName: 'csv-import',
+        quantity: delta,
+        reference: 'CSV_IMPORT',
+        notes: reason,
+        documentType: 'CSV_IMPORT',
+      },
+    });
+
+    try {
+      await tx.auditLog.create({
+        data: {
+          entityType: 'INVENTORY',
+          entityId: `${productId}:${locationId}`,
+          action: 'IMPORT_CSV_ADJUST',
+          before: JSON.stringify({
+            quantity: currentQty,
+            reserved,
+            available: existing?.available ?? currentQty - reserved,
+          }),
+          after: JSON.stringify({
+            quantity: nextQty,
+            reserved,
+            available: nextAvailable,
+          }),
+          actor: 'csv-import',
+          source: 'import-products-from-csv.cjs',
+        },
+      });
+    } catch {
+      // Keep import flow resilient if audit table is unavailable.
+    }
+  });
+}
+
 async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
   const csvPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
   if (!fs.existsSync(csvPath)) {
@@ -217,6 +296,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
       description: toStringOrNull(row.description),
       type,
       brand: toStringOrNull(row.brand),
+      unitLabel: toStringOrNull(row.unitlabel) ?? 'unidad',
       referenceCode: toStringOrNull(row.referencecode),
       imageUrl: toStringOrNull(row.imageurl),
       base_cost,
@@ -277,8 +357,6 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
   }
 
   const prismaToUse = prismaClient ?? prisma;
-  const service = new InventoryService(prismaToUse);
-
   let upsertedProducts = 0;
   let createdCategories = 0;
   let inventoryRowsUpdated = 0;
@@ -386,6 +464,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
         description: productData.description,
         type: productData.type,
         brand: productData.brand,
+        unitLabel: productData.unitLabel,
         base_cost: productData.base_cost,
         price: productData.price,
         attributes: productData.attributes,
@@ -397,6 +476,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
         description: productData.description,
         type: productData.type,
         brand: productData.brand,
+        unitLabel: productData.unitLabel,
         referenceCode: safeReferenceCode,
         imageUrl: productData.imageUrl,
         base_cost: productData.base_cost,
@@ -428,7 +508,12 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
       const currentQty = existing?.quantity ?? 0;
       const delta = desiredQty - currentQty;
       if (delta !== 0) {
-        await service.adjustStock(product.id, locationId, delta, 'Import CSV');
+        await adjustInventoryWithMovement(prismaToUse, {
+          productId: product.id,
+          locationId,
+          delta,
+          reason: 'Import CSV',
+        });
         inventoryRowsUpdated++;
       }
       existingByLocation.delete(locationId);
@@ -436,7 +521,12 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
 
     for (const leftover of existingByLocation.values()) {
       if (leftover.quantity !== 0) {
-        await service.adjustStock(product.id, leftover.locationId, -leftover.quantity, 'Import CSV cleanup');
+        await adjustInventoryWithMovement(prismaToUse, {
+          productId: product.id,
+          locationId: leftover.locationId,
+          delta: -leftover.quantity,
+          reason: 'Import CSV cleanup',
+        });
         inventoryRowsUpdated++;
       }
     }

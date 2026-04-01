@@ -1,212 +1,220 @@
-import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { firstErrorMessage, parseDueDate, parsePriority, productionOrderCreateSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import prisma from "@/lib/prisma";
+import { createAssemblyWorkOrderExact } from "@/lib/assembly/work-order-service";
+import { previewAssemblyAvailability } from "@/lib/assembly/availability-service";
+import { InventoryServiceError } from "@/lib/inventory-service";
+import { getProductSearchSelection } from "@/lib/product-search";
+import { assemblyConfigSchema, firstErrorMessage } from "@/lib/schemas/wms";
+import AssemblyConfiguratorForm from "@/components/AssemblyConfiguratorForm";
 
 export const dynamic = "force-dynamic";
 
-async function createOrder(formData: FormData) {
+function parseDecimal(value: string | undefined) {
+  if (!value) return null;
+  const n = Number(String(value).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+async function createAssemblyOrder(formData: FormData) {
   "use server";
 
-  const code = String(formData.get("code") ?? "").trim().toUpperCase();
-  const status = String(formData.get("status") ?? "BORRADOR").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
-  const customerName = String(formData.get("customerName") ?? "").trim() || null;
-  const priorityRaw = String(formData.get("priority") ?? "").trim();
-  const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const entryFittingProductId = String(formData.get("entryFittingProductId") ?? "").trim();
+  const hoseProductId = String(formData.get("hoseProductId") ?? "").trim();
+  const exitFittingProductId = String(formData.get("exitFittingProductId") ?? "").trim();
+  const hoseLengthRaw = String(formData.get("hoseLength") ?? "").trim();
+  const assemblyQuantityRaw = String(formData.get("assemblyQuantity") ?? "").trim();
+  const sourceDocumentRef = String(formData.get("sourceDocumentRef") ?? "").trim();
+  const notes = String(formData.get("notes") ?? "").trim();
 
-  const parsed = productionOrderCreateSchema.safeParse({
-    code,
-    status,
+  const parsed = assemblyConfigSchema.safeParse({
     warehouseId,
-    customerName: customerName ?? undefined,
-    priorityRaw,
-    dueDateRaw,
-    notes: notes ?? undefined,
+    entryFittingProductId,
+    hoseProductId,
+    exitFittingProductId,
+    hoseLengthRaw,
+    assemblyQuantityRaw,
+    sourceDocumentRef: sourceDocumentRef || undefined,
+    notes: notes || undefined,
   });
-
   if (!parsed.success) {
     redirect(`/production/orders/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  const validPriority = parsePriority(priorityRaw, 3);
-  if (validPriority === null) {
-    redirect(`/production/orders/new?error=${encodeURIComponent("Prioridad invalida (1-5)")}`);
+  const payload = {
+    warehouseId,
+    entryFittingProductId,
+    hoseProductId,
+    exitFittingProductId,
+    hoseLength: parsed.data.hoseLengthRaw,
+    assemblyQuantity: parsed.data.assemblyQuantityRaw,
+    sourceDocumentRef: sourceDocumentRef || null,
+    notes: notes || null,
+  };
+
+  try {
+    const result = await createAssemblyWorkOrderExact(prisma, payload);
+    redirect(`/production/orders/${result.orderId}?ok=${encodeURIComponent("Orden de ensamble creada con reserva exacta")}`);
+  } catch (error) {
+    const message = error instanceof InventoryServiceError ? error.message : "No se pudo crear la orden";
+    redirect(`/production/orders/new?error=${encodeURIComponent(message)}`);
   }
-  const dueDate = parseDueDate(dueDateRaw);
-
-  const warehouse = await prisma.warehouse.findUnique({
-    where: { id: warehouseId },
-    select: { id: true },
-  });
-
-  if (!warehouse) {
-    redirect(`/production/orders/new?error=${encodeURIComponent("Almacen no encontrado")}`);
-  }
-
-  const existing = await prisma.productionOrder.findUnique({
-    where: { code },
-    select: { id: true },
-  });
-
-  if (existing) {
-    redirect(`/production/orders/new?error=${encodeURIComponent(`El codigo ${code} ya existe`)}`);
-  }
-
-  await prisma.productionOrder.create({
-    data: {
-      code,
-      status: parsed.data.status,
-      warehouseId,
-      customerName,
-      priority: validPriority,
-      dueDate,
-      notes,
-    },
-  });
-
-  await createAuditLogSafe({
-    entityType: "PRODUCTION_ORDER",
-    entityId: code,
-    action: "CREATE_ORDER",
-    after: {
-      code,
-      status,
-      warehouseId,
-      priority: validPriority,
-      dueDate: dueDate ? dueDate.toISOString() : null,
-    },
-    source: "production/orders/new",
-    actor: "system",
-  });
-
-  redirect("/production/orders");
 }
 
-export default async function NewProductionOrderPage({
+export default async function NewAssemblyOrderPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
-  const [warehouses, customers] = await Promise.all([
+
+  const values = {
+    warehouseId: String(sp.warehouseId ?? ""),
+    entryFittingProductId: String(sp.entryFittingProductId ?? ""),
+    hoseProductId: String(sp.hoseProductId ?? ""),
+    exitFittingProductId: String(sp.exitFittingProductId ?? ""),
+    hoseLength: String(sp.hoseLength ?? ""),
+    assemblyQuantity: String(sp.assemblyQuantity ?? ""),
+    sourceDocumentRef: String(sp.sourceDocumentRef ?? ""),
+    notes: String(sp.notes ?? ""),
+  };
+
+  const [warehouses, entryFittingSelection, hoseSelection, exitFittingSelection] = await Promise.all([
     prisma.warehouse.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, code: true },
+      select: { id: true, code: true, name: true },
     }),
-    prisma.productionOrder.findMany({
-      where: { customerName: { not: null } },
-      orderBy: { updatedAt: "desc" },
-      take: 200,
-      select: { customerName: true },
+    getProductSearchSelection(prisma, values.entryFittingProductId, {
+      type: "FITTING",
+      warehouseId: values.warehouseId || undefined,
+    }),
+    getProductSearchSelection(prisma, values.hoseProductId, {
+      type: "HOSE",
+      warehouseId: values.warehouseId || undefined,
+    }),
+    getProductSearchSelection(prisma, values.exitFittingProductId, {
+      type: "FITTING",
+      warehouseId: values.warehouseId || undefined,
     }),
   ]);
-  const customerSuggestions = Array.from(
-    new Set(customers.map((row) => row.customerName?.trim() ?? "").filter(Boolean))
+
+  const inputReady = Boolean(
+    values.warehouseId &&
+      values.entryFittingProductId &&
+      values.hoseProductId &&
+      values.exitFittingProductId &&
+      parseDecimal(values.hoseLength) &&
+      parseDecimal(values.assemblyQuantity)
   );
 
+  let preview:
+    | Awaited<ReturnType<typeof previewAssemblyAvailability>>
+    | null = null;
+  if (inputReady) {
+    try {
+      preview = await previewAssemblyAvailability(prisma, {
+        warehouseId: values.warehouseId,
+        entryFittingProductId: values.entryFittingProductId,
+        hoseProductId: values.hoseProductId,
+        exitFittingProductId: values.exitFittingProductId,
+        hoseLength: parseDecimal(values.hoseLength) ?? 0,
+        assemblyQuantity: parseDecimal(values.assemblyQuantity) ?? 0,
+        sourceDocumentRef: values.sourceDocumentRef || null,
+        notes: values.notes || null,
+      });
+    } catch {
+      preview = null;
+    }
+  }
+
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Nueva Orden</h1>
-          <p className="text-slate-400 mt-1">Registra una orden de ensamble.</p>
+          <h1 className="text-3xl font-bold">Configurador de Ensamble 3 Piezas</h1>
+          <p className="text-slate-400 mt-1">Política activa: la orden solo se crea con stock exacto.</p>
         </div>
-        <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-          ← Ordenes
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/production/orders/new/generic" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+            Nueva genérica
+          </Link>
+          <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+            ← Ordenes
+          </Link>
+        </div>
       </div>
 
-      {sp.error && (
-        <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>
-      )}
+      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
 
-      <form action={createOrder} className="glass-card space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Codigo *</span>
-            <input
-              name="code"
-              required
-              className="w-full px-4 py-3 glass rounded-lg uppercase"
-              placeholder="ORD-0001"
-              pattern="[A-Z0-9\-]+"
-              title="Solo letras mayusculas, numeros y guiones"
-            />
-          </label>
+      <AssemblyConfiguratorForm
+        warehouses={warehouses}
+        initialValues={values}
+        initialSelections={{
+          entryFitting: entryFittingSelection,
+          hose: hoseSelection,
+          exitFitting: exitFittingSelection,
+        }}
+      />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Estado *</span>
-            <select name="status" className="w-full px-4 py-3 glass rounded-lg">
-              <option value="BORRADOR">BORRADOR</option>
-              <option value="ABIERTA">ABIERTA</option>
-              <option value="EN_PROCESO">EN PROCESO</option>
-              <option value="COMPLETADA">COMPLETADA</option>
-              <option value="CANCELADA">CANCELADA</option>
-            </select>
-          </label>
-
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Almacen *</span>
-            <select name="warehouseId" required className="w-full px-4 py-3 glass rounded-lg">
-              <option value="">Selecciona un almacen</option>
-              {warehouses.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name} ({warehouse.code})
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Cliente</span>
-            <input
-              name="customerName"
-              list={customerSuggestions.length > 0 ? "production-customer-options" : undefined}
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="Cliente"
-            />
-            {customerSuggestions.length > 0 && (
-              <datalist id="production-customer-options">
-                {customerSuggestions.map((customer) => (
-                  <option key={customer} value={customer} />
+      <div className="glass-card space-y-4">
+        <h2 className="text-lg font-semibold">2) Disponibilidad real por ubicación</h2>
+        {!preview && <p className="text-slate-400">Configura los 3 componentes, longitud y cantidad para generar previsualización.</p>}
+        {preview && (
+          <>
+            <div className={`rounded-lg border px-4 py-3 ${preview.exact ? "border-green-500/30 text-green-200" : "border-red-500/30 text-red-200"}`}>
+              {preview.exact
+                ? "Disponible exacto: ya puedes crear la orden."
+                : "Stock insuficiente: no se permite crear la orden con faltantes."}
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-slate-400 border-b border-white/10">
+                  <th className="text-left py-2">Componente</th>
+                  <th className="text-left py-2">Ubicación</th>
+                  <th className="text-right py-2">Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.allocations.map((allocation, index) => (
+                  <tr key={`${allocation.role}-${allocation.locationId}-${index}`} className="border-b border-white/5">
+                    <td className="py-2 text-slate-300">{allocation.role}</td>
+                    <td className="py-2 text-slate-400">{allocation.locationCode} - {allocation.locationName}</td>
+                    <td className="py-2 text-right text-slate-300">{allocation.requestedQty}</td>
+                  </tr>
                 ))}
-              </datalist>
+              </tbody>
+            </table>
+            {preview.shortages.length > 0 && (
+              <div className="space-y-1">
+                {preview.shortages.map((shortage) => (
+                  <p key={shortage.role} className="text-sm text-red-300">
+                    {shortage.role}: requerido {shortage.requiredQty}, faltante {shortage.shortQty}
+                  </p>
+                ))}
+              </div>
             )}
-          </label>
+          </>
+        )}
+      </div>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Prioridad (1-5)</span>
-            <input
-              name="priority"
-              type="number"
-              min={1}
-              max={5}
-              defaultValue={3}
-              className="w-full px-4 py-3 glass rounded-lg"
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Fecha entrega</span>
-            <input name="dueDate" type="date" className="w-full px-4 py-3 glass rounded-lg" />
-          </label>
-
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Notas</span>
-            <textarea name="notes" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
-          </label>
-        </div>
-
-        <div className="flex items-center justify-end gap-3">
-          <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-            Cancelar
-          </Link>
-          <button type="submit" className="btn-primary">
-            Crear Orden
+      <form action={createAssemblyOrder} className="glass-card space-y-4">
+        <h2 className="text-lg font-semibold">3) Crear orden de ensamble exacta</h2>
+        <input type="hidden" name="warehouseId" value={values.warehouseId} />
+        <input type="hidden" name="entryFittingProductId" value={values.entryFittingProductId} />
+        <input type="hidden" name="hoseProductId" value={values.hoseProductId} />
+        <input type="hidden" name="exitFittingProductId" value={values.exitFittingProductId} />
+        <input type="hidden" name="hoseLength" value={values.hoseLength} />
+        <input type="hidden" name="assemblyQuantity" value={values.assemblyQuantity} />
+        <input type="hidden" name="sourceDocumentRef" value={values.sourceDocumentRef} />
+        <input type="hidden" name="notes" value={values.notes} />
+        <p className="text-slate-400 text-sm">
+          La creación aparta inventario y genera lista de surtido con ubicación exacta.
+        </p>
+        <div className="flex justify-end">
+          <button type="submit" className="btn-primary disabled:opacity-50" disabled={!preview?.exact}>
+            Crear orden exacta
           </button>
         </div>
       </form>

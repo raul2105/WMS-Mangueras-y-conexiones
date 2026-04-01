@@ -7,8 +7,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import ReceiveForm from "@/components/ReceiveForm";
 import { firstErrorMessage, receiveStockSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
+import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ async function receiveStock(formData: FormData) {
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const locationId = String(formData.get("locationId") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim();
+  const operatorName = String(formData.get("operatorName") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const referenceFile = formData.get("referenceFile");
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
@@ -27,6 +29,7 @@ async function receiveStock(formData: FormData) {
     warehouseId,
     locationId,
     reference,
+    operatorName,
     notes,
     quantityRaw: qtyRaw,
   });
@@ -129,26 +132,45 @@ async function receiveStock(formData: FormData) {
   }
 
   const service = new InventoryService(prisma);
+  let createdJobId: string | null = null;
 
   try {
-    await service.receiveStock(product.id, location.id, quantity, reference, {
-      notes,
-      actor: "system",
-      source: "inventory/receive",
-      referenceFilePath: referenceFileMeta?.path ?? null,
-      referenceFileName: referenceFileMeta?.name ?? null,
-      referenceFileMime: referenceFileMeta?.mime ?? null,
-      referenceFileSize: referenceFileMeta?.size ?? null,
-    });
+    createdJobId = await prisma.$transaction(async (tx) => {
+      const result = await service.receiveStock(product.id, location.id, quantity, reference, {
+        tx,
+        notes,
+        actor: operatorName,
+        operatorName,
+        source: "inventory/receive",
+        referenceFilePath: referenceFileMeta?.path ?? null,
+        referenceFileName: referenceFileMeta?.name ?? null,
+        referenceFileMime: referenceFileMeta?.mime ?? null,
+        referenceFileSize: referenceFileMeta?.size ?? null,
+      });
 
-    await createAuditLogSafe({
-      entityType: "INVENTORY_MOVEMENT",
-      entityId: `${product.id}:${location.id}`,
-      action: "RECEIVE_FORM_SUBMIT",
-      after: { quantity, reference, warehouseId, locationId },
-      source: "inventory/receive",
-      actor: "system",
-    });
+      if (!result.movementId) {
+        throw new Error("Movement ID missing after receive");
+      }
+
+      const { job } = await createMovementTraceAndLabelJob(tx, {
+        movementId: result.movementId,
+        labelType: "RECEIPT",
+        sourceEntityType: "INVENTORY_MOVEMENT",
+        sourceEntityId: result.movementId,
+        operatorName,
+      });
+
+      await createAuditLogSafeWithDb({
+        entityType: "INVENTORY_MOVEMENT",
+        entityId: `${product.id}:${location.id}`,
+        action: "RECEIVE_FORM_SUBMIT",
+        after: { quantity, reference, warehouseId, locationId },
+        source: "inventory/receive",
+        actor: operatorName,
+      }, tx);
+
+      return job.id;
+    }, { timeout: 20000 });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       redirect(`/inventory/receive?error=${encodeURIComponent("No se pudo registrar la entrada")}`);
@@ -156,7 +178,10 @@ async function receiveStock(formData: FormData) {
     throw error;
   }
 
-  redirect(`/inventory/receive?ok=1`);
+  if (!createdJobId) {
+    redirect("/inventory/receive?error=No%20se%20pudo%20generar%20etiqueta");
+  }
+  redirect(`/labels/jobs/${createdJobId}?next=${encodeURIComponent("/inventory/receive?ok=1")}`);
 }
 
 export default async function ReceivePage({

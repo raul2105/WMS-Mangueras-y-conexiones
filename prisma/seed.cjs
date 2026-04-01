@@ -2,6 +2,80 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+const DEV_ASSEMBLY_PREFIX = 'DEV-ASM-';
+
+function normalizeTechnicalText(input) {
+  return String(input ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function toAttributeValues(input) {
+  if (input === null || input === undefined) return [];
+  if (Array.isArray(input)) {
+    return input.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  if (typeof input === 'object') return [];
+  const normalized = String(input).trim();
+  return normalized ? [normalized] : [];
+}
+
+function extractProductTechnicalAttributes(attributesRaw) {
+  if (!attributesRaw) return [];
+
+  let parsed;
+  try {
+    parsed = JSON.parse(attributesRaw);
+  } catch {
+    return [];
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+
+  const rows = [];
+  const dedupe = new Set();
+
+  for (const [rawKey, rawValue] of Object.entries(parsed)) {
+    const key = String(rawKey).trim();
+    const keyNormalized = normalizeTechnicalText(key);
+    if (!key || !keyNormalized) continue;
+
+    const values = toAttributeValues(rawValue);
+    values.forEach((value) => {
+      const valueNormalized = normalizeTechnicalText(value);
+      if (!valueNormalized) return;
+
+      const id = `${keyNormalized}::${valueNormalized}`;
+      if (dedupe.has(id)) return;
+      dedupe.add(id);
+
+      rows.push({ key, keyNormalized, value, valueNormalized });
+    });
+  }
+
+  return rows;
+}
+
+async function syncProductTechnicalAttributes(productId, attributesRaw) {
+  const rows = extractProductTechnicalAttributes(attributesRaw);
+
+  await prisma.productTechnicalAttribute.deleteMany({ where: { productId } });
+
+  if (rows.length > 0) {
+    await prisma.productTechnicalAttribute.createMany({
+      data: rows.map((row) => ({
+        productId,
+        key: row.key,
+        keyNormalized: row.keyNormalized,
+        value: row.value,
+        valueNormalized: row.valueNormalized,
+      })),
+    });
+  }
+}
+
 // Warehouse and Location seed data
 const seedWarehouses = [
   {
@@ -22,13 +96,17 @@ const seedWarehouses = [
 
 const seedLocations = [
   // Warehouse 1 locations
-  { warehouseCode: 'WH-01', code: 'A-12-04', name: 'Pasillo A - Rack 12 - Nivel 04', zone: 'A', aisle: '12', rack: '04', level: '04' },
-  { warehouseCode: 'WH-01', code: 'B-01-01', name: 'Pasillo B - Rack 01 - Nivel 01', zone: 'B', aisle: '01', rack: '01', level: '01' },
-  { warehouseCode: 'WH-01', code: 'C-03-02', name: 'Pasillo C - Rack 03 - Nivel 02', zone: 'C', aisle: '03', rack: '02', level: '02' },
-  { warehouseCode: 'WH-01', code: 'RECV-01', name: 'Zona de Recepción 01', zone: 'RECEIVING', isActive: true },
-  { warehouseCode: 'WH-01', code: 'SHIP-01', name: 'Zona de Envío 01', zone: 'SHIPPING', isActive: true },
+  { warehouseCode: 'WH-01', code: 'A-12-04', name: 'Pasillo A - Rack 12 - Nivel 04', zone: 'A', aisle: '12', rack: '04', level: '04', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-01', code: 'B-01-01', name: 'Pasillo B - Rack 01 - Nivel 01', zone: 'B', aisle: '01', rack: '01', level: '01', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-01', code: 'C-03-02', name: 'Pasillo C - Rack 03 - Nivel 02', zone: 'C', aisle: '03', rack: '02', level: '02', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-01', code: 'D-05-01', name: 'Pasillo D - Rack 05 - Nivel 01', zone: 'D', aisle: '05', rack: '01', level: '01', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-01', code: 'E-02-03', name: 'Pasillo E - Rack 02 - Nivel 03', zone: 'E', aisle: '02', rack: '03', level: '03', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-01', code: 'RECV-01', name: 'Zona de Recepción 01', zone: 'RECEIVING', isActive: true, usageType: 'RECEIVING' },
+  { warehouseCode: 'WH-01', code: 'SHIP-01', name: 'Zona de Envío 01', zone: 'SHIPPING', isActive: true, usageType: 'SHIPPING' },
   // Warehouse 2 locations
-  { warehouseCode: 'WH-02', code: 'A-01-01', name: 'Pasillo A - Rack 01 - Nivel 01', zone: 'A', aisle: '01', rack: '01', level: '01' },
+  { warehouseCode: 'WH-02', code: 'A-01-01', name: 'Pasillo A - Rack 01 - Nivel 01', zone: 'A', aisle: '01', rack: '01', level: '01', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-02', code: 'B-02-01', name: 'Pasillo B - Rack 02 - Nivel 01', zone: 'B', aisle: '02', rack: '01', level: '01', usageType: 'STORAGE' },
+  { warehouseCode: 'WH-02', code: 'C-04-02', name: 'Pasillo C - Rack 04 - Nivel 02', zone: 'C', aisle: '04', rack: '02', level: '02', usageType: 'STORAGE' },
 ];
 
 const seedProducts = [
@@ -37,6 +115,7 @@ const seedProducts = [
     name: 'Manguera Hidráulica SAE 100 R1AT 1/4"',
     description: 'Manguera de alta presión con refuerzo de una malla de acero.',
     type: 'HOSE',
+    unitLabel: 'm',
     brand: 'Continental',
     base_cost: 45.5,
     price: 85.0,
@@ -47,14 +126,14 @@ const seedProducts = [
       norm: 'SAE 100 R1AT',
     },
     categoryName: 'Hidráulica',
-    stock: 150,
-    locationCode: 'A-12-04',
+    inventoryRows: [{ locationCode: 'A-12-04', quantity: 150 }],
   },
   {
     sku: 'FIT-JIC-04-04',
     name: 'Conexión JIC Hembra Giratoria 1/4" x 1/4"',
     description: 'Conexión prensable acero al carbón.',
     type: 'FITTING',
+    unitLabel: 'pieza',
     brand: 'Gates',
     base_cost: 12.0,
     price: 25.0,
@@ -64,14 +143,14 @@ const seedProducts = [
       angle: 'Straight',
     },
     categoryName: 'Conexiones Hidráulicas',
-    stock: 500,
-    locationCode: 'B-01-01',
+    inventoryRows: [{ locationCode: 'B-01-01', quantity: 500 }],
   },
   {
     sku: 'ENS-EXCAV-001',
     name: 'Ensamble Manguera Brazo Excavadora',
     description: 'Ensamble 3/4" R12 con proteccion espiral.',
     type: 'ASSEMBLY',
+    unitLabel: 'pieza',
     brand: 'Rigentec',
     base_cost: 450.0,
     price: 950.0,
@@ -80,15 +159,476 @@ const seedProducts = [
       components: ['HOSE-R12-12', 'FIT-JIC-12', 'FIT-JIC-12-90'],
     },
     categoryName: 'Ensambles',
-    stock: 5,
-    locationCode: 'C-03-02',
+    inventoryRows: [{ locationCode: 'C-03-02', quantity: 5 }],
   },
 ];
+
+// Casos manuales de ensamble en dev:
+// 1. Exacto en WH-01: entrada DEV-ASM-FIT-IN-DN16-JIC + salida DEV-ASM-FIT-OUT-DN16-JIC-90 + manguera DEV-ASM-HOSE-DN16-TP-2SN con longitud 2 y cantidad 3.
+// 2. Insuficiente por conexiones en WH-01: usar DEV-ASM-FIT-IN-DN10-JIC o DEV-ASM-FIT-OUT-DN10-RECTA con cantidad 3.
+// 3. Insuficiente por manguera en WH-01: usar DEV-ASM-HOSE-DN10-R2AT con longitud 3 y cantidad 3.
+// 4. Cambio por almacén: varios productos quedan suficientes solo al cambiar a WH-02.
+const seedAssemblyProducts = [
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}HOSE-DN16-TP-2SN`,
+    name: 'Manguera termoplástica DN16 2SN 3/8"',
+    description: 'Manguera termoplástica para ensamble DN16 con alta flexibilidad.',
+    type: 'HOSE',
+    unitLabel: 'm',
+    brand: 'Rigentec',
+    subcategory: 'Mangueras termoplásticas',
+    base_cost: 82,
+    price: 145,
+    categoryName: 'Mangueras de Ensamble',
+    attributes: {
+      diametro: 'DN16',
+      rosca: 'JIC',
+      material: 'Termoplástica',
+      presion: '2SN',
+      medida: '3/8"',
+      uso: 'Ensamble 3 piezas',
+    },
+    inventoryRows: [
+      { locationCode: 'A-12-04', quantity: 4 },
+      { locationCode: 'D-05-01', quantity: 5 },
+      { locationCode: 'A-01-01', quantity: 10 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}HOSE-DN10-R2AT`,
+    name: 'Manguera hidráulica DN10 R2AT 1/4"',
+    description: 'Manguera DN10 con doble malla para pruebas de insuficiencia por longitud.',
+    type: 'HOSE',
+    unitLabel: 'm',
+    brand: 'Rigentec',
+    subcategory: 'Mangueras hidráulicas',
+    base_cost: 64,
+    price: 118,
+    categoryName: 'Mangueras de Ensamble',
+    attributes: {
+      diametro: 'DN10',
+      rosca: 'JIC',
+      material: 'Hule sintético',
+      presion: 'R2AT',
+      medida: '1/4"',
+      uso: 'Ensamble 3 piezas',
+    },
+    inventoryRows: [
+      { locationCode: 'B-01-01', quantity: 6 },
+      { locationCode: 'B-02-01', quantity: 20 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}HOSE-DN12-TP-1SN`,
+    name: 'Manguera termoplástica DN12 1SN 5/16"',
+    description: 'Manguera ligera DN12 para pruebas de búsqueda por DN y termoplástica.',
+    type: 'HOSE',
+    unitLabel: 'm',
+    brand: 'Rigentec',
+    subcategory: 'Mangueras termoplásticas',
+    base_cost: 58,
+    price: 104,
+    categoryName: 'Mangueras de Ensamble',
+    attributes: {
+      diametro: 'DN12',
+      rosca: 'JIC',
+      material: 'Termoplástica',
+      presion: '1SN',
+      medida: '5/16"',
+      uso: 'Ensamble 3 piezas',
+    },
+    inventoryRows: [
+      { locationCode: 'E-02-03', quantity: 12 },
+      { locationCode: 'C-04-02', quantity: 2 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}HOSE-DN20-TP-4SP`,
+    name: 'Manguera termoplástica DN20 4SP 1/2"',
+    description: 'Manguera de mayor capacidad para búsqueda por diámetro y presión.',
+    type: 'HOSE',
+    unitLabel: 'm',
+    brand: 'Rigentec',
+    subcategory: 'Mangueras termoplásticas',
+    base_cost: 110,
+    price: 188,
+    categoryName: 'Mangueras de Ensamble',
+    attributes: {
+      diametro: 'DN20',
+      rosca: 'JIC',
+      material: 'Termoplástica',
+      presion: '4SP',
+      medida: '1/2"',
+      uso: 'Ensamble 3 piezas',
+    },
+    inventoryRows: [
+      { locationCode: 'D-05-01', quantity: 3 },
+      { locationCode: 'A-01-01', quantity: 18 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}HOSE-DN08-TP-1TE`,
+    name: 'Manguera termoplástica DN08 1TE 3/16"',
+    description: 'Manguera compacta para pruebas de búsqueda por medida fraccional.',
+    type: 'HOSE',
+    unitLabel: 'm',
+    brand: 'Rigentec',
+    subcategory: 'Mangueras compactas',
+    base_cost: 41,
+    price: 79,
+    categoryName: 'Mangueras de Ensamble',
+    attributes: {
+      diametro: 'DN08',
+      rosca: 'JIC',
+      material: 'Termoplástica',
+      presion: '1TE',
+      medida: '3/16"',
+      uso: 'Ensamble 3 piezas',
+    },
+    inventoryRows: [
+      { locationCode: 'C-03-02', quantity: 14 },
+      { locationCode: 'B-02-01', quantity: 0.8 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}HOSE-DN25-R15`,
+    name: 'Manguera hidráulica DN25 R15 5/8"',
+    description: 'Manguera robusta para escenarios suficientes solo en almacén secundario.',
+    type: 'HOSE',
+    unitLabel: 'm',
+    brand: 'Rigentec',
+    subcategory: 'Mangueras hidráulicas',
+    base_cost: 132,
+    price: 220,
+    categoryName: 'Mangueras de Ensamble',
+    attributes: {
+      diametro: 'DN25',
+      rosca: 'JIC',
+      material: 'Hule sintético',
+      presion: 'R15',
+      medida: '5/8"',
+      uso: 'Ensamble 3 piezas',
+    },
+    inventoryRows: [
+      { locationCode: 'E-02-03', quantity: 1 },
+      { locationCode: 'C-04-02', quantity: 16 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-IN-DN16-JIC`,
+    name: 'Conexión entrada recta DN16 JIC hembra 3/8"',
+    description: 'Conexión de entrada para ensambles DN16 con rosca JIC.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones entrada',
+    base_cost: 18,
+    price: 36,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Entrada',
+      diametro: 'DN16',
+      rosca: 'JIC',
+      angulo: 'Recta',
+      medida: '3/8"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'B-01-01', quantity: 6 },
+      { locationCode: 'A-01-01', quantity: 15 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-OUT-DN16-JIC-90`,
+    name: 'Conexión salida 90° DN16 JIC macho 3/8"',
+    description: 'Conexión de salida en 90 grados para ensambles DN16.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones salida',
+    base_cost: 22,
+    price: 42,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Salida',
+      diametro: 'DN16',
+      rosca: 'JIC',
+      angulo: '90°',
+      medida: '3/8"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'C-03-02', quantity: 5 },
+      { locationCode: 'B-02-01', quantity: 14 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-IN-DN10-JIC`,
+    name: 'Conexión entrada recta DN10 JIC hembra 1/4"',
+    description: 'Conexión de entrada DN10 para casos con stock justo.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones entrada',
+    base_cost: 14,
+    price: 29,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Entrada',
+      diametro: 'DN10',
+      rosca: 'JIC',
+      angulo: 'Recta',
+      medida: '1/4"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'B-01-01', quantity: 2 },
+      { locationCode: 'A-01-01', quantity: 9 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-OUT-DN10-RECTA`,
+    name: 'Conexión salida recta DN10 JIC macho 1/4"',
+    description: 'Conexión de salida DN10 recta para probar faltantes en WH-01.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones salida',
+    base_cost: 15,
+    price: 30,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Salida',
+      diametro: 'DN10',
+      rosca: 'JIC',
+      angulo: 'Recta',
+      medida: '1/4"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'C-03-02', quantity: 2 },
+      { locationCode: 'A-01-01', quantity: 8 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-IN-DN12-NPT`,
+    name: 'Conexión entrada recta DN12 NPT hembra 5/16"',
+    description: 'Conexión NPT de entrada para filtrar por rosca.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones entrada',
+    base_cost: 16,
+    price: 31,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Entrada',
+      diametro: 'DN12',
+      rosca: 'NPT',
+      angulo: 'Recta',
+      medida: '5/16"',
+      material: 'Latón',
+    },
+    inventoryRows: [
+      { locationCode: 'D-05-01', quantity: 7 },
+      { locationCode: 'C-04-02', quantity: 4 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-OUT-DN12-NPT-90`,
+    name: 'Conexión salida 90° DN12 NPT macho 5/16"',
+    description: 'Conexión NPT de salida en 90 grados.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones salida',
+    base_cost: 19,
+    price: 35,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Salida',
+      diametro: 'DN12',
+      rosca: 'NPT',
+      angulo: '90°',
+      medida: '5/16"',
+      material: 'Latón',
+    },
+    inventoryRows: [
+      { locationCode: 'E-02-03', quantity: 7 },
+      { locationCode: 'C-04-02', quantity: 4 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-IN-DN20-BSP`,
+    name: 'Conexión entrada recta DN20 BSP hembra 1/2"',
+    description: 'Conexión BSP de entrada para ensambles de mayor diámetro.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones entrada',
+    base_cost: 21,
+    price: 39,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Entrada',
+      diametro: 'DN20',
+      rosca: 'BSP',
+      angulo: 'Recta',
+      medida: '1/2"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'A-12-04', quantity: 1 },
+      { locationCode: 'B-02-01', quantity: 11 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-OUT-DN20-BSP-45`,
+    name: 'Conexión salida 45° DN20 BSP macho 1/2"',
+    description: 'Conexión BSP de salida para validar cambio de almacén.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones salida',
+    base_cost: 23,
+    price: 43,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Salida',
+      diametro: 'DN20',
+      rosca: 'BSP',
+      angulo: '45°',
+      medida: '1/2"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'D-05-01', quantity: 1 },
+      { locationCode: 'C-04-02', quantity: 11 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-IN-DN08-JIC`,
+    name: 'Conexión entrada recta DN08 JIC hembra 3/16"',
+    description: 'Conexión compacta de entrada para búsquedas por 3/16.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones entrada',
+    base_cost: 11,
+    price: 24,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Entrada',
+      diametro: 'DN08',
+      rosca: 'JIC',
+      angulo: 'Recta',
+      medida: '3/16"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'C-03-02', quantity: 9 },
+      { locationCode: 'A-01-01', quantity: 2 },
+    ],
+  },
+  {
+    sku: `${DEV_ASSEMBLY_PREFIX}FIT-OUT-DN08-JIC-90`,
+    name: 'Conexión salida 90° DN08 JIC macho 3/16"',
+    description: 'Conexión compacta de salida para búsquedas por 90° y JIC.',
+    type: 'FITTING',
+    unitLabel: 'pieza',
+    brand: 'Rigentec',
+    subcategory: 'Conexiones salida',
+    base_cost: 12,
+    price: 26,
+    categoryName: 'Conexiones de Ensamble',
+    attributes: {
+      posicion: 'Salida',
+      diametro: 'DN08',
+      rosca: 'JIC',
+      angulo: '90°',
+      medida: '3/16"',
+      material: 'Acero',
+    },
+    inventoryRows: [
+      { locationCode: 'D-05-01', quantity: 9 },
+      { locationCode: 'A-01-01', quantity: 2 },
+    ],
+  },
+];
+
+async function seedInventoryRows(productId, inventoryRows, locationMap, fallbackLocation) {
+  await prisma.inventory.deleteMany({ where: { productId } });
+
+  const normalizedRows = Array.isArray(inventoryRows) && inventoryRows.length > 0
+    ? inventoryRows
+    : [{ locationCode: fallbackLocation.code, quantity: 0 }];
+
+  for (const row of normalizedRows) {
+    const location = locationMap[row.locationCode] ?? fallbackLocation;
+    const quantity = typeof row.quantity === 'number' ? row.quantity : 0;
+
+    await prisma.inventory.create({
+      data: {
+        productId,
+        locationId: location.id,
+        quantity,
+        reserved: 0,
+        available: quantity,
+      },
+    });
+  }
+}
+
+async function upsertSeedProduct(productData, locationMap, fallbackLocation) {
+  const category = productData.categoryName
+    ? await prisma.category.upsert({
+        where: { name: productData.categoryName },
+        create: { name: productData.categoryName },
+        update: {},
+      })
+    : null;
+
+  const attributesRaw = productData.attributes ? JSON.stringify(productData.attributes) : null;
+  const product = await prisma.product.upsert({
+    where: { sku: productData.sku },
+    create: {
+      sku: productData.sku,
+      name: productData.name,
+      description: productData.description ?? null,
+      type: productData.type,
+      unitLabel: productData.unitLabel ?? 'unidad',
+      brand: productData.brand ?? null,
+      subcategory: productData.subcategory ?? null,
+      base_cost: productData.base_cost ?? null,
+      price: productData.price ?? null,
+      attributes: attributesRaw,
+      ...(category ? { category: { connect: { id: category.id } } } : {}),
+    },
+    update: {
+      name: productData.name,
+      description: productData.description ?? null,
+      type: productData.type,
+      unitLabel: productData.unitLabel ?? 'unidad',
+      brand: productData.brand ?? null,
+      subcategory: productData.subcategory ?? null,
+      base_cost: productData.base_cost ?? null,
+      price: productData.price ?? null,
+      attributes: attributesRaw,
+      ...(category ? { category: { connect: { id: category.id } } } : { categoryId: null }),
+    },
+    select: { id: true },
+  });
+
+  await syncProductTechnicalAttributes(product.id, attributesRaw);
+  await seedInventoryRows(product.id, productData.inventoryRows, locationMap, fallbackLocation);
+
+  const totalStock = (productData.inventoryRows ?? []).reduce((acc, row) => acc + (typeof row.quantity === 'number' ? row.quantity : 0), 0);
+  console.log(`  ✓ Product: ${productData.sku} - ${productData.name} (Stock total: ${totalStock})`);
+}
 
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // 1. Seed Warehouses
   console.log('📦 Creating warehouses...');
   const warehouseMap = {};
   for (const wh of seedWarehouses) {
@@ -101,7 +641,6 @@ async function main() {
     console.log(`  ✓ Warehouse: ${wh.name}`);
   }
 
-  // 2. Seed Locations
   console.log('📍 Creating locations...');
   const locationMap = {};
   for (const loc of seedLocations) {
@@ -110,15 +649,18 @@ async function main() {
       console.warn(`  ⚠️  Warehouse not found: ${loc.warehouseCode}`);
       continue;
     }
+
     const { warehouseCode, ...locData } = loc;
     const location = await prisma.location.upsert({
       where: { code: loc.code },
       create: {
         ...locData,
+        isActive: locData.isActive ?? true,
         warehouseId: warehouse.id,
       },
       update: {
         ...locData,
+        isActive: locData.isActive ?? true,
         warehouseId: warehouse.id,
       },
     });
@@ -138,69 +680,30 @@ async function main() {
         code: stagingCode,
         name: `Staging - ${wh.name}`,
         zone: 'STAGING',
+        usageType: 'STAGING',
         isActive: true,
         warehouseId: warehouse.id,
       },
-      update: {},
+      update: {
+        name: `Staging - ${wh.name}`,
+        zone: 'STAGING',
+        usageType: 'STAGING',
+        isActive: true,
+        warehouseId: warehouse.id,
+      },
     });
     stagingMap[wh.code] = staging;
     console.log(`  ✓ Staging: ${staging.code}`);
   }
 
-  // 3. Seed Products with Inventory
-  console.log('🔧 Creating products...');
-  for (const p of seedProducts) {
-    const category = p.categoryName
-      ? await prisma.category.upsert({
-          where: { name: p.categoryName },
-          create: { name: p.categoryName },
-          update: {},
-        })
-      : null;
+  console.log('🔧 Creating base products...');
+  for (const productData of seedProducts) {
+    await upsertSeedProduct(productData, locationMap, stagingMap[seedWarehouses[0].code]);
+  }
 
-    const product = await prisma.product.upsert({
-      where: { sku: p.sku },
-      create: {
-        sku: p.sku,
-        name: p.name,
-        description: p.description ?? null,
-        type: p.type,
-        brand: p.brand ?? null,
-        base_cost: p.base_cost ?? null,
-        price: p.price ?? null,
-        attributes: p.attributes ? JSON.stringify(p.attributes) : null,
-        ...(category ? { category: { connect: { id: category.id } } } : {}),
-      },
-      update: {
-        name: p.name,
-        description: p.description ?? null,
-        type: p.type,
-        brand: p.brand ?? null,
-        base_cost: p.base_cost ?? null,
-        price: p.price ?? null,
-        attributes: p.attributes ? JSON.stringify(p.attributes) : null,
-        ...(category ? { category: { connect: { id: category.id } } } : { categoryId: null }),
-      },
-      select: { id: true },
-    });
-
-    // Keep seed idempotent: replace inventory rows for this product.
-    await prisma.inventory.deleteMany({ where: { productId: product.id } });
-
-    const location = locationMap[p.locationCode] ?? stagingMap[seedWarehouses[0].code];
-    const quantity = typeof p.stock === 'number' ? p.stock : 0;
-
-    await prisma.inventory.create({
-      data: {
-        productId: product.id,
-        locationId: location.id,
-        quantity,
-        reserved: 0,
-        available: quantity, // available = quantity - reserved
-      },
-    });
-
-    console.log(`  ✓ Product: ${p.sku} - ${p.name} (Stock: ${quantity})`);
+  console.log('🧪 Creating dev assembly catalog...');
+  for (const productData of seedAssemblyProducts) {
+    await upsertSeedProduct(productData, locationMap, stagingMap[seedWarehouses[0].code]);
   }
 
   console.log('✅ Seed completed successfully!');

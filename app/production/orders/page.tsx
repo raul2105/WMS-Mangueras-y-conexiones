@@ -26,6 +26,7 @@ export default async function ProductionOrdersPage({
       select: {
         id: true,
         code: true,
+        kind: true,
         status: true,
         customerName: true,
         priority: true,
@@ -51,7 +52,10 @@ export default async function ProductionOrdersPage({
             ← Ensamble
           </Link>
           <Link href="/production/orders/new" className="btn-primary">
-            + Nueva Orden
+            + Nueva Ensamble Exacta
+          </Link>
+          <Link href="/production/orders/new/generic" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+            + Nueva Genérica
           </Link>
         </div>
       </div>
@@ -63,6 +67,7 @@ export default async function ProductionOrdersPage({
             <thead>
               <tr className="text-slate-400 border-b border-white/10">
                 <th className="text-left py-3">Codigo</th>
+                <th className="text-left py-3">Tipo</th>
                 <th className="text-left py-3">Estado</th>
                 <th className="text-left py-3">Almacen</th>
                 <th className="text-left py-3">Cliente</th>
@@ -75,6 +80,7 @@ export default async function ProductionOrdersPage({
               {orders.map((order) => (
                 <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="py-3 font-mono text-slate-200">{order.code}</td>
+                  <td className="py-3 text-slate-400">{order.kind === "ASSEMBLY_3PIECE" ? "ENSAMBLE 3P" : "GENERICA"}</td>
                   <td className="py-3 text-slate-300">{order.status.replace("_", " ")}</td>
                   <td className="py-3 text-slate-300">
                     {order.warehouse.name} ({order.warehouse.code})
@@ -93,7 +99,7 @@ export default async function ProductionOrdersPage({
               ))}
               {orders.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-500">
+                  <td colSpan={8} className="py-10 text-center text-slate-500">
                     No hay ordenes de ensamble registradas.
                   </td>
                 </tr>

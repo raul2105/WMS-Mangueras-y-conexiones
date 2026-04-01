@@ -74,8 +74,8 @@ export default async function NewWarehousePage({
               required
               className="w-full px-4 py-3 glass rounded-lg uppercase"
               placeholder="WH-01"
-              pattern="[A-Z0-9\-]+"
-              title="Solo letras mayúsculas, números y guiones"
+              pattern="[A-Za-z0-9-]+"
+              title="Solo letras, números y guiones"
             />
           </label>
 

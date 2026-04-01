@@ -12,6 +12,7 @@
    .\build-release.cmd
    ```
 3. Esperar a que termine `npm run verify:release`.
+   - Si falla por lock de Prisma (`query_engine-windows.dll.node`), cerrar procesos Node que usen este repo (por ejemplo Playwright dev server) y volver a ejecutar.
 4. Verificar artefactos:
    - `release\wms-rigentec-<version>-windows-x64\`
    - `release\wms-rigentec-<version>-windows-x64.zip`
@@ -39,6 +40,32 @@
   ```cmd
   stop.cmd
   ```
+- Compatibilidad: `launch-wms.cmd` y `stop-wms.cmd` delegan al flujo canónico anterior.
+
+## Desinstalacion / migracion a otro equipo
+- Ejecutar en el equipo anterior:
+  ```cmd
+  uninstall.cmd
+  ```
+- El desinstalador ahora tiene 2 modos:
+  - `Conservar datos`: elimina binarios release, accesos directos, PID/run state, logs y cache, pero conserva BD SQLite y respaldos.
+  - `Completo`: elimina todo el estado local (incluyendo BD y respaldos) y la carpeta release.
+- Modo conservar datos por parametro:
+  ```cmd
+  uninstall.cmd -KeepData
+  ```
+- Modo limpieza total por parametro:
+  ```cmd
+  uninstall.cmd -Full
+  ```
+- Para modo completo se exige confirmacion fuerte:
+  - `ELIMINAR BASE`
+  - `ELIMINAR RESPALDOS`
+- Si la BD esta bloqueada o el proceso sigue vivo, la desinstalacion aborta con mensaje claro.
+- En modo conservar datos, si detecta archivos en `app\public\uploads\`, aborta para evitar perdida accidental.
+- Siempre genera bitacora y reporte final:
+  - `%TEMP%\wms-rigentec-uninstall\<timestamp>\uninstall.log`
+  - `%TEMP%\wms-rigentec-uninstall\<timestamp>\cleanup-report.txt`
 
 ## Mantenimiento (soporte)
 - Healthcheck:
@@ -59,3 +86,7 @@ Al reemplazar la release por una nueva, conservar:
 - `%LOCALAPPDATA%\wms-rigentec\data\wms.db`
 - `%LOCALAPPDATA%\wms-rigentec\backups\`
 - `app\public\uploads\`
+
+## Operacion integrada
+- Ver flujo operativo E2E (ensamble + etiquetas + trazabilidad + mantenimiento local):
+  - `docs/OPERACION_INTEGRADA_WMS.md`

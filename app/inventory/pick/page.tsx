@@ -4,9 +4,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, pickStockSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { formatEquivalentSuggestion, getEquivalentProducts } from "@/lib/product-equivalences";
 import { resolveProductInput } from "@/lib/product-search";
+import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +16,14 @@ async function pickStock(formData: FormData) {
 
   const code = String(formData.get("code") ?? "").trim();
   const locationCode = String(formData.get("location") ?? "").trim();
+  const operatorName = String(formData.get("operatorName") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
   const parsed = pickStockSchema.safeParse({
     code,
     locationCode,
+    operatorName,
     reference: reference ?? undefined,
     notes: notes ?? undefined,
     quantityRaw: qtyRaw,
@@ -70,22 +73,39 @@ async function pickStock(formData: FormData) {
   }
 
   const service = new InventoryService(prisma);
+  let createdJobId: string | null = null;
 
   try {
-    await service.pickStock(product.id, location.id, quantity, reference, {
-      notes,
-      actor: "system",
-      source: "inventory/pick",
-    });
+    createdJobId = await prisma.$transaction(async (tx) => {
+      const result = await service.pickStock(product.id, location.id, quantity, reference, {
+        tx,
+        notes,
+        actor: operatorName,
+        operatorName,
+        source: "inventory/pick",
+      });
+      if (!result.movementId) {
+        throw new Error("Movement ID missing after pick");
+      }
+      const { job } = await createMovementTraceAndLabelJob(tx, {
+        movementId: result.movementId,
+        labelType: "PICKING",
+        sourceEntityType: "INVENTORY_MOVEMENT",
+        sourceEntityId: result.movementId,
+        operatorName,
+      });
 
-    await createAuditLogSafe({
-      entityType: "INVENTORY_MOVEMENT",
-      entityId: `${product.id}:${location.id}`,
-      action: "PICK_FORM_SUBMIT",
-      after: { quantity, reference, locationCode },
-      source: "inventory/pick",
-      actor: "system",
-    });
+      await createAuditLogSafeWithDb({
+        entityType: "INVENTORY_MOVEMENT",
+        entityId: `${product.id}:${location.id}`,
+        action: "PICK_FORM_SUBMIT",
+        after: { quantity, reference, locationCode },
+        source: "inventory/pick",
+        actor: operatorName,
+      }, tx);
+
+      return job.id;
+    }, { timeout: 20000 });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {
@@ -117,7 +137,10 @@ async function pickStock(formData: FormData) {
     throw error;
   }
 
-  redirect(`/inventory/pick?ok=1`);
+  if (!createdJobId) {
+    redirect("/inventory/pick?error=No%20se%20pudo%20generar%20etiqueta");
+  }
+  redirect(`/labels/jobs/${createdJobId}?next=${encodeURIComponent("/inventory/pick?ok=1")}`);
 }
 
 export default async function PickPage({
@@ -200,6 +223,16 @@ export default async function PickPage({
               ))}
             </select>
             <p className="text-xs text-slate-500 mt-1">Obligatorio para garantizar integridad de inventario.</p>
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Operador *</span>
+            <input
+              name="operatorName"
+              required
+              className="w-full px-4 py-3 glass rounded-lg"
+              placeholder="Nombre del operador"
+            />
           </label>
 
           <label className="space-y-1">

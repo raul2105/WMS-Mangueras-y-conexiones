@@ -15,7 +15,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
 if errorlevel 1 (
   echo.
   echo No se pudo iniciar WMS.
-  echo Revisa los logs en %%LOCALAPPDATA%%\wms-rigentec\logs
+  echo Revisa los logs en %%LOCALAPPDATA%%\wms-scmayer\logs
   pause
   exit /b 1
 )

@@ -1,5 +1,12 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
+import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Select } from "@/components/ui/select";
+import { Table, TableEmptyRow, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -12,17 +19,18 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   ADJUSTMENT: "Ajuste",
 };
 
-const MOVEMENT_TYPE_COLORS: Record<string, string> = {
-  IN: "text-emerald-400",
-  OUT: "text-red-400",
-  TRANSFER: "text-blue-400",
-  ADJUSTMENT: "text-amber-400",
+const MOVEMENT_TYPE_COLORS: Record<string, "success" | "danger" | "accent" | "warning"> = {
+  IN: "success",
+  OUT: "danger",
+  TRANSFER: "accent",
+  ADJUSTMENT: "warning",
 };
 
 type SearchParams = {
   code?: string;
   location?: string;
   type?: "IN" | "OUT" | "TRANSFER" | "ADJUSTMENT";
+  traceId?: string;
   reference?: string;
   from?: string;
   to?: string;
@@ -37,6 +45,7 @@ export default async function KardexPage({
   const sp = await searchParams;
   const code = String(sp.code ?? "").trim();
   const location = String(sp.location ?? "").trim();
+  const traceId = String(sp.traceId ?? "").trim();
   const reference = String(sp.reference ?? "").trim();
   const type = sp.type;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
@@ -47,6 +56,7 @@ export default async function KardexPage({
   const where = {
     ...(type ? { type } : {}),
     ...(reference ? { reference: { contains: reference } } : {}),
+    ...(traceId ? { traceId: { contains: traceId } } : {}),
     ...(fromDate || toDate
       ? {
           createdAt: {
@@ -93,6 +103,7 @@ export default async function KardexPage({
     const params = new URLSearchParams();
     if (code) params.set("code", code);
     if (location) params.set("location", location);
+    if (traceId) params.set("traceId", traceId);
     if (reference) params.set("reference", reference);
     if (type) params.set("type", type);
     if (sp.from) params.set("from", sp.from);
@@ -102,139 +113,110 @@ export default async function KardexPage({
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Kardex</h1>
-          <p className="text-slate-400 mt-1">Movimientos por SKU, ubicación, tipo, referencia y rango de fechas.</p>
-        </div>
-        <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Inventario</Link>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Kardex"
+        description="Movimientos por SKU, ubicación, tipo, referencia y rango de fechas."
+        actions={
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>
+            Inventario
+          </Link>
+        }
+      />
 
-      <form className="glass-card grid grid-cols-1 md:grid-cols-6 gap-4" method="get">
-        <label className="space-y-1 md:col-span-2">
-          <span className="text-sm text-slate-400">SKU/Referencia</span>
-          <input name="code" defaultValue={code} className="w-full px-4 py-3 glass rounded-lg" placeholder="CON-R1AT-04" />
-        </label>
-
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Ubicación</span>
-          <input name="location" defaultValue={location} className="w-full px-4 py-3 glass rounded-lg" placeholder="A-12-04" />
-        </label>
-
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Tipo</span>
-          <select name="type" defaultValue={type ?? ""} className="w-full px-4 py-3 glass rounded-lg">
-            <option value="">Todos</option>
+      <SectionCard title="Filtros" description="Acota los movimientos para auditoría operativa.">
+        <form className="grid grid-cols-1 gap-4 md:grid-cols-6" method="get">
+          <Input name="code" defaultValue={code} rootClassName="md:col-span-2" label="SKU/Referencia" placeholder="CON-R1AT-04" />
+          <Input name="location" defaultValue={location} label="Ubicación" placeholder="A-12-04" />
+          <Select name="type" defaultValue={type ?? ""} label="Tipo" placeholder="Todos">
             <option value="IN">Entrada</option>
             <option value="OUT">Salida</option>
             <option value="TRANSFER">Traslado</option>
             <option value="ADJUSTMENT">Ajuste</option>
-          </select>
-        </label>
+          </Select>
+          <Input name="from" type="date" defaultValue={sp.from ?? ""} label="Desde" />
+          <Input name="to" type="date" defaultValue={sp.to ?? ""} label="Hasta" />
+          <Input name="traceId" defaultValue={traceId} rootClassName="md:col-span-2" label="Trace ID" placeholder="TRC-WIP-20260406-ABC123" />
+          <Input name="reference" defaultValue={reference} rootClassName="md:col-span-2" label="Referencia" placeholder="Pedido/OT/OC" />
+          <div className="md:col-span-2 flex items-end justify-end gap-3">
+            <Link href="/inventory/kardex" className={buttonStyles({ variant: "secondary" })}>Limpiar</Link>
+            <button type="submit" className={buttonStyles()}>Filtrar</button>
+          </div>
+        </form>
+      </SectionCard>
 
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Desde</span>
-          <input name="from" type="date" defaultValue={sp.from ?? ""} className="w-full px-4 py-3 glass rounded-lg" />
-        </label>
-
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Hasta</span>
-          <input name="to" type="date" defaultValue={sp.to ?? ""} className="w-full px-4 py-3 glass rounded-lg" />
-        </label>
-
-        <label className="space-y-1 md:col-span-4">
-          <span className="text-sm text-slate-400">Referencia</span>
-          <input name="reference" defaultValue={reference} className="w-full px-4 py-3 glass rounded-lg" placeholder="Pedido/OT/OC" />
-        </label>
-
-        <div className="md:col-span-2 flex items-end justify-end gap-3">
-          <Link href="/inventory/kardex" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Limpiar</Link>
-          <button type="submit" className="btn-primary">Filtrar</button>
-        </div>
-      </form>
-
-      {/* Export button — shares same filters via URL */}
-      <div className="flex justify-end">
-        {(() => {
+      <SectionCard
+        title="Movimientos"
+        description={`${total.toLocaleString("es-MX")} registros · página ${page} de ${totalPages || 1}`}
+        actions={(() => {
           const exportParams = new URLSearchParams();
           if (code) exportParams.set("code", code);
           if (location) exportParams.set("location", location);
+          if (traceId) exportParams.set("traceId", traceId);
           if (reference) exportParams.set("reference", reference);
           if (type) exportParams.set("type", type);
           if (sp.from) exportParams.set("from", sp.from);
           if (sp.to) exportParams.set("to", sp.to);
           return (
-            <a
-              href={`/api/export/kardex?${exportParams.toString()}`}
-              className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white text-sm"
-              download
-            >
-              ↓ Exportar CSV
+            <a href={`/api/export/kardex?${exportParams.toString()}`} className={buttonStyles({ variant: "secondary", size: "sm" })} download>
+              Exportar CSV
             </a>
           );
         })()}
-      </div>
-
-      <div className="glass-card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">Movimientos</h2>
-          <span className="text-sm text-slate-400">
-            {total.toLocaleString("es-MX")} registros · página {page} de {totalPages || 1}
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      >
+        <TableWrap striped>
+          <Table>
             <thead>
-              <tr className="text-slate-400 border-b border-white/10">
-                <th className="text-left py-3">Fecha</th>
-                <th className="text-left py-3">Tipo</th>
-                <th className="text-left py-3">SKU</th>
-                <th className="text-left py-3">Producto</th>
-                <th className="text-left py-3">Ubicación</th>
-                <th className="text-right py-3">Cantidad</th>
-                <th className="text-left py-3">Referencia</th>
+              <tr>
+                <Th>Fecha</Th>
+                <Th>Tipo</Th>
+                <Th>SKU</Th>
+                <Th>Trace ID</Th>
+                <Th>Producto</Th>
+                <Th>Ubicación</Th>
+                <Th className="text-right">Cantidad</Th>
+                <Th>Referencia</Th>
               </tr>
             </thead>
             <tbody>
               {movements.map((movement) => (
-                <tr key={movement.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 text-slate-300 whitespace-nowrap">
-                    {new Date(movement.createdAt).toLocaleString("es-MX")}
-                  </td>
-                  <td className="py-3">
-                    <span className={`text-xs font-bold ${MOVEMENT_TYPE_COLORS[movement.type] ?? "text-slate-400"}`}>
+                <TableRow key={movement.id}>
+                  <Td className="whitespace-nowrap">{new Date(movement.createdAt).toLocaleString("es-MX")}</Td>
+                  <Td>
+                    <Badge variant={MOVEMENT_TYPE_COLORS[movement.type] ?? "neutral"}>
                       {MOVEMENT_TYPE_LABELS[movement.type] ?? movement.type}
-                    </span>
-                  </td>
-                  <td className="py-3 font-mono text-slate-200">{movement.product.sku}</td>
-                  <td className="py-3 text-slate-300">{movement.product.name}</td>
-                  <td className="py-3 text-slate-400">
+                    </Badge>
+                  </Td>
+                  <Td className="font-mono text-xs text-[var(--text-primary)]">{movement.product.sku}</Td>
+                  <Td className="font-mono text-xs">
+                    {movement.traceId ? (
+                      <Link href={`/trace/${encodeURIComponent(movement.traceId)}`} className="text-cyan-300 hover:underline">
+                        {movement.traceId}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-500">--</span>
+                    )}
+                  </Td>
+                  <Td>{movement.product.name}</Td>
+                  <Td>
                     {movement.type === "TRANSFER"
                       ? `${movement.fromLocationCode ?? "--"} → ${movement.toLocationCode ?? "--"}`
                       : movement.location?.code ?? "--"}
-                  </td>
-                  <td className="py-3 text-right text-white font-semibold">{movement.quantity}</td>
-                  <td className="py-3 text-slate-400">{movement.reference ?? "--"}</td>
-                </tr>
+                  </Td>
+                  <Td className="text-right font-semibold text-[var(--text-primary)]">{movement.quantity}</Td>
+                  <Td>{movement.reference ?? "--"}</Td>
+                </TableRow>
               ))}
-              {movements.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
-                    No hay movimientos para los filtros seleccionados.
-                  </td>
-                </tr>
-              )}
+                {movements.length === 0 ? <TableEmptyRow colSpan={8}>No hay movimientos para los filtros seleccionados.</TableEmptyRow> : null}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </TableWrap>
 
-        {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 mt-6 pt-4 border-t border-white/10">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             {page > 1 && (
-              <Link href={buildPageUrl(page - 1)} className="px-3 py-1 glass rounded text-sm text-slate-300 hover:text-white">
-                ← Anterior
+              <Link href={buildPageUrl(page - 1)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Anterior
               </Link>
             )}
             {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
@@ -243,20 +225,20 @@ export default async function KardexPage({
                 <Link
                   key={p}
                   href={buildPageUrl(p)}
-                  className={`px-3 py-1 rounded text-sm ${p === page ? "bg-cyan-500/30 text-cyan-300 font-bold" : "glass text-slate-400 hover:text-white"}`}
+                  className={buttonStyles({ variant: p === page ? "primary" : "secondary", size: "sm" })}
                 >
                   {p}
                 </Link>
               );
             })}
             {page < totalPages && (
-              <Link href={buildPageUrl(page + 1)} className="px-3 py-1 glass rounded text-sm text-slate-300 hover:text-white">
-                Siguiente →
+              <Link href={buildPageUrl(page + 1)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Siguiente
               </Link>
             )}
           </div>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }

@@ -54,7 +54,7 @@ export const MOCK_PRODUCTS: Product[] = [
         name: 'Ensamble Manguera Brazo Excavadora',
         description: 'Ensamble 3/4" R12 con proteccion espiral.',
         type: 'ASSEMBLY',
-        brand: 'Rigentec',
+        brand: 'SCMayer',
         base_cost: 450.00,
         price: 950.00,
         attributes: {

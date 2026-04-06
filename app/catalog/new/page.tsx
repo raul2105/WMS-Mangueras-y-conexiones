@@ -6,6 +6,12 @@ import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
 import { TAXONOMY_CATEGORIES, TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
 import { saveProductImage } from "@/lib/product-images";
+import { Button, buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 export const dynamic = "force-dynamic";
 
@@ -200,136 +206,120 @@ export default async function NewCatalogItemPage({
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Nuevo Artículo</h1>
-          <p className="text-slate-400 mt-1">Crea un producto y su inventario inicial.</p>
-        </div>
-        <Link href="/catalog" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-          ← Volver
-        </Link>
-      </div>
+      <PageHeader
+        title="Nuevo Articulo"
+        description="Crea un producto y su inventario inicial."
+        actions={
+          <Link href="/catalog" className={buttonStyles({ variant: "secondary" })}>
+            Volver
+          </Link>
+        }
+      />
 
       {sp.error && (
-        <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>
+        <section className="surface border-[var(--danger)]/40 bg-[var(--danger-soft)] p-4 text-sm text-[var(--danger)]">{sp.error}</section>
       )}
 
-      <form action={createProduct} className="glass-card space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">SKU *</span>
-            <input
+      <form action={createProduct}>
+        <SectionCard
+          title="Ficha de producto"
+          description="Completa los datos comerciales y el inventario inicial."
+          footer={
+            <>
+              <Link href="/catalog" className={buttonStyles({ variant: "secondary" })}>
+                Cancelar
+              </Link>
+              <Button type="submit">Guardar</Button>
+            </>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input
               name="sku"
               required
+              label="SKU"
               list={skuSuggestions.length > 0 ? "catalog-sku-options" : undefined}
-              className="w-full px-4 py-3 glass rounded-lg"
               placeholder="CON-R1AT-04"
             />
-            {skuSuggestions.length > 0 && (
+            {skuSuggestions.length > 0 ? (
               <datalist id="catalog-sku-options">
                 {skuSuggestions.map((sku) => (
                   <option key={sku} value={sku} />
                 ))}
               </datalist>
-            )}
-          </label>
+            ) : null}
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Tipo *</span>
-            <select name="type" className="w-full px-4 py-3 glass rounded-lg">
+            <Select name="type" label="Tipo" required defaultValue="HOSE">
               <option value="HOSE">HOSE</option>
               <option value="FITTING">FITTING</option>
               <option value="ASSEMBLY">ASSEMBLY</option>
               <option value="ACCESSORY">ACCESSORY</option>
-            </select>
-          </label>
+            </Select>
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Nombre *</span>
-            <input name="name" required className="w-full px-4 py-3 glass rounded-lg" placeholder="Manguera Hidráulica..." />
-          </label>
+            <Input name="name" required label="Nombre" rootClassName="md:col-span-2" placeholder="Manguera Hidraulica..." />
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Descripción</span>
-            <textarea name="description" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
-          </label>
+            <Textarea name="description" label="Descripcion" rootClassName="md:col-span-2" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Marca</span>
-            <input
+            <Input
               name="brand"
+              label="Marca"
               list={brandSuggestions.length > 0 ? "catalog-brand-options" : undefined}
-              className="w-full px-4 py-3 glass rounded-lg"
               placeholder="Continental"
             />
-            {brandSuggestions.length > 0 && (
+            {brandSuggestions.length > 0 ? (
               <datalist id="catalog-brand-options">
                 {brandSuggestions.map((brand) => (
                   <option key={brand} value={brand} />
                 ))}
               </datalist>
-            )}
-          </label>
+            ) : null}
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Unidad</span>
-            <input
-              name="unitLabel"
-              defaultValue="unidad"
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="pieza, m, kg"
-            />
-          </label>
+            <Input name="unitLabel" label="Unidad" defaultValue="unidad" placeholder="pieza, m, kg" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Referencia (para escaneo/OCR)</span>
-            <input
+            <Input
               name="referenceCode"
+              label="Referencia"
               list={referenceCodeSuggestions.length > 0 ? "catalog-reference-options" : undefined}
-              className="w-full px-4 py-3 glass rounded-lg font-mono"
               placeholder="REF-000123"
+              inputClassName="font-mono"
             />
-            {referenceCodeSuggestions.length > 0 && (
+            {referenceCodeSuggestions.length > 0 ? (
               <datalist id="catalog-reference-options">
                 {referenceCodeSuggestions.map((referenceCode) => (
                   <option key={referenceCode} value={referenceCode} />
                 ))}
               </datalist>
-            )}
-          </label>
+            ) : null}
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Imagen (URL)</span>
-            <input name="imageUrl" className="w-full px-4 py-3 glass rounded-lg" placeholder="https://..." />
-            <p className="text-xs text-slate-500">Tambien puedes subir una imagen local; si haces ambas cosas, se usa el archivo.</p>
-          </label>
+            <Input
+              name="imageUrl"
+              label="Imagen URL"
+              rootClassName="md:col-span-2"
+              placeholder="https://..."
+              hint="Tambien puedes subir una imagen local; si haces ambas cosas, se usa el archivo."
+            />
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Imagen (archivo)</span>
-            <input name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" className="w-full px-4 py-3 glass rounded-lg" />
-          </label>
+            <label className="space-y-1.5 md:col-span-2">
+              <span className="block text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Imagen archivo</span>
+              <input name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" className="field px-4 py-2.5" />
+            </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Categoría</span>
-            <input
+            <Input
               name="category"
+              label="Categoria"
               list="catalog-category-options"
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="Mangueras Hidráulicas SAE/EN"
+              placeholder="Mangueras Hidraulicas SAE/EN"
             />
             <datalist id="catalog-category-options">
               {categorySuggestions.map((category) => (
                 <option key={category} value={category} />
               ))}
             </datalist>
-          </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Subcategoría</span>
-            <input
+            <Input
               name="subcategory"
+              label="Subcategoria"
               list="catalog-subcategory-options"
-              className="w-full px-4 py-3 glass rounded-lg"
               placeholder="SAE 100R2 / 2SN"
             />
             <datalist id="catalog-subcategory-options">
@@ -337,55 +327,35 @@ export default async function NewCatalogItemPage({
                 <option key={subcategory} value={subcategory} />
               ))}
             </datalist>
-          </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Costo base</span>
-            <input name="base_cost" inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="45.50" />
-          </label>
+            <Input name="base_cost" label="Costo base" inputMode="decimal" placeholder="45.50" />
+            <Input name="price" label="Precio" inputMode="decimal" placeholder="85.00" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Precio</span>
-            <input name="price" inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="85.00" />
-          </label>
+            <Input name="quantity" label="Cantidad inicial" inputMode="decimal" placeholder="0" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Cantidad inicial</span>
-            <input name="quantity" inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="0" />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicación</span>
-            <select name="location" className="w-full px-4 py-3 glass rounded-lg">
-              <option value="">Sin inventario inicial</option>
+            <Select
+              name="location"
+              label="Ubicacion"
+              placeholder="Sin inventario inicial"
+              hint="Requerido si capturas cantidad inicial mayor a 0."
+            >
               {locations.map((location) => (
                 <option key={location.code} value={location.code}>
                   {location.code} - {location.name} ({location.warehouse.code})
                 </option>
               ))}
-            </select>
-            <p className="text-xs text-slate-500">Requerido si capturas cantidad inicial mayor a 0.</p>
-          </label>
+            </Select>
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Attributes (JSON)</span>
-            <textarea
+            <Textarea
               name="attributes"
-              className="w-full px-4 py-3 glass rounded-lg min-h-[96px] font-mono text-sm"
+              label="Attributes (JSON)"
+              rootClassName="md:col-span-2"
+              textareaClassName="font-mono text-sm"
               placeholder='{"pressure_psi": 3263, "inner_diameter": "1/4"}'
+              hint="Se guarda como texto (puede ser JSON)."
             />
-            <p className="text-xs text-slate-500">Se guarda como texto (puede ser JSON).</p>
-          </label>
-        </div>
-
-        <div className="flex items-center justify-end gap-3">
-          <Link href="/catalog" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-            Cancelar
-          </Link>
-          <button type="submit" className="btn-primary">
-            Guardar
-          </button>
-        </div>
+          </div>
+        </SectionCard>
       </form>
     </div>
   );

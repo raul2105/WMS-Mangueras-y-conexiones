@@ -2,6 +2,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MoonIcon, SunIcon } from "@/components/ui/icons";
+import { buttonStyles } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 
 const STORAGE_KEY = "wms-theme";
 
@@ -15,20 +18,35 @@ function getPreferredTheme(): Theme {
     : "dark";
 }
 
+function getAppliedTheme(): Theme | null {
+  const theme = document.documentElement.getAttribute("data-theme");
+  return theme === "dark" || theme === "light" ? theme : null;
+}
+
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute("data-theme", theme);
   document.documentElement.style.colorScheme = theme;
 }
 
-export default function ThemeToggle() {
+type ThemeToggleProps = {
+  compact?: boolean;
+  className?: string;
+};
+
+export default function ThemeToggle({ compact = false, className }: ThemeToggleProps) {
   const [theme, setTheme] = useState<Theme>("dark");
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const preferred = getPreferredTheme();
-    setTheme(preferred);
-    applyTheme(preferred);
-    setMounted(true);
+    const appliedTheme = getAppliedTheme();
+
+    if (appliedTheme) {
+      setTheme(appliedTheme);
+      return;
+    }
+
+    const preferredTheme = getPreferredTheme();
+    applyTheme(preferredTheme);
+    setTheme(preferredTheme);
   }, []);
 
   const toggleTheme = () => {
@@ -38,23 +56,20 @@ export default function ThemeToggle() {
     applyTheme(next);
   };
 
-  // Render placeholder during SSR / before hydration to avoid mismatch
-  if (!mounted) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass text-sm text-slate-300 w-32 h-9" />
-    );
-  }
-
   return (
     <button
       type="button"
       onClick={toggleTheme}
-      className="flex items-center gap-2 px-3 py-2 rounded-lg glass text-sm text-slate-300 hover:text-white transition-colors"
+      className={cn(
+        buttonStyles({ variant: "secondary", size: "sm" }),
+        compact ? "px-2.5" : "w-full justify-start gap-2",
+        className,
+      )}
       aria-label="Cambiar tema"
       title="Cambiar tema"
     >
-      <span className="text-base">{theme === "dark" ? "☾" : "☀"}</span>
-      {theme === "dark" ? "Modo oscuro" : "Modo claro"}
+      {theme === "dark" ? <MoonIcon className="h-4 w-4" /> : <SunIcon className="h-4 w-4" />}
+      {!compact ? <span>{theme === "dark" ? "Modo oscuro" : "Modo claro"}</span> : null}
     </button>
   );
 }

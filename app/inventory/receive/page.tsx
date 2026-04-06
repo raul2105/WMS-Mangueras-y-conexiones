@@ -175,7 +175,7 @@ async function receiveStock(formData: FormData) {
     if (error instanceof InventoryServiceError) {
       redirect(`/inventory/receive?error=${encodeURIComponent("No se pudo registrar la entrada")}`);
     }
-    throw error;
+    redirect(`/inventory/receive?error=${encodeURIComponent("Ocurrio un error inesperado al registrar la entrada")}`);
   }
 
   if (!createdJobId) {

@@ -20,7 +20,7 @@ if exist "%ROOT_DIR%\app\server.js" (
   )
 
   for /f "delims=" %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%I"
-  set "RUNNER_DIR=%TEMP%\wms-rigentec-uninstall\%STAMP%\runner"
+  set "RUNNER_DIR=%TEMP%\wms-scmayer-uninstall\%STAMP%\runner"
   mkdir "%RUNNER_DIR%" >nul 2>&1
   if errorlevel 1 (
     echo [ERROR] No se pudo crear carpeta temporal para ejecutar la desinstalacion.
@@ -46,11 +46,11 @@ if exist "%ROOT_DIR%\app\server.js" (
   exit /b %ERRORLEVEL%
 )
 
-TITLE WMS Rigentec - Desinstalador
+TITLE WMS-SCMayer - Desinstalador
 
 echo.
 echo ============================================================
-echo   WMS Rigentec - Desinstalador
+echo   WMS-SCMayer - Desinstalador
 echo   Limpia la instalacion local del servidor
 echo ============================================================
 echo.
@@ -93,23 +93,23 @@ if exist "prisma\dev.db" (
 )
 
 echo  [1/5] Deteniendo servicio PM2...
-pm2 stop wms-rigentec >nul 2>&1
-pm2 delete wms-rigentec >nul 2>&1
+pm2 stop wms-scmayer >nul 2>&1
+pm2 delete wms-scmayer >nul 2>&1
 pm2 save >nul 2>&1
 echo  PM2 ........................ OK
 echo.
 
 echo  [2/5] Eliminando inicio automatico...
-schtasks /delete /tn "WMS-Rigentec-AutoStart" /f >nul 2>&1
-if exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WMS-Rigentec.cmd" (
-    del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WMS-Rigentec.cmd" >nul 2>&1
+schtasks /delete /tn "WMS-SCMayer-AutoStart" /f >nul 2>&1
+if exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WMS-SCMayer.cmd" (
+    del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WMS-SCMayer.cmd" >nul 2>&1
 )
 if exist "resume_wms.cmd" del /f /q "resume_wms.cmd" >nul 2>&1
 echo  Inicio automatico .......... OK
 echo.
 
 echo  [3/5] Eliminando regla de firewall...
-netsh advfirewall firewall delete rule name="WMS-Rigentec" >nul 2>&1
+netsh advfirewall firewall delete rule name="WMS-SCMayer" >nul 2>&1
 echo  Firewall ................... OK
 echo.
 

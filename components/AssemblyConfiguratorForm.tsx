@@ -28,6 +28,11 @@ type Props = {
     hose: ProductSearchMatch | null;
     exitFitting: ProductSearchMatch | null;
   };
+  hiddenFields?: Array<{ name: string; value: string }>;
+  warehouseLocked?: boolean;
+  title?: string;
+  submitLabel?: string;
+  notesLabel?: string;
 };
 
 type ProductSearchResponse = {
@@ -60,12 +65,14 @@ type WarehouseComboboxProps = {
   warehouses: WarehouseOption[];
   warehouseId: string;
   onWarehouseIdChange: (warehouseId: string) => void;
+  locked?: boolean;
 };
 
 function WarehouseCombobox({
   warehouses,
   warehouseId,
   onWarehouseIdChange,
+  locked = false,
 }: WarehouseComboboxProps) {
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.id === warehouseId) ?? null;
   const [inputValue, setInputValue] = useState(selectedWarehouse ? formatWarehouseLabel(selectedWarehouse) : "");
@@ -102,6 +109,7 @@ function WarehouseCombobox({
           <input
             data-testid="assembly-warehouse-input"
             value={inputValue}
+            disabled={locked}
             onChange={(event) => {
               const next = event.target.value;
               setInputValue(next);
@@ -115,9 +123,9 @@ function WarehouseCombobox({
               blurTimerRef.current = setTimeout(() => setIsOpen(false), 120);
             }}
             placeholder="Busca por nombre o código"
-            className="w-full px-4 py-3 glass rounded-lg"
+            className="w-full px-4 py-3 glass rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
           />
-          {(warehouseId || inputValue) && (
+          {!locked && (warehouseId || inputValue) && (
             <button
               type="button"
               className="px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:text-white hover:border-cyan-400/40"
@@ -158,11 +166,15 @@ function WarehouseCombobox({
           </div>
         )}
 
-        {!warehouseId && (
+        {locked ? (
+          <p className="text-xs text-slate-500">
+            El almacen queda definido por el paso comercial de la orden.
+          </p>
+        ) : !warehouseId ? (
           <p className="text-xs text-slate-500">
             Selecciona un almacén antes de buscar conexiones y mangueras.
           </p>
-        )}
+        ) : null}
       </div>
     </label>
   );
@@ -443,6 +455,11 @@ export default function AssemblyConfiguratorForm({
   warehouses,
   initialValues,
   initialSelections,
+  hiddenFields = [],
+  warehouseLocked = false,
+  title = "1) Configurar ensamble",
+  submitLabel = "Previsualizar disponibilidad",
+  notesLabel = "Notas",
 }: Props) {
   const [warehouseId, setWarehouseId] = useState(initialValues.warehouseId);
   const [hoseLength, setHoseLength] = useState(initialValues.hoseLength);
@@ -455,12 +472,16 @@ export default function AssemblyConfiguratorForm({
 
   return (
     <form method="GET" className="glass-card space-y-5">
-      <h2 className="text-lg font-semibold">1) Configurar ensamble</h2>
+      {hiddenFields.map((field) => (
+        <input key={field.name} type="hidden" name={field.name} value={field.value} />
+      ))}
+      <h2 className="text-lg font-semibold">{title}</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <WarehouseCombobox
           warehouses={warehouses}
           warehouseId={warehouseId}
           onWarehouseIdChange={setWarehouseId}
+          locked={warehouseLocked}
         />
 
         <AssemblyProductSearchField
@@ -539,7 +560,7 @@ export default function AssemblyConfiguratorForm({
         </label>
 
         <label className="space-y-1 md:col-span-2">
-          <span className="text-sm text-slate-400">Notas</span>
+          <span className="text-sm text-slate-400">{notesLabel}</span>
           <textarea
             name="notes"
             defaultValue={initialValues.notes}
@@ -550,7 +571,7 @@ export default function AssemblyConfiguratorForm({
 
       <div className="flex justify-end">
         <button type="submit" className="btn-primary">
-          Previsualizar disponibilidad
+          {submitLabel}
         </button>
       </div>
     </form>

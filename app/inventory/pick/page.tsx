@@ -8,6 +8,12 @@ import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { formatEquivalentSuggestion, getEquivalentProducts } from "@/lib/product-equivalences";
 import { resolveProductInput } from "@/lib/product-search";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
+import { buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 export const dynamic = "force-dynamic";
 
@@ -134,7 +140,7 @@ async function pickStock(formData: FormData) {
 
       redirect(`/inventory/pick?error=${encodeURIComponent(msg)}`);
     }
-    throw error;
+    redirect(`/inventory/pick?error=${encodeURIComponent("Ocurrio un error inesperado al registrar la salida")}`);
   }
 
   if (!createdJobId) {
@@ -179,24 +185,35 @@ export default async function PickPage({
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Picking (Salida)</h1>
-          <p className="text-slate-400 mt-1">Resta existencias del inventario y guarda el movimiento.</p>
-        </div>
-        <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Inventario</Link>
-      </div>
+      <PageHeader
+        title="Picking (Salida)"
+        description="Resta existencias del inventario y registra el movimiento de salida."
+        actions={
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>
+            Inventario
+          </Link>
+        }
+      />
 
-      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
-      {sp.suggestion && (
-        <div className="glass-card border border-amber-500/30 text-amber-100 space-y-2">
-          <p>{sp.suggestion}</p>
-          {sp.suggestedCode && <p className="text-xs text-amber-200/80">Prueba el codigo sugerido en el campo SKU o Referencia: {sp.suggestedCode}</p>}
+      {sp.error && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {sp.error}
         </div>
       )}
-      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Salida registrada.</div>}
+      {sp.suggestion && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--warning) 35%,var(--border-default))] bg-[var(--warning-soft)] px-4 py-3 text-sm text-[var(--warning)] space-y-2">
+          <p>{sp.suggestion}</p>
+          {sp.suggestedCode && <p className="text-xs text-[var(--text-secondary)]">Prueba el codigo sugerido en el campo SKU o Referencia: {sp.suggestedCode}</p>}
+        </div>
+      )}
+      {sp.ok && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">
+          Salida registrada.
+        </div>
+      )}
 
-      <form action={pickStock} className="glass-card space-y-6">
+      <SectionCard title="Formulario de salida" description="Completa los datos operativos para registrar picking.">
+      <form action={pickStock} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <InventoryCodeField
             name="code"
@@ -207,42 +224,26 @@ export default async function PickPage({
             showDetails
           />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Cantidad *</span>
-            <input name="quantity" required inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="2" />
-          </label>
+          <Input name="quantity" required inputMode="decimal" label="Cantidad *" placeholder="2" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicación *</span>
-            <select name="location" required className="w-full px-4 py-3 glass rounded-lg">
+          <Select name="location" required label="Ubicación *" placeholder="Selecciona una ubicación">
               <option value="">Selecciona una ubicación</option>
               {locations.map((location) => (
                 <option key={location.code} value={location.code}>
                   {location.code} - {location.name} ({location.warehouse.code})
                 </option>
               ))}
-            </select>
-            <p className="text-xs text-slate-500 mt-1">Obligatorio para garantizar integridad de inventario.</p>
-          </label>
+          </Select>
+          <p className="-mt-2 text-xs text-[var(--text-muted)] md:col-span-1">Obligatorio para garantizar integridad de inventario.</p>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Operador *</span>
-            <input
-              name="operatorName"
-              required
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="Nombre del operador"
-            />
-          </label>
+          <Input name="operatorName" required label="Operador *" placeholder="Nombre del operador" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Referencia pedido/OT</span>
-            <input
-              name="reference"
-              list={referenceSuggestions.length > 0 ? "pick-reference-options" : undefined}
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="Pedido/OT"
-            />
+          <Input
+            name="reference"
+            label="Referencia pedido/OT"
+            list={referenceSuggestions.length > 0 ? "pick-reference-options" : undefined}
+            placeholder="Pedido/OT"
+          />
             {referenceSuggestions.length > 0 && (
               <datalist id="pick-reference-options">
                 {referenceSuggestions.map((reference) => (
@@ -250,19 +251,16 @@ export default async function PickPage({
                 ))}
               </datalist>
             )}
-          </label>
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Notas</span>
-            <textarea name="notes" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
-          </label>
+          <Textarea name="notes" label="Notas" rootClassName="md:col-span-2" textareaClassName="min-h-[96px]" />
         </div>
 
         <div className="flex items-center justify-end gap-3">
-          <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Cancelar</Link>
-          <button type="submit" className="btn-primary">Registrar salida</button>
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>Cancelar</Link>
+          <button type="submit" className={buttonStyles()}>Registrar salida</button>
         </div>
       </form>
+      </SectionCard>
     </div>
   );
 }

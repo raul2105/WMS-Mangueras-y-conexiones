@@ -1,8 +1,8 @@
-# WMS Rigentec - Resumen de Implementación
+# WMS-SCMayer - Resumen de Implementación
 
 ## 📋 Resumen Ejecutivo
 
-Este documento detalla las mejoras implementadas en el sistema WMS (Warehouse Management System) para Rigentec, transformándolo de un prototipo básico a un sistema robusto con arquitectura profesional y módulos clave para operaciones de almacén.
+Este documento detalla las mejoras implementadas en el sistema WMS (Warehouse Management System) para SCMayer, transformándolo de un prototipo básico a un sistema robusto con arquitectura profesional y módulos clave para operaciones de almacén.
 
 **Fecha:** 2026-02-03  
 **Versión:** 0.2.0 (Pre-MVP)  

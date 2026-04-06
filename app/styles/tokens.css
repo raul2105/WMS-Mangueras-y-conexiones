@@ -1,0 +1,94 @@
+:root {
+  /* Semantic color tokens */
+  --bg-app: #0c1424;
+  --bg-surface: #142033;
+  --bg-elevated: #1a2940;
+
+  --text-primary: #e7eef8;
+  --text-secondary: #bcc9da;
+  --text-muted: #8798ae;
+
+  --border-default: #28374e;
+  --border-strong: #3b4d67;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+
+  --focus-ring: rgba(37, 99, 235, 0.34);
+
+  --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.22);
+  --shadow-md: 0 8px 20px rgba(2, 6, 23, 0.24);
+  --shadow-lg: 0 18px 36px rgba(2, 6, 23, 0.28);
+
+  /* Support tokens derived from semantic system */
+  --bg-subtle: color-mix(in oklab, var(--bg-surface) 70%, var(--bg-elevated));
+  --accent-soft: color-mix(in oklab, var(--accent) 20%, transparent);
+  --success-soft: color-mix(in oklab, var(--success) 16%, transparent);
+  --warning-soft: color-mix(in oklab, var(--warning) 16%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 16%, transparent);
+  --danger-soft-hover: color-mix(in oklab, var(--danger) 24%, transparent);
+  --danger-text: color-mix(in oklab, var(--danger) 60%, #ffffff);
+  --shell-bg: color-mix(in oklab, var(--bg-surface) 72%, var(--bg-elevated));
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+
+  /* Deprecated aliases for compatibility with existing components */
+  --accent-primary: var(--accent);
+  --accent-primary-hover: var(--accent-hover);
+  --surface-raised: var(--bg-elevated);
+  --surface-subtle: var(--bg-subtle);
+  --border-subtle: var(--border-default);
+  --shadow-card: var(--shadow-md);
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-app: #f2f5f9;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f8fafc;
+
+  --text-primary: #102033;
+  --text-secondary: #34475c;
+  --text-muted: #667b93;
+
+  --border-default: #d3ddea;
+  --border-strong: #c0cedf;
+
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #b91c1c;
+
+  --focus-ring: rgba(29, 78, 216, 0.28);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 8px 18px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 34px rgba(15, 23, 42, 0.12);
+
+  --bg-subtle: color-mix(in oklab, var(--bg-surface) 75%, var(--bg-elevated));
+  --accent-soft: color-mix(in oklab, var(--accent) 14%, transparent);
+  --success-soft: color-mix(in oklab, var(--success) 12%, transparent);
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 12%, transparent);
+  --danger-soft-hover: color-mix(in oklab, var(--danger) 18%, transparent);
+  --danger-text: color-mix(in oklab, var(--danger) 72%, #0f172a);
+  --shell-bg: color-mix(in oklab, var(--bg-surface) 80%, var(--bg-elevated));
+
+  --accent-primary: var(--accent);
+  --accent-primary-hover: var(--accent-hover);
+  --surface-raised: var(--bg-elevated);
+  --surface-subtle: var(--bg-subtle);
+  --border-subtle: var(--border-default);
+  --shadow-card: var(--shadow-md);
+
+  color-scheme: light;
+}

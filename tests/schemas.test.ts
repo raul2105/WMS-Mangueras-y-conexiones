@@ -5,6 +5,7 @@ import {
   inventoryAdjustmentSchema,
   transferStockSchema,
   productionOrderCreateSchema,
+  assemblyOrderHeaderSchema,
   assemblyConfigSchema,
   parsePriority,
   parseDueDate,
@@ -168,6 +169,24 @@ describe("assemblyConfigSchema", () => {
   it("rejects zero quantities", () => {
     expect(assemblyConfigSchema.safeParse({ ...base, hoseLengthRaw: "0" }).success).toBe(false);
     expect(assemblyConfigSchema.safeParse({ ...base, assemblyQuantityRaw: "0" }).success).toBe(false);
+  });
+});
+
+describe("assemblyOrderHeaderSchema", () => {
+  const base = {
+    warehouseId: "wh-1",
+    customerName: "Cliente Demo",
+    dueDateRaw: "2026-04-15",
+    priorityRaw: "3",
+  };
+
+  it("accepts a valid commercial header", () => {
+    expect(assemblyOrderHeaderSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("requires customer and due date", () => {
+    expect(assemblyOrderHeaderSchema.safeParse({ ...base, customerName: "" }).success).toBe(false);
+    expect(assemblyOrderHeaderSchema.safeParse({ ...base, dueDateRaw: "" }).success).toBe(false);
   });
 });
 

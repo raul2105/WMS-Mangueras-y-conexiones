@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:WmsAppName = "wms-rigentec"
+$script:WmsAppName = "wms-scmayer"
 $script:WmsPort = 3002
 
 function Resolve-NormalizedPath {
@@ -501,7 +501,7 @@ function Remove-WmsShortcutsForRelease {
       }
       $arguments = "$($shortcut.Arguments)"
       $shortcutName = [System.IO.Path]::GetFileName($shortcutPath)
-      $nameMatches = $shortcutName -match "(?i)wms|rigentec"
+      $nameMatches = $shortcutName -match "(?i)wms|rigentec|scmayer"
       $targetMatches = $targetPath -and (Test-PathWithinBase -BasePath $State.ReleaseRoot -TargetPath $targetPath)
       $argsMatch = $arguments -and $arguments -like "*$($State.ReleaseRoot)*"
       if ($nameMatches -and ($targetMatches -or $argsMatch)) {

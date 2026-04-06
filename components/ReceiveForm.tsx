@@ -4,6 +4,9 @@ import { useState } from "react";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import WarehouseLocationPicker, { type WarehouseOption } from "@/components/WarehouseLocationPicker";
 import Link from "next/link";
+import { Button, buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 type Props = {
   action: (formData: FormData) => void;
@@ -27,7 +30,7 @@ export default function ReceiveForm({ action, warehouses, codeSuggestions, refer
   return (
     <form
       action={action}
-      className="glass-card space-y-6"
+      className="panel space-y-6 p-5"
       onSubmit={(event) => {
         const formData = new FormData(event.currentTarget);
         const code = String(formData.get("code") ?? "").trim();
@@ -67,17 +70,7 @@ export default function ReceiveForm({ action, warehouses, codeSuggestions, refer
           showDetails
         />
 
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Cantidad *</span>
-          <input
-            name="quantity"
-            required
-            inputMode="decimal"
-            className="w-full px-4 py-3 glass rounded-lg"
-            placeholder="10"
-          />
-          {errors.quantity && <p className="text-xs text-red-400">{errors.quantity}</p>}
-        </label>
+        <Input name="quantity" required inputMode="decimal" label="Cantidad" placeholder="10" error={errors.quantity} />
 
         <WarehouseLocationPicker
           warehouses={warehouses}
@@ -87,58 +80,49 @@ export default function ReceiveForm({ action, warehouses, codeSuggestions, refer
           locationError={errors.locationId}
         />
 
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Referencia documento *</span>
-          <input
-            name="reference"
-            required
-            list={referenceSuggestions && referenceSuggestions.length > 0 ? "receive-reference-options" : undefined}
-            className="w-full px-4 py-3 glass rounded-lg"
-            placeholder="Factura/OC/Remision"
-          />
-          {referenceSuggestions && referenceSuggestions.length > 0 && (
-            <datalist id="receive-reference-options">
-              {referenceSuggestions.map((reference) => (
-                <option key={reference} value={reference} />
-              ))}
-            </datalist>
-          )}
-          {errors.reference && <p className="text-xs text-red-400">{errors.reference}</p>}
-        </label>
+        <Input
+          name="reference"
+          required
+          label="Referencia documento"
+          list={referenceSuggestions && referenceSuggestions.length > 0 ? "receive-reference-options" : undefined}
+          placeholder="Factura/OC/Remision"
+          error={errors.reference}
+        />
+        {referenceSuggestions && referenceSuggestions.length > 0 && (
+          <datalist id="receive-reference-options">
+            {referenceSuggestions.map((reference) => (
+              <option key={reference} value={reference} />
+            ))}
+          </datalist>
+        )}
 
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Operador *</span>
-          <input
-            name="operatorName"
-            required
-            className="w-full px-4 py-3 glass rounded-lg"
-            placeholder="Nombre del operador"
-          />
-          {errors.operatorName && <p className="text-xs text-red-400">{errors.operatorName}</p>}
-        </label>
+        <Input
+          name="operatorName"
+          required
+          label="Operador"
+          placeholder="Nombre del operador"
+          error={errors.operatorName}
+        />
 
-        <label className="space-y-1">
-          <span className="text-sm text-slate-400">Archivo referencia (PDF/imagen)</span>
+        <label className="space-y-1.5">
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Archivo referencia</span>
           <input
             name="referenceFile"
             type="file"
             accept="application/pdf,image/*"
-            className="w-full px-4 py-3 glass rounded-lg"
+            className="field px-4 py-2.5"
           />
-          <p className="text-xs text-slate-500">Opcional. Max 10 MB.</p>
+          <p className="text-xs text-[var(--text-muted)]">Opcional. Max 10 MB.</p>
         </label>
 
-        <label className="space-y-1 md:col-span-2">
-          <span className="text-sm text-slate-400">Notas</span>
-          <textarea name="notes" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
-        </label>
+        <Textarea name="notes" label="Notas" textareaClassName="min-h-[96px]" rootClassName="md:col-span-2" />
       </div>
 
       <div className="flex items-center justify-end gap-3">
-        <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+        <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>
           Cancelar
         </Link>
-        <button type="submit" className="btn-primary">Registrar entrada</button>
+        <Button type="submit">Registrar entrada</Button>
       </div>
     </form>
   );

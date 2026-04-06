@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { supplierCreateSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
+import { Button, buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Textarea } from "@/components/ui/textarea";
 
 async function createSupplier(formData: FormData) {
   "use server";
@@ -56,90 +61,67 @@ export default async function NewSupplierPage({
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/purchasing/suppliers" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Proveedores</Link>
-        <h1 className="text-2xl font-bold">Nuevo Proveedor</h1>
-      </div>
+      <PageHeader
+        title="Nuevo Proveedor"
+        description="Captura datos fiscales y de contacto para abastecimiento."
+        actions={
+          <Link href="/purchasing/suppliers" className={buttonStyles({ variant: "secondary" })}>
+            Proveedores
+          </Link>
+        }
+      />
 
       {sp.error && (
-        <div className="glass-card border border-red-500/30 text-red-200 text-sm">{sp.error}</div>
+        <section className="surface border-[var(--danger)]/40 bg-[var(--danger-soft)] p-4 text-sm text-[var(--danger)]">{sp.error}</section>
       )}
 
-      <form action={createSupplier} className="glass-card space-y-5">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Código *</span>
-            <input
+      <form action={createSupplier}>
+        <SectionCard
+          title="Datos del proveedor"
+          footer={
+            <>
+              <Link href="/purchasing/suppliers" className={buttonStyles({ variant: "secondary" })}>
+                Cancelar
+              </Link>
+              <Button type="submit">Guardar Proveedor</Button>
+            </>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input
               name="code"
               required
               maxLength={20}
+              label="Codigo"
               placeholder="PROV-001"
-              className="w-full px-4 py-3 glass rounded-lg font-mono uppercase"
-              style={{ textTransform: "uppercase" }}
+              inputClassName="font-mono uppercase"
+              hint="Solo mayusculas, numeros y guiones."
             />
-            <p className="text-xs text-slate-500">Solo mayúsculas, números y guiones</p>
-          </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Nombre *</span>
-            <input
+            <Input
               name="name"
               required
               maxLength={200}
+              label="Nombre"
               placeholder="Distribuidora Ejemplo S.A."
-              className="w-full px-4 py-3 glass rounded-lg"
             />
-          </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">RFC</span>
-            <input
-              name="taxId"
-              maxLength={20}
-              placeholder="EJMP010101AAA"
-              className="w-full px-4 py-3 glass rounded-lg font-mono"
-            />
-          </label>
+            <Input name="taxId" maxLength={20} label="RFC" placeholder="EJMP010101AAA" inputClassName="font-mono" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Email</span>
-            <input
-              name="email"
-              type="email"
-              maxLength={200}
-              placeholder="contacto@proveedor.com"
-              className="w-full px-4 py-3 glass rounded-lg"
-            />
-          </label>
+            <Input name="email" type="email" maxLength={200} label="Email" placeholder="contacto@proveedor.com" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Teléfono</span>
-            <input
-              name="phone"
-              maxLength={20}
-              placeholder="+52 55 1234 5678"
-              className="w-full px-4 py-3 glass rounded-lg"
-            />
-          </label>
-        </div>
+            <Input name="phone" maxLength={20} label="Telefono" placeholder="+52 55 1234 5678" />
+          </div>
 
-        <label className="space-y-1 block">
-          <span className="text-sm text-slate-400">Dirección</span>
-          <textarea
+          <Textarea
             name="address"
             rows={2}
             maxLength={500}
-            placeholder="Calle, Número, Colonia, CP, Ciudad"
-            className="w-full px-4 py-3 glass rounded-lg resize-none"
+            label="Direccion"
+            placeholder="Calle, Numero, Colonia, CP, Ciudad"
+            textareaClassName="resize-none"
           />
-        </label>
-
-        <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
-          <Link href="/purchasing/suppliers" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-            Cancelar
-          </Link>
-          <button type="submit" className="btn-primary">Guardar Proveedor</button>
-        </div>
+        </SectionCard>
       </form>
     </div>
   );

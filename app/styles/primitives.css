@@ -1,0 +1,188 @@
+/* Layout surfaces */
+.surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+/* Buttons */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  padding: 0.55rem 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.1;
+  text-decoration: none;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.btn-ghost:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"],
+.btn-primary:disabled,
+.btn-primary[aria-disabled="true"],
+.btn-secondary:disabled,
+.btn-secondary[aria-disabled="true"],
+.btn-ghost:disabled,
+.btn-ghost[aria-disabled="true"] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-subtle);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  padding: 0.18rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+}
+
+.badge-accent {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 34%, var(--border-default));
+  background: var(--accent-soft);
+}
+
+.badge-success {
+  color: var(--success);
+  border-color: color-mix(in oklab, var(--success) 34%, var(--border-default));
+  background: var(--success-soft);
+}
+
+.badge-warning {
+  color: var(--warning);
+  border-color: color-mix(in oklab, var(--warning) 34%, var(--border-default));
+  background: var(--warning-soft);
+}
+
+.badge-danger {
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 34%, var(--border-default));
+  background: var(--danger-soft);
+}
+
+/* Form fields and dense controls */
+.field {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  padding: 0.6rem 0.85rem;
+  color: var(--text-primary);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.field::placeholder {
+  color: var(--text-muted);
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.625rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.table-shell {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* Compatibility aliases for gradual migration */
+@utility glass {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+@utility glass-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 1.25rem;
+}
+
+.glass-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}

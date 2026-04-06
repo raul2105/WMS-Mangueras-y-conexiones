@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
+const { seedDemoData } = require('./seed-demo.cjs');
 
 const DEV_ASSEMBLY_PREFIX = 'DEV-ASM-';
 
@@ -81,7 +82,7 @@ const seedWarehouses = [
   {
     code: 'WH-01',
     name: 'Almacén Principal',
-    description: 'Almacén central de Rigentec',
+    description: 'Almacén central de SCMayer',
     address: 'Av. Industrial 1234, Ciudad',
     isActive: true,
   },
@@ -151,7 +152,7 @@ const seedProducts = [
     description: 'Ensamble 3/4" R12 con proteccion espiral.',
     type: 'ASSEMBLY',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     base_cost: 450.0,
     price: 950.0,
     attributes: {
@@ -175,7 +176,7 @@ const seedAssemblyProducts = [
     description: 'Manguera termoplástica para ensamble DN16 con alta flexibilidad.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Mangueras termoplásticas',
     base_cost: 82,
     price: 145,
@@ -200,7 +201,7 @@ const seedAssemblyProducts = [
     description: 'Manguera DN10 con doble malla para pruebas de insuficiencia por longitud.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Mangueras hidráulicas',
     base_cost: 64,
     price: 118,
@@ -224,7 +225,7 @@ const seedAssemblyProducts = [
     description: 'Manguera ligera DN12 para pruebas de búsqueda por DN y termoplástica.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Mangueras termoplásticas',
     base_cost: 58,
     price: 104,
@@ -248,7 +249,7 @@ const seedAssemblyProducts = [
     description: 'Manguera de mayor capacidad para búsqueda por diámetro y presión.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Mangueras termoplásticas',
     base_cost: 110,
     price: 188,
@@ -272,7 +273,7 @@ const seedAssemblyProducts = [
     description: 'Manguera compacta para pruebas de búsqueda por medida fraccional.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Mangueras compactas',
     base_cost: 41,
     price: 79,
@@ -296,7 +297,7 @@ const seedAssemblyProducts = [
     description: 'Manguera robusta para escenarios suficientes solo en almacén secundario.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Mangueras hidráulicas',
     base_cost: 132,
     price: 220,
@@ -320,7 +321,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de entrada para ensambles DN16 con rosca JIC.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones entrada',
     base_cost: 18,
     price: 36,
@@ -344,7 +345,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de salida en 90 grados para ensambles DN16.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones salida',
     base_cost: 22,
     price: 42,
@@ -368,7 +369,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de entrada DN10 para casos con stock justo.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones entrada',
     base_cost: 14,
     price: 29,
@@ -392,7 +393,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de salida DN10 recta para probar faltantes en WH-01.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones salida',
     base_cost: 15,
     price: 30,
@@ -416,7 +417,7 @@ const seedAssemblyProducts = [
     description: 'Conexión NPT de entrada para filtrar por rosca.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones entrada',
     base_cost: 16,
     price: 31,
@@ -440,7 +441,7 @@ const seedAssemblyProducts = [
     description: 'Conexión NPT de salida en 90 grados.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones salida',
     base_cost: 19,
     price: 35,
@@ -464,7 +465,7 @@ const seedAssemblyProducts = [
     description: 'Conexión BSP de entrada para ensambles de mayor diámetro.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones entrada',
     base_cost: 21,
     price: 39,
@@ -488,7 +489,7 @@ const seedAssemblyProducts = [
     description: 'Conexión BSP de salida para validar cambio de almacén.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones salida',
     base_cost: 23,
     price: 43,
@@ -512,7 +513,7 @@ const seedAssemblyProducts = [
     description: 'Conexión compacta de entrada para búsquedas por 3/16.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones entrada',
     base_cost: 11,
     price: 24,
@@ -536,7 +537,7 @@ const seedAssemblyProducts = [
     description: 'Conexión compacta de salida para búsquedas por 90° y JIC.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'Rigentec',
+    brand: 'SCMayer',
     subcategory: 'Conexiones salida',
     base_cost: 12,
     price: 26,
@@ -705,6 +706,10 @@ async function main() {
   for (const productData of seedAssemblyProducts) {
     await upsertSeedProduct(productData, locationMap, stagingMap[seedWarehouses[0].code]);
   }
+
+  console.log('🧩 Creating demo operational dataset...');
+  const demoSummary = await seedDemoData(prisma);
+  console.log('📊 Demo summary:', demoSummary);
 
   console.log('✅ Seed completed successfully!');
 }

@@ -1,7 +1,7 @@
-# Copilot Instructions for WMS Rigentec
+# Copilot Instructions for WMS-SCMayer
 
 ## Project Overview
-This is a Warehouse Management System (WMS) for RIGENTEC, built with Next.js 16, React 19, TypeScript, and Prisma ORM with SQLite. The system manages inventory control and assembly for hoses and connections (mangueras y conexiones).
+This is a Warehouse Management System (WMS) for SCMayer, built with Next.js 16, React 19, TypeScript, and Prisma ORM with SQLite. The system manages inventory control and assembly for hoses and connections (mangueras y conexiones).
 
 ## Tech Stack
 - **Framework**: Next.js 16.1.6 with App Router

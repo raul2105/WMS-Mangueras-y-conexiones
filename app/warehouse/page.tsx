@@ -1,5 +1,13 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
+import { buttonStyles } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { BoxIcon, InventoryIcon, WarehouseIcon } from "@/components/ui/icons";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { StatCard } from "@/components/ui/stat-card";
+import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 24;
@@ -45,119 +53,110 @@ export default async function WarehousePage({
   const buildHref = (page: number) => (page > 1 ? `/warehouse?page=${page}` : "/warehouse");
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-            Almacenes
-          </h1>
-          <p className="text-slate-400 mt-1">Gestión de almacenes y ubicaciones</p>
-        </div>
-        <div className="flex gap-3">
-          <Link href="/warehouse/new" className="btn-primary">
-            + Nuevo Almacén
+    <div className="space-y-5">
+      <PageHeader
+        title="Almacenes"
+        description="Gestiona almacenes activos, capacidad de ubicaciones y acceso a detalles operativos."
+        meta={`${totalCount.toLocaleString("es-MX")} almacenes registrados`}
+        actions={
+          <Link href="/warehouse/new" className={buttonStyles()}>
+            Nuevo almacen
           </Link>
-        </div>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard
+          label="Total almacenes"
+          value={totalCount.toLocaleString("es-MX")}
+          meta="Registrados en el maestro"
+          icon={<WarehouseIcon className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Activos"
+          value={activeCount.toLocaleString("es-MX")}
+          meta="Disponibles para operacion"
+          tone="success"
+          icon={<BoxIcon className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Ubicaciones"
+          value={totalLocations.toLocaleString("es-MX")}
+          meta="Capacidad total configurada"
+          tone="accent"
+          icon={<InventoryIcon className="h-5 w-5" />}
+        />
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass p-4 rounded-xl">
-          <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold block">Total Almacenes</span>
-          <span className="text-2xl font-bold text-white mt-1">{totalCount}</span>
-        </div>
-        <div className="glass p-4 rounded-xl">
-          <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold block">Activos</span>
-          <span className="text-2xl font-bold text-green-400 mt-1">{activeCount}</span>
-        </div>
-        <div className="glass p-4 rounded-xl">
-          <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold block">Total Ubicaciones</span>
-          <span className="text-2xl font-bold text-cyan-400 mt-1">{totalLocations}</span>
-        </div>
-      </div>
-
-      {/* Warehouse List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {warehouses.map((warehouse) => (
-          <Link
-            key={warehouse.id}
-            href={`/warehouse/${warehouse.id}`}
-            className="glass-card group hover:border-cyan-500/50"
-          >
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-4xl p-3 bg-cyan-500/10 rounded-xl group-hover:bg-cyan-500/20 transition-colors">
-                🏭
-              </span>
-              <span
-                className={`text-xs font-bold px-2 py-1 rounded ${
-                  warehouse.isActive
-                    ? "bg-green-500/20 text-green-400"
-                    : "bg-red-500/20 text-red-400"
-                }`}
+      <SectionCard
+        title="Listado de almacenes"
+        description={`Pagina ${safePage} de ${totalPages}`}
+        footer={
+          totalPages > 1 ? (
+            <div className="flex w-full items-center justify-between gap-2 text-sm">
+              <Link
+                href={buildHref(Math.max(1, safePage - 1))}
+                className={buttonStyles({ variant: "secondary", size: "sm", className: safePage <= 1 ? "pointer-events-none opacity-40" : "" })}
               >
-                {warehouse.isActive ? "ACTIVO" : "INACTIVO"}
-              </span>
+                Anterior
+              </Link>
+              <span className="text-[var(--text-muted)]">{safePage} / {totalPages}</span>
+              <Link
+                href={buildHref(Math.min(totalPages, safePage + 1))}
+                className={buttonStyles({ variant: "secondary", size: "sm", className: safePage >= totalPages ? "pointer-events-none opacity-40" : "" })}
+              >
+                Siguiente
+              </Link>
             </div>
-
-            <h2 className="text-xl font-bold text-white group-hover:text-cyan-400 transition-colors">
-              {warehouse.name}
-            </h2>
-            <p className="text-sm text-slate-400 font-mono mt-1">{warehouse.code}</p>
-
-            {warehouse.description && (
-              <p className="text-sm text-slate-500 mt-3 line-clamp-2">{warehouse.description}</p>
-            )}
-
-            {warehouse.address && (
-              <p className="text-xs text-slate-600 mt-2">📍 {warehouse.address}</p>
-            )}
-
-            <div className="mt-4 pt-4 border-t border-white/5 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold text-white">{warehouse._count.locations}</span>
-                <span className="text-xs text-slate-400">ubicaciones</span>
-              </div>
-              <span className="text-sm text-cyan-400 group-hover:text-cyan-300">
-                Ver detalle →
-              </span>
-            </div>
-          </Link>
-        ))}
-
-        {warehouses.length === 0 && (
-          <div className="col-span-full glass-card text-center py-12">
-            <span className="text-6xl block mb-4">📦</span>
-            <p className="text-slate-400 text-lg">No hay almacenes registrados</p>
-            <p className="text-slate-500 text-sm mt-2">
-              Crea tu primer almacén para empezar a gestionar ubicaciones
-            </p>
-            <Link href="/warehouse/new" className="btn-primary mt-6 inline-block">
-              + Crear Almacén
-            </Link>
-          </div>
+          ) : null
+        }
+      >
+        {warehouses.length === 0 ? (
+          <EmptyState
+            title="No hay almacenes registrados"
+            description="Crea tu primer almacen para empezar a gestionar ubicaciones e inventario."
+            actions={<Link href="/warehouse/new" className={buttonStyles({ size: "sm" })}>Crear almacen</Link>}
+          />
+        ) : (
+          <TableWrap striped>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Codigo</Th>
+                  <Th>Almacen</Th>
+                  <Th>Estado</Th>
+                  <Th className="text-right">Ubicaciones</Th>
+                  <Th>Direccion</Th>
+                  <Th className="text-right">Accion</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {warehouses.map((warehouse) => (
+                  <TableRow key={warehouse.id}>
+                    <Td className="font-mono text-xs text-[var(--text-primary)]">{warehouse.code}</Td>
+                    <Td>
+                      <div className="space-y-1">
+                        <p className="font-medium text-[var(--text-primary)]">{warehouse.name}</p>
+                        <p className="text-xs text-[var(--text-muted)]">{warehouse.description || "--"}</p>
+                      </div>
+                    </Td>
+                    <Td>
+                      <Badge variant={warehouse.isActive ? "success" : "danger"}>{warehouse.isActive ? "Activo" : "Inactivo"}</Badge>
+                    </Td>
+                    <Td className="text-right font-semibold text-[var(--text-primary)]">{warehouse._count.locations}</Td>
+                    <Td className="text-sm text-[var(--text-secondary)]">{warehouse.address || "--"}</Td>
+                    <Td className="text-right">
+                      <Link href={`/warehouse/${warehouse.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                        Ver detalle
+                      </Link>
+                    </Td>
+                  </TableRow>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
         )}
-      </div>
-
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between gap-3 text-sm">
-          <Link
-            href={buildHref(Math.max(1, safePage - 1))}
-            className={`px-4 py-2 glass rounded-lg ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
-          >
-            ← Anterior
-          </Link>
-          <span className="text-slate-500">
-            Página {safePage} de {totalPages}
-          </span>
-          <Link
-            href={buildHref(Math.min(totalPages, safePage + 1))}
-            className={`px-4 py-2 glass rounded-lg ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
-          >
-            Siguiente →
-          </Link>
-        </div>
-      )}
+      </SectionCard>
     </div>
   );
 }

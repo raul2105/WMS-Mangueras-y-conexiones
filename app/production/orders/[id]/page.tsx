@@ -3,45 +3,75 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
-import { confirmAssemblyPickTask, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
+import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
 import { assemblyConsumeSchema, firstErrorMessage } from "@/lib/schemas/wms";
+import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import { buttonStyles } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
+
+function formatDateLabel(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleDateString("es-MX");
+}
 
 async function releaseAssemblyPick(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
-  if (!orderId) redirect("/production/orders");
+  if (!orderId) redirect("/production");
   try {
     await releaseAssemblyPickList(prisma, orderId);
-    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Lista de surtido liberada")}`);
   } catch (error) {
-    const message = error instanceof InventoryServiceError ? error.message : "No se pudo liberar surtido";
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Ocurrio un error inesperado al liberar surtido";
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Lista de surtido liberada")}`);
 }
 
-async function confirmAssemblyTask(formData: FormData) {
+async function confirmAssemblyBatch(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
-  const taskId = String(formData.get("taskId") ?? "").trim();
-  const pickedQty = Number(String(formData.get("pickedQty") ?? "").trim());
-  const shortReason = String(formData.get("shortReason") ?? "").trim() || null;
   const operatorName = String(formData.get("operatorName") ?? "").trim();
-  if (!orderId || !taskId || !Number.isFinite(pickedQty) || pickedQty < 0 || !operatorName) {
-    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Datos de picking invalidos")}`);
+  const taskIds = formData
+    .getAll("taskIds")
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+
+  if (!orderId || !operatorName || taskIds.length === 0) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Datos de surtido invalidos")}`);
   }
 
-  try {
-    const result = await confirmAssemblyPickTask(prisma, { taskId, pickedQty, shortReason, operatorName });
-    if (result?.labelJobId) {
-      redirect(`/labels/jobs/${result.labelJobId}?next=${encodeURIComponent(`/production/orders/${orderId}?ok=1`)}`);
+  const tasks = taskIds.map((taskId) => {
+    const pickedRaw = String(formData.get(`pickedQty__${taskId}`) ?? "").trim();
+    const shortReason = String(formData.get(`shortReason__${taskId}`) ?? "").trim() || null;
+    const pickedQty = pickedRaw === "" ? null : Number(pickedRaw);
+    if (pickedQty !== null && (!Number.isFinite(pickedQty) || pickedQty < 0)) {
+      redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Cantidad surtida invalida")}`);
     }
-    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Picking confirmado")}`);
+    return { taskId, pickedQty, shortReason };
+  });
+
+  let result: Awaited<ReturnType<typeof confirmAssemblyPickTasksBatch>>;
+  try {
+    result = await confirmAssemblyPickTasksBatch(prisma, {
+      productionOrderId: orderId,
+      operatorName,
+      tasks,
+    });
   } catch (error) {
-    const message = error instanceof InventoryServiceError ? error.message : "No se pudo confirmar picking";
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Ocurrio un error inesperado al confirmar surtido";
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
+
+  const message = `Surtido confirmado (${result.processedCount} tareas, ${result.labelJobIds.length} etiquetas)`;
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent(message)}`);
 }
 
 async function consumeAssemblyOrder(formData: FormData) {
@@ -52,31 +82,37 @@ async function consumeAssemblyOrder(formData: FormData) {
   });
   if (!parsed.success) {
     const orderId = String(formData.get("orderId") ?? "").trim();
-    const target = orderId ? `/production/orders/${orderId}` : "/production/orders";
+    const target = orderId ? `/production/orders/${orderId}` : "/production";
     redirect(`${target}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
   const orderId = parsed.data.orderId;
   const operatorName = parsed.data.operatorName;
   try {
     await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName);
-    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cerrada y consumida")}`);
   } catch (error) {
-    const message = error instanceof InventoryServiceError ? error.message : "No se pudo cerrar orden";
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Ocurrio un error inesperado al cerrar la orden";
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cerrada y consumida")}`);
 }
 
 async function cancelAssemblyOrder(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
-  if (!orderId) redirect("/production/orders");
+  if (!orderId) redirect("/production");
   try {
     await cancelAssemblyWorkOrder(prisma, orderId);
-    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cancelada y reservas liberadas")}`);
   } catch (error) {
-    const message = error instanceof InventoryServiceError ? error.message : "No se pudo cancelar orden";
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Ocurrio un error inesperado al cancelar la orden";
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cancelada y reservas liberadas")}`);
 }
 
 export default async function ProductionOrderDetailPage({
@@ -96,6 +132,10 @@ export default async function ProductionOrderDetailPage({
       code: true,
       status: true,
       kind: true,
+      customerName: true,
+      priority: true,
+      dueDate: true,
+      notes: true,
       warehouse: { select: { name: true, code: true } },
       items: {
         select: {
@@ -112,6 +152,7 @@ export default async function ProductionOrderDetailPage({
           assemblyQuantity: true,
           totalHoseRequired: true,
           sourceDocumentRef: true,
+          notes: true,
           entryFittingProduct: { select: { sku: true, name: true } },
           hoseProduct: { select: { sku: true, name: true } },
           exitFittingProduct: { select: { sku: true, name: true } },
@@ -152,6 +193,7 @@ export default async function ProductionOrderDetailPage({
                   sequence: true,
                   reservedQty: true,
                   pickedQty: true,
+                  shortQty: true,
                   status: true,
                   shortReason: true,
                   sourceLocation: { select: { code: true, name: true } },
@@ -164,9 +206,31 @@ export default async function ProductionOrderDetailPage({
       },
     },
   });
-  if (!order) redirect("/production/orders");
+  if (!order) redirect("/production");
 
-  if (order.kind !== "ASSEMBLY_3PIECE" || !order.assemblyConfiguration || !order.assemblyWorkOrder) {
+  const orderTrace = await prisma.traceRecord.findFirst({
+    where: {
+      sourceEntityType: "ASSEMBLY_ORDER",
+      sourceEntityId: order.id,
+    },
+    select: {
+      traceId: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  const lastAssemblyOperator = await prisma.inventoryMovement.findFirst({
+    where: {
+      documentType: "ASSEMBLY_ORDER",
+      documentId: order.id,
+      operatorName: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { operatorName: true },
+  });
+
+  if (order.kind !== "ASSEMBLY_3PIECE") {
     return (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4">
@@ -174,9 +238,9 @@ export default async function ProductionOrderDetailPage({
             <h1 className="text-3xl font-bold">Orden {order.code}</h1>
             <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
           </div>
-          <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Ordenes</Link>
+          <Link href="/production" className={buttonStyles({ variant: "secondary" })}>Ensamble</Link>
         </div>
-        <div className="glass-card border border-amber-500/30 text-amber-200">
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--warning) 35%,var(--border-default))] bg-[var(--warning-soft)] px-4 py-3 text-sm text-[var(--warning)]">
           Orden genérica: la edición manual permanece en ruta de mantenimiento temporal.
         </div>
         <table className="w-full text-sm glass-card">
@@ -203,7 +267,97 @@ export default async function ProductionOrderDetailPage({
     );
   }
 
+  if (!order.assemblyConfiguration || !order.assemblyWorkOrder) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Orden {order.code}</h1>
+            <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
+          </div>
+          <Link href="/production" className={buttonStyles({ variant: "secondary" })}>Ensamble</Link>
+        </div>
+
+        {sp.error && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">{sp.error}</div>}
+        {sp.ok && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">{sp.ok}</div>}
+
+        <div className="panel space-y-4 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">Encabezado comercial</h2>
+              <p className="text-sm text-slate-400 mt-1">
+                La orden esta en borrador y todavia no tiene configuracion tecnica.
+              </p>
+            </div>
+            <span className="px-3 py-1 rounded-full border border-[color-mix(in oklab,var(--warning) 35%,var(--border-default))] bg-[var(--warning-soft)] text-[var(--warning)] text-xs">
+              PENDIENTE CONFIG
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="space-y-1">
+              <p className="text-slate-400">Cliente</p>
+              <p className="text-slate-200">{order.customerName ?? "--"}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Fecha compromiso</p>
+              <p className="text-slate-200">{formatDateLabel(order.dueDate)}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Prioridad</p>
+              <p className="text-slate-200">{order.priority}</p>
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <p className="text-slate-400">Notas comerciales</p>
+              <p className="text-slate-200 whitespace-pre-wrap">{order.notes ?? "--"}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="panel space-y-4 p-5">
+          <h2 className="text-xl font-semibold">Estado operativo</h2>
+          <p className="text-sm text-slate-400">
+            Las acciones operativas se habilitan cuando completes la configuracion exacta del ensamble.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" className={buttonStyles({ className: "opacity-50" })} disabled>Liberar surtido</button>
+            <button type="button" className={buttonStyles({ className: "opacity-50" })} disabled>Cerrar y consumir</button>
+          </div>
+        </div>
+
+        <div className="panel border-[var(--border-strong)] p-5">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Siguiente paso</h2>
+              <p className="text-sm text-slate-400 mt-1">
+                Continúa con la configuracion de productos, longitud, cantidad y previsualizacion exacta.
+              </p>
+            </div>
+            <Link href={`/production/orders/new?orderId=${order.id}`} className={buttonStyles()}>
+              Continuar configuracion
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const activePickList = order.assemblyWorkOrder.pickLists[0] ?? null;
+  const isFinalOrderStatus = order.status === "COMPLETADA" || order.status === "CANCELADA";
+  const hasWip = order.assemblyWorkOrder.lines.some((line) => line.wipQty > 0);
+  const hasConsumed = order.assemblyWorkOrder.lines.some((line) => line.consumedQty > 0);
+  const canCancel =
+    !isFinalOrderStatus &&
+    order.assemblyWorkOrder.pickStatus === "NOT_RELEASED" &&
+    !hasWip &&
+    !hasConsumed &&
+    order.assemblyWorkOrder.consumptionStatus === "NOT_CONSUMED";
+  const canClose =
+    !isFinalOrderStatus &&
+    order.assemblyWorkOrder.pickStatus === "COMPLETED" &&
+    order.assemblyWorkOrder.wipStatus !== "NOT_IN_WIP" &&
+    order.assemblyWorkOrder.consumptionStatus !== "CONSUMED";
+  const closeOperatorDefault = lastAssemblyOperator?.operatorName ?? "";
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -212,98 +366,178 @@ export default async function ProductionOrderDetailPage({
           <h1 className="text-3xl font-bold">Orden {order.code}</h1>
           <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
         </div>
-        <Link href="/production/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Ordenes</Link>
+        <Link href="/production" className={buttonStyles({ variant: "secondary" })}>Ensamble</Link>
       </div>
 
-      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
-      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">{sp.ok}</div>}
+      {sp.error && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">{sp.error}</div>}
+      {sp.ok && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">{sp.ok}</div>}
 
-      <div className="glass-card space-y-3">
+      <div className="panel space-y-4 p-5">
+        <h2 className="text-xl font-semibold">Encabezado comercial</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="space-y-1">
+            <p className="text-slate-400">Cliente</p>
+            <p className="text-slate-200">{order.customerName ?? "--"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-slate-400">Fecha compromiso</p>
+            <p className="text-slate-200">{formatDateLabel(order.dueDate)}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-slate-400">Prioridad</p>
+            <p className="text-slate-200">{order.priority}</p>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <p className="text-slate-400">Notas comerciales</p>
+            <p className="text-slate-200 whitespace-pre-wrap">{order.notes ?? "--"}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel space-y-3 p-5">
         <h2 className="text-xl font-semibold">Configuración</h2>
         <p>{order.assemblyConfiguration.entryFittingProduct.sku} + {order.assemblyConfiguration.hoseProduct.sku} + {order.assemblyConfiguration.exitFittingProduct.sku}</p>
         <p className="text-sm text-slate-400">Longitud {order.assemblyConfiguration.hoseLength}, cantidad {order.assemblyConfiguration.assemblyQuantity}, manguera total {order.assemblyConfiguration.totalHoseRequired}</p>
         <p className="text-sm text-slate-400">Documento fuente: {order.assemblyConfiguration.sourceDocumentRef ?? "--"}</p>
+        <p className="text-sm text-slate-400">Notas tecnicas: {order.assemblyConfiguration.notes ?? "--"}</p>
       </div>
 
-      <div className="glass-card space-y-4">
+      <div className="panel space-y-4 p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Estado operativo</h2>
           <form action={releaseAssemblyPick}>
             <input type="hidden" name="orderId" value={order.id} />
-            <button type="submit" className="btn-primary" disabled={order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"}>Liberar surtido</button>
+            <button type="submit" className={buttonStyles({ className: order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED" ? "opacity-50" : "" })} disabled={order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"}>Iniciar surtido</button>
           </form>
         </div>
         <p className="text-sm text-slate-400">Reserva {order.assemblyWorkOrder.reservationStatus} | Picking {order.assemblyWorkOrder.pickStatus} | WIP {order.assemblyWorkOrder.wipStatus} | Consumo {order.assemblyWorkOrder.consumptionStatus}</p>
         <p className="text-sm text-slate-400">WIP: {order.assemblyWorkOrder.wipLocation.code} - {order.assemblyWorkOrder.wipLocation.name}</p>
+        <p className="text-sm text-slate-400">
+          Trace de ensamble:
+          {orderTrace ? (
+            <>
+              {" "}
+              <Link href={`/trace/${encodeURIComponent(orderTrace.traceId)}`} className="font-mono text-cyan-300 hover:underline">
+                {orderTrace.traceId}
+              </Link>
+              {" "}
+              (actualizado {new Date(orderTrace.updatedAt).toLocaleString("es-MX")})
+            </>
+          ) : (
+            " se generará al confirmar el primer surtido de la orden"
+          )}
+        </p>
       </div>
 
-      <table className="w-full text-sm glass-card">
-        <thead>
-          <tr className="text-slate-400 border-b border-white/10">
-            <th className="text-left py-2">Rol</th>
-            <th className="text-left py-2">Producto</th>
-            <th className="text-right py-2">Req</th>
-            <th className="text-right py-2">Reservado</th>
-            <th className="text-right py-2">WIP</th>
-            <th className="text-right py-2">Consumido</th>
-            <th className="text-right py-2">Faltante</th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.assemblyWorkOrder.lines.map((line) => (
-            <tr key={line.id} className="border-b border-white/5">
-              <td className="py-2">{line.componentRole}</td>
-              <td className="py-2">{line.product.sku} - {line.product.name}</td>
-              <td className="py-2 text-right">{line.requiredQty}</td>
-              <td className="py-2 text-right">{line.reservedQty}</td>
-              <td className="py-2 text-right">{line.wipQty}</td>
-              <td className="py-2 text-right">{line.consumedQty}</td>
-              <td className="py-2 text-right">{line.shortQty}</td>
+      <TableWrap dense striped className="glass-card p-0">
+        <Table className="min-w-[880px] table-fixed">
+          <thead>
+            <tr>
+              <Th className="w-[12rem]">Rol</Th>
+              <Th className="w-[48%]">Producto</Th>
+              <Th className="w-[5.5rem] text-right">Req</Th>
+              <Th className="w-[6.5rem] text-right">Reservado</Th>
+              <Th className="w-[5rem] text-right">WIP</Th>
+              <Th className="w-[7rem] text-right">Consumido</Th>
+              <Th className="w-[6rem] text-right">Faltante</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {order.assemblyWorkOrder.lines.map((line) => (
+              <TableRow key={line.id}>
+                <Td className="align-top font-medium text-[var(--text-primary)]">{line.componentRole}</Td>
+                <Td className="align-top">
+                  <div className="min-w-0 space-y-1">
+                    <p className="break-words font-mono text-xs text-[var(--text-muted)]">{line.product.sku}</p>
+                    <p className="break-words text-sm text-[var(--text-primary)]">{line.product.name}</p>
+                  </div>
+                </Td>
+                <Td className="align-top text-right font-semibold text-[var(--text-primary)]">{line.requiredQty}</Td>
+                <Td className="align-top text-right font-semibold text-[var(--text-primary)]">{line.reservedQty}</Td>
+                <Td className="align-top text-right font-semibold text-[var(--text-primary)]">{line.wipQty}</Td>
+                <Td className="align-top text-right font-semibold text-[var(--text-primary)]">{line.consumedQty}</Td>
+                <Td className="align-top text-right font-semibold text-[var(--text-primary)]">{line.shortQty}</Td>
+              </TableRow>
+            ))}
+          </tbody>
+        </Table>
+      </TableWrap>
 
       {activePickList && (
-        <div className="glass-card space-y-3">
+        <div className="panel space-y-3 p-5">
           <h2 className="text-xl font-semibold">Picking {activePickList.code}</h2>
-          {activePickList.tasks.map((task) => {
-            const pendingQty = Math.max(0, task.reservedQty - task.pickedQty);
-            return (
-              <form key={task.id} action={confirmAssemblyTask} className="glass rounded-lg p-4 grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
-                <input type="hidden" name="orderId" value={order.id} />
-                <input type="hidden" name="taskId" value={task.id} />
-                <div className="md:col-span-2">
-                  <p className="text-xs text-slate-400">Ubicación</p>
-                  <p>{task.sequence}. {task.sourceLocation.code} - {task.sourceLocation.name}</p>
+          <form action={confirmAssemblyBatch} className="space-y-3">
+            <input type="hidden" name="orderId" value={order.id} />
+            {activePickList.tasks.map((task) => {
+              const pendingQty = Math.max(0, task.reservedQty - task.pickedQty);
+              const isClosed = task.status === "COMPLETED" || task.status === "CANCELLED";
+              return (
+                <div key={task.id} className="surface rounded-lg p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                  {!isClosed && <input type="hidden" name="taskIds" value={task.id} />}
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-slate-400">Ubicación</p>
+                    <p>{task.sequence}. {task.sourceLocation.code} - {task.sourceLocation.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Componente</p>
+                    <p>{task.assemblyWorkOrderLine.componentRole} ({task.assemblyWorkOrderLine.product.sku})</p>
+                  </div>
+                  <label className="space-y-1">
+                    <span className="text-xs text-slate-400">Cantidad surtida</span>
+                    <input
+                      name={`pickedQty__${task.id}`}
+                      type="number"
+                      min={0}
+                      max={pendingQty}
+                      step="0.0001"
+                      defaultValue={isClosed ? task.pickedQty : pendingQty}
+                      className="w-full px-3 py-2 glass rounded-lg"
+                      disabled={isClosed}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs text-slate-400">Motivo faltante</span>
+                    <input
+                      name={`shortReason__${task.id}`}
+                      defaultValue={task.shortReason ?? ""}
+                      className="w-full px-3 py-2 glass rounded-lg"
+                      disabled={isClosed}
+                    />
+                  </label>
+                  <div className="text-xs text-slate-400">
+                    Estado: <span className="text-slate-200">{task.status}</span>
+                    <br />
+                    Pendiente: <span className="text-slate-200">{pendingQty}</span>
+                    <br />
+                    Faltante: <span className="text-slate-200">{task.shortQty}</span>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-400">Componente</p>
-                  <p>{task.assemblyWorkOrderLine.componentRole} ({task.assemblyWorkOrderLine.product.sku})</p>
-                </div>
-                <label className="space-y-1">
-                  <span className="text-xs text-slate-400">Cantidad surtida</span>
-                  <input name="pickedQty" type="number" min={0} max={pendingQty} step="0.0001" defaultValue={pendingQty} className="w-full px-3 py-2 glass rounded-lg" disabled={task.status === "COMPLETED" || task.status === "CANCELLED"} />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-slate-400">Motivo faltante</span>
-                  <input name="shortReason" defaultValue={task.shortReason ?? ""} className="w-full px-3 py-2 glass rounded-lg" disabled={task.status === "COMPLETED" || task.status === "CANCELLED"} />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-slate-400">Operador</span>
-                  <input name="operatorName" className="w-full px-3 py-2 glass rounded-lg" required disabled={task.status === "COMPLETED" || task.status === "CANCELLED"} />
-                </label>
-                <button type="submit" className="btn-primary" disabled={task.status === "COMPLETED" || task.status === "CANCELLED"}>Confirmar</button>
-              </form>
-            );
-          })}
+              );
+            })}
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+              <label className="space-y-1">
+                <span className="text-xs text-slate-400">Operador surtido</span>
+                <input name="operatorName" className="w-full px-3 py-2 glass rounded-lg" required />
+              </label>
+              <button type="submit" className={buttonStyles()}>
+                Confirmar surtido de la orden
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
       <div className="flex justify-end gap-3">
         <form action={cancelAssemblyOrder}>
           <input type="hidden" name="orderId" value={order.id} />
-          <button type="submit" className="px-4 py-2 rounded-lg border border-red-500/40 text-red-300 hover:text-white hover:bg-red-500/20">Cancelar orden</button>
+          <button
+            type="submit"
+            className={buttonStyles({ variant: "danger", className: canCancel ? "" : "opacity-50" })}
+            disabled={!canCancel}
+            title={!canCancel ? "La cancelacion solo se permite antes de liberar surtido y sin consumo/WIP" : undefined}
+          >
+            Cancelar orden
+          </button>
         </form>
         <form action={consumeAssemblyOrder}>
           <input type="hidden" name="orderId" value={order.id} />
@@ -312,10 +546,23 @@ export default async function ProductionOrderDetailPage({
             required
             className="px-3 py-2 glass rounded-lg mr-2"
             placeholder="Operador cierre"
+            defaultValue={closeOperatorDefault}
           />
-          <button type="submit" className="btn-primary">Cerrar y consumir</button>
+          <button
+            type="submit"
+            className={buttonStyles({ className: canClose ? "" : "opacity-50" })}
+            disabled={!canClose}
+            title={!canClose ? "El cierre requiere picking completado y material en WIP" : undefined}
+          >
+            Cerrar y consumir
+          </button>
         </form>
       </div>
+      {(!canCancel || !canClose) && (
+        <p className="text-xs text-[var(--text-muted)] text-right">
+          Acciones finales bloqueadas: cancelar solo antes de liberar surtido; cerrar solo con picking completado y WIP disponible.
+        </p>
+      )}
     </div>
   );
 }

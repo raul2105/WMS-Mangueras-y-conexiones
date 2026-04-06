@@ -1,3 +1,11 @@
+export type AssemblyOrderDraftHeaderInput = {
+  warehouseId: string;
+  customerName: string;
+  dueDate: Date;
+  priority?: number | null;
+  notes?: string | null;
+};
+
 export type AssemblyConfigInput = {
   warehouseId: string;
   entryFittingProductId: string;

@@ -1,7 +1,7 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { buildAssemblyRequirements, previewAssemblyAvailability } from "@/lib/assembly/availability-service";
-import type { AssemblyConfigInput } from "@/lib/assembly/types";
+import type { AssemblyConfigInput, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
 
 type Tx = Prisma.TransactionClient;
 
@@ -130,151 +130,181 @@ async function releaseInventoryReservationInTx(args: {
   });
 }
 
-export async function createAssemblyWorkOrderExact(prisma: PrismaClient, input: AssemblyConfigInput) {
-  const requirements = buildAssemblyRequirements(input);
+async function createAssemblyOperationalRecordsInTx(args: {
+  tx: Tx;
+  order: { id: string; code: string; warehouseId: string };
+  input: AssemblyConfigInput;
+  requirements: ReturnType<typeof buildAssemblyRequirements>;
+  preview: Awaited<ReturnType<typeof previewAssemblyAvailability>>;
+}) {
+  const { tx, order, input, requirements, preview } = args;
+  const wipLocation = await ensureWarehouseWipLocation(tx, order.warehouseId);
 
-  return prisma.$transaction(async (tx) => {
-    const preview = await previewAssemblyAvailability(tx, input);
-    if (!preview.exact) {
-      throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "Assembly order requires exact stock for all three components");
-    }
+  await tx.assemblyConfiguration.create({
+    data: {
+      productionOrderId: order.id,
+      entryFittingProductId: input.entryFittingProductId,
+      hoseProductId: input.hoseProductId,
+      exitFittingProductId: input.exitFittingProductId,
+      hoseLength: input.hoseLength,
+      assemblyQuantity: input.assemblyQuantity,
+      totalHoseRequired: input.hoseLength * input.assemblyQuantity,
+      sourceDocumentRef: input.sourceDocumentRef ?? null,
+      notes: input.notes ?? null,
+    },
+  });
 
-    const code = await generateProductionOrderCode(tx);
-    const wipLocation = await ensureWarehouseWipLocation(tx, input.warehouseId);
+  const assemblyWorkOrder = await tx.assemblyWorkOrder.create({
+    data: {
+      productionOrderId: order.id,
+      warehouseId: order.warehouseId,
+      wipLocationId: wipLocation.id,
+      availabilityStatus: "EXACT",
+      reservationStatus: "RESERVED",
+      pickStatus: "NOT_RELEASED",
+      wipStatus: "NOT_IN_WIP",
+      consumptionStatus: "NOT_CONSUMED",
+      hasShortage: false,
+    },
+    select: { id: true },
+  });
 
-    const order = await tx.productionOrder.create({
+  const lineByRole = new Map<string, { id: string; productId: string }>();
+  for (const requirement of requirements) {
+    const line = await tx.assemblyWorkOrderLine.create({
       data: {
-        code,
-        kind: "ASSEMBLY_3PIECE",
-        status: "ABIERTA",
-        warehouseId: input.warehouseId,
-        customerName: null,
-        priority: 3,
-        notes: input.notes ?? null,
-      },
-      select: { id: true, code: true, warehouseId: true },
-    });
-
-    await tx.assemblyConfiguration.create({
-      data: {
-        productionOrderId: order.id,
-        entryFittingProductId: input.entryFittingProductId,
-        hoseProductId: input.hoseProductId,
-        exitFittingProductId: input.exitFittingProductId,
-        hoseLength: input.hoseLength,
-        assemblyQuantity: input.assemblyQuantity,
-        totalHoseRequired: input.hoseLength * input.assemblyQuantity,
-        sourceDocumentRef: input.sourceDocumentRef ?? null,
-        notes: input.notes ?? null,
-      },
-    });
-
-    const assemblyWorkOrder = await tx.assemblyWorkOrder.create({
-      data: {
-        productionOrderId: order.id,
-        warehouseId: order.warehouseId,
-        wipLocationId: wipLocation.id,
-        availabilityStatus: "EXACT",
+        assemblyWorkOrderId: assemblyWorkOrder.id,
+        componentRole: requirement.role,
+        productId: requirement.productId,
+        unitLabel: requirement.unitLabel,
+        perAssemblyQty: requirement.perAssemblyQty,
+        requiredQty: requirement.requiredQty,
+        reservedQty: 0,
+        pickedQty: 0,
+        wipQty: 0,
+        consumedQty: 0,
+        shortQty: 0,
         reservationStatus: "RESERVED",
         pickStatus: "NOT_RELEASED",
         wipStatus: "NOT_IN_WIP",
         consumptionStatus: "NOT_CONSUMED",
-        hasShortage: false,
       },
-      select: { id: true },
+      select: { id: true, productId: true },
+    });
+    lineByRole.set(requirement.role, line);
+  }
+
+  const year = new Date().getFullYear();
+  const pickCount = await tx.pickList.count({ where: { code: { startsWith: `PK-ENS-${year}-` } } });
+  const pickCode = `PK-ENS-${year}-${String(pickCount + 1).padStart(4, "0")}`;
+  const pickList = await tx.pickList.create({
+    data: {
+      code: pickCode,
+      assemblyWorkOrderId: assemblyWorkOrder.id,
+      status: "DRAFT",
+    },
+    select: { id: true },
+  });
+
+  let sequence = 1;
+  const reservedByLineId = new Map<string, number>();
+  for (const allocation of preview.allocations) {
+    const line = lineByRole.get(allocation.role);
+    if (!line) continue;
+
+    await reserveInventoryInTx({
+      tx,
+      productId: allocation.productId,
+      locationId: allocation.locationId,
+      qty: allocation.requestedQty,
+      reference: order.code,
+      documentType: "ASSEMBLY_ORDER",
+      documentId: order.id,
+      documentLineId: line.id,
     });
 
-    const lineByRole = new Map<string, { id: string; productId: string }>();
-    for (const requirement of requirements) {
-      const line = await tx.assemblyWorkOrderLine.create({
-        data: {
-          assemblyWorkOrderId: assemblyWorkOrder.id,
-          componentRole: requirement.role,
-          productId: requirement.productId,
-          unitLabel: requirement.unitLabel,
-          perAssemblyQty: requirement.perAssemblyQty,
-          requiredQty: requirement.requiredQty,
-          reservedQty: 0,
-          pickedQty: 0,
-          wipQty: 0,
-          consumedQty: 0,
-          shortQty: 0,
-          reservationStatus: "RESERVED",
-          pickStatus: "NOT_RELEASED",
-          wipStatus: "NOT_IN_WIP",
-          consumptionStatus: "NOT_CONSUMED",
-        },
-        select: { id: true, productId: true },
-      });
-      lineByRole.set(requirement.role, line);
-    }
-
-    const year = new Date().getFullYear();
-    const pickCount = await tx.pickList.count({ where: { code: { startsWith: `PK-ENS-${year}-` } } });
-    const pickCode = `PK-ENS-${year}-${String(pickCount + 1).padStart(4, "0")}`;
-    const pickList = await tx.pickList.create({
+    await tx.pickTask.create({
       data: {
-        code: pickCode,
-        assemblyWorkOrderId: assemblyWorkOrder.id,
-        status: "DRAFT",
+        pickListId: pickList.id,
+        assemblyWorkOrderLineId: line.id,
+        sourceLocationId: allocation.locationId,
+        targetWipLocationId: wipLocation.id,
+        sequence,
+        requestedQty: allocation.requestedQty,
+        reservedQty: allocation.requestedQty,
+        pickedQty: 0,
+        shortQty: 0,
+        status: "PENDING",
       },
+    });
+    sequence += 1;
+
+    reservedByLineId.set(line.id, (reservedByLineId.get(line.id) ?? 0) + allocation.requestedQty);
+  }
+
+  for (const [lineId, reservedQty] of reservedByLineId.entries()) {
+    await tx.assemblyWorkOrderLine.update({
+      where: { id: lineId },
+      data: { reservedQty },
+    });
+  }
+
+  await tx.auditLog.create({
+    data: {
+      entityType: "ASSEMBLY_ORDER",
+      entityId: order.id,
+      action: "CONFIGURE_EXACT",
+      after: JSON.stringify({
+        code: order.code,
+        warehouseId: order.warehouseId,
+        requirements,
+        allocations: preview.allocations,
+        pickListCode: pickCode,
+      }),
+      source: "assembly/work-order-service",
+      actor: "system",
+    },
+  });
+
+  return { orderId: order.id, code: order.code };
+}
+
+export async function createAssemblyOrderDraftHeader(prisma: PrismaClient, input: AssemblyOrderDraftHeaderInput) {
+  return prisma.$transaction(async (tx) => {
+    const warehouse = await tx.warehouse.findUnique({
+      where: { id: input.warehouseId },
       select: { id: true },
     });
-
-    let sequence = 1;
-    const reservedByLineId = new Map<string, number>();
-    for (const allocation of preview.allocations) {
-      const line = lineByRole.get(allocation.role);
-      if (!line) continue;
-
-      await reserveInventoryInTx({
-        tx,
-        productId: allocation.productId,
-        locationId: allocation.locationId,
-        qty: allocation.requestedQty,
-        reference: order.code,
-        documentType: "ASSEMBLY_ORDER",
-        documentId: order.id,
-        documentLineId: line.id,
-      });
-
-      await tx.pickTask.create({
-        data: {
-          pickListId: pickList.id,
-          assemblyWorkOrderLineId: line.id,
-          sourceLocationId: allocation.locationId,
-          targetWipLocationId: wipLocation.id,
-          sequence,
-          requestedQty: allocation.requestedQty,
-          reservedQty: allocation.requestedQty,
-          pickedQty: 0,
-          shortQty: 0,
-          status: "PENDING",
-        },
-      });
-      sequence += 1;
-
-      reservedByLineId.set(line.id, (reservedByLineId.get(line.id) ?? 0) + allocation.requestedQty);
+    if (!warehouse) {
+      throw new InventoryServiceError("WAREHOUSE_NOT_FOUND", "Warehouse not found");
     }
 
-    for (const [lineId, reservedQty] of reservedByLineId.entries()) {
-      await tx.assemblyWorkOrderLine.update({
-        where: { id: lineId },
-        data: { reservedQty },
-      });
-    }
+    const code = await generateProductionOrderCode(tx);
+    const order = await tx.productionOrder.create({
+      data: {
+        code,
+        kind: "ASSEMBLY_3PIECE",
+        status: "BORRADOR",
+        warehouseId: input.warehouseId,
+        customerName: input.customerName,
+        dueDate: input.dueDate,
+        priority: input.priority ?? 3,
+        notes: input.notes ?? null,
+      },
+      select: { id: true, code: true },
+    });
 
     await tx.auditLog.create({
       data: {
         entityType: "ASSEMBLY_ORDER",
         entityId: order.id,
-        action: "CREATE_EXACT",
+        action: "CREATE_DRAFT_HEADER",
         after: JSON.stringify({
           code: order.code,
-          warehouseId: order.warehouseId,
-          requirements,
-          allocations: preview.allocations,
-          pickListCode: pickCode,
+          warehouseId: input.warehouseId,
+          customerName: input.customerName,
+          dueDate: input.dueDate.toISOString(),
+          priority: input.priority ?? 3,
         }),
         source: "assembly/work-order-service",
         actor: "system",
@@ -282,6 +312,61 @@ export async function createAssemblyWorkOrderExact(prisma: PrismaClient, input: 
     });
 
     return { orderId: order.id, code: order.code };
+  }, { timeout: 20000 });
+}
+
+export async function configureAssemblyOrderExact(
+  prisma: PrismaClient,
+  productionOrderId: string,
+  input: AssemblyConfigInput
+) {
+  const requirements = buildAssemblyRequirements(input);
+
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.productionOrder.findUnique({
+      where: { id: productionOrderId },
+      select: {
+        id: true,
+        code: true,
+        kind: true,
+        status: true,
+        warehouseId: true,
+        assemblyConfiguration: { select: { id: true } },
+        assemblyWorkOrder: { select: { id: true } },
+      },
+    });
+    if (!order || order.kind !== "ASSEMBLY_3PIECE") {
+      throw new InventoryServiceError("ORDER_NOT_FOUND", "Assembly order not found");
+    }
+    if (order.assemblyConfiguration || order.assemblyWorkOrder) {
+      throw new InventoryServiceError("ORDER_ALREADY_CONFIGURED", "Assembly order is already configured");
+    }
+    if (order.status !== "BORRADOR") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Assembly order must be draft before configuration");
+    }
+    if (order.warehouseId !== input.warehouseId) {
+      throw new InventoryServiceError("WAREHOUSE_MISMATCH", "Assembly configuration must use the order warehouse");
+    }
+
+    const preview = await previewAssemblyAvailability(tx, input);
+    if (!preview.exact) {
+      throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "Assembly order requires exact stock for all three components");
+    }
+
+    const result = await createAssemblyOperationalRecordsInTx({
+      tx,
+      order,
+      input,
+      requirements,
+      preview,
+    });
+
+    await tx.productionOrder.update({
+      where: { id: order.id },
+      data: { status: "ABIERTA" },
+    });
+
+    return result;
   }, { timeout: 20000 });
 }
 
@@ -319,6 +404,19 @@ export async function cancelAssemblyWorkOrder(prisma: PrismaClient, productionOr
     });
     if (!order || order.kind !== "ASSEMBLY_3PIECE" || !order.assemblyWorkOrder) {
       throw new InventoryServiceError("ORDER_NOT_FOUND", "Assembly order not found");
+    }
+
+    if (order.status === "COMPLETADA" || order.status === "CANCELADA") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Cannot cancel an order that is already completed or cancelled");
+    }
+
+    if (order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Cannot cancel after pick list release");
+    }
+
+    const hasConsumed = order.assemblyWorkOrder.lines.some((line) => line.consumedQty > 0);
+    if (hasConsumed) {
+      throw new InventoryServiceError("CONSUMPTION_PENDING", "Cannot cancel an order with consumed material");
     }
 
     const hasWip = order.assemblyWorkOrder.lines.some((line) => line.wipQty > 0);
@@ -385,10 +483,14 @@ export async function closeAssemblyWorkOrderConsume(
         id: true,
         code: true,
         kind: true,
+        status: true,
         assemblyWorkOrder: {
           select: {
             id: true,
             wipLocationId: true,
+            pickStatus: true,
+            wipStatus: true,
+            consumptionStatus: true,
             lines: {
               select: {
                 id: true,
@@ -404,6 +506,22 @@ export async function closeAssemblyWorkOrderConsume(
     });
     if (!order || order.kind !== "ASSEMBLY_3PIECE" || !order.assemblyWorkOrder) {
       throw new InventoryServiceError("ORDER_NOT_FOUND", "Assembly order not found");
+    }
+
+    if (order.status === "COMPLETADA" || order.status === "CANCELADA") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Cannot close an order that is already completed or cancelled");
+    }
+
+    if (order.assemblyWorkOrder.pickStatus !== "COMPLETED") {
+      throw new InventoryServiceError("PICKING_INCOMPLETE", "Cannot close assembly order until picking is completed");
+    }
+
+    if (order.assemblyWorkOrder.consumptionStatus === "CONSUMED") {
+      throw new InventoryServiceError("ALREADY_CONSUMED", "Assembly order is already consumed");
+    }
+
+    if (order.assemblyWorkOrder.wipStatus === "NOT_IN_WIP") {
+      throw new InventoryServiceError("WIP_INSUFFICIENT", "WIP quantity is insufficient to close the assembly order");
     }
 
     for (const line of order.assemblyWorkOrder.lines) {

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { getLocalProductImagePath } from "@/lib/product-image-path";
+import { BoxIcon } from "@/components/ui/icons";
 
 interface ProductImageProps {
     sku: string;
@@ -22,16 +23,23 @@ export default function ProductImage({
     const localSrc = getLocalProductImagePath(sku);
     const [src, setSrc] = useState<string>(imageUrl || localSrc);
     const [failed, setFailed] = useState(false);
+    const isCompact = size <= 72;
 
     if (failed) {
         return (
             <div
                 className={`flex items-center justify-center bg-slate-800 rounded-lg border border-white/5 ${className}`}
                 style={{ width: size, height: size, maxWidth: "100%" }}
+                title={name || sku}
+                aria-label={name || sku}
             >
-                <div className="text-center space-y-2 px-4">
-                    <div className="text-4xl">📦</div>
-                    <p className="text-xs text-slate-500 font-mono break-all">{sku}</p>
+                <div className={isCompact ? "flex items-center justify-center" : "text-center space-y-2 px-3"}>
+                    <BoxIcon className={isCompact ? "h-5 w-5 text-[var(--text-muted)]" : "mx-auto h-8 w-8 text-[var(--text-muted)]"} />
+                    {isCompact ? null : (
+                        <p className="line-clamp-2 max-w-full overflow-hidden text-ellipsis break-words text-[11px] text-slate-500 font-mono">
+                            {sku}
+                        </p>
+                    )}
                 </div>
             </div>
         );

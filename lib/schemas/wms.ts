@@ -49,6 +49,14 @@ export const productionOrderCreateSchema = z.object({
   notes: z.string().trim().optional(),
 });
 
+export const assemblyOrderHeaderSchema = z.object({
+  warehouseId: requiredText("Almacen"),
+  customerName: requiredText("Cliente"),
+  dueDateRaw: requiredText("Fecha compromiso"),
+  priorityRaw: z.string().trim().optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
 export const productionOrderUpdateSchema = z.object({
   id: requiredText("Id"),
   status: z.enum(["BORRADOR", "ABIERTA", "EN_PROCESO", "COMPLETADA", "CANCELADA"]),

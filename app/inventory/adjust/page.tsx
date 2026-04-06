@@ -7,6 +7,11 @@ import { firstErrorMessage, inventoryAdjustmentSchema } from "@/lib/schemas/wms"
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
+import { buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Select } from "@/components/ui/select";
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +112,7 @@ async function adjustStock(formData: FormData) {
       const msg = messages[error.code] ?? `Error: ${error.message}`;
       redirect(`/inventory/adjust?error=${encodeURIComponent(msg)}`);
     }
-    throw error;
+    redirect(`/inventory/adjust?error=${encodeURIComponent("Ocurrio un error inesperado al registrar el ajuste")}`);
   }
 
   if (!createdJobId) {
@@ -142,18 +147,29 @@ export default async function AdjustPage({
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Ajuste de Inventario</h1>
-          <p className="text-slate-400 mt-1">Registra ajustes positivos o negativos con motivo obligatorio.</p>
+      <PageHeader
+        title="Ajuste de Inventario"
+        description="Registra ajustes positivos o negativos con motivo obligatorio."
+        actions={
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>
+            Inventario
+          </Link>
+        }
+      />
+
+      {sp.error && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {sp.error}
         </div>
-        <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Inventario</Link>
-      </div>
+      )}
+      {sp.ok && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">
+          Ajuste registrado.
+        </div>
+      )}
 
-      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
-      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Ajuste registrado.</div>}
-
-      <form action={adjustStock} className="glass-card space-y-6">
+      <SectionCard title="Formulario de ajuste" description="Define cantidad de ajuste, ubicación y motivo de operación.">
+      <form action={adjustStock} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <InventoryCodeField
             name="code"
@@ -164,51 +180,35 @@ export default async function AdjustPage({
             showDetails
           />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ajuste (+/-) *</span>
-            <input name="delta" required inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="-2 o 5" />
-          </label>
+          <Input name="delta" required inputMode="decimal" label="Ajuste (+/-) *" placeholder="-2 o 5" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicación *</span>
-            <select name="location" required className="w-full px-4 py-3 glass rounded-lg">
+          <Select name="location" required label="Ubicación *" placeholder="Selecciona una ubicación">
               <option value="">Selecciona una ubicación</option>
               {locations.map((location) => (
                 <option key={location.code} value={location.code}>
                   {location.code} - {location.name} ({location.warehouse.code})
                 </option>
               ))}
-            </select>
-          </label>
+          </Select>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Operador *</span>
-            <input
-              name="operatorName"
-              required
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="Nombre del operador"
-            />
-          </label>
+          <Input name="operatorName" required label="Operador *" placeholder="Nombre del operador" />
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Motivo *</span>
-            <select name="reason" required className="w-full px-4 py-3 glass rounded-lg">
+          <Select name="reason" required label="Motivo *" rootClassName="md:col-span-2" placeholder="Selecciona un motivo">
               <option value="">Selecciona un motivo</option>
               <option value="CONTEO_CICLICO">Conteo cíclico</option>
               <option value="MERMA_DANIO">Merma o daño</option>
               <option value="ERROR_CAPTURA">Corrección por error de captura</option>
               <option value="REUBICACION">Reubicación sin transferencia</option>
               <option value="AJUSTE_AUTORIZADO">Ajuste autorizado por supervisor</option>
-            </select>
-          </label>
+          </Select>
         </div>
 
         <div className="flex items-center justify-end gap-3">
-          <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Cancelar</Link>
-          <button type="submit" className="btn-primary">Registrar ajuste</button>
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>Cancelar</Link>
+          <button type="submit" className={buttonStyles()}>Registrar ajuste</button>
         </div>
       </form>
+      </SectionCard>
     </div>
   );
 }

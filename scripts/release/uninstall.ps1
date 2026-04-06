@@ -60,7 +60,7 @@ function Confirm-Strong {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$sessionRoot = Join-Path $env:TEMP "wms-rigentec-uninstall\$timestamp"
+$sessionRoot = Join-Path $env:TEMP "wms-scmayer-uninstall\$timestamp"
 Ensure-Directory -Path $sessionRoot
 $sessionLog = Join-Path $sessionRoot "uninstall.log"
 $cleanupReportPath = Join-Path $sessionRoot "cleanup-report.txt"
@@ -95,7 +95,7 @@ function Save-CleanupReport {
   )
 
   $reportHeader = @(
-    "WMS Rigentec - Cleanup Report",
+    "WMS-SCMayer - Cleanup Report",
     "Result: $Result",
     "ExitCode: $ExitCode",
     "GeneratedAt: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",

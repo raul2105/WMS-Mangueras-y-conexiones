@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-Este directorio contiene los registros de decisiones arquitectónicas del proyecto WMS Rigentec.
+Este directorio contiene los registros de decisiones arquitectónicas del proyecto WMS-SCMayer.
 
 ## ¿Qué es un ADR?
 

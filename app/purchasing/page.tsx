@@ -1,5 +1,13 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
+import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { BoxIcon, InventoryIcon, PurchasingIcon, WarehouseIcon } from "@/components/ui/icons";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { StatCard } from "@/components/ui/stat-card";
+import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 
 export const revalidate = 30;
 
@@ -13,12 +21,12 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  BORRADOR: "text-slate-400 bg-slate-500/20",
-  CONFIRMADA: "text-blue-400 bg-blue-500/20",
-  EN_TRANSITO: "text-amber-400 bg-amber-500/20",
-  RECIBIDA: "text-emerald-400 bg-emerald-500/20",
-  PARCIAL: "text-orange-400 bg-orange-500/20",
-  CANCELADA: "text-red-400 bg-red-500/20",
+  BORRADOR: "neutral",
+  CONFIRMADA: "accent",
+  EN_TRANSITO: "warning",
+  RECIBIDA: "success",
+  PARCIAL: "warning",
+  CANCELADA: "danger",
 };
 
 export default async function PurchasingPage() {
@@ -46,102 +54,108 @@ export default async function PurchasingPage() {
   const openCount = (countsByStatus["CONFIRMADA"] ?? 0) + (countsByStatus["EN_TRANSITO"] ?? 0) + (countsByStatus["PARCIAL"] ?? 0);
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-orange-400 to-amber-400">
-            Compras
-          </h1>
-          <p className="text-slate-400 mt-1">Gestión de proveedores y órdenes de compra.</p>
-        </div>
-        <div className="flex gap-3">
-          <Link href="/purchasing/orders/new" className="btn-primary">+ Nueva OC</Link>
-        </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Compras"
+        description="Gestion de proveedores, ordenes de compra y seguimiento de recepciones."
+        meta={`${openCount.toLocaleString("es-MX")} OCs activas`}
+        actions={
+          <>
+            <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary" })}>
+              Ver ordenes
+            </Link>
+            <Link href="/purchasing/orders/new" className={buttonStyles()}>
+              Nueva OC
+            </Link>
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <StatCard
+          label="OCs activas"
+          value={openCount.toLocaleString("es-MX")}
+          tone="accent"
+          icon={<PurchasingIcon className="h-5 w-5" />}
+        />
+        <StatCard
+          label="En transito"
+          value={(countsByStatus["EN_TRANSITO"] ?? 0).toLocaleString("es-MX")}
+          tone="warning"
+          icon={<InventoryIcon className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Borradores"
+          value={(countsByStatus["BORRADOR"] ?? 0).toLocaleString("es-MX")}
+          icon={<BoxIcon className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Proveedores"
+          value={totalSuppliers.toLocaleString("es-MX")}
+          tone="success"
+          icon={<WarehouseIcon className="h-5 w-5" />}
+        />
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-orange-400">{openCount}</p>
-          <p className="text-sm text-slate-400 mt-1">OCs activas</p>
+      <SectionCard title="Accesos rapidos" description="Navega a las vistas operativas principales de Compras.">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Link href="/purchasing/orders" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Ordenes de compra</p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Crear, confirmar, recibir y cerrar ordenes.</p>
+          </Link>
+          <Link href="/purchasing/suppliers" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Proveedores</p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Gestion del catalogo de proveedores y precios.</p>
+          </Link>
         </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-amber-400">{countsByStatus["EN_TRANSITO"] ?? 0}</p>
-          <p className="text-sm text-slate-400 mt-1">En tránsito</p>
-        </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-slate-300">{countsByStatus["BORRADOR"] ?? 0}</p>
-          <p className="text-sm text-slate-400 mt-1">Borradores</p>
-        </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-cyan-400">{totalSuppliers}</p>
-          <p className="text-sm text-slate-400 mt-1">Proveedores activos</p>
-        </div>
-      </div>
+      </SectionCard>
 
-      {/* Accesos rápidos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link href="/purchasing/orders" className="glass-card group hover:bg-orange-900/10 block">
-          <div className="flex items-center gap-4">
-            <span className="text-3xl p-3 bg-orange-500/10 rounded-xl group-hover:bg-orange-500/20 transition-colors">📋</span>
-            <div>
-              <h2 className="text-lg font-bold group-hover:text-orange-400 transition-colors">Órdenes de Compra</h2>
-              <p className="text-sm text-slate-400">Crear, gestionar y recibir órdenes de compra.</p>
-            </div>
-          </div>
-        </Link>
-        <Link href="/purchasing/suppliers" className="glass-card group hover:bg-cyan-900/10 block">
-          <div className="flex items-center gap-4">
-            <span className="text-3xl p-3 bg-cyan-500/10 rounded-xl group-hover:bg-cyan-500/20 transition-colors">🏢</span>
-            <div>
-              <h2 className="text-lg font-bold group-hover:text-cyan-400 transition-colors">Proveedores</h2>
-              <p className="text-sm text-slate-400">Catálogo de proveedores y productos vinculados.</p>
-            </div>
-          </div>
-        </Link>
-      </div>
-
-      {/* Órdenes recientes */}
-      <div className="glass-card">
-        <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-2">
-          <h3 className="text-lg font-bold">Órdenes Recientes</h3>
-          <Link href="/purchasing/orders" className="text-xs text-orange-400 hover:underline">Ver todas →</Link>
-        </div>
+      <SectionCard
+        title="Ordenes recientes"
+        description="Ultimas ordenes creadas en el modulo de compras."
+        actions={
+          <Link href="/purchasing/orders" className={buttonStyles({ variant: "ghost", size: "sm" })}>
+            Ver todas
+          </Link>
+        }
+      >
         {recentOrders.length === 0 ? (
-          <p className="text-slate-500 text-sm">No hay órdenes de compra aún.</p>
+          <EmptyState compact title="Sin ordenes recientes" description="No hay ordenes de compra registradas aun." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <TableWrap striped>
+            <Table>
               <thead>
-                <tr className="text-slate-400 border-b border-white/10">
-                  <th className="text-left py-2">Folio</th>
-                  <th className="text-left py-2">Proveedor</th>
-                  <th className="text-left py-2">Estado</th>
-                  <th className="text-right py-2">Líneas</th>
+                <tr>
+                  <Th>Folio</Th>
+                  <Th>Proveedor</Th>
+                  <Th>Estado</Th>
+                  <Th className="text-right">Lineas</Th>
+                  <Th className="text-right">Accion</Th>
                 </tr>
               </thead>
               <tbody>
                 {recentOrders.map((order) => (
-                  <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="py-2">
-                      <Link href={`/purchasing/orders/${order.id}`} className="text-orange-400 hover:underline font-mono text-xs">
-                        {order.folio}
-                      </Link>
-                    </td>
-                    <td className="py-2 text-slate-300">{order.supplier.name}</td>
-                    <td className="py-2">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${STATUS_COLORS[order.status] ?? "text-slate-400 bg-slate-500/20"}`}>
+                  <TableRow key={order.id}>
+                    <Td className="font-mono text-xs text-[var(--text-primary)]">{order.folio}</Td>
+                    <Td>{order.supplier.name}</Td>
+                    <Td>
+                      <Badge variant={(STATUS_COLORS[order.status] as "neutral" | "accent" | "success" | "warning" | "danger") ?? "neutral"}>
                         {STATUS_LABELS[order.status] ?? order.status}
-                      </span>
-                    </td>
-                    <td className="py-2 text-right text-slate-400">{order._count.lines}</td>
-                  </tr>
+                      </Badge>
+                    </Td>
+                    <Td className="text-right font-semibold text-[var(--text-primary)]">{order._count.lines}</Td>
+                    <Td className="text-right">
+                      <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                        Ver detalle
+                      </Link>
+                    </Td>
+                  </TableRow>
                 ))}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableWrap>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }

@@ -1,10 +1,10 @@
 @echo off
-TITLE WMS Rigentec - Instalador
+TITLE WMS-SCMayer - Instalador
 setlocal EnableExtensions EnableDelayedExpansion
 
 echo.
 echo ============================================================
-echo   WMS Rigentec - Instalador de Servidor Local
+echo   WMS-SCMayer - Instalador de Servidor Local
 echo   Configura el WMS para uso en red interna
 echo ============================================================
 echo.
@@ -148,10 +148,10 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 :: Detener instancia anterior si existe
-pm2 delete wms-rigentec >nul 2>&1
+pm2 delete wms-scmayer >nul 2>&1
 
 :: Iniciar la aplicacion
-call pm2 start npm --name "wms-rigentec" -- run start
+call pm2 start npm --name "wms-scmayer" -- run start
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo  ERROR: Fallo al iniciar la aplicacion con PM2.
@@ -177,12 +177,12 @@ set "RESUME_SCRIPT=%PROJECT_DIR%\resume_wms.cmd"
 ) > "%RESUME_SCRIPT%"
 
 :: Agregar al Inicio de Windows via Task Scheduler (ONLOGON del usuario actual)
-schtasks /delete /tn "WMS-Rigentec-AutoStart" /f >nul 2>&1
-schtasks /create /tn "WMS-Rigentec-AutoStart" /tr "cmd /c \"%RESUME_SCRIPT%\"" /sc ONLOGON /ru "%USERNAME%" /rl HIGHEST /f >nul 2>&1
+schtasks /delete /tn "WMS-SCMayer-AutoStart" /f >nul 2>&1
+schtasks /create /tn "WMS-SCMayer-AutoStart" /tr "cmd /c \"%RESUME_SCRIPT%\"" /sc ONLOGON /ru "%USERNAME%" /rl HIGHEST /f >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     :: Fallback: copiar al folder de Inicio de Windows
     set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-    copy "%RESUME_SCRIPT%" "!STARTUP!\WMS-Rigentec.cmd" >nul 2>&1
+    copy "%RESUME_SCRIPT%" "!STARTUP!\WMS-SCMayer.cmd" >nul 2>&1
     echo  Inicio automatico (Startup folder^) . OK
 ) else (
     echo  Inicio automatico (Task Scheduler^) .. OK
@@ -193,8 +193,8 @@ echo.
 :: PASO 7/7 - Firewall
 :: -------------------------------------------------------
 echo  [7/7] Configurando acceso en red local (firewall^)...
-netsh advfirewall firewall delete rule name="WMS-Rigentec" >nul 2>&1
-netsh advfirewall firewall add rule name="WMS-Rigentec" dir=in action=allow protocol=TCP localport=3002 >nul 2>&1
+netsh advfirewall firewall delete rule name="WMS-SCMayer" >nul 2>&1
+netsh advfirewall firewall add rule name="WMS-SCMayer" dir=in action=allow protocol=TCP localport=3002 >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo  ADVERTENCIA: No se pudo configurar el firewall.
     echo  Puede que otras PCs en la red no puedan acceder al WMS.
@@ -223,7 +223,7 @@ echo ============================================================
 echo   INSTALACION COMPLETADA EXITOSAMENTE
 echo ============================================================
 echo.
-echo   El WMS Rigentec esta corriendo en modo produccion.
+echo   El WMS-SCMayer esta corriendo en modo produccion.
 echo.
 echo   Acceso desde este equipo (servidor^):
 echo     http://localhost:3002

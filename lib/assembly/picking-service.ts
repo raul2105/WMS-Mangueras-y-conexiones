@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 
 type Tx = Prisma.TransactionClient;
 
@@ -17,7 +18,6 @@ async function recomputePickStates(tx: Tx, assemblyWorkOrderId: string) {
   ]);
 
   const anyPicked = tasks.some((t) => t.pickedQty > 0);
-  const anyOpenTask = tasks.some((t) => t.status === "PENDING" || t.status === "IN_PROGRESS");
   const anyShort = tasks.some((t) => t.shortQty > 0);
   const allTasksClosed = tasks.length > 0 && tasks.every((t) => t.status === "COMPLETED" || t.status === "CANCELLED");
 
@@ -171,6 +171,19 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
         data: { status: "EN_PROCESO" },
       });
     }
+
+    await createAuditLogSafeWithDb({
+      entityType: "ASSEMBLY_ORDER",
+      entityId: order.id,
+      action: "RELEASE_PICK_LIST",
+      actor: "system",
+      source: "assembly/picking-service",
+      after: {
+        pickListId: pickList.id,
+        pickListStatus: pickList.status === "DRAFT" ? "RELEASED" : pickList.status,
+        orderStatus: order.status === "ABIERTA" ? "EN_PROCESO" : order.status,
+      },
+    }, tx);
   }, { timeout: 20000 });
 }
 
@@ -295,21 +308,125 @@ export async function confirmAssemblyPickTask(
     await recomputePickStates(tx, task.pickList.assemblyWorkOrderId);
 
     let labelJobId: string | null = null;
+    let orderTraceId: string | null = null;
     if (movementId) {
-      const { job } = await createMovementTraceAndLabelJob(tx, {
+      const { job, trace } = await createMovementTraceAndLabelJob(tx, {
         movementId,
         labelType: "WIP",
-        sourceEntityType: "PICK_TASK",
-        sourceEntityId: task.id,
+        sourceEntityType: "ASSEMBLY_ORDER",
+        sourceEntityId: task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
         operatorName: args.operatorName ?? null,
       });
       labelJobId = job.id;
+      orderTraceId = trace.traceId;
     }
+
+    await createAuditLogSafeWithDb({
+      entityType: "ASSEMBLY_PICK_TASK",
+      entityId: task.id,
+      action: "CONFIRM_PICK",
+      actor: args.operatorName ?? "system",
+      source: "assembly/picking-service",
+      before: {
+        taskStatus: task.status,
+        pickedQty: task.pickedQty,
+        shortQty: task.shortQty,
+      },
+      after: {
+        taskStatus: nextTaskStatus,
+        pickedQty: nextTaskPicked,
+        shortQty: nextTaskShort,
+        linePickedQty: nextLinePicked,
+        lineWipQty: nextLineWip,
+        movementId,
+        labelJobId,
+        orderTraceId,
+        pickListStatus: nextPickListStatus,
+      },
+    }, tx);
 
     return {
       movementId,
       labelJobId,
+      orderTraceId,
       productionOrderId: task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
     };
   }, { timeout: 20000 });
+}
+
+export async function confirmAssemblyPickTasksBatch(
+  prisma: PrismaClient,
+  args: {
+    productionOrderId: string;
+    operatorName: string;
+    tasks: Array<{ taskId: string; pickedQty?: number | null; shortReason?: string | null }>;
+  }
+) {
+  if (!args.productionOrderId) {
+    throw new InventoryServiceError("ORDER_NOT_FOUND", "Assembly order not found");
+  }
+  if (!args.operatorName?.trim()) {
+    throw new InventoryServiceError("INVALID_OPERATOR", "Operator name is required");
+  }
+  if (!args.tasks.length) {
+    throw new InventoryServiceError("TASK_NOT_FOUND", "No pick tasks were provided");
+  }
+
+  const taskIds = args.tasks.map((task) => task.taskId);
+  const dbTasks = await prisma.pickTask.findMany({
+    where: { id: { in: taskIds } },
+    select: {
+      id: true,
+      reservedQty: true,
+      pickedQty: true,
+      status: true,
+      assemblyWorkOrderLine: {
+        select: {
+          assemblyWorkOrder: {
+            select: {
+              productionOrder: { select: { id: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const taskById = new Map(dbTasks.map((task) => [task.id, task]));
+  for (const task of args.tasks) {
+    const dbTask = taskById.get(task.taskId);
+    if (!dbTask) {
+      throw new InventoryServiceError("TASK_NOT_FOUND", `Pick task not found: ${task.taskId}`);
+    }
+    if (dbTask.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id !== args.productionOrderId) {
+      throw new InventoryServiceError("TASK_NOT_FOUND", "Pick task does not belong to the provided assembly order");
+    }
+    if (dbTask.status === "COMPLETED" || dbTask.status === "CANCELLED") {
+      throw new InventoryServiceError("TASK_CLOSED", "One or more pick tasks are already closed");
+    }
+  }
+
+  const results: Array<Awaited<ReturnType<typeof confirmAssemblyPickTask>>> = [];
+  for (const task of args.tasks) {
+    const dbTask = taskById.get(task.taskId);
+    if (!dbTask) continue;
+    const pending = Math.max(0, dbTask.reservedQty - dbTask.pickedQty);
+    const pickedQty = task.pickedQty == null ? pending : task.pickedQty;
+    const result = await confirmAssemblyPickTask(prisma, {
+      taskId: task.taskId,
+      pickedQty,
+      shortReason: task.shortReason ?? null,
+      operatorName: args.operatorName,
+    });
+    results.push(result);
+  }
+
+  const labelJobIds = results.map((result) => result.labelJobId).filter((value): value is string => Boolean(value));
+  const traceIds = results.map((result) => result.orderTraceId).filter((value): value is string => Boolean(value));
+
+  return {
+    processedCount: results.length,
+    labelJobIds,
+    traceIds,
+  };
 }

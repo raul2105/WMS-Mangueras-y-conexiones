@@ -1,10 +1,10 @@
 @echo off
-TITLE WMS Rigentec - Actualizacion
+TITLE WMS-SCMayer - Actualizacion
 setlocal EnableExtensions EnableDelayedExpansion
 
 echo.
 echo ============================================================
-echo   WMS Rigentec - Actualizacion del Sistema
+echo   WMS-SCMayer - Actualizacion del Sistema
 echo ============================================================
 echo.
 echo  AVISO: El servidor se detendra brevemente (1-2 minutos^).
@@ -76,10 +76,10 @@ echo.
 :: PASO 5/5 - Reiniciar servidor
 :: -------------------------------------------------------
 echo  [5/5] Reiniciando servidor...
-pm2 restart wms-rigentec
+pm2 restart wms-scmayer
 if %ERRORLEVEL% NEQ 0 (
     echo  Servidor no estaba corriendo. Iniciando...
-    call pm2 start npm --name "wms-rigentec" -- run start
+    call pm2 start npm --name "wms-scmayer" -- run start
 )
 call pm2 save >nul 2>&1
 echo  Servidor ................... OK

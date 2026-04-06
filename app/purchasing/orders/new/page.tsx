@@ -3,6 +3,13 @@ import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { purchaseOrderCreateSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
+import { Button, buttonStyles } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 async function createOrder(formData: FormData) {
   "use server";
@@ -61,60 +68,63 @@ export default async function NewPurchaseOrderPage({
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/purchasing/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Órdenes</Link>
-        <h1 className="text-2xl font-bold">Nueva Orden de Compra</h1>
-      </div>
+      <PageHeader
+        title="Nueva Orden de Compra"
+        description="Configura proveedor, fecha compromiso y notas operativas."
+        actions={
+          <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary" })}>
+            Ordenes
+          </Link>
+        }
+      />
 
       {sp.error && (
-        <div className="glass-card border border-red-500/30 text-red-200 text-sm">{sp.error}</div>
+        <section className="surface border-[var(--danger)]/40 bg-[var(--danger-soft)] p-4 text-sm text-[var(--danger)]">{sp.error}</section>
       )}
 
       {suppliers.length === 0 && (
-        <div className="glass-card border border-amber-500/30 text-amber-200 text-sm">
-          No hay proveedores activos.{" "}
-          <Link href="/purchasing/suppliers/new" className="underline hover:no-underline">Crear proveedor →</Link>
-        </div>
+        <EmptyState
+          compact
+          title="No hay proveedores activos"
+          description="Registra un proveedor antes de generar nuevas ordenes de compra."
+          actions={<Link href="/purchasing/suppliers/new" className={buttonStyles({ variant: "secondary", size: "sm" })}>Crear proveedor</Link>}
+        />
       )}
 
-      <form action={createOrder} className="glass-card space-y-5">
-        <label className="space-y-1 block">
-          <span className="text-sm text-slate-400">Proveedor *</span>
-          <select name="supplierId" required className="w-full px-4 py-3 glass rounded-lg">
-            <option value="">Seleccionar proveedor…</option>
+      <form action={createOrder}>
+        <SectionCard
+          title="Datos de la orden"
+          footer={
+            <>
+              <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary" })}>Cancelar</Link>
+              <Button type="submit" disabled={suppliers.length === 0}>Crear OC</Button>
+            </>
+          }
+        >
+          <Select name="supplierId" required label="Proveedor" placeholder="Seleccionar proveedor...">
             {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
+              <option key={s.id} value={s.id}>
+                {s.code} - {s.name}
+              </option>
             ))}
-          </select>
-        </label>
+          </Select>
 
-        <label className="space-y-1 block">
-          <span className="text-sm text-slate-400">Fecha esperada de entrega</span>
-          <input
+          <Input
             name="expectedDate"
             type="date"
-            className="w-full px-4 py-3 glass rounded-lg"
+            label="Fecha esperada de entrega"
             min={new Date().toISOString().slice(0, 10)}
           />
-        </label>
 
-        <label className="space-y-1 block">
-          <span className="text-sm text-slate-400">Notas</span>
-          <textarea
+          <Textarea
             name="notes"
+            label="Notas"
             rows={3}
             maxLength={1000}
-            placeholder="Instrucciones especiales, condiciones de pago…"
-            className="w-full px-4 py-3 glass rounded-lg resize-none"
+            placeholder="Instrucciones especiales, condiciones de pago..."
+            textareaClassName="resize-none"
           />
-        </label>
-
-        <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
-          <Link href="/purchasing/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Cancelar</Link>
-          <button type="submit" className="btn-primary" disabled={suppliers.length === 0}>
-            Crear OC
-          </button>
-        </div>
+        </SectionCard>
       </form>
     </div>
   );

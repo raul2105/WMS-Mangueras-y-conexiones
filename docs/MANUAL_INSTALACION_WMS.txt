@@ -1,8 +1,8 @@
-MANUAL DE INSTALACION WMS RIGENTEC EN OTRA COMPUTADORA
+MANUAL DE INSTALACION WMS-SCMAYER EN OTRA COMPUTADORA
 Version: 2026-03-31
 
 1) OBJETIVO
-Este manual explica como instalar y operar WMS Rigentec en otra computadora Windows
+Este manual explica como instalar y operar WMS-SCMayer en otra computadora Windows
 usando el paquete release portable (sin instalar Node.js en el equipo destino).
 
 2) ALCANCE
@@ -16,7 +16,7 @@ usando el paquete release portable (sin instalar Node.js en el equipo destino).
 3) PRERREQUISITOS
 - Windows 10/11 x64
 - Acceso a la carpeta del release:
-  wms-rigentec-<version>-windows-x64
+  wms-scmayer-<version>-windows-x64
   (o su archivo .zip)
 - Permisos para ejecutar archivos .cmd
 
@@ -35,7 +35,7 @@ En la carpeta release deben existir, entre otros:
 
 5) INSTALACION EN PC NUEVA (PRIMERA VEZ)
 Paso 1. Copiar release al equipo destino
-- Recomendado: C:\WMS-Rigentec\
+- Recomendado: C:\WMS-SCMayer\
 - Si recibes .zip, extraelo completo
 
 Paso 2. Inicializar base de datos local (solo una vez)
@@ -70,13 +70,13 @@ Validar salud:
 7) RUTAS IMPORTANTES DE DATOS Y LOGS
 La informacion operativa no vive dentro de la carpeta release. Se guarda en:
 - Base de datos SQLite:
-  %LOCALAPPDATA%\wms-rigentec\data\wms.db
+  %LOCALAPPDATA%\wms-scmayer\data\wms.db
 - Respaldos:
-  %LOCALAPPDATA%\wms-rigentec\backups\
+  %LOCALAPPDATA%\wms-scmayer\backups\
 - Logs:
-  %LOCALAPPDATA%\wms-rigentec\logs\
+  %LOCALAPPDATA%\wms-scmayer\logs\
 - Estado/PID:
-  %LOCALAPPDATA%\wms-rigentec\run\
+  %LOCALAPPDATA%\wms-scmayer\run\
 
 8) MANTENIMIENTO BASICO
 Crear respaldo manual:
@@ -107,7 +107,7 @@ Caso C: WMS no abre o cierra al iniciar
 Solucion:
 1. Ejecutar maintenance\healthcheck.cmd
 2. Revisar logs en:
-   %LOCALAPPDATA%\wms-rigentec\logs\
+   %LOCALAPPDATA%\wms-scmayer\logs\
 3. Intentar stop.cmd y luego launcher.cmd
 
 Caso D: Permisos o bloqueo de archivos
@@ -124,7 +124,7 @@ En equipo anterior:
 1. Ejecutar stop.cmd
 2. Ejecutar maintenance\backup-db.cmd
 3. Localizar respaldo mas reciente en:
-   %LOCALAPPDATA%\wms-rigentec\backups\
+   %LOCALAPPDATA%\wms-scmayer\backups\
 4. Copiar carpeta del respaldo a un medio seguro
 
 En equipo nuevo:
@@ -139,13 +139,13 @@ En equipo nuevo:
 Para actualizar:
 1. Ejecutar stop.cmd
 2. Reemplazar carpeta release por la nueva version
-3. No borrar %LOCALAPPDATA%\wms-rigentec\
+3. No borrar %LOCALAPPDATA%\wms-scmayer\
 4. Ejecutar launcher.cmd
 
 Nota:
 La persistencia depende de conservar:
-- %LOCALAPPDATA%\wms-rigentec\data\wms.db
-- %LOCALAPPDATA%\wms-rigentec\backups\
+- %LOCALAPPDATA%\wms-scmayer\data\wms.db
+- %LOCALAPPDATA%\wms-scmayer\backups\
 
 12) DESINSTALACION
 Para retirar la app:

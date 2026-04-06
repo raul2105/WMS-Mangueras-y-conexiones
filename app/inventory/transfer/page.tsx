@@ -6,6 +6,12 @@ import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, transferStockSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
+import { buttonStyles } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +100,7 @@ async function transferStock(formData: FormData) {
       const msg = messages[error.code] ?? `Error: ${error.message}`;
       redirect(`/inventory/transfer?error=${encodeURIComponent(msg)}`);
     }
-    throw error;
+    redirect(`/inventory/transfer?error=${encodeURIComponent("Ocurrio un error inesperado al registrar la transferencia")}`);
   }
 
   redirect("/inventory/transfer?ok=1");
@@ -135,18 +141,29 @@ export default async function TransferPage({
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Transferencia Interna</h1>
-          <p className="text-slate-400 mt-1">Mueve stock entre ubicaciones de forma atomica.</p>
+      <PageHeader
+        title="Transferencia Interna"
+        description="Mueve stock entre ubicaciones de forma atomica."
+        actions={
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>
+            Inventario
+          </Link>
+        }
+      />
+
+      {sp.error && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {sp.error}
         </div>
-        <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Inventario</Link>
-      </div>
+      )}
+      {sp.ok && (
+        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">
+          Transferencia registrada.
+        </div>
+      )}
 
-      {sp.error && <div className="glass-card border border-red-500/30 text-red-200">{sp.error}</div>}
-      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200">Transferencia registrada.</div>}
-
-      <form action={transferStock} className="glass-card space-y-6">
+      <SectionCard title="Formulario de transferencia" description="Define origen, destino y cantidad para mover inventario.">
+      <form action={transferStock} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <InventoryCodeField
             name="code"
@@ -157,43 +174,32 @@ export default async function TransferPage({
             showDetails
           />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Cantidad *</span>
-            <input name="quantity" required inputMode="decimal" className="w-full px-4 py-3 glass rounded-lg" placeholder="5" />
-          </label>
+          <Input name="quantity" required inputMode="decimal" label="Cantidad *" placeholder="5" />
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicacion origen *</span>
-            <select name="fromLocation" required className="w-full px-4 py-3 glass rounded-lg">
+          <Select name="fromLocation" required label="Ubicacion origen *" placeholder="Selecciona ubicación origen">
               <option value="">Selecciona ubicación origen</option>
               {locations.map((location) => (
                 <option key={`from-${location.code}`} value={location.code}>
                   {location.code} - {location.name} ({location.warehouse.code})
                 </option>
               ))}
-            </select>
-          </label>
+          </Select>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Ubicacion destino *</span>
-            <select name="toLocation" required className="w-full px-4 py-3 glass rounded-lg">
+          <Select name="toLocation" required label="Ubicacion destino *" placeholder="Selecciona ubicación destino">
               <option value="">Selecciona ubicación destino</option>
               {locations.map((location) => (
                 <option key={`to-${location.code}`} value={location.code}>
                   {location.code} - {location.name} ({location.warehouse.code})
                 </option>
               ))}
-            </select>
-          </label>
+          </Select>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Referencia</span>
-            <input
-              name="reference"
-              list={referenceSuggestions.length > 0 ? "transfer-reference-options" : undefined}
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="TRF-0001"
-            />
+          <Input
+            name="reference"
+            label="Referencia"
+            list={referenceSuggestions.length > 0 ? "transfer-reference-options" : undefined}
+            placeholder="TRF-0001"
+          />
             {referenceSuggestions.length > 0 && (
               <datalist id="transfer-reference-options">
                 {referenceSuggestions.map((reference) => (
@@ -201,19 +207,16 @@ export default async function TransferPage({
                 ))}
               </datalist>
             )}
-          </label>
 
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Notas</span>
-            <textarea name="notes" className="w-full px-4 py-3 glass rounded-lg min-h-[96px]" />
-          </label>
+          <Textarea name="notes" label="Notas" rootClassName="md:col-span-2" textareaClassName="min-h-[96px]" />
         </div>
 
         <div className="flex items-center justify-end gap-3">
-          <Link href="/inventory" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">Cancelar</Link>
-          <button type="submit" className="btn-primary">Registrar transferencia</button>
+          <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>Cancelar</Link>
+          <button type="submit" className={buttonStyles()}>Registrar transferencia</button>
         </div>
       </form>
+      </SectionCard>
     </div>
   );
 }

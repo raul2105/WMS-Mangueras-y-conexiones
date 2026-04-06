@@ -5,6 +5,12 @@ import CatalogFilters from "@/components/CatalogFilters";
 import ProductImage from "@/components/ProductImage";
 import { normalizeTechnicalText } from "@/lib/product-attributes";
 import { TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
+import { PageHeader } from "@/components/ui/page-header";
+import { buttonStyles } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
@@ -274,142 +280,152 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         return qs ? `/catalog?${qs}` : "/catalog";
     };
 
-    return (
-        <div className="space-y-8">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-                        Catálogo Maestro
-                    </h1>
-                    <p className="text-slate-400 mt-1">Gestión de Mangueras, Conexiones y Ensambles</p>
-                </div>
-                <div className="flex gap-3">
-                    <Link href="/catalog/import" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
-                        Importar CSV
-                    </Link>
-                    <Link href="/catalog/new" className="btn-primary">
-                        + Nuevo Artículo
-                    </Link>
-                </div>
-            </div>
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Catalogo Maestro"
+        description="Gestion de mangueras, conexiones y ensambles."
+        actions={
+          <>
+            <Link href="/catalog/import" className={buttonStyles({ variant: "secondary" })}>
+              Importar CSV
+            </Link>
+            <Link href="/catalog/new" className={buttonStyles()}>
+              Nuevo articulo
+            </Link>
+          </>
+        }
+      />
 
-            {/* Stats/Quick Filters */}
-            <CatalogFilters
-                counts={counts}
-                brands={brands}
-                categories={categories}
-                subcategories={subcategories.length > 0 ? subcategories : TAXONOMY_SUBCATEGORIES.map((value) => ({ value, count: 0 }))}
-                attributeKeys={attributeKeys}
-                attributeValues={attributeValues}
-            />
+      <CatalogFilters
+        counts={counts}
+        brands={brands}
+        categories={categories}
+        subcategories={subcategories.length > 0 ? subcategories : TAXONOMY_SUBCATEGORIES.map((value) => ({ value, count: 0 }))}
+        attributeKeys={attributeKeys}
+        attributeValues={attributeValues}
+      />
 
-            <div className="flex items-center justify-between text-sm text-slate-400">
-                <span>{totalProducts.toLocaleString("es-MX")} productos encontrados</span>
-                <span>Página {Math.min(currentPage, totalPages)} de {totalPages}</span>
-            </div>
-
-            {/* Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {products.map((product) => {
-                    const stock = sumStock(product.inventory);
-                    const attributes = safeJsonParse(product.attributes);
-
-                    return (
-                    <div key={product.id} className="glass-card group relative">
-                        <div className="absolute top-4 right-4">
-                            <span className={`px-2 py-1 rounded text-xs font-bold
-${product.type === 'HOSE' ? 'bg-blue-500/20 text-blue-400' :
-                                product.type === 'FITTING' ? 'bg-orange-500/20 text-orange-400' :
-                                    'bg-purple-500/20 text-purple-400'}`}>
-                                {product.type}
-                            </span>
-                        </div>
-
-                        {/* Miniatura del producto */}
-                        <div className="flex items-start gap-3 pr-12">
-                            <ProductImage
-                                sku={product.sku}
-                                imageUrl={product.imageUrl}
-                                name={product.name}
-                                size={72}
-                                className="flex-shrink-0 rounded-md"
-                            />
-                            <div className="min-w-0">
-                                <h3 className="text-lg font-bold text-white group-hover:text-cyan-400 transition-colors leading-tight">
-                                    {product.name}
-                                </h3>
-                                <p className="text-sm text-slate-400 font-mono mt-1">{product.sku}</p>
-                            </div>
-                        </div>
-
-                        <div className="mt-4 space-y-2">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">Marca</span>
-                                <span className="text-slate-300">{product.brand}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">Categoría</span>
-                                <span className="text-slate-300 text-right">{product.category?.name ?? "--"}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">Subcategoría</span>
-                                <span className="text-slate-300 text-right">{product.subcategory ?? "--"}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">Stock</span>
-                                <span className={`${(stock || 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {stock} un.
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Technical Specs Preview */}
-                        <div className="mt-4 p-3 bg-black/20 rounded-lg space-y-1">
-                            {attributes && typeof attributes === "object" && Object.entries(attributes).slice(0, 3).map(([key, val]) => (
-                                <div key={key} className="flex justify-between text-xs">
-                                    <span className="text-slate-500 capitalize">{toDisplayAttributeKey(key)}</span>
-                                    <span className="text-slate-300 truncate max-w-[50%]">{String(val)}</span>
+      <SectionCard
+        title="Productos"
+        description={
+          <span className="text-xs text-[var(--text-muted)]">
+            {totalProducts.toLocaleString("es-MX")} resultados • Pagina {Math.min(currentPage, totalPages)} de {totalPages}
+          </span>
+        }
+      >
+        <div className="space-y-4">
+          {products.length === 0 ? (
+            <EmptyState compact title="Sin resultados" description="No se encontraron productos con los filtros activos." />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <TableWrap striped>
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th>Articulo</Th>
+                        <Th>Tipo</Th>
+                        <Th>Marca</Th>
+                        <Th>Categoria</Th>
+                        <Th className="text-right">Stock</Th>
+                        <Th className="text-right">Precio</Th>
+                        <Th className="text-right">Accion</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map((product) => {
+                        const stock = sumStock(product.inventory);
+                        return (
+                          <TableRow key={product.id}>
+                            <Td>
+                              <div className="flex items-center gap-3">
+                                <ProductImage sku={product.sku} imageUrl={product.imageUrl} name={product.name} size={48} className="shrink-0 rounded-md" />
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium text-[var(--text-primary)]">{product.name}</p>
+                                  <p className="truncate font-mono text-xs text-[var(--text-muted)]">{product.sku}</p>
                                 </div>
-                            ))}
-                        </div>
+                              </div>
+                            </Td>
+                            <Td>
+                              <Badge variant="accent">{product.type}</Badge>
+                            </Td>
+                            <Td>{product.brand ?? "--"}</Td>
+                            <Td>{product.category?.name ?? product.subcategory ?? "--"}</Td>
+                            <Td className={`text-right font-semibold ${stock > 0 ? "text-emerald-500" : "text-red-500"}`}>{stock}</Td>
+                            <Td className="text-right font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</Td>
+                            <Td className="text-right">
+                              <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                                Ver detalle
+                              </Link>
+                            </Td>
+                          </TableRow>
+                        );
+                      })}
+                    </tbody>
+                  </Table>
+                </TableWrap>
+              </div>
 
-                        <div className="mt-6 flex items-center justify-between">
-                            <span className="text-xl font-bold text-white">${product.price?.toFixed(2)}</span>
-                            <Link href={`/catalog/${product.id}`} className="text-sm text-cyan-400 hover:text-cyan-300 hover:underline">
-                                Ver Detalle →
-                            </Link>
+              <div className="space-y-3 md:hidden">
+                {products.map((product) => {
+                  const stock = sumStock(product.inventory);
+                  const attributes = safeJsonParse(product.attributes);
+                  return (
+                    <article key={product.id} className="surface rounded-lg p-3">
+                      <div className="flex items-start gap-3">
+                        <ProductImage sku={product.sku} imageUrl={product.imageUrl} name={product.name} size={64} className="shrink-0 rounded-md" />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <p className="truncate font-medium text-[var(--text-primary)]">{product.name}</p>
+                          <p className="font-mono text-xs text-[var(--text-muted)]">{product.sku}</p>
+                          <Badge variant="accent">{product.type}</Badge>
                         </div>
-                    </div>
-                    );
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                        <p className="text-[var(--text-muted)]">Marca: <span className="text-[var(--text-secondary)]">{product.brand ?? "--"}</span></p>
+                        <p className="text-[var(--text-muted)]">Stock: <span className={stock > 0 ? "text-emerald-500" : "text-red-500"}>{stock}</span></p>
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        {attributes && typeof attributes === "object" && Object.entries(attributes).slice(0, 2).map(([key, val]) => (
+                          <p key={key} className="truncate text-xs text-[var(--text-muted)]">
+                            {toDisplayAttributeKey(key)}: <span className="text-[var(--text-secondary)]">{String(val)}</span>
+                          </p>
+                        ))}
+                      </div>
+                      <div className="mt-3 flex items-center justify-between">
+                        <p className="font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</p>
+                        <Link href={`/catalog/${product.id}`} className={buttonStyles({ size: "sm" })}>
+                          Ver detalle
+                        </Link>
+                      </div>
+                    </article>
+                  );
                 })}
+              </div>
+            </>
+          )}
+
+          {totalPages > 1 ? (
+            <div className="flex items-center justify-between gap-2 border-t border-[var(--border-default)] pt-3">
+              <Link
+                href={makePageHref(Math.max(1, currentPage - 1))}
+                className={buttonStyles({ variant: "secondary", size: "sm", className: currentPage <= 1 ? "pointer-events-none opacity-50" : "" })}
+              >
+                Anterior
+              </Link>
+              <span className="text-xs text-[var(--text-muted)]">
+                {Math.min(currentPage, totalPages)} / {totalPages}
+              </span>
+              <Link
+                href={makePageHref(Math.min(totalPages, currentPage + 1))}
+                className={buttonStyles({ variant: "secondary", size: "sm", className: currentPage >= totalPages ? "pointer-events-none opacity-50" : "" })}
+              >
+                Siguiente
+              </Link>
             </div>
-
-            {products.length === 0 && (
-                <div className="glass-card text-center text-slate-300 py-8">
-                    No se encontraron productos con esos filtros.
-                </div>
-            )}
-
-            {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 pt-2">
-                    <Link
-                        href={makePageHref(Math.max(1, currentPage - 1))}
-                        className={`px-3 py-2 glass rounded-lg ${currentPage <= 1 ? "pointer-events-none opacity-50" : "hover:text-white"}`}
-                    >
-                        ← Anterior
-                    </Link>
-                    <span className="px-3 py-2 text-slate-400 text-sm">
-                        {Math.min(currentPage, totalPages)} / {totalPages}
-                    </span>
-                    <Link
-                        href={makePageHref(Math.min(totalPages, currentPage + 1))}
-                        className={`px-3 py-2 glass rounded-lg ${currentPage >= totalPages ? "pointer-events-none opacity-50" : "hover:text-white"}`}
-                    >
-                        Siguiente →
-                    </Link>
-                </div>
-            )}
+          ) : null}
         </div>
-    );
+      </SectionCard>
+    </div>
+  );
 }

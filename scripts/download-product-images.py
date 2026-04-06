@@ -24,9 +24,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = ROOT / "public" / "product-images"
-DEFAULT_CSV = Path(
-    r"C:\Users\raul_\Desktop\Rigentec  Soluciones de ingenieria y Tecnológicas\06_Recursos\01_Catalogos_Proveedores\wms_catalogo_import.csv"
-)
+DEFAULT_CSV = ROOT / "data" / "wms_catalogo_import.csv"
 REQUEST_TIMEOUT = 25
 MIN_BYTES_DEFAULT = 20_000
 
@@ -145,7 +143,7 @@ def fetch_image_bytes(query: str) -> bytes | None:
             response = requests.get(
                 url,
                 timeout=REQUEST_TIMEOUT,
-                headers={"User-Agent": "Mozilla/5.0 WMS Rigentec Image Importer"},
+                headers={"User-Agent": "Mozilla/5.0 WMS-SCMayer Image Importer"},
             )
             response.raise_for_status()
             if len(response.content) < 5_000:

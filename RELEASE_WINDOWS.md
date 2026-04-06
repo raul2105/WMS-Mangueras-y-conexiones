@@ -14,13 +14,13 @@
 3. Esperar a que termine `npm run verify:release`.
    - Si falla por lock de Prisma (`query_engine-windows.dll.node`), cerrar procesos Node que usen este repo (por ejemplo Playwright dev server) y volver a ejecutar.
 4. Verificar artefactos:
-   - `release\wms-rigentec-<version>-windows-x64\`
-   - `release\wms-rigentec-<version>-windows-x64.zip`
+   - `release\wms-scmayer-<version>-windows-x64\`
+   - `release\wms-scmayer-<version>-windows-x64.zip`
 
 ## Copiar a SC MAYER
 1. Copiar la carpeta o el `.zip` generado.
 2. En SC MAYER, ubicarlo en una ruta fija, por ejemplo:
-   - `C:\WMS-Rigentec\`
+   - `C:\WMS-SCMayer\`
 3. Si se copio zip, extraerlo.
 
 ## Primera instalacion en SC MAYER
@@ -29,7 +29,7 @@
   maintenance\init-local.cmd
   ```
 - Esto crea la DB operativa en:
-  - `%LOCALAPPDATA%\wms-rigentec\data\wms.db`
+  - `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
 
 ## Arranque / operacion diaria
 - Iniciar:
@@ -64,8 +64,8 @@
 - Si la BD esta bloqueada o el proceso sigue vivo, la desinstalacion aborta con mensaje claro.
 - En modo conservar datos, si detecta archivos en `app\public\uploads\`, aborta para evitar perdida accidental.
 - Siempre genera bitacora y reporte final:
-  - `%TEMP%\wms-rigentec-uninstall\<timestamp>\uninstall.log`
-  - `%TEMP%\wms-rigentec-uninstall\<timestamp>\cleanup-report.txt`
+  - `%TEMP%\wms-scmayer-uninstall\<timestamp>\uninstall.log`
+  - `%TEMP%\wms-scmayer-uninstall\<timestamp>\cleanup-report.txt`
 
 ## Mantenimiento (soporte)
 - Healthcheck:
@@ -83,8 +83,8 @@
 
 ## Persistencia al actualizar version
 Al reemplazar la release por una nueva, conservar:
-- `%LOCALAPPDATA%\wms-rigentec\data\wms.db`
-- `%LOCALAPPDATA%\wms-rigentec\backups\`
+- `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
+- `%LOCALAPPDATA%\wms-scmayer\backups\`
 - `app\public\uploads\`
 
 ## Operacion integrada

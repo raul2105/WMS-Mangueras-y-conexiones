@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const code = sp.get("code")?.trim() ?? "";
   const location = sp.get("location")?.trim() ?? "";
+  const traceId = sp.get("traceId")?.trim() ?? "";
   const reference = sp.get("reference")?.trim() ?? "";
   const type = sp.get("type") ?? "";
   const from = sp.get("from");
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
   const where = {
     ...(type ? { type: type as "IN" | "OUT" | "TRANSFER" | "ADJUSTMENT" } : {}),
     ...(reference ? { reference: { contains: reference } } : {}),
+    ...(traceId ? { traceId: { contains: traceId } } : {}),
     ...(fromDate || toDate
       ? {
           createdAt: {
@@ -70,7 +72,7 @@ export async function GET(request: NextRequest) {
     take: 10000,
   });
 
-  const headers = ["Fecha", "Tipo", "SKU", "Ref.Producto", "Producto", "Ubicacion", "Cantidad", "Referencia", "Notas"];
+  const headers = ["Fecha", "Tipo", "SKU", "Trace ID", "Ref.Producto", "Producto", "Ubicacion", "Cantidad", "Referencia", "Notas"];
 
   const rows = movements.map((mv) => {
     const locationDisplay =
@@ -82,6 +84,7 @@ export async function GET(request: NextRequest) {
       new Date(mv.createdAt).toLocaleString("es-MX"),
       MOVEMENT_TYPE_LABELS[mv.type] ?? mv.type,
       mv.product.sku,
+      mv.traceId ?? "",
       mv.product.referenceCode ?? "",
       mv.product.name,
       locationDisplay,

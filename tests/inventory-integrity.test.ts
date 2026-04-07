@@ -8,6 +8,17 @@ import { importProductsFromCsv } from "../scripts/import-products-from-csv.cjs";
 const prisma = new PrismaClient();
 
 async function resetDb() {
+  await prisma.purchaseReceiptLine.deleteMany();
+  await prisma.purchaseReceipt.deleteMany();
+  await prisma.purchaseOrderLine.deleteMany();
+  await prisma.purchaseOrder.deleteMany();
+  await prisma.supplierProduct.deleteMany();
+  await prisma.supplier.deleteMany();
+  await prisma.salesInternalOrderPickTask.deleteMany();
+  await prisma.salesInternalOrderPickList.deleteMany();
+  await prisma.salesInternalOrderAssemblyConfig.deleteMany();
+  await prisma.salesInternalOrderLine.deleteMany();
+  await prisma.salesInternalOrder.deleteMany();
   await prisma.pickTask.deleteMany();
   await prisma.pickList.deleteMany();
   await prisma.assemblyWorkOrderLine.deleteMany();

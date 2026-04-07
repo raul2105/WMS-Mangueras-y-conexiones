@@ -57,3 +57,7 @@ prisma/*.backup*
 *.db
 *.db-shm
 *.db-wal
+
+# Playwright generated reports
+/playwright-report/
+/test-results/

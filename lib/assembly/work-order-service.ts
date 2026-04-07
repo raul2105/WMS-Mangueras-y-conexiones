@@ -4,6 +4,15 @@ import { buildAssemblyRequirements, previewAssemblyAvailability } from "@/lib/as
 import type { AssemblyConfigInput, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
 
 type Tx = Prisma.TransactionClient;
+type Db = PrismaClient | Tx;
+
+function withDbTransaction<T>(db: Db, fn: (tx: Tx) => Promise<T>, timeout = 20000) {
+  if ("$transaction" in db) {
+    return db.$transaction((tx) => fn(tx), { timeout });
+  }
+
+  return fn(db);
+}
 
 function nextYearSequenceCode(prefix: string, year: number, sequence: number) {
   return `${prefix}-${year}-${String(sequence).padStart(4, "0")}`;
@@ -269,8 +278,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
   return { orderId: order.id, code: order.code };
 }
 
-export async function createAssemblyOrderDraftHeader(prisma: PrismaClient, input: AssemblyOrderDraftHeaderInput) {
-  return prisma.$transaction(async (tx) => {
+export async function createAssemblyOrderDraftHeader(prisma: Db, input: AssemblyOrderDraftHeaderInput) {
+  return withDbTransaction(prisma, async (tx) => {
     const warehouse = await tx.warehouse.findUnique({
       where: { id: input.warehouseId },
       select: { id: true },
@@ -312,17 +321,17 @@ export async function createAssemblyOrderDraftHeader(prisma: PrismaClient, input
     });
 
     return { orderId: order.id, code: order.code };
-  }, { timeout: 20000 });
+  });
 }
 
 export async function configureAssemblyOrderExact(
-  prisma: PrismaClient,
+  prisma: Db,
   productionOrderId: string,
   input: AssemblyConfigInput
 ) {
   const requirements = buildAssemblyRequirements(input);
 
-  return prisma.$transaction(async (tx) => {
+  return withDbTransaction(prisma, async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: productionOrderId },
       select: {
@@ -367,11 +376,11 @@ export async function configureAssemblyOrderExact(
     });
 
     return result;
-  }, { timeout: 20000 });
+  });
 }
 
-export async function cancelAssemblyWorkOrder(prisma: PrismaClient, productionOrderId: string) {
-  return prisma.$transaction(async (tx) => {
+export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: string) {
+  return withDbTransaction(prisma, async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: productionOrderId },
       select: {
@@ -470,15 +479,15 @@ export async function cancelAssemblyWorkOrder(prisma: PrismaClient, productionOr
       where: { id: order.id },
       data: { status: "CANCELADA" },
     });
-  }, { timeout: 20000 });
+  });
 }
 
 export async function closeAssemblyWorkOrderConsume(
-  prisma: PrismaClient,
+  prisma: Db,
   productionOrderId: string,
   operatorName?: string | null
 ) {
-  return prisma.$transaction(async (tx) => {
+  return withDbTransaction(prisma, async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: productionOrderId },
       select: {
@@ -590,5 +599,5 @@ export async function closeAssemblyWorkOrderConsume(
       where: { id: order.id },
       data: { status: "COMPLETADA" },
     });
-  }, { timeout: 20000 });
+  });
 }

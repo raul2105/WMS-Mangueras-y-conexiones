@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Prisma, ProductionOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +15,18 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELADA: "Cancelada",
 };
 
+const ACTIVE_DIRECT_PICK_STATUSES = ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] as const;
+
 function parsePage(value: string | undefined) {
   const parsed = Number.parseInt(value ?? "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function formatDateTime(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString("es-MX");
 }
 
 type SearchParams = {
@@ -36,7 +46,7 @@ export default async function ProductionPage({
     statusCandidate && statusCandidate in STATUS_LABELS ? (statusCandidate as ProductionOrderStatus) : undefined;
   const where: Prisma.ProductionOrderWhereInput | undefined = statusFilter ? { status: statusFilter } : undefined;
 
-  const [orders, totalCount, filteredCount, statusCounts] = await Promise.all([
+  const [orders, totalCount, filteredCount, statusCounts, activeDirectPickOrders] = await Promise.all([
     prisma.productionOrder.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -57,6 +67,34 @@ export default async function ProductionPage({
     prisma.productionOrder.count(),
     prisma.productionOrder.count({ where }),
     prisma.productionOrder.groupBy({ by: ["status"], _count: { status: true } }),
+    prisma.salesInternalOrder.findMany({
+      where: {
+        status: { not: "CANCELADA" },
+        pickLists: {
+          some: { status: { in: [...ACTIVE_DIRECT_PICK_STATUSES] } },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 10,
+      select: {
+        id: true,
+        code: true,
+        customerName: true,
+        updatedAt: true,
+        warehouse: { select: { code: true, name: true } },
+        pickLists: {
+          where: { status: { in: [...ACTIVE_DIRECT_PICK_STATUSES] } },
+          orderBy: { updatedAt: "desc" },
+          take: 1,
+          select: {
+            code: true,
+            status: true,
+            updatedAt: true,
+            targetLocation: { select: { code: true, name: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
@@ -97,6 +135,68 @@ export default async function ProductionPage({
           <p className="text-xs text-slate-400 uppercase font-bold">3. Ejecutar</p>
           <p className="text-slate-300 mt-2">Libera surtido, mueve a WIP y realiza el consumo final para cerrar.</p>
         </div>
+      </div>
+
+      <div className="glass-card space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold">Surtidos directos activos</h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Top 10 pedidos con picking independiente en curso.
+            </p>
+          </div>
+          <Link href="/production/requests" className="text-sm text-cyan-300 hover:text-white">
+            Ver pedidos de surtido
+          </Link>
+        </div>
+
+        {activeDirectPickOrders.length === 0 ? (
+          <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+            No hay surtidos directos activos.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-slate-400 border-b border-white/10">
+                  <th className="text-left py-3">Pedido</th>
+                  <th className="text-left py-3">Cliente</th>
+                  <th className="text-left py-3">Almacen</th>
+                  <th className="text-left py-3">Pick list</th>
+                  <th className="text-left py-3">Estado</th>
+                  <th className="text-left py-3">Destino</th>
+                  <th className="text-left py-3">Actualizado</th>
+                  <th className="text-right py-3">Accion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeDirectPickOrders.map((order) => {
+                  const activePickList = order.pickLists[0] ?? null;
+                  return (
+                    <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="py-3 font-mono text-slate-200">{order.code}</td>
+                      <td className="py-3 text-slate-300">{order.customerName ?? "--"}</td>
+                      <td className="py-3 text-slate-300">
+                        {order.warehouse ? `${order.warehouse.code} (${order.warehouse.name})` : "--"}
+                      </td>
+                      <td className="py-3 text-slate-300">{activePickList?.code ?? "--"}</td>
+                      <td className="py-3 text-slate-300">{summarizePickListStatus(activePickList?.status)}</td>
+                      <td className="py-3 text-slate-300">
+                        {activePickList?.targetLocation ? `${activePickList.targetLocation.code} - ${activePickList.targetLocation.name}` : "--"}
+                      </td>
+                      <td className="py-3 text-slate-400">{formatDateTime(activePickList?.updatedAt ?? order.updatedAt)}</td>
+                      <td className="py-3 text-right">
+                        <Link href={`/production/fulfillment/${order.id}`} className="text-cyan-400 hover:text-cyan-300">
+                          Operar surtido
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="glass-card space-y-5">

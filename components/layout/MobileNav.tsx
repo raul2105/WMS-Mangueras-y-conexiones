@@ -12,10 +12,12 @@ type Props = {
   open: boolean;
   pathname: string;
   modules: NavItem[];
+  userName: string;
+  userEmail: string;
   onClose: () => void;
 };
 
-export default function MobileNav({ open, pathname, modules, onClose }: Props) {
+export default function MobileNav({ open, pathname, modules, userName, userEmail, onClose }: Props) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -73,8 +75,8 @@ export default function MobileNav({ open, pathname, modules, onClose }: Props) {
           <div className="flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-2">
             <UserCircleIcon className="h-4 w-4 text-[var(--text-muted)]" />
             <div className="leading-tight">
-              <p className="text-xs font-medium text-[var(--text-primary)]">Usuario</p>
-              <p className="text-[11px] text-[var(--text-muted)]">Admin</p>
+              <p className="text-xs font-medium text-[var(--text-primary)]">{userName}</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{userEmail}</p>
             </div>
           </div>
         </div>
@@ -82,4 +84,3 @@ export default function MobileNav({ open, pathname, modules, onClose }: Props) {
     </div>
   );
 }
-

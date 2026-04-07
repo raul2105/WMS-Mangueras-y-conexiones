@@ -12,7 +12,7 @@ type SearchParams = {
   warehouseId?: string;
 };
 
-export default async function SalesEquivalencesPage({
+export default async function ProductionEquivalencesPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
@@ -35,16 +35,16 @@ export default async function SalesEquivalencesPage({
     matches.map(async (product) => ({
       product,
       equivalents: await getEquivalentProducts(product.id, { warehouseId: warehouseId || undefined, limit: 6, inStockOnly: false }),
-    }))
+    })),
   );
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Equivalencias comerciales"
+        title="Equivalencias para pedidos"
         description="Consulta sustitutos registrados por producto con stock disponible por almacen cuando aplique."
         meta={query ? `${groups.length} productos analizados` : "Busca un SKU o referencia para explorar equivalencias"}
-        actions={<Link href="/sales/orders/new" className="btn-primary">+ Nuevo pedido</Link>}
+        actions={<Link href="/production/requests/new" className="btn-primary">+ Nuevo pedido</Link>}
       />
 
       <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
@@ -62,19 +62,23 @@ export default async function SalesEquivalencesPage({
           <select name="warehouseId" defaultValue={warehouseId} className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white">
             <option value="">Todos</option>
             {warehouses.map((warehouse) => (
-              <option key={warehouse.id} value={warehouse.id}>{warehouse.code} - {warehouse.name}</option>
+              <option key={warehouse.id} value={warehouse.id}>
+                {warehouse.code} - {warehouse.name}
+              </option>
             ))}
           </select>
         </label>
         <div className="flex items-end gap-2">
           <button type="submit" className="btn-primary">Buscar</button>
-          <Link href="/sales/equivalences" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">Limpiar</Link>
+          <Link href="/production/equivalences" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">
+            Limpiar
+          </Link>
         </div>
       </form>
 
       {!query ? (
         <div className="glass-card px-4 py-10 text-center text-slate-400">
-          Ingresa un SKU, referencia o nombre para mostrar equivalencias comerciales.
+          Ingresa un SKU, referencia o nombre para mostrar equivalencias del pedido.
         </div>
       ) : groups.length === 0 ? (
         <div className="glass-card px-4 py-10 text-center text-slate-400">

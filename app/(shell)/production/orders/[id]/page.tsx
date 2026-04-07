@@ -23,6 +23,13 @@ async function releaseAssemblyPick(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
+
+  const session = await auth();
+  const roles = session?.user?.roles ?? [];
+  if (roles.includes("WAREHOUSE_OPERATOR")) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("El rol Operador de almacén no puede liberar surtido de ensamble")}`);
+  }
+
   try {
     await releaseAssemblyPickList(prisma, orderId);
   } catch (error) {
@@ -44,7 +51,7 @@ async function confirmAssemblyBatch(formData: FormData) {
     .map((value) => String(value).trim())
     .filter(Boolean);
 
-  if (!orderId || !operatorName || taskIds.length === 0) {
+  if (!orderId || !operatorName) {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Datos de surtido invalidos")}`);
   }
 
@@ -58,47 +65,69 @@ async function confirmAssemblyBatch(formData: FormData) {
     return { taskId, pickedQty, shortReason };
   });
 
-  let result: Awaited<ReturnType<typeof confirmAssemblyPickTasksBatch>>;
+  let processedCount = 0;
+  let labelCount = 0;
+  let autoClosed = false;
+
   try {
-    result = await confirmAssemblyPickTasksBatch(prisma, {
-      productionOrderId: orderId,
-      operatorName,
-      tasks,
+    if (taskIds.length > 0) {
+      const result = await confirmAssemblyPickTasksBatch(prisma, {
+        productionOrderId: orderId,
+        operatorName,
+        tasks,
+      });
+      processedCount = result.processedCount;
+      labelCount = result.labelJobIds.length;
+    }
+
+    const orderState = await prisma.productionOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        status: true,
+        assemblyWorkOrder: {
+          select: {
+            pickStatus: true,
+            wipStatus: true,
+            consumptionStatus: true,
+          },
+        },
+      },
     });
+
+    const canAutoClose =
+      Boolean(orderState?.assemblyWorkOrder) &&
+      orderState?.status !== "COMPLETADA" &&
+      orderState?.status !== "CANCELADA" &&
+      orderState?.assemblyWorkOrder?.pickStatus === "COMPLETED" &&
+      orderState?.assemblyWorkOrder?.wipStatus !== "NOT_IN_WIP" &&
+      orderState?.assemblyWorkOrder?.consumptionStatus !== "CONSUMED";
+
+    if (canAutoClose) {
+      await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName);
+      autoClosed = true;
+    }
   } catch (error) {
     const message = error instanceof InventoryServiceError
-      ? error.message
+      ? error.code === "PICKLIST_NOT_RELEASED"
+        ? "No se puede surtir: primero debes liberar el surtido"
+        : error.message
       : "Ocurrio un error inesperado al confirmar surtido";
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
-  const message = `Surtido confirmado (${result.processedCount} tareas, ${result.labelJobIds.length} etiquetas)`;
-  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent(message)}`);
-}
-
-async function consumeAssemblyOrder(formData: FormData) {
-  "use server";
-  const parsed = assemblyConsumeSchema.safeParse({
-    orderId: String(formData.get("orderId") ?? "").trim(),
-    operatorName: String(formData.get("operatorName") ?? "").trim(),
-  });
-  if (!parsed.success) {
-    const orderId = String(formData.get("orderId") ?? "").trim();
-    const target = orderId ? `/production/orders/${orderId}` : "/production";
-    redirect(`${target}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
-  }
-  const orderId = parsed.data.orderId;
-  const operatorName = parsed.data.operatorName;
-  try {
-    await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName);
-  } catch (error) {
-    const message = error instanceof InventoryServiceError
-      ? error.message
-      : "Ocurrio un error inesperado al cerrar la orden";
-    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  if (autoClosed) {
+    const message = processedCount > 0
+      ? `Surtido confirmado (${processedCount} tareas, ${labelCount} etiquetas) y orden cerrada/consumida`
+      : "Orden cerrada y consumida";
+    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cerrada y consumida")}`);
+  if (processedCount > 0) {
+    const message = `Surtido confirmado (${processedCount} tareas, ${labelCount} etiquetas). Orden abierta: faltan tareas o cierre final.`;
+    redirect(`/production/orders/${orderId}?ok=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/production/orders/${orderId}?error=${encodeURIComponent("No hay tareas pendientes para confirmar ni condiciones para cierre")}`);
 }
 
 async function cancelAssemblyOrder(formData: FormData) {
@@ -253,8 +282,8 @@ export default async function ProductionOrderDetailPage({
         </div>
         {order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId ? (
           <div className="rounded-[var(--radius-lg)] border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
-            Origen comercial: {canViewSalesOrigin ? (
-              <Link href={`/sales/orders/${order.sourceDocumentId}`} className="font-mono text-cyan-300 hover:text-white">
+            Origen pedido: {canViewSalesOrigin ? (
+              <Link href={`/production/requests/${order.sourceDocumentId}`} className="font-mono text-cyan-300 hover:text-white">
                 {order.sourceDocumentId}
               </Link>
             ) : (
@@ -293,8 +322,8 @@ export default async function ProductionOrderDetailPage({
           <div>
           {order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId ? (
             <div className="rounded-[var(--radius-lg)] border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
-              Origen comercial: {canViewSalesOrigin ? (
-                <Link href={`/sales/orders/${order.sourceDocumentId}`} className="font-mono text-cyan-300 hover:text-white">
+              Origen pedido: {canViewSalesOrigin ? (
+                <Link href={`/production/requests/${order.sourceDocumentId}`} className="font-mono text-cyan-300 hover:text-white">
                   {order.sourceDocumentId}
                 </Link>
               ) : (
@@ -373,6 +402,29 @@ export default async function ProductionOrderDetailPage({
   }
 
   const activePickList = order.assemblyWorkOrder.pickLists[0] ?? null;
+  const sourceSalesOrder =
+    order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId
+      ? await prisma.salesInternalOrder.findUnique({
+          where: { id: order.sourceDocumentId },
+          select: { id: true, status: true, code: true },
+        })
+      : null;
+  const isWarehouseOperator = (session?.user?.roles ?? []).includes("WAREHOUSE_OPERATOR");
+  const hasValidSalesSource = order.sourceDocumentType === "SalesInternalOrder" && Boolean(order.sourceDocumentId);
+  const isSourceConfirmed = sourceSalesOrder?.status === "CONFIRMADA";
+  const releaseBlockedReason =
+    order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"
+      ? "El surtido ya fue liberado o procesado"
+      : isWarehouseOperator
+        ? "El rol Operador de almacén no puede liberar surtido de ensamble"
+        : !hasValidSalesSource
+          ? "La orden no tiene pedido de origen vinculado"
+          : !sourceSalesOrder
+            ? "No se encontró el pedido de origen vinculado"
+            : !isSourceConfirmed
+              ? "El pedido de origen debe estar CONFIRMADA para liberar surtido"
+              : null;
+  const canReleaseAssemblyPick = !releaseBlockedReason;
   const isFinalOrderStatus = order.status === "COMPLETADA" || order.status === "CANCELADA";
   const hasWip = order.assemblyWorkOrder.lines.some((line) => line.wipQty > 0);
   const hasConsumed = order.assemblyWorkOrder.lines.some((line) => line.consumedQty > 0);
@@ -387,6 +439,14 @@ export default async function ProductionOrderDetailPage({
     order.assemblyWorkOrder.pickStatus === "COMPLETED" &&
     order.assemblyWorkOrder.wipStatus !== "NOT_IN_WIP" &&
     order.assemblyWorkOrder.consumptionStatus !== "CONSUMED";
+  const actionableTasks = activePickList?.tasks.filter((task) => task.status !== "COMPLETED" && task.status !== "CANCELLED") ?? [];
+  const canConfirmTasks = Boolean(activePickList) && activePickList.status !== "DRAFT" && actionableTasks.length > 0;
+  const canUnifiedProcess = canConfirmTasks || canClose;
+  const unifiedProcessBlockedReason = canUnifiedProcess
+    ? null
+    : activePickList?.status === "DRAFT"
+      ? "No se puede surtir: primero debes liberar el surtido"
+      : "No hay tareas pendientes para confirmar ni condiciones para cierre";
   const closeOperatorDefault = lastAssemblyOperator?.operatorName ?? "";
 
   return (
@@ -437,11 +497,28 @@ export default async function ProductionOrderDetailPage({
           <h2 className="text-xl font-semibold">Estado operativo</h2>
           <form action={releaseAssemblyPick}>
             <input type="hidden" name="orderId" value={order.id} />
-            <button type="submit" className={buttonStyles({ className: order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED" ? "opacity-50" : "" })} disabled={order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"}>Iniciar surtido</button>
+            <button
+              type="submit"
+              className={buttonStyles({ className: !canReleaseAssemblyPick ? "opacity-50" : "" })}
+              disabled={!canReleaseAssemblyPick}
+              title={releaseBlockedReason ?? undefined}
+            >
+              Iniciar surtido
+            </button>
           </form>
         </div>
         <p className="text-sm text-slate-400">Reserva {order.assemblyWorkOrder.reservationStatus} | Picking {order.assemblyWorkOrder.pickStatus} | WIP {order.assemblyWorkOrder.wipStatus} | Consumo {order.assemblyWorkOrder.consumptionStatus}</p>
         <p className="text-sm text-slate-400">WIP: {order.assemblyWorkOrder.wipLocation.code} - {order.assemblyWorkOrder.wipLocation.name}</p>
+        {order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId ? (
+          <p className="text-sm text-slate-400">
+            Pedido origen: {sourceSalesOrder?.code ?? order.sourceDocumentId} · Estado {sourceSalesOrder?.status ?? "NO_ENCONTRADO"}
+          </p>
+        ) : (
+          <p className="text-sm text-slate-400">Pedido origen: no vinculado</p>
+        )}
+        {releaseBlockedReason ? (
+          <p className="text-xs text-[var(--warning)]">Liberación bloqueada: {releaseBlockedReason}.</p>
+        ) : null}
         <p className="text-sm text-slate-400">
           Trace de ensamble:
           {orderTrace ? (
@@ -547,12 +624,20 @@ export default async function ProductionOrderDetailPage({
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
               <label className="space-y-1">
                 <span className="text-xs text-slate-400">Operador surtido</span>
-                <input name="operatorName" className="w-full px-3 py-2 glass rounded-lg" required />
+                <input name="operatorName" className="w-full px-3 py-2 glass rounded-lg" required defaultValue={closeOperatorDefault} />
               </label>
-              <button type="submit" className={buttonStyles()}>
-                Confirmar surtido de la orden
+              <button
+                type="submit"
+                className={buttonStyles({ className: canUnifiedProcess ? "" : "opacity-50" })}
+                disabled={!canUnifiedProcess}
+                title={unifiedProcessBlockedReason ?? undefined}
+              >
+                Confirmar surtido y cerrar si aplica
               </button>
             </div>
+            {unifiedProcessBlockedReason ? (
+              <p className="text-xs text-[var(--warning)]">{unifiedProcessBlockedReason}.</p>
+            ) : null}
           </form>
         </div>
       )}
@@ -569,28 +654,10 @@ export default async function ProductionOrderDetailPage({
             Cancelar orden
           </button>
         </form>
-        <form action={consumeAssemblyOrder}>
-          <input type="hidden" name="orderId" value={order.id} />
-          <input
-            name="operatorName"
-            required
-            className="px-3 py-2 glass rounded-lg mr-2"
-            placeholder="Operador cierre"
-            defaultValue={closeOperatorDefault}
-          />
-          <button
-            type="submit"
-            className={buttonStyles({ className: canClose ? "" : "opacity-50" })}
-            disabled={!canClose}
-            title={!canClose ? "El cierre requiere picking completado y material en WIP" : undefined}
-          >
-            Cerrar y consumir
-          </button>
-        </form>
       </div>
-      {(!canCancel || !canClose) && (
+      {!canCancel && (
         <p className="text-xs text-[var(--text-muted)] text-right">
-          Acciones finales bloqueadas: cancelar solo antes de liberar surtido; cerrar solo con picking completado y WIP disponible.
+          Acciones finales bloqueadas: cancelar solo antes de liberar surtido.
         </p>
       )}
     </div>

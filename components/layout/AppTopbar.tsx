@@ -5,13 +5,15 @@ import { cn } from "@/lib/cn";
 import type { NavItem } from "@/components/layout/nav-config";
 import { MenuIcon, PanelCloseIcon, PanelOpenIcon, UserCircleIcon } from "@/components/ui/icons";
 import ThemeToggle from "@/components/ThemeToggle";
-import { useSession, signOut } from "next-auth/react";
+import { signOut } from "next-auth/react";
 
 type Props = {
   activeModule: NavItem;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onOpenMobileNav: () => void;
+  userName: string;
+  userEmail: string;
 };
 
 export default function AppTopbar({
@@ -19,11 +21,9 @@ export default function AppTopbar({
   sidebarCollapsed,
   onToggleSidebar,
   onOpenMobileNav,
+  userName,
+  userEmail,
 }: Props) {
-  const { data: session } = useSession();
-  const userName = session?.user?.name ?? "Usuario";
-  const userEmail = session?.user?.email ?? "";
-
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--border-subtle)] bg-[var(--shell-bg)]/95 backdrop-blur-sm">
       <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-5">
@@ -79,4 +79,3 @@ export default function AppTopbar({
     </header>
   );
 }
-

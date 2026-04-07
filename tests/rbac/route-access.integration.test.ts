@@ -16,8 +16,10 @@ describe("rbac role-route access matrix", () => {
     "/inventory/transfer",
     "/inventory/pick",
     "/audit",
-    "/sales/orders",
-    "/sales/orders/new",
+    "/production/requests",
+    "/production/requests/new",
+    "/production/availability",
+    "/production/equivalences",
   ] as const;
 
   it("maps critical routes to expected permissions", () => {
@@ -25,6 +27,9 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/inventory/transfer")).toBe("inventory.transfer");
     expect(getRequiredPermissionForPath("/inventory/pick")).toBe("inventory.pick");
     expect(getRequiredPermissionForPath("/audit")).toBe("audit.view");
+    expect(getRequiredPermissionForPath("/production/requests")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/sales/orders")).toBe("sales.view");
   });
 
@@ -55,7 +60,18 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("SALES_EXECUTIVE", "/audit")).toBe(false);
   });
 
-  it("sales routes are available for manager and sales executive", () => {
+  it("request routes are available for manager and sales executive", () => {
+    expect(canAccess("MANAGER", "/production/requests")).toBe(true);
+    expect(canAccess("MANAGER", "/production/requests/new")).toBe(true);
+    expect(canAccess("MANAGER", "/production/availability")).toBe(true);
+    expect(canAccess("MANAGER", "/production/equivalences")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/production/requests")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/production/requests/new")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/production/availability")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/production/equivalences")).toBe(true);
+  });
+
+  it("legacy sales redirects still require sales.view", () => {
     expect(canAccess("MANAGER", "/sales/orders")).toBe(true);
     expect(canAccess("MANAGER", "/sales/orders/new")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/sales/orders")).toBe(true);

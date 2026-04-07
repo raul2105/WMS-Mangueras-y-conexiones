@@ -20,7 +20,7 @@ function parsePage(value: string | undefined) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
-export default async function SalesAvailabilityPage({
+export default async function ProductionAvailabilityPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
@@ -94,7 +94,7 @@ export default async function SalesAvailabilityPage({
         current.available += row.available;
         acc[warehouseCode] = current;
         return acc;
-      }, {})
+      }, {}),
     );
 
     return {
@@ -115,16 +115,16 @@ export default async function SalesAvailabilityPage({
     if (selectedWarehouse) params.set("warehouse", selectedWarehouse);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
-    return qs ? `/sales/availability?${qs}` : "/sales/availability";
+    return qs ? `/production/availability?${qs}` : "/production/availability";
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Disponibilidad comercial"
-        description="Stock total, reservado y disponible en tiempo real para promesa comercial."
+        title="Disponibilidad para pedidos"
+        description="Stock total, reservado y disponible en tiempo real para promesa comercial dentro de ensamble."
         meta={`${totalRows.toLocaleString("es-MX")} productos con inventario`}
-        actions={<Link href="/sales/orders/new" className="btn-primary">+ Nuevo pedido</Link>}
+        actions={<Link href="/production/requests/new" className="btn-primary">+ Nuevo pedido</Link>}
       />
 
       <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
@@ -142,13 +142,17 @@ export default async function SalesAvailabilityPage({
           <select name="warehouse" defaultValue={selectedWarehouse} className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white">
             <option value="">Todos</option>
             {warehouses.map((warehouse) => (
-              <option key={warehouse.code} value={warehouse.code}>{warehouse.code} - {warehouse.name}</option>
+              <option key={warehouse.code} value={warehouse.code}>
+                {warehouse.code} - {warehouse.name}
+              </option>
             ))}
           </select>
         </label>
         <div className="flex items-end gap-2">
           <button type="submit" className="btn-primary">Filtrar</button>
-          <Link href="/sales/availability" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">Limpiar</Link>
+          <Link href="/production/availability" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">
+            Limpiar
+          </Link>
         </div>
       </form>
 

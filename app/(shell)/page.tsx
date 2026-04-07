@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,8 +10,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { ArrowDownIcon, ArrowUpIcon, BoxIcon, DashboardIcon, InventoryIcon, SwapIcon, WarehouseIcon } from "@/components/ui/icons";
+import { ROLE_HOME } from "@/lib/rbac/route-access-map";
+import type { RoleCode } from "@/lib/rbac/permissions";
 
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   IN: "Entrada",
@@ -26,6 +30,15 @@ const MOVEMENT_TYPE_COLORS: Record<string, string> = {
 };
 
 export default async function Home() {
+  const session = await auth();
+  const roles = session?.user?.roles ?? [];
+  const primaryRole = (roles[0] as RoleCode) ?? "MANAGER";
+  const home = ROLE_HOME[primaryRole] ?? "/";
+
+  if (home !== "/") {
+    redirect(home);
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 

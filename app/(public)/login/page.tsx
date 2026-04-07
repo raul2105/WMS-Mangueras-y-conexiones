@@ -52,18 +52,30 @@ export default async function LoginPage({
   const error = String(sp.error ?? "").trim();
 
   return (
-    <div className="mx-auto flex min-h-[70vh] max-w-xl items-center">
-      <SectionCard title="Acceso WMS" description="Inicia sesion para operar el sistema.">
-        <form action={loginAction} className="space-y-4">
-          <input type="hidden" name="callbackUrl" value={callbackUrl} />
-          <Input name="email" type="email" label="Email" placeholder="admin@scmayer.local" required />
-          <Input name="password" type="password" label="Contrasena" required />
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
-          <button type="submit" className={buttonStyles({ fullWidth: true })}>
-            Iniciar sesion
-          </button>
-        </form>
-      </SectionCard>
+    <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden px-4 py-10 sm:px-6">
+      <div
+        className="pointer-events-none absolute inset-0 -z-10 opacity-70"
+        aria-hidden="true"
+        style={{
+          background:
+            "radial-gradient(circle at 10% 10%, color-mix(in oklab, var(--accent) 22%, transparent) 0%, transparent 40%), radial-gradient(circle at 80% 20%, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 36%), linear-gradient(180deg, var(--bg-app), var(--bg-app))",
+        }}
+      />
+
+      <div className="w-full max-w-md space-y-4">
+        <p className="text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">SCMAYHER WMS</p>
+        <SectionCard title="Acceso WMS" description="Inicia sesion para operar el sistema.">
+          <form action={loginAction} className="space-y-4">
+            <input type="hidden" name="callbackUrl" value={callbackUrl} />
+            <Input name="email" type="email" label="Email" placeholder="admin@scmayher.local" required />
+            <Input name="password" type="password" label="Contrasena" required />
+            {error ? <p className="text-sm text-red-400">{error}</p> : null}
+            <button type="submit" className={buttonStyles({ fullWidth: true })}>
+              Iniciar sesion
+            </button>
+          </form>
+        </SectionCard>
+      </div>
     </div>
   );
 }

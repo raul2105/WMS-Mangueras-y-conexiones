@@ -110,6 +110,9 @@ model Product {
   technicalAttributes ProductTechnicalAttribute[]
   productionOrderItems ProductionOrderItem[]
   salesInternalOrderLines SalesInternalOrderLine[]
+  salesAssemblyConfigurationsEntry SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyEntryFittingProduct")
+  salesAssemblyConfigurationsHose  SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyHoseProduct")
+  salesAssemblyConfigurationsExit  SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyExitFittingProduct")
   supplierProducts     SupplierProduct[]
   purchaseOrderLines   PurchaseOrderLine[]
   assemblyConfigurationsEntry AssemblyConfiguration[] @relation("AssemblyEntryFittingProduct")
@@ -216,6 +219,9 @@ model Location {
   purchaseReceipts     PurchaseReceipt[]
   assemblyPickTasksSource PickTask[] @relation("PickTaskSourceLocation")
   assemblyPickTasksTarget PickTask[] @relation("PickTaskTargetLocation")
+  salesOrderPickListsTarget SalesInternalOrderPickList[] @relation("SalesOrderPickListTargetLocation")
+  salesOrderPickTasksSource SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskSourceLocation")
+  salesOrderPickTasksTarget SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskTargetLocation")
   assemblyWipWorkOrders  AssemblyWorkOrder[] @relation("AssemblyWipLocation")
   traceRecords TraceRecord[]
 
@@ -271,6 +277,11 @@ enum SalesInternalOrderStatus {
   BORRADOR
   CONFIRMADA
   CANCELADA
+}
+
+enum SalesInternalOrderLineKind {
+  PRODUCT
+  CONFIGURED_ASSEMBLY
 }
 
 enum ProductionOrderKind {
@@ -503,6 +514,7 @@ model SalesInternalOrder {
   confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
   cancelledByUser User? @relation("SalesInternalOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   lines SalesInternalOrderLine[]
+  pickLists SalesInternalOrderPickList[]
 
   @@index([status, createdAt])
   @@index([requestedByUserId])
@@ -512,17 +524,99 @@ model SalesInternalOrder {
 model SalesInternalOrderLine {
   id String @id @default(uuid())
   orderId String
-  productId String
+  lineKind SalesInternalOrderLineKind @default(PRODUCT)
+  productId String?
   requestedQty Float
   notes String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  assemblyConfiguration SalesInternalOrderAssemblyConfig?
+  pickTasks SalesInternalOrderPickTask[]
 
   @@index([orderId])
   @@index([productId])
+  @@index([orderId, lineKind])
+}
+
+model SalesInternalOrderAssemblyConfig {
+  id String @id @default(uuid())
+  orderLineId String @unique
+
+  entryFittingProductId String
+  hoseProductId String
+  exitFittingProductId String
+
+  hoseLength Float
+  assemblyQuantity Float
+  totalHoseRequired Float
+  sourceDocumentRef String?
+  notes String?
+
+  orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  entryFittingProduct Product @relation("SalesAssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
+  hoseProduct Product @relation("SalesAssemblyHoseProduct", fields: [hoseProductId], references: [id], onDelete: Restrict)
+  exitFittingProduct Product @relation("SalesAssemblyExitFittingProduct", fields: [exitFittingProductId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entryFittingProductId])
+  @@index([hoseProductId])
+  @@index([exitFittingProductId])
+}
+
+model SalesInternalOrderPickList {
+  id String @id @default(uuid())
+  code String @unique
+  orderId String
+  targetLocationId String
+  status PickListStatus @default(DRAFT)
+  releasedAt DateTime?
+  completedAt DateTime?
+  canceledAt DateTime?
+
+  order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  targetLocation Location @relation("SalesOrderPickListTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  tasks SalesInternalOrderPickTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId, status])
+  @@index([targetLocationId])
+}
+
+model SalesInternalOrderPickTask {
+  id String @id @default(uuid())
+  pickListId String
+  orderLineId String
+  sourceLocationId String
+  targetLocationId String
+
+  sequence Int
+  requestedQty Float
+  reservedQty Float
+  pickedQty Float @default(0)
+  shortQty Float @default(0)
+  status PickTaskStatus @default(PENDING)
+  shortReason String?
+  notes String?
+
+  pickList SalesInternalOrderPickList @relation(fields: [pickListId], references: [id], onDelete: Cascade)
+  orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  sourceLocation Location @relation("SalesOrderPickTaskSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  targetLocation Location @relation("SalesOrderPickTaskTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pickListId, sequence])
+  @@index([orderLineId])
+  @@index([sourceLocationId, status])
+  @@index([targetLocationId, status])
 }
 
 enum AssemblyAvailabilityStatus {

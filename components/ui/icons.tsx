@@ -65,6 +65,17 @@ export function PurchasingIcon(props: Props) {
   );
 }
 
+export function SalesIcon(props: Props) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M4 19h16" />
+      <path d="M6 16V8l6-4 6 4v8" />
+      <path d="M9 13h6" />
+      <path d="M12 10v6" />
+    </BaseIcon>
+  );
+}
+
 export function ProductionIcon(props: Props) {
   return (
     <BaseIcon {...props}>
@@ -73,6 +84,16 @@ export function ProductionIcon(props: Props) {
       <path d="M7 4 3 8l4 4" />
       <path d="m3 8 9 9" />
       <path d="m12 17 4 4 4-4" />
+    </BaseIcon>
+  );
+}
+
+export function AuditIcon(props: Props) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6l-8-3Z" />
+      <path d="M9 12h6" />
+      <path d="M12 9v6" />
     </BaseIcon>
   );
 }

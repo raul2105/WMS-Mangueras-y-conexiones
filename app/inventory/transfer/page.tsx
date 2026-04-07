@@ -12,11 +12,13 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
 async function transferStock(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("inventory.transfer");
 
   const code = String(formData.get("code") ?? "").trim();
   const fromLocationCode = String(formData.get("fromLocation") ?? "").trim();
@@ -111,6 +113,7 @@ export default async function TransferPage({
 }: {
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
+  await pageGuard("inventory.transfer");
   const sp = await searchParams;
   const [locations, products, recentReferences] = await Promise.all([
     prisma.location.findMany({

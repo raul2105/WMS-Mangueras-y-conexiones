@@ -382,6 +382,7 @@ export async function cancelAssemblyWorkOrder(prisma: PrismaClient, productionOr
         assemblyWorkOrder: {
           select: {
             id: true,
+            pickStatus: true,
             lines: {
               select: {
                 id: true,
@@ -389,6 +390,7 @@ export async function cancelAssemblyWorkOrder(prisma: PrismaClient, productionOr
                 reservedQty: true,
                 pickedQty: true,
                 wipQty: true,
+                consumedQty: true,
                 pickTasks: {
                   select: {
                     sourceLocationId: true,

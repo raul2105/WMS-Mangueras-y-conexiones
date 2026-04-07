@@ -175,3 +175,27 @@ export const purchaseReceiptOperationSchema = z.object({
   referenceDoc: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });
+
+// ─── Módulo Comercial ────────────────────────────────────────────────────────
+
+export const salesInternalOrderCreateSchema = z.object({
+  customerName: requiredText("Cliente"),
+  warehouseId: requiredText("Almacen"),
+  dueDateRaw: requiredText("Fecha compromiso"),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+export const salesInternalOrderLineSchema = z.object({
+  productId: requiredText("Producto"),
+  requestedQtyRaw: decimalText("Cantidad"),
+  notes: z.string().trim().max(500).optional(),
+});
+
+export const salesInternalOrderTransitionSchema = z.object({
+  orderId: requiredText("Pedido"),
+});
+
+export const salesGenerateProductionOrderSchema = z.object({
+  orderId: requiredText("Pedido"),
+  lineId: requiredText("Linea"),
+});

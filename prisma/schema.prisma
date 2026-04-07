@@ -10,6 +10,81 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  isActive     Boolean  @default(true)
+
+  userRoles UserRole[]
+  requestedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderRequestedBy")
+  confirmedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderConfirmedBy")
+  cancelledSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderCancelledBy")
+
+  inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
+  traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
+  auditLogs          AuditLog[]          @relation("AuditActorUser")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model Role {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+
+  userRoles        UserRole[]
+  rolePermissions  RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  description String?
+
+  rolePermissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  grantedAt DateTime @default(now())
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
 model Product {
   id          String   @id @default(uuid())
   sku         String   @unique
@@ -34,6 +109,7 @@ model Product {
   equivalencesTo ProductEquivalence[]   @relation("EquivalenceTo")
   technicalAttributes ProductTechnicalAttribute[]
   productionOrderItems ProductionOrderItem[]
+  salesInternalOrderLines SalesInternalOrderLine[]
   supplierProducts     SupplierProduct[]
   purchaseOrderLines   PurchaseOrderLine[]
   assemblyConfigurationsEntry AssemblyConfiguration[] @relation("AssemblyEntryFittingProduct")
@@ -110,6 +186,7 @@ model Warehouse {
   
   locations   Location[]
   productionOrders ProductionOrder[]
+  salesInternalOrders SalesInternalOrder[]
   assemblyWorkOrders AssemblyWorkOrder[]
   traceRecords TraceRecord[]
   
@@ -190,6 +267,12 @@ enum ProductionOrderStatus {
   CANCELADA
 }
 
+enum SalesInternalOrderStatus {
+  BORRADOR
+  CONFIRMADA
+  CANCELADA
+}
+
 enum ProductionOrderKind {
   GENERIC
   ASSEMBLY_3PIECE
@@ -201,6 +284,7 @@ model InventoryMovement {
   quantity  Float
   traceId   String?
   operatorName String?
+  operatorUserId String?
   reference String?                // PO, SO, Transfer Order, etc.
   notes     String?
   documentType String?
@@ -213,6 +297,7 @@ model InventoryMovement {
   
   productId  String
   product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  operatorUser User?               @relation("MovementOperatorUser", fields: [operatorUserId], references: [id], onDelete: SetNull)
   
   locationId String?
   location   Location?             @relation(fields: [locationId], references: [id], onDelete: SetNull)
@@ -230,6 +315,7 @@ model InventoryMovement {
   @@index([createdAt])
   @@index([documentType, documentId])
   @@index([traceId])
+  @@index([operatorUserId])
 }
 
 enum LabelType {
@@ -271,6 +357,7 @@ model TraceRecord {
   sourceDocumentLineId String?
   companyName String
   operatorName String?
+  operatorUserId String?
   reference String?
 
   quantity Float?
@@ -283,6 +370,7 @@ model TraceRecord {
   originMovementId String? @unique
 
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  operatorUser User? @relation("TraceOperatorUser", fields: [operatorUserId], references: [id], onDelete: SetNull)
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   location Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   originMovement InventoryMovement? @relation(fields: [originMovementId], references: [id], onDelete: SetNull)
@@ -295,6 +383,7 @@ model TraceRecord {
   @@index([labelType])
   @@index([sourceDocumentType, sourceDocumentId])
   @@index([createdAt])
+  @@index([operatorUserId])
 }
 
 model LabelTemplate {
@@ -352,6 +441,9 @@ model ProductionOrder {
   customerName String?
   dueDate      DateTime?
   notes        String?
+  sourceDocumentType String?
+  sourceDocumentId String?
+  sourceDocumentLineId String?
 
   warehouseId String
   warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
@@ -366,6 +458,7 @@ model ProductionOrder {
   @@index([warehouseId])
   @@index([status])
   @@index([createdAt])
+  @@index([sourceDocumentType, sourceDocumentId])
 }
 
 model ProductionOrderItem {
@@ -385,6 +478,51 @@ model ProductionOrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([locationId])
+}
+
+model SalesInternalOrder {
+  id String @id @default(uuid())
+  code String @unique
+  status SalesInternalOrderStatus @default(BORRADOR)
+  customerName String?
+  warehouseId String?
+  dueDate DateTime?
+  notes String?
+
+  requestedByUserId String?
+  confirmedByUserId String?
+  cancelledByUserId String?
+
+  confirmedAt DateTime?
+  cancelledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  requestedByUser User? @relation("SalesInternalOrderRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser User? @relation("SalesInternalOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  lines SalesInternalOrderLine[]
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([warehouseId])
+}
+
+model SalesInternalOrderLine {
+  id String @id @default(uuid())
+  orderId String
+  productId String
+  requestedQty Float
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 enum AssemblyAvailabilityStatus {
@@ -586,13 +724,18 @@ model AuditLog {
   before     String?
   after      String?
   actor      String?
+  actorUserId String?
   source     String?
+
+  actorUser User? @relation("AuditActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+
   createdAt  DateTime @default(now())
 
   @@index([entityType])
   @@index([entityId])
   @@index([action])
   @@index([createdAt])
+  @@index([actorUserId])
 }
 
 model ImportLog {

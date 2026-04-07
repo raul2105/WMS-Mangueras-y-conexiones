@@ -1,12 +1,14 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
 import { assemblyConsumeSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 import { buttonStyles } from "@/components/ui/button";
+import { isSystemAdmin } from "@/lib/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +126,7 @@ export default async function ProductionOrderDetailPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
+  const session = await auth();
 
   const order = await prisma.productionOrder.findUnique({
     where: { id },
@@ -136,6 +139,9 @@ export default async function ProductionOrderDetailPage({
       priority: true,
       dueDate: true,
       notes: true,
+      sourceDocumentType: true,
+      sourceDocumentId: true,
+      sourceDocumentLineId: true,
       warehouse: { select: { name: true, code: true } },
       items: {
         select: {
@@ -208,6 +214,8 @@ export default async function ProductionOrderDetailPage({
   });
   if (!order) redirect("/production");
 
+  const canViewSalesOrigin = isSystemAdmin(session?.user?.roles) || (session?.user?.permissions ?? []).includes("sales.view");
+
   const orderTrace = await prisma.traceRecord.findFirst({
     where: {
       sourceEntityType: "ASSEMBLY_ORDER",
@@ -243,6 +251,17 @@ export default async function ProductionOrderDetailPage({
         <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--warning) 35%,var(--border-default))] bg-[var(--warning-soft)] px-4 py-3 text-sm text-[var(--warning)]">
           Orden genérica: la edición manual permanece en ruta de mantenimiento temporal.
         </div>
+        {order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId ? (
+          <div className="rounded-[var(--radius-lg)] border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+            Origen comercial: {canViewSalesOrigin ? (
+              <Link href={`/sales/orders/${order.sourceDocumentId}`} className="font-mono text-cyan-300 hover:text-white">
+                {order.sourceDocumentId}
+              </Link>
+            ) : (
+              <span className="font-mono">{order.sourceDocumentId}</span>
+            )}
+          </div>
+        ) : null}
         <table className="w-full text-sm glass-card">
           <thead>
             <tr className="text-slate-400 border-b border-white/10">
@@ -272,6 +291,17 @@ export default async function ProductionOrderDetailPage({
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4">
           <div>
+          {order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId ? (
+            <div className="rounded-[var(--radius-lg)] border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+              Origen comercial: {canViewSalesOrigin ? (
+                <Link href={`/sales/orders/${order.sourceDocumentId}`} className="font-mono text-cyan-300 hover:text-white">
+                  {order.sourceDocumentId}
+                </Link>
+              ) : (
+                <span className="font-mono">{order.sourceDocumentId}</span>
+              )}
+            </div>
+          ) : null}
             <h1 className="text-3xl font-bold">Orden {order.code}</h1>
             <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
           </div>

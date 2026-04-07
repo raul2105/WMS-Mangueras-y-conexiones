@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
 import { TAXONOMY_CATEGORIES, TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
@@ -15,6 +16,7 @@ interface PageProps {
 
 async function updateProduct(id: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("catalog.edit");
 
   const name = String(formData.get("name") ?? "").trim();
   const type = String(formData.get("type") ?? "").trim().toUpperCase();
@@ -113,6 +115,7 @@ async function updateProduct(id: string, formData: FormData) {
 }
 
 export default async function ProductEditPage({ params, searchParams }: PageProps) {
+  await pageGuard("catalog.edit");
   const { id } = await params;
   const sp = await searchParams;
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Prisma, ProductionOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -30,8 +31,10 @@ export default async function ProductionPage({
 }) {
   const sp = await searchParams;
   const currentPage = parsePage(sp.page);
-  const statusFilter = sp.status && STATUS_LABELS[sp.status] ? sp.status : undefined;
-  const where = statusFilter ? { status: statusFilter as keyof typeof STATUS_LABELS } : {};
+  const statusCandidate = sp.status?.trim();
+  const statusFilter: ProductionOrderStatus | undefined =
+    statusCandidate && statusCandidate in STATUS_LABELS ? (statusCandidate as ProductionOrderStatus) : undefined;
+  const where: Prisma.ProductionOrderWhereInput | undefined = statusFilter ? { status: statusFilter } : undefined;
 
   const [orders, totalCount, filteredCount, statusCounts] = await Promise.all([
     prisma.productionOrder.findMany({

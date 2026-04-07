@@ -5,9 +5,11 @@ import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import InventoryService from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { firstErrorMessage, purchaseReceiptOperationSchema } from "@/lib/schemas/wms";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 async function receiveItems(orderId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const parsedHeader = purchaseReceiptOperationSchema.safeParse({
     locationId: String(formData.get("locationId") ?? "").trim(),
@@ -167,6 +169,7 @@ export default async function ReceivePage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("purchasing.manage");
   const { id } = await params;
   const sp = await searchParams;
 

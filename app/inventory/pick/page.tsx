@@ -14,11 +14,13 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
 async function pickStock(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("inventory.pick");
 
   const code = String(formData.get("code") ?? "").trim();
   const locationCode = String(formData.get("location") ?? "").trim();
@@ -154,6 +156,7 @@ export default async function PickPage({
 }: {
   searchParams: Promise<{ ok?: string; error?: string; suggestion?: string; suggestedCode?: string }>;
 }) {
+  await pageGuard("inventory.pick");
   const sp = await searchParams;
   const [locations, products, recentReferences] = await Promise.all([
     prisma.location.findMany({

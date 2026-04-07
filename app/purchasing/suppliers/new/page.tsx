@@ -8,9 +8,11 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 async function createSupplier(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
@@ -57,6 +59,7 @@ export default async function NewSupplierPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("purchasing.manage");
   const sp = await searchParams;
 
   return (

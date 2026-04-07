@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
 import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
@@ -98,6 +99,7 @@ export default async function CatalogImportPage({
 }: {
   searchParams: Promise<ActionState & { dry?: string }>;
 }) {
+  await pageGuard("catalog.edit");
   const sp = await searchParams;
 
   const recentImports = await prisma.importLog.findMany({

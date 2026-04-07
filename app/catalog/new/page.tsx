@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
@@ -17,6 +18,7 @@ export const dynamic = "force-dynamic";
 
 async function createProduct(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("catalog.edit");
 
   const sku = String(formData.get("sku") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
@@ -164,6 +166,7 @@ export default async function NewCatalogItemPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("catalog.edit");
   const sp = await searchParams;
   const [locations, categories, brands, recentProducts] = await Promise.all([
     prisma.location.findMany({

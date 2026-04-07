@@ -3,11 +3,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { firstErrorMessage, parseDueDate, parsePriority, productionOrderCreateSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
 async function createOrder(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
 
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const status = String(formData.get("status") ?? "BORRADOR").trim();
@@ -90,6 +92,7 @@ export default async function NewGenericProductionOrderPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("production.execute");
   const sp = await searchParams;
   const [warehouses, customers] = await Promise.all([
     prisma.warehouse.findMany({

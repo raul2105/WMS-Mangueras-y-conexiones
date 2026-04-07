@@ -5,12 +5,14 @@ import type { ComponentType, SVGProps } from "react";
 import { NAV_ITEMS, type NavIcon, type NavItem, isNavItemActive } from "@/components/layout/nav-config";
 import { cn } from "@/lib/cn";
 import {
+  AuditIcon,
   BoxIcon,
   ChevronRightIcon,
   DashboardIcon,
   InventoryIcon,
   ProductionIcon,
   PurchasingIcon,
+  SalesIcon,
   WarehouseIcon,
 } from "@/components/ui/icons";
 
@@ -19,8 +21,10 @@ const iconMap: Record<NavIcon, ComponentType<SVGProps<SVGSVGElement>>> = {
   catalog: BoxIcon,
   warehouse: WarehouseIcon,
   inventory: InventoryIcon,
+  sales: SalesIcon,
   purchasing: PurchasingIcon,
   production: ProductionIcon,
+  audit: AuditIcon,
 };
 
 type Props = {

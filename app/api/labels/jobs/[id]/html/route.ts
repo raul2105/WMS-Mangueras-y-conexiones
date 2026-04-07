@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { markLabelPrintJobStatus } from "@/lib/labeling-service";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,8 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  await requirePermission("labels.manage");
+
   const { id } = await params;
   const job = await prisma.labelPrintJob.findUnique({
     where: { id },

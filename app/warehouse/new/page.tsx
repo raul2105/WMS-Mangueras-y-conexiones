@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ export default async function NewWarehousePage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("warehouse.manage");
   const sp = await searchParams;
 
   return (

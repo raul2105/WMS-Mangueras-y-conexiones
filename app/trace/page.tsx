@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export default async function TraceLookupPage({
 }: {
   searchParams: Promise<{ error?: string; traceId?: string }>;
 }) {
+  await pageGuard("audit.view");
   const sp = await searchParams;
   if (sp.traceId?.trim()) {
     redirect(`/trace/${encodeURIComponent(sp.traceId.trim())}`);

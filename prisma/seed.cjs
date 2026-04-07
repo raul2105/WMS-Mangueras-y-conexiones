@@ -1,9 +1,211 @@
 const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
 const { seedDemoData } = require('./seed-demo.cjs');
 
 const DEV_ASSEMBLY_PREFIX = 'DEV-ASM-';
+
+const RBAC_PERMISSIONS = [
+  'users.manage',
+  'roles.manage',
+  'catalog.view',
+  'catalog.edit',
+  'inventory.view',
+  'inventory.adjust',
+  'inventory.transfer',
+  'inventory.receive',
+  'inventory.pick',
+  'kardex.view',
+  'warehouse.manage',
+  'location.manage',
+  'production.view',
+  'production.execute',
+  'purchasing.view',
+  'purchasing.manage',
+  'sales.view',
+  'sales.create_order',
+  'audit.view',
+  'labels.manage',
+];
+
+const RBAC_ROLES = [
+  {
+    code: 'SYSTEM_ADMIN',
+    name: 'System Admin',
+    description: 'Acceso total del sistema WMS',
+    permissions: RBAC_PERMISSIONS,
+  },
+  {
+    code: 'MANAGER',
+    name: 'Manager',
+    description: 'Gestion operativa de catalogo, inventario, compras y produccion',
+    permissions: [
+      'catalog.view',
+      'catalog.edit',
+      'inventory.view',
+      'inventory.adjust',
+      'inventory.transfer',
+      'inventory.receive',
+      'inventory.pick',
+      'kardex.view',
+      'warehouse.manage',
+      'location.manage',
+      'production.view',
+      'production.execute',
+      'purchasing.view',
+      'purchasing.manage',
+      'sales.view',
+      'sales.create_order',
+      'audit.view',
+      'labels.manage',
+    ],
+  },
+  {
+    code: 'WAREHOUSE_OPERATOR',
+    name: 'Warehouse Operator',
+    description: 'Operacion diaria de inventario y ensamble',
+    permissions: [
+      'catalog.view',
+      'inventory.view',
+      'inventory.adjust',
+      'inventory.transfer',
+      'inventory.receive',
+      'inventory.pick',
+      'kardex.view',
+      'production.view',
+      'production.execute',
+      'purchasing.view',
+      'labels.manage',
+    ],
+  },
+  {
+    code: 'SALES_EXECUTIVE',
+    name: 'Sales Executive',
+    description: 'Consulta comercial y captura de pedidos de venta',
+    permissions: [
+      'catalog.view',
+      'inventory.view',
+      'sales.view',
+      'sales.create_order',
+    ],
+  },
+];
+
+const RBAC_USERS = [
+  { email: 'admin@scmayer.local', name: 'Admin Principal', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
+  { email: 'admin2@scmayer.local', name: 'Admin Secundario', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
+  { email: 'manager@scmayer.local', name: 'Manager WMS', password: 'Manager123*', roles: ['MANAGER'] },
+  { email: 'operator@scmayer.local', name: 'Operador Almacen', password: 'Operator123*', roles: ['WAREHOUSE_OPERATOR'] },
+  { email: 'sales@scmayer.local', name: 'Ejecutivo Ventas', password: 'Sales123*', roles: ['SALES_EXECUTIVE'] },
+];
+
+async function seedRbac() {
+  console.log('🔐 Seeding RBAC (users, roles, permissions)...');
+
+  for (const permissionCode of RBAC_PERMISSIONS) {
+    await prisma.permission.upsert({
+      where: { code: permissionCode },
+      create: {
+        code: permissionCode,
+        description: `Permission ${permissionCode}`,
+      },
+      update: {
+        description: `Permission ${permissionCode}`,
+      },
+    });
+  }
+
+  for (const roleData of RBAC_ROLES) {
+    await prisma.role.upsert({
+      where: { code: roleData.code },
+      create: {
+        code: roleData.code,
+        name: roleData.name,
+        description: roleData.description,
+        isActive: true,
+      },
+      update: {
+        name: roleData.name,
+        description: roleData.description,
+        isActive: true,
+      },
+    });
+
+    const role = await prisma.role.findUnique({
+      where: { code: roleData.code },
+      select: { id: true },
+    });
+    if (!role) continue;
+
+    await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+    for (const permissionCode of roleData.permissions) {
+      const permission = await prisma.permission.findUnique({
+        where: { code: permissionCode },
+        select: { id: true },
+      });
+      if (!permission) continue;
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: role.id,
+            permissionId: permission.id,
+          },
+        },
+        create: {
+          roleId: role.id,
+          permissionId: permission.id,
+        },
+        update: {},
+      });
+    }
+  }
+
+  for (const userData of RBAC_USERS) {
+    const passwordHash = await bcrypt.hash(userData.password, 10);
+    await prisma.user.upsert({
+      where: { email: userData.email },
+      create: {
+        email: userData.email,
+        name: userData.name,
+        passwordHash,
+        isActive: true,
+      },
+      update: {
+        name: userData.name,
+        passwordHash,
+        isActive: true,
+      },
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { email: userData.email },
+      select: { id: true },
+    });
+    if (!user) continue;
+
+    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    for (const roleCode of userData.roles) {
+      const role = await prisma.role.findUnique({ where: { code: roleCode }, select: { id: true } });
+      if (!role) continue;
+      await prisma.userRole.upsert({
+        where: {
+          userId_roleId: {
+            userId: user.id,
+            roleId: role.id,
+          },
+        },
+        create: {
+          userId: user.id,
+          roleId: role.id,
+        },
+        update: {},
+      });
+    }
+  }
+
+  console.log('  ✓ RBAC roles, permissions and users seeded');
+}
 
 function normalizeTechnicalText(input) {
   return String(input ?? '')
@@ -710,6 +912,8 @@ async function main() {
   console.log('🧩 Creating demo operational dataset...');
   const demoSummary = await seedDemoData(prisma);
   console.log('📊 Demo summary:', demoSummary);
+
+  await seedRbac();
 
   console.log('✅ Seed completed successfully!');
 }

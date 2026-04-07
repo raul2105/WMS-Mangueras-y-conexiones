@@ -10,9 +10,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 async function createOrder(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const supplierId = String(formData.get("supplierId") ?? "").trim();
   const expectedDate = String(formData.get("expectedDate") ?? "").trim() || undefined;
@@ -58,6 +60,7 @@ export default async function NewPurchaseOrderPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("purchasing.manage");
   const sp = await searchParams;
 
   const suppliers = await prisma.supplier.findMany({

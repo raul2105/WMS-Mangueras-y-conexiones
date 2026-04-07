@@ -1,9 +1,211 @@
 const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
 const { seedDemoData } = require('./seed-demo.cjs');
 
 const DEV_ASSEMBLY_PREFIX = 'DEV-ASM-';
+
+const RBAC_PERMISSIONS = [
+  'users.manage',
+  'roles.manage',
+  'catalog.view',
+  'catalog.edit',
+  'inventory.view',
+  'inventory.adjust',
+  'inventory.transfer',
+  'inventory.receive',
+  'inventory.pick',
+  'kardex.view',
+  'warehouse.manage',
+  'location.manage',
+  'production.view',
+  'production.execute',
+  'purchasing.view',
+  'purchasing.manage',
+  'sales.view',
+  'sales.create_order',
+  'audit.view',
+  'labels.manage',
+];
+
+const RBAC_ROLES = [
+  {
+    code: 'SYSTEM_ADMIN',
+    name: 'System Admin',
+    description: 'Acceso total del sistema WMS',
+    permissions: RBAC_PERMISSIONS,
+  },
+  {
+    code: 'MANAGER',
+    name: 'Manager',
+    description: 'Gestion operativa de catalogo, inventario, compras y produccion',
+    permissions: [
+      'catalog.view',
+      'catalog.edit',
+      'inventory.view',
+      'inventory.adjust',
+      'inventory.transfer',
+      'inventory.receive',
+      'inventory.pick',
+      'kardex.view',
+      'warehouse.manage',
+      'location.manage',
+      'production.view',
+      'production.execute',
+      'purchasing.view',
+      'purchasing.manage',
+      'sales.view',
+      'sales.create_order',
+      'audit.view',
+      'labels.manage',
+    ],
+  },
+  {
+    code: 'WAREHOUSE_OPERATOR',
+    name: 'Warehouse Operator',
+    description: 'Operacion diaria de inventario y ensamble',
+    permissions: [
+      'catalog.view',
+      'inventory.view',
+      'inventory.adjust',
+      'inventory.transfer',
+      'inventory.receive',
+      'inventory.pick',
+      'kardex.view',
+      'production.view',
+      'production.execute',
+      'purchasing.view',
+      'labels.manage',
+    ],
+  },
+  {
+    code: 'SALES_EXECUTIVE',
+    name: 'Sales Executive',
+    description: 'Consulta comercial y captura de pedidos de venta',
+    permissions: [
+      'catalog.view',
+      'inventory.view',
+      'sales.view',
+      'sales.create_order',
+    ],
+  },
+];
+
+const RBAC_USERS = [
+  { email: 'admin@scmayher.local', name: 'Admin Principal', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
+  { email: 'admin2@scmayher.local', name: 'Admin Secundario', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
+  { email: 'manager@scmayher.local', name: 'Manager WMS', password: 'Manager123*', roles: ['MANAGER'] },
+  { email: 'operator@scmayher.local', name: 'Operador Almacen', password: 'Operator123*', roles: ['WAREHOUSE_OPERATOR'] },
+  { email: 'sales@scmayher.local', name: 'Ejecutivo Ventas', password: 'Sales123*', roles: ['SALES_EXECUTIVE'] },
+];
+
+async function seedRbac() {
+  console.log('🔐 Seeding RBAC (users, roles, permissions)...');
+
+  for (const permissionCode of RBAC_PERMISSIONS) {
+    await prisma.permission.upsert({
+      where: { code: permissionCode },
+      create: {
+        code: permissionCode,
+        description: `Permission ${permissionCode}`,
+      },
+      update: {
+        description: `Permission ${permissionCode}`,
+      },
+    });
+  }
+
+  for (const roleData of RBAC_ROLES) {
+    await prisma.role.upsert({
+      where: { code: roleData.code },
+      create: {
+        code: roleData.code,
+        name: roleData.name,
+        description: roleData.description,
+        isActive: true,
+      },
+      update: {
+        name: roleData.name,
+        description: roleData.description,
+        isActive: true,
+      },
+    });
+
+    const role = await prisma.role.findUnique({
+      where: { code: roleData.code },
+      select: { id: true },
+    });
+    if (!role) continue;
+
+    await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+    for (const permissionCode of roleData.permissions) {
+      const permission = await prisma.permission.findUnique({
+        where: { code: permissionCode },
+        select: { id: true },
+      });
+      if (!permission) continue;
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: role.id,
+            permissionId: permission.id,
+          },
+        },
+        create: {
+          roleId: role.id,
+          permissionId: permission.id,
+        },
+        update: {},
+      });
+    }
+  }
+
+  for (const userData of RBAC_USERS) {
+    const passwordHash = await bcrypt.hash(userData.password, 10);
+    await prisma.user.upsert({
+      where: { email: userData.email },
+      create: {
+        email: userData.email,
+        name: userData.name,
+        passwordHash,
+        isActive: true,
+      },
+      update: {
+        name: userData.name,
+        passwordHash,
+        isActive: true,
+      },
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { email: userData.email },
+      select: { id: true },
+    });
+    if (!user) continue;
+
+    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    for (const roleCode of userData.roles) {
+      const role = await prisma.role.findUnique({ where: { code: roleCode }, select: { id: true } });
+      if (!role) continue;
+      await prisma.userRole.upsert({
+        where: {
+          userId_roleId: {
+            userId: user.id,
+            roleId: role.id,
+          },
+        },
+        create: {
+          userId: user.id,
+          roleId: role.id,
+        },
+        update: {},
+      });
+    }
+  }
+
+  console.log('  ✓ RBAC roles, permissions and users seeded');
+}
 
 function normalizeTechnicalText(input) {
   return String(input ?? '')
@@ -82,7 +284,7 @@ const seedWarehouses = [
   {
     code: 'WH-01',
     name: 'Almacén Principal',
-    description: 'Almacén central de SCMayer',
+    description: 'Almacén central de SCMayher',
     address: 'Av. Industrial 1234, Ciudad',
     isActive: true,
   },
@@ -152,7 +354,7 @@ const seedProducts = [
     description: 'Ensamble 3/4" R12 con proteccion espiral.',
     type: 'ASSEMBLY',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     base_cost: 450.0,
     price: 950.0,
     attributes: {
@@ -176,7 +378,7 @@ const seedAssemblyProducts = [
     description: 'Manguera termoplástica para ensamble DN16 con alta flexibilidad.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Mangueras termoplásticas',
     base_cost: 82,
     price: 145,
@@ -201,7 +403,7 @@ const seedAssemblyProducts = [
     description: 'Manguera DN10 con doble malla para pruebas de insuficiencia por longitud.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Mangueras hidráulicas',
     base_cost: 64,
     price: 118,
@@ -225,7 +427,7 @@ const seedAssemblyProducts = [
     description: 'Manguera ligera DN12 para pruebas de búsqueda por DN y termoplástica.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Mangueras termoplásticas',
     base_cost: 58,
     price: 104,
@@ -249,7 +451,7 @@ const seedAssemblyProducts = [
     description: 'Manguera de mayor capacidad para búsqueda por diámetro y presión.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Mangueras termoplásticas',
     base_cost: 110,
     price: 188,
@@ -273,7 +475,7 @@ const seedAssemblyProducts = [
     description: 'Manguera compacta para pruebas de búsqueda por medida fraccional.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Mangueras compactas',
     base_cost: 41,
     price: 79,
@@ -297,7 +499,7 @@ const seedAssemblyProducts = [
     description: 'Manguera robusta para escenarios suficientes solo en almacén secundario.',
     type: 'HOSE',
     unitLabel: 'm',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Mangueras hidráulicas',
     base_cost: 132,
     price: 220,
@@ -321,7 +523,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de entrada para ensambles DN16 con rosca JIC.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones entrada',
     base_cost: 18,
     price: 36,
@@ -345,7 +547,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de salida en 90 grados para ensambles DN16.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones salida',
     base_cost: 22,
     price: 42,
@@ -369,7 +571,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de entrada DN10 para casos con stock justo.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones entrada',
     base_cost: 14,
     price: 29,
@@ -393,7 +595,7 @@ const seedAssemblyProducts = [
     description: 'Conexión de salida DN10 recta para probar faltantes en WH-01.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones salida',
     base_cost: 15,
     price: 30,
@@ -417,7 +619,7 @@ const seedAssemblyProducts = [
     description: 'Conexión NPT de entrada para filtrar por rosca.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones entrada',
     base_cost: 16,
     price: 31,
@@ -441,7 +643,7 @@ const seedAssemblyProducts = [
     description: 'Conexión NPT de salida en 90 grados.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones salida',
     base_cost: 19,
     price: 35,
@@ -465,7 +667,7 @@ const seedAssemblyProducts = [
     description: 'Conexión BSP de entrada para ensambles de mayor diámetro.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones entrada',
     base_cost: 21,
     price: 39,
@@ -489,7 +691,7 @@ const seedAssemblyProducts = [
     description: 'Conexión BSP de salida para validar cambio de almacén.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones salida',
     base_cost: 23,
     price: 43,
@@ -513,7 +715,7 @@ const seedAssemblyProducts = [
     description: 'Conexión compacta de entrada para búsquedas por 3/16.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones entrada',
     base_cost: 11,
     price: 24,
@@ -537,7 +739,7 @@ const seedAssemblyProducts = [
     description: 'Conexión compacta de salida para búsquedas por 90° y JIC.',
     type: 'FITTING',
     unitLabel: 'pieza',
-    brand: 'SCMayer',
+    brand: 'SCMayher',
     subcategory: 'Conexiones salida',
     base_cost: 12,
     price: 26,
@@ -710,6 +912,8 @@ async function main() {
   console.log('🧩 Creating demo operational dataset...');
   const demoSummary = await seedDemoData(prisma);
   console.log('📊 Demo summary:', demoSummary);
+
+  await seedRbac();
 
   console.log('✅ Seed completed successfully!');
 }

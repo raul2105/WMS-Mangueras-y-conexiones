@@ -10,11 +10,13 @@ import { firstErrorMessage, receiveStockSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
 async function receiveStock(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("inventory.receive");
 
   const code = String(formData.get("code") ?? "").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
@@ -189,6 +191,7 @@ export default async function ReceivePage({
 }: {
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
+  await pageGuard("inventory.receive");
   const sp = await searchParams;
   const [warehouses, products, recentReferences] = await Promise.all([
     prisma.warehouse.findMany({

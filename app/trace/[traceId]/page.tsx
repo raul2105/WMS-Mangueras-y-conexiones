@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export default async function TraceDetailPage({
 }: {
   params: Promise<{ traceId: string }>;
 }) {
+  await pageGuard("audit.view");
   const { traceId } = await params;
   const trace = await prisma.traceRecord.findUnique({
     where: { traceId },

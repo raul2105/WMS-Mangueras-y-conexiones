@@ -3,7 +3,7 @@ import prisma, { prismaReady, resolvedDatabasePath } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const service = "wms-scmayer";
+  const service = "wms-scmayher";
   const version = process.env.npm_package_version ?? "unknown";
   const timestamp = new Date().toISOString();
   const dbPath = process.env.WMS_DB_PATH ?? resolvedDatabasePath ?? process.env.DATABASE_URL ?? "unknown";

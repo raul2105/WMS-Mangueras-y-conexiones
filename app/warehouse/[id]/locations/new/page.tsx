@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,7 @@ export default async function NewLocationPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
+  await pageGuard("location.manage");
   const { id } = await params;
   const sp = await searchParams;
 

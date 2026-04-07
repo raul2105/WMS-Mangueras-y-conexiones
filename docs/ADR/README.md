@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-Este directorio contiene los registros de decisiones arquitectónicas del proyecto WMS-SCMayer.
+Este directorio contiene los registros de decisiones arquitectónicas del proyecto WMS-SCMayher.
 
 ## ¿Qué es un ADR?
 

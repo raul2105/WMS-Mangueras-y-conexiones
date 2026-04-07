@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,8 @@ function escapeCSV(value: string | number | null | undefined): string {
 }
 
 export async function GET(request: NextRequest) {
+  await requirePermission("kardex.view");
+
   const sp = request.nextUrl.searchParams;
   const code = sp.get("code")?.trim() ?? "";
   const location = sp.get("location")?.trim() ?? "";

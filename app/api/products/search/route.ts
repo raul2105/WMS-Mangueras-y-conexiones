@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { getProductSearchSelection, searchProducts } from "@/lib/product-search";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,8 @@ function parsePositiveNumber(value: string | null) {
 }
 
 export async function GET(request: Request) {
+  await requirePermission("catalog.view");
+
   const { searchParams } = new URL(request.url);
   const query = String(searchParams.get("q") ?? "").trim();
   const selectedId = String(searchParams.get("selectedId") ?? "").trim();

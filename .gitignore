@@ -46,3 +46,14 @@ next-env.d.ts
 
 /release/
 /.release-cache/
+
+# SQLite database files (contain real data, never commit)
+prisma/*.db
+prisma/*.db-shm
+prisma/*.db-wal
+prisma/*.db.*
+prisma/*.bak*
+prisma/*.backup*
+*.db
+*.db-shm
+*.db-wal

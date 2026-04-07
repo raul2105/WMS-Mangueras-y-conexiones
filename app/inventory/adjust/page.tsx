@@ -12,11 +12,13 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
+import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
 
 async function adjustStock(formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("inventory.adjust");
 
   const code = String(formData.get("code") ?? "").trim();
   const locationCode = String(formData.get("location") ?? "").trim();
@@ -126,6 +128,7 @@ export default async function AdjustPage({
 }: {
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
+  await pageGuard("inventory.adjust");
   const sp = await searchParams;
   const [locations, products] = await Promise.all([
     prisma.location.findMany({

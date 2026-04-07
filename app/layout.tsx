@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Script from "next/script";
-import AppShell from "@/components/layout/AppShell";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
 const plexSans = IBM_Plex_Sans({
@@ -17,11 +16,11 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WMS-SCMayer",
-  description: "WMS-SCMayer - Sistema de control de inventario y ensamble",
+  title: "WMS-SCMayher",
+  description: "WMS-SCMayher - Sistema de control de inventario y ensamble",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -48,9 +47,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${plexSans.variable} ${plexMono.variable} antialiased`}>
-        <AppShell>{children}</AppShell>
-      </body>
+      <body className={`${plexSans.variable} ${plexMono.variable} antialiased`}>{children}</body>
     </html>
   );
 }

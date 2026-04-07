@@ -176,7 +176,7 @@ export const purchaseReceiptOperationSchema = z.object({
   notes: z.string().trim().max(500).optional(),
 });
 
-// ─── Módulo Comercial ────────────────────────────────────────────────────────
+// ─── Pedidos de surtido / captura comercial ─────────────────────────────────
 
 export const salesInternalOrderCreateSchema = z.object({
   customerName: requiredText("Cliente"),
@@ -191,6 +191,25 @@ export const salesInternalOrderLineSchema = z.object({
   notes: z.string().trim().max(500).optional(),
 });
 
+export const salesInternalOrderProductLineCreateSchema = z.object({
+  orderId: requiredText("Pedido"),
+  productId: requiredText("Producto"),
+  requestedQtyRaw: decimalText("Cantidad"),
+  notes: z.string().trim().max(500).optional(),
+});
+
+export const salesInternalOrderAssemblyLineCreateSchema = z.object({
+  orderId: requiredText("Pedido"),
+  warehouseId: requiredText("Almacen"),
+  entryFittingProductId: requiredText("Conexion de entrada"),
+  hoseProductId: requiredText("Manguera"),
+  exitFittingProductId: requiredText("Conexion de salida"),
+  hoseLengthRaw: decimalText("Longitud de manguera"),
+  assemblyQuantityRaw: decimalText("Cantidad de ensambles"),
+  sourceDocumentRef: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
 export const salesInternalOrderTransitionSchema = z.object({
   orderId: requiredText("Pedido"),
 });
@@ -198,4 +217,13 @@ export const salesInternalOrderTransitionSchema = z.object({
 export const salesGenerateProductionOrderSchema = z.object({
   orderId: requiredText("Pedido"),
   lineId: requiredText("Linea"),
+});
+
+export const salesOrderPickListTransitionSchema = z.object({
+  orderId: requiredText("Pedido"),
+});
+
+export const salesOrderPickConfirmSchema = z.object({
+  orderId: requiredText("Pedido"),
+  operatorName: requiredText("Operador"),
 });

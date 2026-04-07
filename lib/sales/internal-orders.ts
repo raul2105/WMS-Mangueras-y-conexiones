@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient, SalesInternalOrderStatus } from "@prisma/cli
 
 const SALES_INTERNAL_ORDER_PREFIX = "PI";
 const GENERATED_PRODUCTION_ORDER_PREFIX = "SOE";
+const SALES_PICK_LIST_PREFIX = "PK-SUR";
 
 export const SALES_INTERNAL_ORDER_STATUS_LABELS: Record<SalesInternalOrderStatus, string> = {
   BORRADOR: "Borrador",
@@ -45,8 +46,18 @@ export async function getNextGeneratedProductionOrderCode(db: CodeDb, now = new 
   return `${prefix}${String(nextSequence).padStart(4, "0")}`;
 }
 
-export function canGenerateProductionOrderForProductType(productType: string) {
-  return productType === "ASSEMBLY";
+export async function getNextSalesPickListCode(db: CodeDb, now = new Date()) {
+  const year = now.getFullYear();
+  const prefix = `${SALES_PICK_LIST_PREFIX}-${year}-`;
+  const lastPickList = await db.salesInternalOrderPickList.findFirst({
+    where: { code: { startsWith: prefix } },
+    orderBy: { code: "desc" },
+    select: { code: true },
+  });
+
+  const lastSequence = lastPickList?.code ? Number.parseInt(lastPickList.code.slice(prefix.length), 10) : 0;
+  const nextSequence = Number.isFinite(lastSequence) ? lastSequence + 1 : 1;
+  return `${prefix}${String(nextSequence).padStart(4, "0")}`;
 }
 
 export function summarizeProductionStatus(status: string | null | undefined) {
@@ -64,5 +75,24 @@ export function summarizeProductionStatus(status: string | null | undefined) {
       return "Orden de ensamble cancelada";
     default:
       return status;
+  }
+}
+
+export function summarizePickListStatus(status: string | null | undefined) {
+  switch (status) {
+    case "DRAFT":
+      return "Borrador";
+    case "RELEASED":
+      return "Liberado";
+    case "IN_PROGRESS":
+      return "En progreso";
+    case "PARTIAL":
+      return "Parcial";
+    case "COMPLETED":
+      return "Completado";
+    case "CANCELLED":
+      return "Cancelado";
+    default:
+      return status ?? "Sin surtido";
   }
 }

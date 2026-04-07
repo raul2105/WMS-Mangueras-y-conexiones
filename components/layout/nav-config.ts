@@ -1,4 +1,7 @@
 import type { PermissionCode } from "@/lib/rbac/permissions";
+import type { RoleCode } from "@/lib/rbac/permissions";
+import { isSystemAdmin } from "@/lib/rbac/permissions";
+import { ROLE_HOME } from "@/lib/rbac/route-access-map";
 
 export type NavIcon = "dashboard" | "catalog" | "warehouse" | "inventory" | "sales" | "purchasing" | "production" | "audit";
 
@@ -13,7 +16,7 @@ export type NavItem = {
   requiredPermission?: PermissionCode;
 };
 
-export const NAV_ITEMS: NavItem[] = [
+const BASE_NAV_ITEMS: NavItem[] = [
   {
     href: "/",
     label: "Dashboard",
@@ -46,14 +49,6 @@ export const NAV_ITEMS: NavItem[] = [
     requiredPermission: "inventory.view",
   },
   {
-    href: "/sales",
-    label: "Comercial",
-    icon: "sales",
-    description: "Disponibilidad comercial, equivalencias y pedidos internos.",
-    match: "prefix",
-    requiredPermission: "sales.view",
-  },
-  {
     href: "/purchasing",
     label: "Compras",
     icon: "purchasing",
@@ -78,6 +73,59 @@ export const NAV_ITEMS: NavItem[] = [
     requiredPermission: "audit.view",
   },
 ];
+
+export const NAV_ITEMS = BASE_NAV_ITEMS;
+
+function buildNavItems(primaryRole: RoleCode): NavItem[] {
+  const items = [...BASE_NAV_ITEMS];
+  const productionIndex = items.findIndex((item) => item.href === "/production");
+  if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
+    items[productionIndex] = {
+      href: "/production/requests",
+      label: "Ensamble",
+      icon: "production",
+      description: "Pedidos de surtido, configurador y seguimiento comercial dentro de ensamble.",
+      match: "prefix",
+      requiredPermission: "sales.view",
+    };
+  }
+
+  return items;
+}
+
+function getPrimaryRole(roles: string[]): RoleCode {
+  const firstKnownRole = roles.find((role): role is RoleCode =>
+    role === "SYSTEM_ADMIN" || role === "MANAGER" || role === "WAREHOUSE_OPERATOR" || role === "SALES_EXECUTIVE",
+  );
+  return firstKnownRole ?? "MANAGER";
+}
+
+export function getVisibleNavItems(roles: string[] = [], permissions: string[] = []): NavItem[] {
+  const primaryRole = getPrimaryRole(roles);
+  const homeHref = ROLE_HOME[primaryRole] ?? "/";
+  const navItems = buildNavItems(primaryRole);
+
+  const byPermissions = isSystemAdmin(roles)
+    ? navItems
+    : navItems.filter((item) => !item.requiredPermission || permissions.includes(item.requiredPermission));
+
+  if (homeHref === "/") {
+    return byPermissions;
+  }
+
+  const homeItem: NavItem = {
+    ...navItems[0],
+    href: homeHref,
+    label: "Inicio",
+    description: "Acceso principal de tu rol.",
+    match: "prefix",
+  };
+
+  return [
+    homeItem,
+    ...byPermissions.filter((item) => item.href !== "/" && item.href !== homeHref),
+  ];
+}
 
 export function isNavItemActive(pathname: string, item: NavItem) {
   if (item.match === "exact") return pathname === item.href;

@@ -22,6 +22,11 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
   { prefix: "/warehouse/", permission: "warehouse.manage" },
   { prefix: "/warehouse", permission: "warehouse.manage" },
 
+  { prefix: "/production/requests/", permission: "sales.view" },
+  { prefix: "/production/requests", permission: "sales.view" },
+  { prefix: "/production/availability", permission: "sales.view" },
+  { prefix: "/production/equivalences", permission: "sales.view" },
+  { prefix: "/production/fulfillment/", permission: "production.execute" },
   { prefix: "/production/orders/new", permission: "production.execute" },
   { prefix: "/production/orders/", permission: "production.view" },
   { prefix: "/production", permission: "production.view" },

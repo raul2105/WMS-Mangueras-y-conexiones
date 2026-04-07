@@ -148,6 +148,48 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
   },
   {
+    route: "/production/requests",
+    description: "Listado de pedidos de surtido y configuraciones ligadas a ensamble",
+    permission: "sales.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/production/requests/new",
+    description: "Captura del encabezado de un nuevo pedido de surtido",
+    permission: "sales.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/production/requests/[id]",
+    description: "Detalle del pedido mixto con líneas directas y configuradas",
+    permission: "sales.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/production/requests/[id]/assembly/new",
+    description: "Configurador de ensamble exacto ligado a un pedido de surtido",
+    permission: "sales.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/production/availability",
+    description: "Consulta de disponibilidad por producto y almacén para promesa comercial",
+    permission: "sales.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/production/equivalences",
+    description: "Consulta de equivalencias y sustitutos disponibles por almacén",
+    permission: "sales.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/production/fulfillment/[id]",
+    description: "Ejecución del surtido directo del pedido hacia staging",
+    permission: "production.execute",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
     route: "/production/orders/[id]",
     description: "Detalle de orden de ensamble",
     permission: "production.view",
@@ -302,5 +344,5 @@ export const ROLE_HOME: Record<RoleCode, string> = {
   SYSTEM_ADMIN: "/",
   MANAGER: "/",
   WAREHOUSE_OPERATOR: "/inventory",
-  SALES_EXECUTIVE: "/sales",
+  SALES_EXECUTIVE: "/production/requests",
 };

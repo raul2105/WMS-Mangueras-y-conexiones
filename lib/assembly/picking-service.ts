@@ -132,6 +132,8 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
         id: true,
         kind: true,
         status: true,
+        sourceDocumentType: true,
+        sourceDocumentId: true,
         assemblyWorkOrder: {
           select: {
             id: true,
@@ -151,6 +153,32 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
     const pickList = order.assemblyWorkOrder.pickLists[0];
     if (!pickList) {
       throw new InventoryServiceError("PICKLIST_NOT_FOUND", "Pick list not found for assembly order");
+    }
+
+    if (order.sourceDocumentType !== "SalesInternalOrder" || !order.sourceDocumentId) {
+      throw new InventoryServiceError(
+        "SOURCE_ORDER_REQUIRED",
+        "La orden de ensamble requiere un pedido de origen confirmado para liberar surtido"
+      );
+    }
+
+    const sourceOrder = await tx.salesInternalOrder.findUnique({
+      where: { id: order.sourceDocumentId },
+      select: { id: true, status: true },
+    });
+
+    if (!sourceOrder) {
+      throw new InventoryServiceError(
+        "SOURCE_ORDER_NOT_FOUND",
+        "No se encontro el pedido de origen vinculado a la orden de ensamble"
+      );
+    }
+
+    if (sourceOrder.status !== "CONFIRMADA") {
+      throw new InventoryServiceError(
+        "SOURCE_ORDER_NOT_CONFIRMED",
+        "Solo se puede liberar surtido cuando el pedido de origen esta CONFIRMADA"
+      );
     }
 
     if (pickList.status === "DRAFT") {
@@ -225,7 +253,7 @@ export async function confirmAssemblyPickTask(
             },
           },
         },
-        pickList: { select: { id: true, assemblyWorkOrderId: true } },
+        pickList: { select: { id: true, status: true, assemblyWorkOrderId: true } },
       },
     });
     if (!task) {
@@ -233,6 +261,9 @@ export async function confirmAssemblyPickTask(
     }
     if (task.status === "COMPLETED" || task.status === "CANCELLED") {
       throw new InventoryServiceError("TASK_CLOSED", "Pick task is already closed");
+    }
+    if (!["RELEASED", "IN_PROGRESS", "PARTIAL"].includes(task.pickList.status)) {
+      throw new InventoryServiceError("PICKLIST_NOT_RELEASED", "Cannot confirm pick tasks before release");
     }
 
     const pending = task.reservedQty - task.pickedQty;
@@ -380,6 +411,12 @@ export async function confirmAssemblyPickTasksBatch(
       reservedQty: true,
       pickedQty: true,
       status: true,
+      pickList: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
       assemblyWorkOrderLine: {
         select: {
           assemblyWorkOrder: {
@@ -403,6 +440,9 @@ export async function confirmAssemblyPickTasksBatch(
     }
     if (dbTask.status === "COMPLETED" || dbTask.status === "CANCELLED") {
       throw new InventoryServiceError("TASK_CLOSED", "One or more pick tasks are already closed");
+    }
+    if (!["RELEASED", "IN_PROGRESS", "PARTIAL"].includes(dbTask.pickList.status)) {
+      throw new InventoryServiceError("PICKLIST_NOT_RELEASED", "Cannot confirm pick tasks before release");
     }
   }
 

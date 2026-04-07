@@ -50,7 +50,7 @@ async function seedDemoData(prisma) {
         sourceDocumentType: sourceDocumentType ?? null,
         sourceDocumentId: sourceDocumentId ?? null,
         sourceDocumentLineId: sourceDocumentLineId ?? null,
-        companyName: 'SCMayer',
+        companyName: 'SCMayher',
         operatorName: operatorName ?? null,
         reference: reference ?? null,
         quantity: quantity ?? null,

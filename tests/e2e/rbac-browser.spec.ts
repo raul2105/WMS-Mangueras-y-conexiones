@@ -1,13 +1,26 @@
 import { expect, test } from "@playwright/test";
 
 const USERS = {
-  SYSTEM_ADMIN: { email: "admin@scmayer.local", password: "Admin123*" },
-  MANAGER: { email: "manager@scmayer.local", password: "Manager123*" },
-  WAREHOUSE_OPERATOR: { email: "operator@scmayer.local", password: "Operator123*" },
-  SALES_EXECUTIVE: { email: "sales@scmayer.local", password: "Sales123*" },
+  SYSTEM_ADMIN: { email: "admin@scmayher.local", password: "Admin123*" },
+  MANAGER: { email: "manager@scmayher.local", password: "Manager123*" },
+  WAREHOUSE_OPERATOR: { email: "operator@scmayher.local", password: "Operator123*" },
+  SALES_EXECUTIVE: { email: "sales@scmayher.local", password: "Sales123*" },
 } as const;
 
 type RoleKey = keyof typeof USERS;
+const EXPECTED_HOME: Record<RoleKey, string> = {
+  SYSTEM_ADMIN: "/",
+  MANAGER: "/",
+  WAREHOUSE_OPERATOR: "/inventory",
+  SALES_EXECUTIVE: "/production/requests",
+};
+
+const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navItems: number }> = {
+  SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.local", navItems: 7 },
+  MANAGER: { name: "Manager WMS", email: "manager@scmayher.local", navItems: 7 },
+  WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.local", navItems: 4 },
+  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.local", navItems: 3 },
+};
 
 async function loginAs(
   page: import("@playwright/test").Page,
@@ -22,6 +35,13 @@ async function loginAs(
     await page.getByRole("button", { name: "Iniciar sesion" }).click();
   }
   await expect(page).not.toHaveURL(/\/login/);
+  await expect(page).toHaveURL(new RegExp(`${EXPECTED_HOME[role]}(?:\\?.*)?$`));
+
+  const expectedUser = EXPECTED_USER[role];
+  await expect(page.getByRole("banner")).toContainText(expectedUser.name);
+  await expect(page.getByRole("banner")).toContainText(expectedUser.email);
+  await expect(page.getByRole("banner")).not.toContainText("Usuario");
+  await expect(page.locator('nav[aria-label="Navegacion principal"] a')).toHaveCount(expectedUser.navItems);
 }
 
 async function expectAllowed(
@@ -31,6 +51,17 @@ async function expectAllowed(
 ) {
   await page.goto(route);
   await expect(page).toHaveURL(new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await expect(page.getByRole("heading", { name: expectedHeading })).toBeVisible();
+}
+
+async function expectRedirectedAllowed(
+  page: import("@playwright/test").Page,
+  route: string,
+  expectedUrl: RegExp,
+  expectedHeading: RegExp,
+) {
+  await page.goto(route);
+  await expect(page).toHaveURL(expectedUrl);
   await expect(page.getByRole("heading", { name: expectedHeading })).toBeVisible();
 }
 
@@ -44,6 +75,13 @@ async function expectForbidden(
 }
 
 test.describe("RBAC en navegador por rol", () => {
+  test("login no muestra shell de la app", async ({ page }) => {
+    await page.goto("/login?callbackUrl=%2F");
+    await expect(page.locator('nav[aria-label="Navegacion principal"]')).toHaveCount(0);
+    await expect(page.getByLabel("Abrir navegacion")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Acceso WMS" })).toBeVisible();
+  });
+
   test("SYSTEM_ADMIN puede acceder a rutas criticas", async ({ page }) => {
     await loginAs(page, "SYSTEM_ADMIN");
     await expectAllowed(page, "/inventory/adjust", /Ajuste de Inventario/i);
@@ -76,10 +114,18 @@ test.describe("RBAC en navegador por rol", () => {
     await expectForbidden(page, "/audit");
   });
 
-  test("SALES_EXECUTIVE puede operar flujo comercial", async ({ page }) => {
+  test("SALES_EXECUTIVE opera el flujo nuevo de pedidos dentro de ensamble", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    await expectAllowed(page, "/sales", /Comercial/i);
-    await expectAllowed(page, "/sales/orders", /Pedidos internos/i);
-    await expectAllowed(page, "/sales/orders/new", /Nuevo pedido interno/i);
+    await expectAllowed(page, "/production/requests", /Pedidos de surtido/i);
+    await expectAllowed(page, "/production/requests/new", /Nuevo pedido de surtido/i);
+    await expectAllowed(page, "/production/availability", /Disponibilidad para pedidos/i);
+    await expectAllowed(page, "/production/equivalences", /Equivalencias para pedidos/i);
+  });
+
+  test("rutas legacy de sales redirigen al flujo nuevo", async ({ page }) => {
+    await loginAs(page, "SALES_EXECUTIVE");
+    await expectRedirectedAllowed(page, "/sales", /\/production\/requests(?:\?.*)?$/, /Pedidos de surtido/i);
+    await expectRedirectedAllowed(page, "/sales/orders", /\/production\/requests(?:\?.*)?$/, /Pedidos de surtido/i);
+    await expectRedirectedAllowed(page, "/sales/orders/new", /\/production\/requests\/new(?:\?.*)?$/, /Nuevo pedido de surtido/i);
   });
 });

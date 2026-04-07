@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Script from "next/script";
-import AppShell from "@/components/layout/AppShell";
-import AuthSessionProvider from "@/components/providers/AuthSessionProvider";
-import { auth } from "@/lib/auth";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
 const plexSans = IBM_Plex_Sans({
@@ -19,8 +16,8 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WMS-SCMayer",
-  description: "WMS-SCMayer - Sistema de control de inventario y ensamble",
+  title: "WMS-SCMayher",
+  description: "WMS-SCMayher - Sistema de control de inventario y ensamble",
 };
 
 export default async function RootLayout({
@@ -28,8 +25,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await auth();
-
   return (
     <html lang="es" suppressHydrationWarning>
       <head>
@@ -52,11 +47,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className={`${plexSans.variable} ${plexMono.variable} antialiased`}>
-        <AuthSessionProvider session={session}>
-          <AppShell>{children}</AppShell>
-        </AuthSessionProvider>
-      </body>
+      <body className={`${plexSans.variable} ${plexMono.variable} antialiased`}>{children}</body>
     </html>
   );
 }

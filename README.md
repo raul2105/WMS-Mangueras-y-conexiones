@@ -1,4 +1,4 @@
-# WMS-SCMayer - Sistema de Gestión de Almacenes
+# WMS-SCMayher - Sistema de Gestión de Almacenes
 
 Sistema completo de gestión de almacenes (WMS) especializado en mangueras y conexiones industriales, construido con Next.js, TypeScript, Prisma y Tailwind CSS.
 
@@ -167,7 +167,7 @@ lsof -ti:3002 | xargs kill
 
 ## 📄 Licencia
 
-Privado - SCMayer © 2026
+Privado - SCMayher © 2026
 
 ## 🙋 Soporte
 

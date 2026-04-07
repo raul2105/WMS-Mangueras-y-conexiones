@@ -21,12 +21,12 @@
 - Build/release
   - `npm run verify:release`
   - `build-release.cmd`
-  - validar que exista `release\wms-scmayer-<version>-windows-x64.zip`
+  - validar que exista `release\wms-scmayher-<version>-windows-x64.zip`
 - Runtime local
   - `maintenance\init-local.cmd`
   - `launcher.cmd`
   - abrir `http://127.0.0.1:3002/api/health`
-  - `stop.cmd` y validar respaldo en `%LOCALAPPDATA%\wms-scmayer\backups`
+  - `stop.cmd` y validar respaldo en `%LOCALAPPDATA%\wms-scmayher\backups`
 - Inventario + etiquetas
   - registrar una entrada y confirmar redireccion a `/labels/jobs/[id]`
   - imprimir/exportar HTML y abrir trace desde la etiqueta

@@ -3,23 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
-import { NAV_ITEMS, getActiveNavItem } from "@/components/layout/nav-config";
-import { useSession } from "next-auth/react";
+import { getActiveNavItem, getVisibleNavItems } from "@/components/layout/nav-config";
 import SidebarNav from "@/components/layout/SidebarNav";
 import AppTopbar from "@/components/layout/AppTopbar";
 import MobileNav from "@/components/layout/MobileNav";
 import ThemeToggle from "@/components/ThemeToggle";
-import { isSystemAdmin } from "@/lib/rbac/permissions";
 
 type Props = {
   children: ReactNode;
+  userName: string;
+  userEmail: string;
+  roles: string[];
+  permissions: string[];
 };
 
 const SIDEBAR_STORAGE_KEY = "wms-shell-sidebar-collapsed";
 
-export default function AppShell({ children }: Props) {
+export default function AppShell({ children, userName, userEmail, roles, permissions }: Props) {
   const pathname = usePathname();
-  const { data: session } = useSession();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -39,11 +40,8 @@ export default function AppShell({ children }: Props) {
   }, [sidebarCollapsed]);
 
   const visibleModules = useMemo(() => {
-    const roles = session?.user?.roles ?? [];
-    const permissions = session?.user?.permissions ?? [];
-    if (isSystemAdmin(roles)) return NAV_ITEMS;
-    return NAV_ITEMS.filter((item) => !item.requiredPermission || permissions.includes(item.requiredPermission));
-  }, [session?.user?.permissions, session?.user?.roles]);
+    return getVisibleNavItems(roles, permissions);
+  }, [permissions, roles]);
 
   const activeModule = useMemo(() => getActiveNavItem(pathname, visibleModules), [pathname, visibleModules]);
   const desktopSidebarWidth = sidebarCollapsed ? "5rem" : "17rem";
@@ -56,7 +54,7 @@ export default function AppShell({ children }: Props) {
       <aside className="hidden border-r border-[var(--border-subtle)] bg-[var(--shell-bg)] md:flex md:h-screen md:flex-col md:sticky md:top-0">
         <div className="border-b border-[var(--border-subtle)] px-4 py-4">
           <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-            {sidebarCollapsed ? "SCM" : "SCMAYER"}
+            {sidebarCollapsed ? "SCM" : "SCMAYHER"}
           </p>
           {!sidebarCollapsed ? <p className="text-sm font-semibold text-[var(--text-primary)]">WMS ERP</p> : null}
         </div>
@@ -76,11 +74,20 @@ export default function AppShell({ children }: Props) {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
           onOpenMobileNav={() => setMobileNavOpen(true)}
+          userName={userName}
+          userEmail={userEmail}
         />
         <main className="mx-auto min-w-0 max-w-[1600px] p-4 md:p-6 lg:p-8">{children}</main>
       </div>
 
-      <MobileNav open={mobileNavOpen} pathname={pathname} modules={visibleModules} onClose={() => setMobileNavOpen(false)} />
+      <MobileNav
+        open={mobileNavOpen}
+        pathname={pathname}
+        modules={visibleModules}
+        userName={userName}
+        userEmail={userEmail}
+        onClose={() => setMobileNavOpen(false)}
+      />
     </div>
   );
 }

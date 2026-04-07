@@ -44,7 +44,7 @@ type CreateLocationTraceInput = {
   templateCode?: string | null;
 };
 
-const DEFAULT_COMPANY_NAME = process.env.WMS_COMPANY_NAME?.trim() || "SCMayer";
+const DEFAULT_COMPANY_NAME = process.env.WMS_COMPANY_NAME?.trim() || "SCMayher";
 const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() || "http://localhost:3002";
 
 const DEFAULT_TEMPLATES: Array<Prisma.LabelTemplateCreateInput> = [

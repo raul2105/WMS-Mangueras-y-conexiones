@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, ScanCommand } from "@aws-sdk/client-dynamodb";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 
 const dynamoClient = new DynamoDBClient({});
@@ -88,6 +88,17 @@ export async function ddbQueryByWarehousePrefix({ tableName, warehouseCode, sear
         ":searchPrefix": toAttr(searchPrefix),
       },
       Limit: limit,
+    }),
+  );
+
+  return (response.Items || []).map((entry) => unmarshallItem(entry));
+}
+
+export async function ddbScanPlainItems({ tableName, limit }) {
+  const response = await dynamoClient.send(
+    new ScanCommand({
+      TableName: tableName,
+      ...(typeof limit === "number" ? { Limit: limit } : {}),
     }),
   );
 

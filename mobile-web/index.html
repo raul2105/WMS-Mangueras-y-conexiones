@@ -5,14 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b1324" />
     <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <link rel="stylesheet" href="./styles.css" />
     <title>WMS Mobile Edge</title>
   </head>
   <body>
     <main class="app-shell" id="appShell">
       <header class="top">
-        <h1>WMS Mobile</h1>
-        <p>Capa edge/mobile desacoplada del WMS local</p>
+        <div class="top-bar">
+          <div>
+            <h1>WMS Mobile</h1>
+            <p>Operacion movil conectada al ecosistema WMS</p>
+          </div>
+          <div class="env-badge" id="environmentBadge">ENV</div>
+        </div>
       </header>
 
       <section class="card hidden" id="loginView">
@@ -20,6 +26,7 @@
         <p class="muted">
           Autenticacion por Cognito (Hosted UI) o modo mock local.
         </p>
+        <p id="loginError" class="feedback error hidden"></p>
         <div class="row">
           <button id="loginBtn">Entrar</button>
         </div>
@@ -30,39 +37,295 @@
           <div>
             <h2 id="displayName">Usuario</h2>
             <p class="muted" id="userMeta">Sin sesion</p>
+            <div class="session-chips">
+              <span class="chip" id="userEmailChip">email: -</span>
+              <span class="chip" id="userRoleChip">perfil: -</span>
+            </div>
           </div>
           <button id="logoutBtn" class="ghost">Salir</button>
         </div>
 
-        <div class="tiles">
-          <article class="tile">
-            <h3>Inventario</h3>
-            <p>Consulta remota (placeholder)</p>
-          </article>
-          <article class="tile">
-            <h3>Solicitudes de ensamble</h3>
-            <p>Captura de solicitud (placeholder)</p>
-          </article>
-          <article class="tile">
-            <h3>Borradores de producto</h3>
-            <p>Intake de draft (placeholder)</p>
-          </article>
-        </div>
+        <nav class="module-nav" id="moduleNav" aria-label="Navegacion principal movil"></nav>
 
-        <div class="health-grid">
+        <section class="panel active" id="homePanel">
+          <div class="tiles">
+            <article class="tile">
+              <h3>Servicio</h3>
+              <p id="homeServiceStatus">Verificando servicio...</p>
+            </article>
+            <article class="tile">
+              <h3>Version activa</h3>
+              <p id="homeVersionStatus">Cargando version...</p>
+            </article>
+            <article class="tile">
+              <h3>Capacidades</h3>
+              <p id="homeFeatureStatus">Cargando permisos...</p>
+            </article>
+          </div>
+
+          <div class="health-grid" id="homeModuleGrid"></div>
+        </section>
+
+        <section class="panel" id="catalogPanel">
           <article class="mini-card">
-            <h4>Health</h4>
-            <pre id="healthOutput">-</pre>
+            <h4>Catalogo Maestro</h4>
+            <p class="muted">Consulta productos, stock resumido y detalle comercial del catalogo sincronizado.</p>
+            <form id="catalogForm" class="module-form">
+              <div class="form-row">
+                <label>
+                  Buscar
+                  <input id="catalogQuery" name="catalogQuery" placeholder="SKU, referencia, nombre o marca" />
+                </label>
+                <label>
+                  Limite
+                  <input id="catalogLimit" name="catalogLimit" type="number" min="1" max="100" value="20" />
+                </label>
+              </div>
+              <div class="row">
+                <button id="catalogSubmit" type="submit">Consultar catalogo</button>
+              </div>
+            </form>
+            <p id="catalogFeedback" class="feedback muted"></p>
+            <div id="catalogResults" class="results-list"></div>
+            <div id="catalogDetail" class="results-list"></div>
           </article>
+        </section>
+
+        <section class="panel" id="inventoryPanel">
           <article class="mini-card">
-            <h4>Version</h4>
-            <pre id="versionOutput">-</pre>
+            <h4>Busqueda de inventario</h4>
+            <p class="muted">Consulta por SKU o nombre en el almacen indicado.</p>
+            <form id="inventoryForm" class="module-form">
+              <label>
+                Buscar
+                <input id="inventoryQuery" name="inventoryQuery" placeholder="Ej: MANG-1/4" required />
+              </label>
+              <div class="form-row">
+                <label>
+                  Almacen
+                  <input id="inventoryWarehouse" name="inventoryWarehouse" value="WH-MAIN" />
+                </label>
+                <label>
+                  Limite
+                  <input id="inventoryLimit" name="inventoryLimit" type="number" min="1" max="50" value="20" />
+                </label>
+              </div>
+              <div class="row">
+                <button id="inventorySubmit" type="submit">Buscar inventario</button>
+              </div>
+            </form>
+            <p id="inventoryFeedback" class="feedback muted"></p>
+            <div id="inventoryResults" class="results-list"></div>
           </article>
+        </section>
+
+        <section class="panel" id="salesPanel">
           <article class="mini-card">
-            <h4>Me / Permissions</h4>
-            <pre id="meOutput">-</pre>
+            <h4>Pedidos de surtido</h4>
+            <p class="muted">Captura encabezados, consulta estados y da seguimiento comercial desde la capa cloud.</p>
+            <form id="salesFiltersForm" class="module-form">
+              <div class="form-row">
+                <label>
+                  Estado
+                  <select id="salesStatusFilter" name="salesStatusFilter">
+                    <option value="">Todos</option>
+                    <option value="BORRADOR">Borrador</option>
+                    <option value="CONFIRMADA">Confirmada</option>
+                    <option value="CANCELADA">Cancelada</option>
+                  </select>
+                </label>
+                <label>
+                  Limite
+                  <input id="salesLimit" name="salesLimit" type="number" min="1" max="100" value="20" />
+                </label>
+              </div>
+              <div class="row">
+                <button id="salesRefreshSubmit" type="submit">Actualizar pedidos</button>
+              </div>
+            </form>
+            <p id="salesFeedback" class="feedback muted"></p>
+            <div class="tiles" id="salesSummaryGrid"></div>
+            <div id="salesResults" class="results-list"></div>
           </article>
-        </div>
+
+          <article class="mini-card">
+            <h4>Nuevo pedido de surtido</h4>
+            <p class="muted">Primero registra el encabezado. Las lineas y el seguimiento operacional continúan despues.</p>
+            <form id="salesCreateForm" class="module-form">
+              <label>
+                Cliente
+                <input id="salesCustomerName" name="customerName" placeholder="Cliente / cuenta" required />
+              </label>
+              <div class="form-row">
+                <label>
+                  Almacen
+                  <input id="salesWarehouseCode" name="warehouseCode" value="WH-MAIN" required />
+                </label>
+                <label>
+                  Fecha compromiso
+                  <input id="salesDueDate" name="dueDate" type="date" required />
+                </label>
+              </div>
+              <label>
+                Notas
+                <input id="salesNotes" name="notes" placeholder="Contexto comercial, prioridad o consideraciones" />
+              </label>
+              <div class="row">
+                <button id="salesCreateSubmit" type="submit">Crear pedido</button>
+              </div>
+            </form>
+            <p id="salesCreateFeedback" class="feedback muted"></p>
+          </article>
+
+          <article class="mini-card">
+            <h4>Seguimiento de pedido</h4>
+            <p class="muted">Consulta detalle y estatus actual por identificador.</p>
+            <form id="salesDetailForm" class="module-form">
+              <label>
+                Request ID
+                <input id="salesDetailRequestId" name="requestId" placeholder="Ej: 52ecdf5d-..." required />
+              </label>
+              <div class="row">
+                <button id="salesDetailSubmit" type="submit">Consultar pedido</button>
+              </div>
+            </form>
+            <p id="salesDetailFeedback" class="feedback muted"></p>
+            <div id="salesDetailResult" class="results-list"></div>
+          </article>
+        </section>
+
+        <section class="panel" id="availabilityPanel">
+          <article class="mini-card">
+            <h4>Disponibilidad para pedidos</h4>
+            <p class="muted">Consulta stock total, reservado y disponible por almacen para promesa comercial.</p>
+            <form id="availabilityForm" class="module-form">
+              <div class="form-row">
+                <label>
+                  Buscar producto
+                  <input id="availabilityQuery" name="availabilityQuery" placeholder="SKU, referencia, nombre, marca..." />
+                </label>
+                <label>
+                  Almacen
+                  <input id="availabilityWarehouse" name="availabilityWarehouse" placeholder="Todos" />
+                </label>
+              </div>
+              <div class="row">
+                <button id="availabilitySubmit" type="submit">Consultar disponibilidad</button>
+              </div>
+            </form>
+            <p id="availabilityFeedback" class="feedback muted"></p>
+            <div id="availabilityResults" class="results-list"></div>
+          </article>
+        </section>
+
+        <section class="panel" id="equivalencesPanel">
+          <article class="mini-card">
+            <h4>Equivalencias para pedidos</h4>
+            <p class="muted">Busca sustitutos registrados y su stock disponible por almacen.</p>
+            <form id="equivalencesForm" class="module-form">
+              <div class="form-row">
+                <label>
+                  Producto base
+                  <input id="equivalencesQuery" name="equivalencesQuery" placeholder="SKU, referencia o nombre" required />
+                </label>
+                <label>
+                  Almacen
+                  <input id="equivalencesWarehouse" name="equivalencesWarehouse" placeholder="Todos" />
+                </label>
+              </div>
+              <div class="row">
+                <button id="equivalencesSubmit" type="submit">Buscar equivalencias</button>
+              </div>
+            </form>
+            <p id="equivalencesFeedback" class="feedback muted"></p>
+            <div id="equivalencesResults" class="results-list"></div>
+          </article>
+        </section>
+
+        <section class="panel" id="assemblyPanel">
+          <article class="mini-card">
+            <h4>Nueva solicitud de ensamble</h4>
+            <p class="muted">Crea una solicitud para sincronizar con el proceso local y consulta su estatus cuando ya exista.</p>
+            <form id="assemblyForm" class="module-form">
+              <label>
+                Almacen
+                <input id="assemblyWarehouse" name="warehouseCode" value="WH-MAIN" required />
+              </label>
+              <div class="form-row">
+                <label>
+                  SKU base
+                  <input id="assemblySku" name="sku" placeholder="SKU principal" />
+                </label>
+                <label>
+                  Cantidad
+                  <input id="assemblyQty" name="quantity" type="number" min="1" value="1" />
+                </label>
+              </div>
+              <label>
+                Notas
+                <input id="assemblyNotes" name="notes" placeholder="Detalles de la solicitud" />
+              </label>
+              <div class="row">
+                <button id="assemblySubmit" type="submit">Crear solicitud</button>
+              </div>
+            </form>
+            <p id="assemblyFeedback" class="feedback muted"></p>
+          </article>
+
+          <article class="mini-card">
+            <h4>Estatus de solicitudes</h4>
+            <p class="muted">Consulta el estatus de una solicitud existente por su identificador.</p>
+            <form id="assemblyStatusForm" class="module-form">
+              <label>
+                Request ID
+                <input id="assemblyStatusRequestId" name="requestId" placeholder="Ej: req_123456" required />
+              </label>
+              <div class="row">
+                <button id="assemblyStatusSubmit" type="submit">Consultar estatus</button>
+              </div>
+            </form>
+            <p id="assemblyStatusFeedback" class="feedback muted"></p>
+            <div id="assemblyStatusResult" class="results-list"></div>
+          </article>
+        </section>
+
+        <section class="panel" id="draftsPanel">
+          <article class="mini-card">
+            <h4>Nuevo borrador de producto</h4>
+            <p class="muted">Captura inicial para alta o ajuste de catalogo.</p>
+            <form id="draftForm" class="module-form">
+              <label>
+                Nombre del producto
+                <input id="draftName" name="name" placeholder="Nombre comercial" required />
+              </label>
+              <div class="form-row">
+                <label>
+                  Tipo de borrador
+                  <select id="draftType" name="draftType" required>
+                    <option value="">Selecciona...</option>
+                    <option value="HOSE">Manguera</option>
+                    <option value="FITTING">Conexion</option>
+                    <option value="ASSEMBLY">Ensamble</option>
+                    <option value="ACCESSORY">Accesorio</option>
+                  </select>
+                </label>
+                <label>
+                  Marca
+                  <input id="draftBrand" name="brand" placeholder="Marca" />
+                </label>
+              </div>
+              <label>
+                Descripcion
+                <input id="draftDescription" name="description" placeholder="Descripcion corta" />
+              </label>
+              <div class="row">
+                <button id="draftSubmit" type="submit">Crear borrador</button>
+              </div>
+            </form>
+            <p id="draftFeedback" class="feedback muted"></p>
+          </article>
+        </section>
+
       </section>
     </main>
 

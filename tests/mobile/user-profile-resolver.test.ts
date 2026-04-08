@@ -16,6 +16,7 @@ describe("mobile user profile resolver", () => {
       userId: "u-1",
       displayName: "User One",
       roleCodes: ["MANAGER"],
+      effectiveRoleCode: "MANAGER",
       preferredWarehouseCode: "WH-MAIN",
     });
   });

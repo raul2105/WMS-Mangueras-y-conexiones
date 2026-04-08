@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
+    "precheck": "node scripts/precheck-config.cjs",
     "synth": "cdk synth",
     "diff": "cdk diff",
     "deploy": "cdk deploy"

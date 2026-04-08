@@ -114,6 +114,20 @@ class MobileEdgeStack extends Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
+    const catalogTable = new dynamodb.Table(this, "MobileCatalogTable", {
+      tableName: `${prefix}-catalog`,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "productId", type: dynamodb.AttributeType.STRING },
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const salesRequestsTable = new dynamodb.Table(this, "MobileSalesRequestsTable", {
+      tableName: `${prefix}-sales-requests`,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "requestId", type: dynamodb.AttributeType.STRING },
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
     const assemblyRequestsTable = new dynamodb.Table(this, "MobileAssemblyRequestsTable", {
       tableName: `${prefix}-assembly-requests`,
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -151,10 +165,16 @@ class MobileEdgeStack extends Stack {
       MOBILE_BUILD: config.mobileBuild || "dev",
       MOBILE_RELEASE_DATE: config.mobileReleaseDate || "2026-04-07",
       MOBILE_ENABLED: String(Boolean(config.flags?.mobile_enabled)),
+      CATALOG_ENABLED: String(Boolean(config.flags?.catalog_enabled)),
       INVENTORY_SEARCH_ENABLED: String(Boolean(config.flags?.inventory_search_enabled)),
+      SALES_REQUESTS_ENABLED: String(Boolean(config.flags?.sales_requests_enabled)),
+      AVAILABILITY_ENABLED: String(Boolean(config.flags?.availability_enabled)),
+      EQUIVALENCES_ENABLED: String(Boolean(config.flags?.equivalences_enabled)),
       ASSEMBLY_REQUESTS_ENABLED: String(Boolean(config.flags?.assembly_requests_enabled)),
       PRODUCT_DRAFTS_ENABLED: String(Boolean(config.flags?.product_drafts_enabled)),
+      MOBILE_DDB_CATALOG_TABLE: catalogTable.tableName,
       MOBILE_DDB_INVENTORY_TABLE: inventoryTable.tableName,
+      MOBILE_DDB_SALES_REQUESTS_TABLE: salesRequestsTable.tableName,
       MOBILE_DDB_ASSEMBLY_REQUESTS_TABLE: assemblyRequestsTable.tableName,
       MOBILE_DDB_PRODUCT_DRAFTS_TABLE: productDraftsTable.tableName,
       MOBILE_INTEGRATION_QUEUE_URL: integrationQueue.queueUrl,
@@ -163,7 +183,7 @@ class MobileEdgeStack extends Stack {
 
     const createFunction = (idName, handlerName) =>
       new lambda.Function(this, idName, {
-        runtime: lambda.Runtime.NODEJS_20_X,
+        runtime: lambda.Runtime.NODEJS_22_X,
         timeout: Duration.seconds(10),
         memorySize: 256,
         handler: `handlers/${handlerName}.handler`,
@@ -174,15 +194,30 @@ class MobileEdgeStack extends Stack {
     const healthFn = createFunction("MobileHealthFn", "health");
     const versionFn = createFunction("MobileVersionFn", "version");
     const mePermissionsFn = createFunction("MobileMePermissionsFn", "me-permissions");
+    const catalogListFn = createFunction("MobileCatalogListFn", "catalog-list");
+    const catalogGetFn = createFunction("MobileCatalogGetFn", "catalog-get");
     const inventorySearchFn = createFunction("MobileInventorySearchFn", "inventory-search");
+    const salesRequestListFn = createFunction("MobileSalesRequestListFn", "sales-request-list");
+    const salesRequestGetFn = createFunction("MobileSalesRequestGetFn", "sales-request-get");
+    const salesRequestCreateFn = createFunction("MobileSalesRequestCreateFn", "sales-request-create");
+    const availabilityFn = createFunction("MobileAvailabilityFn", "availability");
+    const equivalencesFn = createFunction("MobileEquivalencesFn", "equivalences");
     const assemblyRequestCreateFn = createFunction("MobileAssemblyRequestCreateFn", "assembly-request-create");
     const assemblyRequestGetFn = createFunction("MobileAssemblyRequestGetFn", "assembly-request-get");
     const productDraftCreateFn = createFunction("MobileProductDraftCreateFn", "product-draft-create");
 
+    catalogTable.grantReadData(catalogListFn);
+    catalogTable.grantReadData(catalogGetFn);
     inventoryTable.grantReadData(inventorySearchFn);
+    catalogTable.grantReadData(availabilityFn);
+    catalogTable.grantReadData(equivalencesFn);
+    salesRequestsTable.grantReadData(salesRequestListFn);
+    salesRequestsTable.grantReadData(salesRequestGetFn);
+    salesRequestsTable.grantReadWriteData(salesRequestCreateFn);
     assemblyRequestsTable.grantReadWriteData(assemblyRequestCreateFn);
     assemblyRequestsTable.grantReadData(assemblyRequestGetFn);
     productDraftsTable.grantReadWriteData(productDraftCreateFn);
+    integrationQueue.grantSendMessages(salesRequestCreateFn);
     integrationQueue.grantSendMessages(assemblyRequestCreateFn);
     integrationQueue.grantSendMessages(productDraftCreateFn);
 
@@ -241,6 +276,55 @@ class MobileEdgeStack extends Stack {
       path: "/v1/mobile/inventory/search",
       methods: [apigwv2.HttpMethod.GET],
       lambdaFn: inventorySearchFn,
+      privateRoute: true,
+    });
+
+    addRoute("CatalogListIntegration", {
+      path: "/v1/mobile/catalog",
+      methods: [apigwv2.HttpMethod.GET],
+      lambdaFn: catalogListFn,
+      privateRoute: true,
+    });
+
+    addRoute("CatalogGetIntegration", {
+      path: "/v1/mobile/catalog/{productId}",
+      methods: [apigwv2.HttpMethod.GET],
+      lambdaFn: catalogGetFn,
+      privateRoute: true,
+    });
+
+    addRoute("SalesRequestListIntegration", {
+      path: "/v1/mobile/sales-requests",
+      methods: [apigwv2.HttpMethod.GET],
+      lambdaFn: salesRequestListFn,
+      privateRoute: true,
+    });
+
+    addRoute("SalesRequestCreateIntegration", {
+      path: "/v1/mobile/sales-requests",
+      methods: [apigwv2.HttpMethod.POST],
+      lambdaFn: salesRequestCreateFn,
+      privateRoute: true,
+    });
+
+    addRoute("SalesRequestGetIntegration", {
+      path: "/v1/mobile/sales-requests/{id}",
+      methods: [apigwv2.HttpMethod.GET],
+      lambdaFn: salesRequestGetFn,
+      privateRoute: true,
+    });
+
+    addRoute("AvailabilityIntegration", {
+      path: "/v1/mobile/availability",
+      methods: [apigwv2.HttpMethod.GET],
+      lambdaFn: availabilityFn,
+      privateRoute: true,
+    });
+
+    addRoute("EquivalencesIntegration", {
+      path: "/v1/mobile/equivalences",
+      methods: [apigwv2.HttpMethod.GET],
+      lambdaFn: equivalencesFn,
       privateRoute: true,
     });
 
@@ -305,6 +389,14 @@ class MobileEdgeStack extends Stack {
 
     new cdk.CfnOutput(this, "MobileInventoryTableName", {
       value: inventoryTable.tableName,
+    });
+
+    new cdk.CfnOutput(this, "MobileCatalogTableName", {
+      value: catalogTable.tableName,
+    });
+
+    new cdk.CfnOutput(this, "MobileSalesRequestsTableName", {
+      value: salesRequestsTable.tableName,
     });
 
     new cdk.CfnOutput(this, "MobileAssemblyRequestsTableName", {

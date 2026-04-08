@@ -23,7 +23,11 @@
   "mobileReleaseDate": "2026-04-07",
   "flags": {
     "mobile_enabled": false,
+    "catalog_enabled": false,
     "inventory_search_enabled": false,
+    "sales_requests_enabled": false,
+    "availability_enabled": false,
+    "equivalences_enabled": false,
     "assembly_requests_enabled": false,
     "product_drafts_enabled": false
   },

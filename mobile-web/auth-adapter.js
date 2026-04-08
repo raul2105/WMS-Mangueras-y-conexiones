@@ -1,13 +1,20 @@
 import { clearSession, getSession, setSession } from "./session-store.js";
 
 const PKCE_KEY = "wms-mobile-pkce-verifier";
+const OAUTH_STATE_KEY = "wms-mobile-oauth-state";
+
+function normalizeDomain(input) {
+  const raw = String(input || "").trim();
+  return raw.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
 
 function getConfig() {
   const provided = window.__WMS_MOBILE_CONFIG__ || {};
   return {
     authMode: provided.authMode || "mock",
+    environment: provided.environment || "dev",
     cognito: {
-      domain: provided.cognito?.domain || "",
+      domain: normalizeDomain(provided.cognito?.domain || ""),
       clientId: provided.cognito?.clientId || "",
       redirectUri: provided.cognito?.redirectUri || window.location.href,
       logoutUri: provided.cognito?.logoutUri || window.location.href,
@@ -49,10 +56,32 @@ function getCodeFromUrl() {
   return params.get("code");
 }
 
+function getAuthErrorFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get("error");
+  if (!error) return null;
+  const description = params.get("error_description");
+  return {
+    error,
+    description: description ? decodeURIComponent(description) : "",
+  };
+}
+
+function validateStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const stateFromUrl = params.get("state");
+  const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+  if (!stateFromUrl || !expectedState || stateFromUrl !== expectedState) {
+    throw new Error("OAuth state mismatch");
+  }
+}
+
 function clearAuthCodeFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete("code");
   url.searchParams.delete("state");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_description");
   window.history.replaceState({}, "", url.toString());
 }
 
@@ -91,6 +120,8 @@ export async function restoreSession() {
       token: "mock-token",
       displayName: "Mock Session",
       userId: "mock-manager",
+      email: "manager@scmayher.com",
+      roleCodes: ["MANAGER"],
     };
     setSession(mockSession);
     return mockSession;
@@ -99,11 +130,20 @@ export async function restoreSession() {
   const existing = getSession();
   if (existing) return existing;
 
+  const authError = getAuthErrorFromUrl();
+  if (authError) {
+    clearAuthCodeFromUrl();
+    throw new Error(`Cognito login error: ${authError.error}${authError.description ? ` (${authError.description})` : ""}`);
+  }
+
   const code = getCodeFromUrl();
   if (!code) return null;
 
+  validateStateFromUrl();
+
   const tokenResult = await exchangeCodeForToken(code, cfg.cognito);
   clearAuthCodeFromUrl();
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
   const idClaims = tokenResult.id_token ? parseJwt(tokenResult.id_token) : null;
   const accessClaims = tokenResult.access_token ? parseJwt(tokenResult.access_token) : null;
   const claims = idClaims || accessClaims || {};
@@ -112,6 +152,14 @@ export async function restoreSession() {
     token: tokenResult.id_token || tokenResult.access_token,
     displayName: claims.name || claims.email || "Mobile User",
     userId: claims.sub || "",
+    email: claims.email || "",
+    roleCodes: typeof claims["custom:role_codes"] === "string"
+      ? claims["custom:role_codes"].split(",").map((value) => value.trim()).filter(Boolean)
+      : typeof claims["custom:role_code"] === "string" && claims["custom:role_code"].trim()
+      ? [claims["custom:role_code"].trim()]
+      : Array.isArray(claims["cognito:groups"])
+      ? claims["cognito:groups"].map((value) => String(value).trim()).filter(Boolean)
+      : [],
   };
   setSession(session);
   return session;
@@ -125,6 +173,8 @@ export async function startLogin() {
       token: "mock-token",
       displayName: "Mock Session",
       userId: "mock-manager",
+      email: "manager@scmayher.com",
+      roleCodes: ["MANAGER"],
     };
     setSession(mockSession);
     return;
@@ -135,7 +185,9 @@ export async function startLogin() {
 
   const verifier = generateRandomString(64);
   const challenge = base64UrlEncode(await sha256(verifier));
+  const state = generateRandomString(24);
   sessionStorage.setItem(PKCE_KEY, verifier);
+  sessionStorage.setItem(OAUTH_STATE_KEY, state);
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -144,14 +196,16 @@ export async function startLogin() {
     scope: cfg.cognito.scope || "openid email profile",
     code_challenge_method: "S256",
     code_challenge: challenge,
+    state,
   });
-  window.location.assign(`https://${cfg.cognito.domain}/login?${params.toString()}`);
+  window.location.assign(`https://${cfg.cognito.domain}/oauth2/authorize?${params.toString()}`);
 }
 
 export function logout() {
   const cfg = getConfig();
   clearSession();
   sessionStorage.removeItem(PKCE_KEY);
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
 
   if (cfg.authMode !== "cognito") return;
 

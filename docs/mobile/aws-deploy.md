@@ -16,7 +16,7 @@ Arquitectura activa en este paquete:
 ## Requisitos
 
 - AWS CLI con perfil `Rigentec-SCMayer`
-- Node.js 20+
+- Node.js 22+
 - NPM
 
 Verificacion:
@@ -51,6 +51,17 @@ npm run diff
 ```
 
 No ejecutar `npm run deploy` hasta autorizacion explicita.
+
+## Runtime objetivo
+
+- Desarrollo local del repo: `Node 22.x`
+- CI: `Node 22.x`
+- Lambda runtime objetivo: `NODEJS_22_X`
+
+Si el runtime Lambda `Node 22` no estuviera habilitado temporalmente en la cuenta/región objetivo, el fallback operativo permitido es:
+
+- repo, CI y tooling en `Node 22.x`;
+- Lambdas temporalmente en `Node 20.x` solo hasta cerrar compatibilidad operativa.
 
 ## Convencion de nombres
 

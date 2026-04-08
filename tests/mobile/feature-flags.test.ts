@@ -23,13 +23,21 @@ describe("mobile feature flags", () => {
   it("requires mobile_enabled before enabling any capability", () => {
     const flags = {
       mobile_enabled: false,
+      catalog_enabled: true,
       inventory_search_enabled: true,
+      sales_requests_enabled: true,
+      availability_enabled: true,
+      equivalences_enabled: true,
       assembly_requests_enabled: true,
       product_drafts_enabled: true,
     };
 
     expect(isMobileCapabilityEnabled("base", flags)).toBe(false);
+    expect(isMobileCapabilityEnabled("catalog", flags)).toBe(false);
     expect(isMobileCapabilityEnabled("inventory_search", flags)).toBe(false);
+    expect(isMobileCapabilityEnabled("sales_requests", flags)).toBe(false);
+    expect(isMobileCapabilityEnabled("availability", flags)).toBe(false);
+    expect(isMobileCapabilityEnabled("equivalences", flags)).toBe(false);
     expect(isMobileCapabilityEnabled("assembly_requests", flags)).toBe(false);
     expect(isMobileCapabilityEnabled("product_drafts", flags)).toBe(false);
   });
@@ -37,14 +45,22 @@ describe("mobile feature flags", () => {
   it("accepts legacy env aliases for backwards compatibility", () => {
     const flags = readMobileFeatureFlags({
       MOBILE_ENABLED: "true",
+      MOBILE_CATALOG_ENABLED: "true",
       MOBILE_INVENTORY_READ_ENABLED: "true",
+      MOBILE_SALES_REQUESTS_ENABLED: "true",
+      MOBILE_AVAILABILITY_ENABLED: "true",
+      MOBILE_EQUIVALENCES_ENABLED: "true",
       MOBILE_ASSEMBLY_REQUESTS_ENABLED: "false",
       MOBILE_PRODUCT_DRAFTS_ENABLED: "true",
     });
 
     expect(flags).toEqual({
       mobile_enabled: true,
+      catalog_enabled: true,
       inventory_search_enabled: true,
+      sales_requests_enabled: true,
+      availability_enabled: true,
+      equivalences_enabled: true,
       assembly_requests_enabled: false,
       product_drafts_enabled: true,
     });

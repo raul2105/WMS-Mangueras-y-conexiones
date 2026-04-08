@@ -1,24 +1,31 @@
 const ROLE_PERMISSION_MATRIX = {
   SYSTEM_ADMIN: [
     "mobile.profile.read",
+    "catalog.view",
     "inventory.search",
+    "sales.view",
     "assembly_requests.create",
     "product_drafts.create",
     "mobile.admin",
   ],
   MANAGER: [
     "mobile.profile.read",
+    "catalog.view",
     "inventory.search",
+    "sales.view",
     "assembly_requests.create",
     "product_drafts.create",
   ],
   WAREHOUSE_OPERATOR: [
     "mobile.profile.read",
+    "catalog.view",
     "inventory.search",
   ],
   SALES_EXECUTIVE: [
     "mobile.profile.read",
+    "catalog.view",
     "inventory.search",
+    "sales.view",
     "assembly_requests.create",
     "product_drafts.create",
   ],
@@ -36,6 +43,9 @@ export function resolvePermissionCodes(roleCodes, flags) {
   // Feature flags gate business capabilities without changing role mapping.
   if (!flags.mobile_enabled) {
     return ["mobile.profile.read"];
+  }
+  if (!flags.catalog_enabled) {
+    permissionSet.delete("catalog.view");
   }
   if (!flags.inventory_search_enabled) {
     permissionSet.delete("inventory.search");

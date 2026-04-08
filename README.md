@@ -5,7 +5,7 @@ Sistema completo de gestión de almacenes (WMS) especializado en mangueras y con
 ## 🚀 Quick Start
 
 ### Prerrequisitos
-- Node.js 20+ y npm
+- Node.js 22+ y npm
 - Git
 
 ### Instalación
@@ -136,6 +136,13 @@ Implementada como extensión desacoplada, sin tocar la operación crítica local
 - El WMS local sigue siendo `source of truth`.
 - La nube soporta consulta de inventario, solicitudes de ensamble y borradores de productos nuevos.
 - El sistema local sigue siendo el `source of truth`; cloud publica eventos de intake por SQS para integración controlada.
+- Runtime objetivo del repositorio y de la capa móvil AWS: `Node 22.x`.
+
+### Evolución prevista
+
+- La PWA actual es una base mínima.
+- La dirección objetivo es llevar la experiencia AWS móvil hacia paridad visual y funcional con los flujos comerciales del WMS local.
+- La propuesta ideal de reestructura quedó documentada en [docs/mobile/mobile-edge-restructure.md](./docs/mobile/mobile-edge-restructure.md).
 
 ### Variables de entorno móviles (Lambda)
 

@@ -62,6 +62,7 @@ Response `200`:
   "roleCodes": [
     "MANAGER"
   ],
+  "effectiveRoleCode": "MANAGER",
   "permissionCodes": [
     "mobile.profile.read",
     "inventory.search",
@@ -168,6 +169,34 @@ Response `201`:
   "createdAt": "2026-04-07T19:00:00.000Z"
 }
 ```
+
+### `GET /v1/mobile/catalog`
+
+Uso: listado consultable del catálogo sincronizado para experiencia comercial móvil.
+
+### `GET /v1/mobile/catalog/{productId}`
+
+Uso: detalle de producto sincronizado para consulta móvil.
+
+### `GET /v1/mobile/sales-requests`
+
+Uso: listado y seguimiento de pedidos de surtido capturados o sincronizados en cloud.
+
+### `GET /v1/mobile/sales-requests/{id}`
+
+Uso: detalle de un pedido de surtido por identificador.
+
+### `POST /v1/mobile/sales-requests`
+
+Uso: intake cloud del encabezado de un pedido de surtido con estado de sincronización.
+
+### `GET /v1/mobile/availability`
+
+Uso: consulta comercial de stock total, reservado y disponible por almacén.
+
+### `GET /v1/mobile/equivalences`
+
+Uso: consulta de sustitutos registrados por producto base.
 
 ## Compatibility rules
 

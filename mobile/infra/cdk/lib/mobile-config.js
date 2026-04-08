@@ -25,6 +25,16 @@ function assertString(value, key) {
   }
 }
 
+function assertHttpsUrl(url, key) {
+  if (typeof url !== "string" || !url.startsWith("https://")) {
+    throw new Error(`Invalid config key "${key}": expected https URL`);
+  }
+}
+
+function containsExampleDomain(urls) {
+  return urls.some((url) => /example\.com/i.test(String(url)));
+}
+
 function loadMobileConfig(app) {
   const envName = (process.env.MOBILE_ENV || app.node.tryGetContext("env") || "dev").trim();
   const configPath = path.resolve(__dirname, `../config/${envName}.json`);
@@ -48,6 +58,24 @@ function loadMobileConfig(app) {
   assertArray(parsed.callbackUrls, "callbackUrls");
   assertArray(parsed.logoutUrls, "logoutUrls");
   assertArray(parsed.corsAllowedOrigins, "corsAllowedOrigins");
+
+  if (parsed.environment === "prod") {
+    if (parsed.mobileAuthMode !== "cognito") {
+      throw new Error('Invalid prod config: "mobileAuthMode" must be "cognito"');
+    }
+
+    if (!parsed.flags || parsed.flags.mobile_enabled !== true) {
+      throw new Error('Invalid prod config: "flags.mobile_enabled" must be true');
+    }
+
+    if (containsExampleDomain(parsed.callbackUrls) || containsExampleDomain(parsed.logoutUrls)) {
+      throw new Error("Invalid prod config: replace example.com callback/logout URLs before deploy");
+    }
+
+    parsed.callbackUrls.forEach((url) => assertHttpsUrl(url, "callbackUrls"));
+    parsed.logoutUrls.forEach((url) => assertHttpsUrl(url, "logoutUrls"));
+    parsed.corsAllowedOrigins.forEach((url) => assertHttpsUrl(url, "corsAllowedOrigins"));
+  }
 
   return parsed;
 }

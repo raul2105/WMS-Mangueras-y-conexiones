@@ -61,3 +61,10 @@ prisma/*.backup*
 # Playwright generated reports
 /playwright-report/
 /test-results/
+
+# Mobile edge artifacts
+/mobile-web/out/
+/mobile-web/.next/
+/mobile-web/config.js
+/mobile/infra/cdk/cdk.out/
+/mobile/infra/cdk/node_modules/

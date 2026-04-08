@@ -22,6 +22,7 @@ Cada ADR sigue esta plantilla:
 | ID | Título | Estado | Fecha |
 |----|--------|--------|-------|
 | [001](./001-arquitectura-base.md) | Arquitectura Base del Sistema WMS | Aceptado | 2026-02-03 |
+| [002](./002-mobile-aws-hibrido.md) | Capa móvil AWS sobre WMS local maestro | Aceptado | 2026-04-07 |
 
 ## Crear un nuevo ADR
 
@@ -54,4 +55,4 @@ Crea un ADR cuando tomes decisiones que:
 ---
 
 **Mantenedor:** Tech Lead  
-**Última actualización:** 2026-02-03
+**Última actualización:** 2026-04-07

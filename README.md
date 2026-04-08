@@ -54,6 +54,8 @@ npm run dev              # Servidor de desarrollo (puerto 3002)
 npm run build            # Build de producción
 npm run start            # Servidor de producción
 npm run lint             # Linter (ESLint)
+npm run mobile:infra:synth  # Sintetiza IaC móvil (sin deploy)
+npm run mobile:infra:diff   # Diff IaC móvil (sin deploy)
 ```
 
 ### Base de Datos
@@ -114,6 +116,40 @@ Ver [IMPORT_PRODUCTS_CSV.md](./IMPORT_PRODUCTS_CSV.md) para detalles del formato
 - [Estado real de capacidades WMS](./docs/WMS_CAPABILITIES_STATUS.md)
 - [Architecture Decision Records](./docs/ADR/README.md)
   - [ADR-001: Arquitectura Base](./docs/ADR/001-arquitectura-base.md)
+  - [ADR-002: Capa móvil AWS híbrida](./docs/ADR/002-mobile-aws-hibrido.md)
+- [Mobile API v1 Contracts](./docs/mobile/v1-contracts.md)
+- [AWS Mobile Deploy Guide](./docs/mobile/aws-deploy.md)
+
+## ☁️ Capa móvil AWS (Fase 0+1+2 parcial)
+
+Implementada como extensión desacoplada, sin tocar la operación crítica local.
+
+- `mobile-web/`: PWA shell mínima (estática).
+- `mobile/functions/`: handlers Lambda (`health`, `version`, `me/permissions`, `inventory/search`, `assembly-requests`, `product-drafts`).
+- `mobile/infra/cdk/`: infraestructura AWS (S3, CloudFront, Cognito, HTTP API, Lambda, DynamoDB, SQS, CloudWatch).
+- `lib/mobile/`: contratos, feature flags y RBAC móvil.
+
+### Principio operativo
+
+- El WMS local sigue siendo `source of truth`.
+- La nube soporta consulta de inventario, solicitudes de ensamble y borradores de productos nuevos.
+- El sistema local sigue siendo el `source of truth`; cloud publica eventos de intake por SQS para integración controlada.
+
+### Variables de entorno móviles (Lambda)
+
+- `MOBILE_ENABLED`
+- `INVENTORY_SEARCH_ENABLED`
+- `ASSEMBLY_REQUESTS_ENABLED`
+- `PRODUCT_DRAFTS_ENABLED`
+- `MOBILE_BUILD`
+- `MOBILE_RELEASE_DATE`
+- `MOBILE_SERVICE_NAME`
+- `MOBILE_AUTH_MODE` (`cognito` o `mock`)
+- `MOBILE_DDB_INVENTORY_TABLE`
+- `MOBILE_DDB_ASSEMBLY_REQUESTS_TABLE`
+- `MOBILE_DDB_PRODUCT_DRAFTS_TABLE`
+- `MOBILE_INTEGRATION_QUEUE_URL`
+- `MOBILE_CORS_ALLOWED_ORIGIN`
 
 ## 🔒 Quality Gates
 

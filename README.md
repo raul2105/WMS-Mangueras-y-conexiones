@@ -56,6 +56,8 @@ npm run start            # Servidor de producción
 npm run lint             # Linter (ESLint)
 npm run mobile:infra:synth  # Sintetiza IaC móvil (sin deploy)
 npm run mobile:infra:diff   # Diff IaC móvil (sin deploy)
+npm run mobile:infra:deploy # Despliega IaC móvil en AWS
+npm run mobile:infra:destroy # Elimina stack móvil en AWS (usar con cuidado)
 ```
 
 ### Base de Datos

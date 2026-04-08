@@ -36,7 +36,9 @@
     "populate:subcategories": "node scripts/populate-product-subcategories.cjs",
     "reindex:attributes": "node scripts/reindex-product-attributes.cjs",
     "mobile:infra:synth": "npm --prefix mobile/infra/cdk run synth",
-    "mobile:infra:diff": "npm --prefix mobile/infra/cdk run diff"
+    "mobile:infra:diff": "npm --prefix mobile/infra/cdk run diff",
+    "mobile:infra:deploy": "npm --prefix mobile/infra/cdk run deploy",
+    "mobile:infra:destroy": "npm --prefix mobile/infra/cdk exec cdk destroy"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

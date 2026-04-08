@@ -34,7 +34,9 @@
     "import:products": "node scripts/import-products-from-csv.cjs",
     "link:product-images": "node scripts/link-product-images-from-folder.cjs",
     "populate:subcategories": "node scripts/populate-product-subcategories.cjs",
-    "reindex:attributes": "node scripts/reindex-product-attributes.cjs"
+    "reindex:attributes": "node scripts/reindex-product-attributes.cjs",
+    "mobile:infra:synth": "npm --prefix mobile/infra/cdk run synth",
+    "mobile:infra:diff": "npm --prefix mobile/infra/cdk run diff"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1324" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>WMS Mobile Edge</title>
+  </head>
+  <body>
+    <main class="app-shell" id="appShell">
+      <header class="top">
+        <h1>WMS Mobile</h1>
+        <p>Capa edge/mobile desacoplada del WMS local</p>
+      </header>
+
+      <section class="card hidden" id="loginView">
+        <h2>Acceso movil</h2>
+        <p class="muted">
+          Autenticacion por Cognito (Hosted UI) o modo mock local.
+        </p>
+        <div class="row">
+          <button id="loginBtn">Entrar</button>
+        </div>
+      </section>
+
+      <section class="card hidden" id="homeView">
+        <div class="session-bar">
+          <div>
+            <h2 id="displayName">Usuario</h2>
+            <p class="muted" id="userMeta">Sin sesion</p>
+          </div>
+          <button id="logoutBtn" class="ghost">Salir</button>
+        </div>
+
+        <div class="tiles">
+          <article class="tile">
+            <h3>Inventario</h3>
+            <p>Consulta remota (placeholder)</p>
+          </article>
+          <article class="tile">
+            <h3>Solicitudes de ensamble</h3>
+            <p>Captura de solicitud (placeholder)</p>
+          </article>
+          <article class="tile">
+            <h3>Borradores de producto</h3>
+            <p>Intake de draft (placeholder)</p>
+          </article>
+        </div>
+
+        <div class="health-grid">
+          <article class="mini-card">
+            <h4>Health</h4>
+            <pre id="healthOutput">-</pre>
+          </article>
+          <article class="mini-card">
+            <h4>Version</h4>
+            <pre id="versionOutput">-</pre>
+          </article>
+          <article class="mini-card">
+            <h4>Me / Permissions</h4>
+            <pre id="meOutput">-</pre>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script src="./config.js"></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

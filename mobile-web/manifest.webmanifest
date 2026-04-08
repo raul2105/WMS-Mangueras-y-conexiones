@@ -1,0 +1,9 @@
+{
+  "name": "WMS Mobile Edge",
+  "short_name": "WMS Mobile",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#070d1a",
+  "theme_color": "#0b1324",
+  "icons": []
+}

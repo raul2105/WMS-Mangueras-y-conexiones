@@ -1,5 +1,10 @@
 # WMS Mobile Web Shell
 
+> **⚠️ DEPRECATED** — This standalone PWA shell is deprecated in favor of the responsive Next.js app.
+> All mobile functionality is now integrated into the main application via `ResponsiveDataView`,
+> `MobileActionBar`, and `CollapsibleFilters` components. This directory is kept for reference
+> only and will be removed in a future release.
+
 PWA shell minima para Fase 1.
 
 ## Config local

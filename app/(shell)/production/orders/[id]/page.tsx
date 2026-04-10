@@ -5,7 +5,6 @@ import { auth } from "@/lib/auth";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
-import { assemblyConsumeSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 import { buttonStyles } from "@/components/ui/button";
 import { isSystemAdmin } from "@/lib/rbac/permissions";

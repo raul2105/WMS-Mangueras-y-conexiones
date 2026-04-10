@@ -1,0 +1,6 @@
+{
+  "app": "node bin/wms-web-app.js",
+  "context": {
+    "@aws-cdk/core:newStyleStackSynthesis": true
+  }
+}

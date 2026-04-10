@@ -33,7 +33,7 @@ async function importCsv(formData: FormData) {
   }
 
   const require = createRequire(import.meta.url);
-  const importerPath = path.join(process.cwd(), "scripts", "import-products-from-csv.cjs");
+  const importerPath = path.join(process.cwd(), "scripts", "data", "import-products-from-csv.cjs");
   // Keep runtime resolution based on process.cwd() for release packaging.
   const runtimeRequire = new Function("req", "modulePath", "return req(modulePath);") as (
     req: NodeRequire,
@@ -136,7 +136,7 @@ export default async function CatalogImportPage({
             required
             className="w-full px-4 py-3 glass rounded-lg"
           />
-          <p className="text-xs text-slate-500">Formato según `IMPORT_PRODUCTS_CSV.md`. Máx. 25 MB.</p>
+          <p className="text-xs text-slate-500">Formato según `docs/reference/import-products-csv.md`. Máx. 25 MB.</p>
         </label>
 
         <label className="flex items-center gap-3">

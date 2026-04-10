@@ -13,6 +13,12 @@ if (-not $stoppedPid) {
 
 Write-OpsLog -State $state -Message "WMS process stopped (PID $stoppedPid)."
 
+if ($state.DbMode -eq "aws") {
+  Write-OpsLog -State $state -Message "WMS stopped in aws mode; SQLite backup skipped."
+  Write-Host "WMS detenido. Modo aws activo; respaldo SQLite omitido."
+  exit 0
+}
+
 if (Test-Path $state.DbPath) {
   $backupDir = New-DatabaseBackup -State $state -Reason "stop"
   Write-Host "WMS detenido."

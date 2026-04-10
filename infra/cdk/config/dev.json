@@ -1,0 +1,13 @@
+{
+  "environment": "dev",
+  "region": "us-east-1",
+  "namePrefix": "wms-web-dev",
+  "stackName": "WmsWebDevStack",
+  "officeIpCidr": "0.0.0.0/0",
+  "dbInstanceClass": "db.t4g.micro",
+  "dbAllocatedStorageGb": 20,
+  "dbName": "wms",
+  "dbUsername": "wmsadmin",
+  "rdsPubliclyAccessible": true,
+  "budgetLimitUsd": 5
+}

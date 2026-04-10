@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
 
     // Utility scripts (CommonJS)
+    "check-products.cjs",
+    "infra/**/*.js",
+    "mobile/infra/**/*.js",
+    "mobile/infra/**/*.cjs",
     "prisma/seed.cjs",
     "scripts/**/*.cjs",
   ]),

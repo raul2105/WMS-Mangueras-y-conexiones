@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -70,7 +70,7 @@ async function cleanupAssemblyFixtures() {
         OR: [
           productIds.length > 0 ? { productId: { in: productIds } } : undefined,
           locationIds.length > 0 ? { locationId: { in: locationIds } } : undefined,
-        ].filter(Boolean) as any,
+        ].filter(Boolean) as Prisma.InventoryWhereInput[],
       },
     });
   }

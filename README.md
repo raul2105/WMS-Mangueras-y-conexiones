@@ -1,31 +1,28 @@
-# WMS-SCMayher - Sistema de Gestión de Almacenes
+# WMS-SCMayher
 
-Sistema completo de gestión de almacenes (WMS) especializado en mangueras y conexiones industriales, construido con Next.js, TypeScript, Prisma y Tailwind CSS.
+Sistema WMS para mangueras y conexiones industriales sobre Next.js, TypeScript y Prisma.
 
-## 🚀 Quick Start
+## Estado operativo
 
 ### Prerrequisitos
 - Node.js 22+ y npm
 - Git
+- AWS web: runtime remoto activo para la experiencia web; infraestructura en `infra/cdk` y despliegue en `scripts/deploy/aws-web.ps1`.
+- Windows portable: runtime local soportado para operación en sitio; release en `scripts/release/build-release.ps1` y wrapper compatible en `build-release.cmd`.
+- Mobile edge/PWA: artefactos en `mobile/` y `mobile-web/`; despliegue de staging en `scripts/deploy/mobile-staging.ps1`.
+- PM2 legacy: scripts históricos archivados en `archive/legacy/windows-pm2/`; no se usan para instalaciones nuevas.
 
-### Instalación
+## Comandos principales
 
 ```bash
-# 1. Clonar el repositorio
-git clone <repo-url>
-cd WMS-Mangueras-y-conexiones
-
-# 2. Instalar dependencias
 npm install
-
-# 3. Configurar base de datos (SQLite)
-npm run db:setup
-
-# 4. Iniciar servidor de desarrollo
+npm run prisma:validate
+npm run lint
+npm run build
 npm run dev
 ```
 
-Abre [http://localhost:3002](http://localhost:3002) en tu navegador.
+Comandos operativos relevantes:
 
 ## 📁 Estructura del Proyecto
 
@@ -62,59 +59,34 @@ npm run mobile:infra:destroy # Elimina stack móvil en AWS (usar con cuidado)
 
 ### Base de Datos
 ```bash
-npm run db:setup         # Setup inicial (push + seed)
-npm run db:migrate       # Crear migración
-npm run db:push          # Push schema sin migración
-npm run db:seed          # Poblar datos de ejemplo
-npm run db:studio        # GUI Prisma Studio (puerto 5555)
-npm run db:reset         # Reset completo de BD
+npm run build:release
+npm run verify:release
+npm run infra:synth
+npm run infra:diff
+npm run mobile:infra:synth
+npm run mobile:staging:deploy
 ```
 
-### Importación
-```bash
-npm run import:products -- --file data/products.csv     # Importar productos desde CSV
-npm run import:products -- --file data/products.csv --dry-run  # Simulación (sin escribir)
-```
+## Estructura
 
-Ver [IMPORT_PRODUCTS_CSV.md](./IMPORT_PRODUCTS_CSV.md) para detalles del formato CSV.
+- `app/`, `components/`, `lib/`: aplicación principal Next.js.
+- `prisma/`: modelo de datos, migraciones y seed.
+- `infra/cdk/`: stack AWS para la app web.
+- `mobile/` y `mobile-web/`: runtime edge/API y cliente PWA.
+- `scripts/release/`, `scripts/deploy/`, `scripts/data/`, `scripts/db/`, `scripts/smoke/`: scripts canónicos.
+- `scripts/*.ps1|*.cjs|*.py`: wrappers de compatibilidad para rutas antiguas.
+- `docs/`: documentación viva.
 
-## 🏗️ Módulos del Sistema
+## Documentación
 
-### ✅ Implementado
-- **Catálogo Maestro**: Productos (SKU, atributos técnicos), categorías
-- **Inventario**: Movimientos IN/OUT, stock por ubicación, trazabilidad
-- **Scanner QR/Barcode**: Captura ágil de códigos con cámara
-- **Import CSV**: Carga masiva de productos e inventario inicial
-
-### 🚧 En Desarrollo
-- **Almacenes y Ubicaciones**: Gestión de bodegas, zonas, bins/racks
-- **Transferencias Internas**: Movimientos entre ubicaciones
-- **Ajustes de Inventario**: Con auditoría y razón de ajuste
-- **Validación Server-Side**: Zod schemas para robustez
-
-### 🔮 Roadmap
-- **Autenticación y RBAC**: NextAuth.js + roles (admin/operador/supervisor)
-- **Audit Log**: Trazabilidad completa (quién, qué, cuándo)
-- **Recepción PO**: Validación vs orden de compra, put-away sugerido
-- **Picking/Packing**: Olas, picklists, confirmaciones
-- **Dashboard KPIs**: Fill rate, exactitud de inventario, rotación
-- **Reportes y Exports**: Inventario, movimientos, análisis
-
-## 🎨 Stack Tecnológico
-
-- **Framework:** Next.js 16 (App Router + Turbopack)
-- **Lenguaje:** TypeScript 5
-- **UI:** React 19 + Tailwind CSS v4 (glassmorphism design)
-- **Base de Datos:** SQLite (dev) → PostgreSQL (prod)
-- **ORM:** Prisma 6
-- **Scanner:** ZXing (QR/Barcode)
-- **Linter:** ESLint 9
-- **CI/CD:** GitHub Actions
-
-## 📚 Documentación
-
-- [Setup Manual de Base de Datos](./DB_SETUP_MANUAL.md)
-- [Importación de Productos CSV](./IMPORT_PRODUCTS_CSV.md)
+- [Matriz de soporte de runtimes](./docs/runbooks/runtime-support-matrix.md)
+- [Operación Windows portable](./docs/runbooks/windows-portable-install.md)
+- [Operación local Windows](./docs/runbooks/windows-local-operations.md)
+- [Runbook de limpieza manual de ramas Git](./docs/runbooks/git-branch-cleanup.md)
+- [Base de datos y Prisma](./docs/reference/database-setup.md)
+- [Importación de productos CSV](./docs/reference/import-products-csv.md)
+- [Deploy AWS web](./docs/mobile/aws-deploy.md)
+- [Contratos mobile v1](./docs/mobile/v1-contracts.md)
 - [Estado real de capacidades WMS](./docs/WMS_CAPABILITIES_STATUS.md)
 - [Architecture Decision Records](./docs/ADR/README.md)
   - [ADR-001: Arquitectura Base](./docs/ADR/001-arquitectura-base.md)
@@ -217,9 +189,11 @@ Privado - SCMayher © 2026
 ## 🙋 Soporte
 
 Para dudas o problemas, contactar al Tech Lead o abrir un issue en el repositorio.
+- [ADR](./docs/ADR/README.md)
+- [Guía de contribución y flujo PR](./CONTRIBUTING.md)
 
----
+## Notas
 
-**Versión:** 0.1.0  
-**Última actualización:** 2026-02-03  
-**Próxima release:** v0.2.0 (Módulo Warehouse + Tests)
+- `release/` y los respaldos locales se preservan fuera del flujo normal de limpieza del repo.
+- Los entrypoints operativos siguen siendo `launcher.cmd`, `stop.cmd`, `uninstall.cmd`, `maintenance/*.cmd` y `build-release.cmd`.
+- Si se reorganiza un script interno, se mantiene un wrapper temporal en la ruta anterior hasta cerrar la transición.

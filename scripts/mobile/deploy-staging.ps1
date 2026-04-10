@@ -47,3 +47,10 @@ Invoke-Checked { node scripts/mobile/bootstrap-read-models.cjs }
 Write-Host "[mobile] staging deploy complete"
 Write-Host "webUrl=$($manifest.webUrl)"
 Write-Host "apiBaseUrl=$($manifest.apiBaseUrl)"
+$target = Join-Path $PSScriptRoot "..\deploy\mobile-staging.ps1"
+if (-not (Test-Path $target)) {
+  throw "Missing target script: $target"
+}
+
+& $target @args
+exit $LASTEXITCODE

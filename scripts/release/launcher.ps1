@@ -4,6 +4,9 @@ $ErrorActionPreference = "Stop"
 $state = Get-WmsState
 Ensure-WmsStateDirectories -State $state
 
+$isAwsDbMode = ($state.DbMode -eq "aws")
+$databaseUrl = ""
+
 foreach ($requiredPath in @($state.NodeExe, $state.AppServerPath)) {
   if (-not (Test-Path $requiredPath)) {
     $message = "Falta un archivo requerido para iniciar WMS: $requiredPath"
@@ -12,23 +15,41 @@ foreach ($requiredPath in @($state.NodeExe, $state.AppServerPath)) {
   }
 }
 
-if (-not (Test-Path $state.DbPath)) {
-  if (-not (Test-Path $state.BootstrapDbPath)) {
-    $message = "No se encontro la base de datos ni el archivo inicial en $($state.BootstrapDbPath). El release puede estar incompleto."
+if ($isAwsDbMode) {
+  if (-not $state.DatabaseUrl) {
+    $message = "WMS_DB_MODE=aws requiere DATABASE_URL (postgresql://...) definido antes de iniciar."
     Write-OpsLog -State $state -Level "ERROR" -Message $message
     throw $message
   }
-  Write-Host "Primera ejecucion: inicializando base de datos..."
-  Ensure-WmsStateDirectories -State $state -IncludeData
-  Copy-Item -LiteralPath $state.BootstrapDbPath -Destination $state.DbPath -Force
-  foreach ($suffix in @("-wal", "-shm")) {
-    $artifact = "$($state.DbPath)$suffix"
-    if (Test-Path $artifact) {
-      Remove-Item -LiteralPath $artifact -Force -ErrorAction SilentlyContinue
-    }
+
+  if (-not ($state.DatabaseUrl -match "^postgres(ql)?://")) {
+    $message = "DATABASE_URL invalido para modo aws. Se esperaba un URL PostgreSQL."
+    Write-OpsLog -State $state -Level "ERROR" -Message $message
+    throw $message
   }
-  Write-OpsLog -State $state -Message "Base de datos inicializada automaticamente desde bootstrap."
-  Write-Host "Base de datos lista en $($state.DbPath)"
+
+  $databaseUrl = $state.DatabaseUrl
+} else {
+  if (-not (Test-Path $state.DbPath)) {
+    if (-not (Test-Path $state.BootstrapDbPath)) {
+      $message = "No se encontro la base de datos ni el archivo inicial en $($state.BootstrapDbPath). El release puede estar incompleto."
+      Write-OpsLog -State $state -Level "ERROR" -Message $message
+      throw $message
+    }
+    Write-Host "Primera ejecucion: inicializando base de datos..."
+    Ensure-WmsStateDirectories -State $state -IncludeData
+    Copy-Item -LiteralPath $state.BootstrapDbPath -Destination $state.DbPath -Force
+    foreach ($suffix in @("-wal", "-shm")) {
+      $artifact = "$($state.DbPath)$suffix"
+      if (Test-Path $artifact) {
+        Remove-Item -LiteralPath $artifact -Force -ErrorAction SilentlyContinue
+      }
+    }
+    Write-OpsLog -State $state -Message "Base de datos inicializada automaticamente desde bootstrap."
+    Write-Host "Base de datos lista en $($state.DbPath)"
+  }
+
+  $databaseUrl = $state.SqliteUrl
 }
 
 if (Test-Path $state.PidFile) {
@@ -65,13 +86,21 @@ $env:NEXT_TELEMETRY_DISABLED = "1"
 $env:HOSTNAME = "127.0.0.1"
 $env:PORT = "$($state.Port)"
 $env:WMS_DATA_DIR = $state.DataDir
-$env:WMS_DB_PATH = $state.DbPath
 $env:WMS_BACKUP_DIR = $state.BackupDir
 $env:WMS_LOG_DIR = $state.LogDir
-$env:SQLITE_BUSY_TIMEOUT_MS = "5000"
-$env:DATABASE_URL = $state.SqliteUrl
+$env:WMS_DB_MODE = $state.DbMode
+$env:DATABASE_URL = $databaseUrl
 
-Write-OpsLog -State $state -Message "Starting WMS with DB at $($state.DbPath)"
+if ($isAwsDbMode) {
+  Remove-Item Env:WMS_DB_PATH -ErrorAction SilentlyContinue
+  Remove-Item Env:SQLITE_BUSY_TIMEOUT_MS -ErrorAction SilentlyContinue
+} else {
+  $env:WMS_DB_PATH = $state.DbPath
+  $env:SQLITE_BUSY_TIMEOUT_MS = "5000"
+}
+
+$dbLogTarget = if ($isAwsDbMode) { "AWS PostgreSQL" } else { $state.DbPath }
+Write-OpsLog -State $state -Message "Starting WMS (dbMode=$($state.DbMode)) with DB target: $dbLogTarget"
 
 $process = Start-Process `
   -FilePath $state.NodeExe `
@@ -97,7 +126,7 @@ if (-not $healthy) {
   Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $state.PidFile -Force -ErrorAction SilentlyContinue
   $message = "WMS no respondio al healthcheck en 60 segundos. Revisa logs en $($state.LogDir)"
-  Write-OpsLog -State $state -Level "ERROR" -Message "$message. DB path: $($state.DbPath)"
+  Write-OpsLog -State $state -Level "ERROR" -Message "$message. dbMode=$($state.DbMode)"
   throw $message
 }
 

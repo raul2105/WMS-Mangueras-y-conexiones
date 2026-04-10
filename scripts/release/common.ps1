@@ -62,6 +62,19 @@ function Convert-ToSqliteUrl {
   return "file:$($Path -replace '\\', '/')"
 }
 
+function Get-WmsDbMode {
+  $mode = "$($env:WMS_DB_MODE)".Trim().ToLowerInvariant()
+  if (-not $mode) {
+    return "aws"
+  }
+
+  if ($mode -in @("aws", "local")) {
+    return $mode
+  }
+
+  throw "Invalid WMS_DB_MODE '$mode'. Supported values: aws, local"
+}
+
 function Get-WmsState {
   param(
     [string]$ReleaseRoot = (Get-ReleaseRoot)
@@ -83,6 +96,8 @@ function Get-WmsState {
   $runDir = Join-Path $stateRoot "run"
   $cacheDir = Join-Path $stateRoot "cache"
   $dbPath = Join-Path $dataDir "wms.db"
+  $dbMode = Get-WmsDbMode
+  $databaseUrl = "$($env:DATABASE_URL)".Trim()
 
   return [pscustomobject]@{
     ReleaseRoot = $resolvedReleaseRoot
@@ -101,7 +116,10 @@ function Get-WmsState {
     DbPath = Resolve-NormalizedPath -Path $dbPath
     DbWalPath = (Resolve-NormalizedPath -Path "$dbPath-wal")
     DbShmPath = (Resolve-NormalizedPath -Path "$dbPath-shm")
+    DbMode = $dbMode
+    IsAwsDbMode = ($dbMode -eq "aws")
     SqliteUrl = Convert-ToSqliteUrl -Path $dbPath
+    DatabaseUrl = $databaseUrl
     OpsLog = Resolve-NormalizedPath -Path (Join-Path $logDir "ops.log")
     PidFile = Resolve-NormalizedPath -Path (Join-Path $runDir "wms.pid")
     Port = $script:WmsPort

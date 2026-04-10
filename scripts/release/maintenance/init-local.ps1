@@ -4,6 +4,13 @@ $ErrorActionPreference = "Stop"
 $state = Get-WmsState
 Ensure-WmsStateDirectories -State $state -IncludeData
 
+if ($state.DbMode -eq "aws") {
+  $message = "WMS_DB_MODE=aws: inicializacion local omitida (se usa PostgreSQL compartida)."
+  Write-OpsLog -State $state -Message $message
+  Write-Host $message
+  exit 0
+}
+
 if (-not (Test-Path $state.BootstrapDbPath)) {
   $message = "No se encontro la base inicial en $($state.BootstrapDbPath)"
   Write-OpsLog -State $state -Level "ERROR" -Message $message

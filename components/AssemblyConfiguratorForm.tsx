@@ -79,16 +79,11 @@ function WarehouseCombobox({
   const [isOpen, setIsOpen] = useState(false);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (selectedWarehouse) {
-      setInputValue(formatWarehouseLabel(selectedWarehouse));
-    }
-  }, [selectedWarehouse]);
-
   useEffect(() => () => {
     if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
   }, []);
 
+  const displayValue = !isOpen && selectedWarehouse ? formatWarehouseLabel(selectedWarehouse) : inputValue;
   const normalized = inputValue.trim().toLowerCase();
   const filteredWarehouses = warehouses
     .filter((warehouse) => {
@@ -108,7 +103,7 @@ function WarehouseCombobox({
         <div className="flex items-center gap-2">
           <input
             data-testid="assembly-warehouse-input"
-            value={inputValue}
+            value={displayValue}
             disabled={locked}
             onChange={(event) => {
               const next = event.target.value;
@@ -214,6 +209,9 @@ function AssemblyProductSearchField({
   const selectionRequestRef = useRef(0);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedLabel = selected ? formatProductLabel(selected) : "";
+  const trimmedQuery = query.trim();
+  const isSelectedQuery = Boolean(selectedId && selectedLabel && trimmedQuery === selectedLabel);
+  const shouldSearch = !disabled && Boolean(warehouseId) && trimmedQuery.length >= 2 && !isSelectedQuery;
 
   useEffect(() => () => {
     if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
@@ -261,32 +259,15 @@ function AssemblyProductSearchField({
   }, [selectedId, warehouseId, productType, selectedLabel]);
 
   useEffect(() => {
-    const trimmed = query.trim();
-    if (disabled || !warehouseId) {
-      setResults([]);
-      setIsLoading(false);
-      setSearchError(null);
-      return;
-    }
-
-    if (!trimmed || (selectedId && selected && trimmed === selectedLabel)) {
-      setResults([]);
-      setIsLoading(false);
-      setSearchError(null);
-      return;
-    }
-
-    if (trimmed.length < 2) {
-      setResults([]);
-      setIsLoading(false);
-      setSearchError(null);
+    if (!shouldSearch) {
+      searchRequestRef.current += 1;
       return;
     }
 
     const timeoutId = setTimeout(() => {
       const requestId = ++searchRequestRef.current;
       const params = new URLSearchParams({
-        q: trimmed,
+        q: trimmedQuery,
         type: productType,
         warehouseId,
       });
@@ -319,7 +300,7 @@ function AssemblyProductSearchField({
     }, 220);
 
     return () => clearTimeout(timeoutId);
-  }, [query, selectedId, selectedLabel, warehouseId, productType, requiredQty, disabled]);
+  }, [shouldSearch, trimmedQuery, warehouseId, productType, requiredQty]);
 
   const hasRequiredQty = typeof requiredQty === "number" && Number.isFinite(requiredQty) && requiredQty > 0;
   const isInsufficient = Boolean(
@@ -327,6 +308,9 @@ function AssemblyProductSearchField({
       warehouseId &&
       (hasRequiredQty ? selected.totalAvailable < requiredQty! : selected.totalAvailable <= 0)
   );
+  const visibleResults = shouldSearch ? results : [];
+  const visibleIsLoading = shouldSearch ? isLoading : false;
+  const visibleSearchError = shouldSearch ? searchError : null;
 
   return (
     <div className="space-y-2">
@@ -357,15 +341,15 @@ function AssemblyProductSearchField({
         className="w-full px-4 py-3 glass rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
       />
 
-      {isLoading && <p className="text-xs text-slate-500">Buscando coincidencias operativas...</p>}
-      {!isLoading && !disabled && query.trim().length > 0 && query.trim().length < 2 && (
+      {visibleIsLoading && <p className="text-xs text-slate-500">Buscando coincidencias operativas...</p>}
+      {!visibleIsLoading && !disabled && trimmedQuery.length > 0 && trimmedQuery.length < 2 && (
         <p className="text-xs text-slate-500">Escribe al menos 2 caracteres para buscar.</p>
       )}
-      {searchError && <p className="text-xs text-amber-300">{searchError}</p>}
+      {visibleSearchError && <p className="text-xs text-amber-300">{visibleSearchError}</p>}
 
-      {isOpen && results.length > 0 && (
+      {isOpen && visibleResults.length > 0 && (
         <div className="grid grid-cols-1 gap-2">
-          {results.map((option) => (
+          {visibleResults.map((option) => (
             <button
               type="button"
               key={`${fieldKey}-${option.id}`}

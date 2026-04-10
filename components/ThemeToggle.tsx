@@ -34,26 +34,22 @@ type ThemeToggleProps = {
 };
 
 export default function ThemeToggle({ compact = false, className }: ThemeToggleProps) {
-  const [theme, setTheme] = useState<Theme>("dark");
-
-  useEffect(() => {
-    const appliedTheme = getAppliedTheme();
-
-    if (appliedTheme) {
-      setTheme(appliedTheme);
-      return;
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return "dark";
     }
 
-    const preferredTheme = getPreferredTheme();
-    applyTheme(preferredTheme);
-    setTheme(preferredTheme);
-  }, []);
+    return getAppliedTheme() ?? getPreferredTheme();
+  });
+
+  useEffect(() => {
+    applyTheme(theme);
+    window.localStorage.setItem(STORAGE_KEY, theme);
+  }, [theme]);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    window.localStorage.setItem(STORAGE_KEY, next);
-    applyTheme(next);
   };
 
   return (

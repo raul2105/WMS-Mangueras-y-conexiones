@@ -23,7 +23,7 @@ type ProductTypeFilter = string | string[] | undefined;
 
 type ProductSearchDb = {
   product: {
-    findMany: (args: Prisma.ProductFindManyArgs) => Promise<Array<any>>;
+    findMany: (args: Prisma.ProductFindManyArgs) => Promise<ProductSearchCandidate[]>;
   };
 };
 

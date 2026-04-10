@@ -161,10 +161,10 @@ Usar solo cuando sea intencional.
 
 13) EXPORTAR ESTE MANUAL A PDF
 Opcion recomendada (sin herramientas extra):
-1. Abrir docs\MANUAL_INSTALACION_WMS.md en Word o Edge
+1. Abrir docs\runbooks\windows-portable-install.md en Word o Edge
 2. Imprimir
 3. Seleccionar "Guardar como PDF"
 4. Guardar como:
-   docs\MANUAL_INSTALACION_WMS.pdf
+   docs\windows-portable-install.pdf
 
 FIN DEL MANUAL

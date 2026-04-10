@@ -26,7 +26,7 @@
   - `maintenance\init-local.cmd`
   - `launcher.cmd`
   - abrir `http://127.0.0.1:3002/api/health`
-  - `stop.cmd` y validar respaldo en `%LOCALAPPDATA%\wms-scmayher\backups`
+  - `stop.cmd` y validar respaldo en `%LOCALAPPDATA%\wms-scmayer\backups`
 - Inventario + etiquetas
   - registrar una entrada y confirmar redireccion a `/labels/jobs/[id]`
   - imprimir/exportar HTML y abrir trace desde la etiqueta

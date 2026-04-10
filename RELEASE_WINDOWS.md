@@ -29,7 +29,7 @@
   maintenance\init-local.cmd
   ```
 - Esto crea la DB operativa en:
-  - `%LOCALAPPDATA%\wms-scmayher\data\wms.db`
+  - `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
 
 ## Arranque / operacion diaria
 - Iniciar:
@@ -64,8 +64,8 @@
 - Si la BD esta bloqueada o el proceso sigue vivo, la desinstalacion aborta con mensaje claro.
 - En modo conservar datos, si detecta archivos en `app\public\uploads\`, aborta para evitar perdida accidental.
 - Siempre genera bitacora y reporte final:
-  - `%TEMP%\wms-scmayher-uninstall\<timestamp>\uninstall.log`
-  - `%TEMP%\wms-scmayher-uninstall\<timestamp>\cleanup-report.txt`
+  - `%TEMP%\wms-scmayer-uninstall\<timestamp>\uninstall.log`
+  - `%TEMP%\wms-scmayer-uninstall\<timestamp>\cleanup-report.txt`
 
 ## Mantenimiento (soporte)
 - Healthcheck:
@@ -83,10 +83,10 @@
 
 ## Persistencia al actualizar version
 Al reemplazar la release por una nueva, conservar:
-- `%LOCALAPPDATA%\wms-scmayher\data\wms.db`
-- `%LOCALAPPDATA%\wms-scmayher\backups\`
+- `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
+- `%LOCALAPPDATA%\wms-scmayer\backups\`
 - `app\public\uploads\`
 
 ## Operacion integrada
 - Ver flujo operativo E2E (ensamble + etiquetas + trazabilidad + mantenimiento local):
-  - `docs/OPERACION_INTEGRADA_WMS.md`
+  - `docs/runbooks/windows-local-operations.md`

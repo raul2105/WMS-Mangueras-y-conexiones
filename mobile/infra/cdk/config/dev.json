@@ -1,0 +1,35 @@
+{
+  "environment": "dev",
+  "region": "us-east-1",
+  "namePrefix": "rigentec-wms-mobile-dev",
+  "stackName": "RigentecWmsMobileDevStack",
+  "cognitoDomainPrefix": "rigentec-wms-mobile-dev",
+  "callbackUrls": [
+    "https://d3qrqr8pq7wfev.cloudfront.net/index.html",
+    "http://localhost:4173/index.html"
+  ],
+  "logoutUrls": [
+    "https://d3qrqr8pq7wfev.cloudfront.net/index.html",
+    "http://localhost:4173/index.html"
+  ],
+  "corsAllowedOrigins": [
+    "https://d3qrqr8pq7wfev.cloudfront.net",
+    "http://localhost:4173",
+    "https://localhost:4173"
+  ],
+  "mobileServiceName": "wms-mobile-edge",
+  "mobileAuthMode": "cognito",
+  "mobileBuild": "dev",
+  "mobileReleaseDate": "2026-04-07",
+  "flags": {
+    "mobile_enabled": false,
+    "catalog_enabled": false,
+    "inventory_search_enabled": false,
+    "sales_requests_enabled": false,
+    "availability_enabled": false,
+    "equivalences_enabled": false,
+    "assembly_requests_enabled": false,
+    "product_drafts_enabled": false
+  },
+  "logRetentionDays": "SEVEN_DAYS"
+}

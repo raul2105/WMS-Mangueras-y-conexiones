@@ -208,8 +208,8 @@ UI/UX:        65% █████████████░░░░░░░
 
 ### Guías de Usuario
 - **README.md**: Quick start, scripts, módulos, troubleshooting
-- **DB_SETUP_MANUAL.md**: Setup de Prisma y base de datos
-- **IMPORT_PRODUCTS_CSV.md**: Importación masiva de productos
+- **docs/reference/database-setup.md**: Setup de Prisma y base de datos
+- **docs/reference/import-products-csv.md**: Importación masiva de productos
 
 ### CI/CD
 - **.github/workflows/ci.yml**: Pipeline automatizado

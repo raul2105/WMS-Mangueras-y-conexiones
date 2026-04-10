@@ -73,10 +73,10 @@ maintenance\healthcheck.cmd
 
 ## 7. Rutas Importantes de Datos y Logs
 La informacion operativa no vive dentro de la carpeta release. Se guarda en:
-- Base de datos SQLite: `%LOCALAPPDATA%\wms-scmayher\data\wms.db`
-- Respaldos: `%LOCALAPPDATA%\wms-scmayher\backups\`
-- Logs: `%LOCALAPPDATA%\wms-scmayher\logs\`
-- Estado/PID: `%LOCALAPPDATA%\wms-scmayher\run\`
+- Base de datos SQLite: `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
+- Respaldos: `%LOCALAPPDATA%\wms-scmayer\backups\`
+- Logs: `%LOCALAPPDATA%\wms-scmayer\logs\`
+- Estado/PID: `%LOCALAPPDATA%\wms-scmayer\run\`
 
 ## 8. Mantenimiento Basico
 Crear respaldo manual:
@@ -112,7 +112,7 @@ maintenance\healthcheck.cmd
 ### Caso C: WMS no abre o cierra al iniciar
 **Solucion:**
 1. Ejecutar `maintenance\healthcheck.cmd`
-2. Revisar logs en `%LOCALAPPDATA%\wms-scmayher\logs\`
+2. Revisar logs en `%LOCALAPPDATA%\wms-scmayer\logs\`
 3. Intentar `stop.cmd` y luego `launcher.cmd`
 
 ### Caso D: Permisos o bloqueo de archivos
@@ -133,7 +133,7 @@ stop.cmd
 ```cmd
 maintenance\backup-db.cmd
 ```
-3. Localizar respaldo mas reciente en `%LOCALAPPDATA%\wms-scmayher\backups\`
+3. Localizar respaldo mas reciente en `%LOCALAPPDATA%\wms-scmayer\backups\`
 4. Copiar la carpeta del respaldo a un medio seguro
 
 ### En equipo nuevo
@@ -156,15 +156,15 @@ launcher.cmd
 stop.cmd
 ```
 2. Reemplazar carpeta release por la nueva version
-3. No borrar `%LOCALAPPDATA%\wms-scmayher\`
+3. No borrar `%LOCALAPPDATA%\wms-scmayer\`
 4. Ejecutar:
 ```cmd
 launcher.cmd
 ```
 
 Persistencia esperada:
-- `%LOCALAPPDATA%\wms-scmayher\data\wms.db`
-- `%LOCALAPPDATA%\wms-scmayher\backups\`
+- `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
+- `%LOCALAPPDATA%\wms-scmayer\backups\`
 
 ## 12. Desinstalacion
 Ejecutar:

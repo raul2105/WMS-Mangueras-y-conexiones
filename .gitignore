@@ -29,6 +29,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+build_output*.txt
+lint.txt
+prisma_error.txt
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -61,3 +64,26 @@ prisma/*.backup*
 # Playwright generated reports
 /playwright-report/
 /test-results/
+
+# OpenNext build output
+/.open-next/
+
+# CDK build output
+/infra/cdk/cdk.out/
+/infra/cdk/cdk.out.*/
+/infra/cdk/cdk.out.deploy*/
+/infra/cdk/node_modules/
+
+# Mobile edge artifacts
+/mobile-web/out/
+/mobile-web/.next/
+/mobile-web/config.js
+/mobile/infra/cdk/cdk.out/
+/mobile/infra/cdk/node_modules/
+
+# local workspace artifacts
+/.tmp-product-images/
+/backups/
+/.vs/
+*.bak
+*.bak_*

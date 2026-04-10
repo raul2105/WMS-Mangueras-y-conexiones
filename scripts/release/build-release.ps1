@@ -1,5 +1,7 @@
 param(
-  [string]$NodeZipPath = ""
+  [string]$NodeZipPath = "",
+  [ValidateSet("aws", "local")]
+  [string]$DbMode = "aws"
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,6 +120,7 @@ function Build-BootstrapDatabase {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
 Push-Location $repoRoot
+$restoreDefaultPrismaClient = $false
 try {
   $pkg = Get-Content (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
   $appName = [string]$pkg.name
@@ -136,6 +139,13 @@ try {
   Assert-NoRepoNodeProcesses -RepoRoot $repoRoot
   Assert-PrismaEngineUnlocked -RepoRoot $repoRoot
   Invoke-Step "npm run verify:release"
+
+  if ($DbMode -eq "aws") {
+    Write-Host ">> Preparing AWS Prisma client and build output"
+    Invoke-Step "node scripts/db/generate-aws-prisma-client.cjs"
+    $restoreDefaultPrismaClient = $true
+    Invoke-Step "npm run build"
+  }
 
   $standaloneDir = Join-Path $repoRoot ".next\standalone"
   if (-not (Test-Path (Join-Path $standaloneDir "server.js"))) {
@@ -226,7 +236,9 @@ try {
   Copy-Item -LiteralPath $nextStaticDir -Destination $releaseAppNextDir -Recurse -Force
   Copy-Item -LiteralPath $publicDir -Destination $releaseAppDir -Recurse -Force
   Copy-Item -LiteralPath $schemaPath -Destination $releaseAppPrismaDir -Force
-  Build-BootstrapDatabase -RepoRoot $repoRoot -OutputPath (Join-Path $releaseBootstrapDir "initial.db")
+  if ($DbMode -eq "local") {
+    Build-BootstrapDatabase -RepoRoot $repoRoot -OutputPath (Join-Path $releaseBootstrapDir "initial.db")
+  }
   Copy-Item -LiteralPath $csvTemplatePath -Destination $releaseAppDataDir -Force
   Copy-Item -LiteralPath $importScriptPath -Destination $releaseAppScriptsDir -Force
   Copy-Item -LiteralPath $csvParseModulePath -Destination $releaseAppNodeModulesDir -Recurse -Force
@@ -267,5 +279,12 @@ try {
   Write-Host "Release zip:    $releaseZip"
 }
 finally {
+  if ($restoreDefaultPrismaClient) {
+    try {
+      Invoke-Step "node scripts/db/generate-default-prisma-client.cjs"
+    } catch {
+      Write-Warning "No se pudo restaurar el Prisma client SQLite por defecto: $($_.Exception.Message)"
+    }
+  }
   Pop-Location
 }

@@ -93,11 +93,11 @@ const RBAC_ROLES = [
 ];
 
 const RBAC_USERS = [
-  { email: 'admin@scmayher.local', name: 'Admin Principal', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
-  { email: 'admin2@scmayher.local', name: 'Admin Secundario', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
-  { email: 'manager@scmayher.local', name: 'Manager WMS', password: 'Manager123*', roles: ['MANAGER'] },
-  { email: 'operator@scmayher.local', name: 'Operador Almacen', password: 'Operator123*', roles: ['WAREHOUSE_OPERATOR'] },
-  { email: 'sales@scmayher.local', name: 'Ejecutivo Ventas', password: 'Sales123*', roles: ['SALES_EXECUTIVE'] },
+  { email: 'admin@scmayher.com', name: 'Admin Principal', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
+  { email: 'admin2@scmayher.com', name: 'Admin Secundario', password: 'Admin123*', roles: ['SYSTEM_ADMIN'] },
+  { email: 'manager@scmayher.com', name: 'Manager WMS', password: 'Manager123*', roles: ['MANAGER'] },
+  { email: 'operator@scmayher.com', name: 'Operador Almacen', password: 'Operator123*', roles: ['WAREHOUSE_OPERATOR'] },
+  { email: 'sales@scmayher.com', name: 'Ejecutivo Ventas', password: 'Sales123*', roles: ['SALES_EXECUTIVE'] },
 ];
 
 async function seedRbac() {

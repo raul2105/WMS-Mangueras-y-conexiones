@@ -8,6 +8,13 @@ $ErrorActionPreference = "Stop"
 $state = Get-WmsState
 Ensure-WmsStateDirectories -State $state -IncludeData
 
+if ($state.DbMode -eq "aws") {
+  $message = "WMS_DB_MODE=aws: restauracion SQLite no aplica (datos en PostgreSQL compartida)."
+  Write-OpsLog -State $state -Level "WARN" -Message $message
+  Write-Host $message
+  exit 0
+}
+
 $stoppedPid = Stop-WmsProcess -State $state
 if ($stoppedPid) {
   Write-OpsLog -State $state -Message "WMS stopped before restore (PID $stoppedPid)."

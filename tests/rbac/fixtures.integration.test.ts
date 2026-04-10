@@ -5,10 +5,10 @@ import { ensureRbacFixtures, getRolePermissions } from "@/tests/fixtures/rbac-fi
 const prisma = new PrismaClient();
 
 const TEST_EMAILS = [
-  "test-admin@scmayher.local",
-  "test-manager@scmayher.local",
-  "test-warehouse@scmayher.local",
-  "test-sales@scmayher.local",
+  "test-admin@scmayher.com",
+  "test-manager@scmayher.com",
+  "test-warehouse@scmayher.com",
+  "test-sales@scmayher.com",
 ];
 
 describe("rbac fixtures seed by role", () => {

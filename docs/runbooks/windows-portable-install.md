@@ -36,22 +36,32 @@ En la carpeta release deben existir, entre otros:
 - Recomendado: `C:\WMS-SCMayher\`
 - Si recibes `.zip`, extraelo completo
 
-### Paso 2. Inicializar base de datos local (solo una vez)
+### Paso 2. Configurar base compartida AWS (obligatorio en modo aws)
+Antes de iniciar, configurar variables de entorno:
+
+```powershell
+$env:WMS_DB_MODE = "aws"
+$env:DATABASE_URL = "postgresql://<user>:<password>@<host>:5432/<db>?schema=public"
+```
+
+### Paso 3. Inicializar base local (solo si se usa modo local)
 1. Abrir la carpeta del release
 2. Ejecutar:
 ```cmd
 maintenance\init-local.cmd
 ```
-3. Resultado esperado: `Inicializacion completada.`
+3. Resultado esperado:
+	- Modo `local`: `Inicializacion completada.`
+	- Modo `aws`: `inicializacion local omitida`
 
-### Paso 3. Iniciar la aplicacion
+### Paso 4. Iniciar la aplicacion
 Ejecutar:
 ```cmd
 launcher.cmd
 ```
 Resultado esperado: `WMS listo.` y apertura de navegador.
 
-### Paso 4. Verificar acceso web
+### Paso 5. Verificar acceso web
 - `http://127.0.0.1:3002`
 - (tambien funciona `http://localhost:3002`)
 
@@ -73,7 +83,8 @@ maintenance\healthcheck.cmd
 
 ## 7. Rutas Importantes de Datos y Logs
 La informacion operativa no vive dentro de la carpeta release. Se guarda en:
-- Base de datos SQLite: `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
+- Base compartida (modo `aws`): PostgreSQL remota en `DATABASE_URL`
+- Base SQLite local (modo `local`): `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
 - Respaldos: `%LOCALAPPDATA%\wms-scmayer\backups\`
 - Logs: `%LOCALAPPDATA%\wms-scmayer\logs\`
 - Estado/PID: `%LOCALAPPDATA%\wms-scmayer\run\`
@@ -89,6 +100,8 @@ Restaurar respaldo:
 maintenance\restore-db.cmd
 ```
 
+Nota: en modo `aws`, backup/restore SQLite se omiten porque la informacion esta en PostgreSQL compartida.
+
 Chequeo rapido:
 ```cmd
 maintenance\healthcheck.cmd
@@ -101,6 +114,14 @@ maintenance\healthcheck.cmd
 **Solucion:**
 1. Ejecutar `maintenance\init-local.cmd`
 2. Volver a lanzar `launcher.cmd`
+
+### Caso A2: "WMS_DB_MODE=aws requiere DATABASE_URL"
+**Causa:** falta configurar `DATABASE_URL` para la base compartida.
+
+**Solucion:**
+1. Definir `WMS_DB_MODE=aws`
+2. Definir `DATABASE_URL` PostgreSQL valida
+3. Ejecutar `launcher.cmd` nuevamente
 
 ### Caso B: "El puerto 3002 ya esta en uso..."
 **Causa:** otro proceso ocupa ese puerto.

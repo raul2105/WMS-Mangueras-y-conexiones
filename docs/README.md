@@ -22,6 +22,8 @@ Este directorio concentra la documentación vigente de la rama de estabilizació
 - [Manual de base de datos](./reference/database-setup.md)
 - [Guía de importación CSV](./reference/import-products-csv.md)
 - [Matriz de runtimes](./runbooks/runtime-support-matrix.md)
+- [Runbook de limpieza manual de ramas Git](./runbooks/git-branch-cleanup.md)
+- [Guía de contribución y flujo PR](../CONTRIBUTING.md)
 
 ## Regla de mantenimiento
 

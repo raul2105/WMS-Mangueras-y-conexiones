@@ -45,12 +45,14 @@ npm run mobile:staging:deploy
 - [Matriz de soporte de runtimes](./docs/runbooks/runtime-support-matrix.md)
 - [Operación Windows portable](./docs/runbooks/windows-portable-install.md)
 - [Operación local Windows](./docs/runbooks/windows-local-operations.md)
+- [Runbook de limpieza manual de ramas Git](./docs/runbooks/git-branch-cleanup.md)
 - [Base de datos y Prisma](./docs/reference/database-setup.md)
 - [Importación de productos CSV](./docs/reference/import-products-csv.md)
 - [Deploy AWS web](./docs/mobile/aws-deploy.md)
 - [Contratos mobile v1](./docs/mobile/v1-contracts.md)
 - [Estado real de capacidades WMS](./docs/WMS_CAPABILITIES_STATUS.md)
 - [ADR](./docs/ADR/README.md)
+- [Guía de contribución y flujo PR](./CONTRIBUTING.md)
 
 ## Notas
 

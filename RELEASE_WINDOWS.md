@@ -9,7 +9,7 @@
 1. Abrir PowerShell en la raiz del proyecto.
 2. Ejecutar:
    ```powershell
-   .\build-release.cmd
+  .\build-release.cmd -DbMode aws
    ```
 3. Esperar a que termine `npm run verify:release`.
    - Si falla por lock de Prisma (`query_engine-windows.dll.node`), cerrar procesos Node que usen este repo (por ejemplo Playwright dev server) y volver a ejecutar.
@@ -23,13 +23,21 @@
    - `C:\WMS-SCMayher\`
 3. Si se copio zip, extraerlo.
 
+## Configuracion de base compartida (AWS)
+Antes de iniciar en cada equipo cliente, definir variables de entorno del proceso/sistema:
+
+```powershell
+$env:WMS_DB_MODE = "aws"
+$env:DATABASE_URL = "postgresql://<user>:<password>@<host>:5432/<db>?schema=public"
+```
+
+Notas:
+- `WMS_DB_MODE=aws` es el modo por defecto del release actual.
+- Si `DATABASE_URL` no esta definida, `launcher.cmd` aborta con error explicito.
+
 ## Primera instalacion en SC MAYER
-- Inicializar SQLite una sola vez:
-  ```cmd
-  maintenance\init-local.cmd
-  ```
-- Esto crea la DB operativa en:
-  - `%LOCALAPPDATA%\wms-scmayer\data\wms.db`
+- En modo `aws`, `maintenance\init-local.cmd` no crea SQLite local y solo registra que la inicializacion fue omitida.
+- En modo `local`, `maintenance\init-local.cmd` mantiene el flujo anterior con `bootstrap\initial.db`.
 
 ## Arranque / operacion diaria
 - Iniciar:
@@ -80,6 +88,8 @@
   ```cmd
   maintenance\restore-db.cmd
   ```
+
+En modo `aws`, backup/restore locales se omiten porque la informacion vive en PostgreSQL compartida.
 
 ## Persistencia al actualizar version
 Al reemplazar la release por una nueva, conservar:

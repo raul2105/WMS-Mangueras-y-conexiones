@@ -54,10 +54,10 @@ const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
 };
 
 const ROLE_USERS: Record<RoleCode, { email: string; name: string; password: string }> = {
-  SYSTEM_ADMIN: { email: "test-admin@scmayher.local", name: "Test System Admin", password: "Admin123*" },
-  MANAGER: { email: "test-manager@scmayher.local", name: "Test Manager", password: "Manager123*" },
-  WAREHOUSE_OPERATOR: { email: "test-warehouse@scmayher.local", name: "Test Warehouse", password: "Warehouse123*" },
-  SALES_EXECUTIVE: { email: "test-sales@scmayher.local", name: "Test Sales", password: "Sales123*" },
+  SYSTEM_ADMIN: { email: "test-admin@scmayher.com", name: "Test System Admin", password: "Admin123*" },
+  MANAGER: { email: "test-manager@scmayher.com", name: "Test Manager", password: "Manager123*" },
+  WAREHOUSE_OPERATOR: { email: "test-warehouse@scmayher.com", name: "Test Warehouse", password: "Warehouse123*" },
+  SALES_EXECUTIVE: { email: "test-sales@scmayher.com", name: "Test Sales", password: "Sales123*" },
 };
 
 export function getRolePermissions(role: RoleCode) {

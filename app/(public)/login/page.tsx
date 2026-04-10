@@ -67,7 +67,7 @@ export default async function LoginPage({
         <SectionCard title="Acceso WMS" description="Inicia sesion para operar el sistema.">
           <form action={loginAction} className="space-y-4">
             <input type="hidden" name="callbackUrl" value={callbackUrl} />
-            <Input name="email" type="email" label="Email" placeholder="admin@scmayher.local" required />
+            <Input name="email" type="email" label="Email" placeholder="admin@scmayher.com" required />
             <Input name="password" type="password" label="Contrasena" required />
             {error ? <p className="text-sm text-red-400">{error}</p> : null}
             <button type="submit" className={buttonStyles({ fullWidth: true })}>

@@ -1,0 +1,22 @@
+{
+  "name": "wms-mobile-infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "scripts": {
+    "precheck": "node scripts/precheck-config.cjs",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.191.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1019.2"
+  }
+}

@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { InventoryService, InventoryServiceError } from "../lib/inventory-service";
-import { importProductsFromCsv } from "../scripts/import-products-from-csv.cjs";
+import { importProductsFromCsv } from "../scripts/data/import-products-from-csv.cjs";
 
 const prisma = new PrismaClient();
 

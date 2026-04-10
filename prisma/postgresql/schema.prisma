@@ -1,0 +1,962 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  isActive     Boolean  @default(true)
+
+  userRoles UserRole[]
+  requestedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderRequestedBy")
+  confirmedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderConfirmedBy")
+  cancelledSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderCancelledBy")
+
+  inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
+  traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
+  auditLogs          AuditLog[]          @relation("AuditActorUser")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model Role {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+
+  userRoles        UserRole[]
+  rolePermissions  RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  description String?
+
+  rolePermissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  grantedAt DateTime @default(now())
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  sku         String   @unique
+  referenceCode String? @unique
+  imageUrl     String?
+  name        String
+  description String?
+  type        String   // HOSE, FITTING, ASSEMBLY, ACCESSORY
+  unitLabel   String   @default("unidad")
+  brand       String?
+  subcategory String?
+  base_cost   Float?
+  price       Float?
+  attributes  String?  // JSON string for flexibility (Pressure, Diameter, Material)
+  
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  inventory   Inventory[]
+  movements   InventoryMovement[]
+  equivalencesFrom ProductEquivalence[] @relation("EquivalenceFrom")
+  equivalencesTo ProductEquivalence[]   @relation("EquivalenceTo")
+  technicalAttributes ProductTechnicalAttribute[]
+  productionOrderItems ProductionOrderItem[]
+  salesInternalOrderLines SalesInternalOrderLine[]
+  salesAssemblyConfigurationsEntry SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyEntryFittingProduct")
+  salesAssemblyConfigurationsHose  SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyHoseProduct")
+  salesAssemblyConfigurationsExit  SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyExitFittingProduct")
+  supplierProducts     SupplierProduct[]
+  purchaseOrderLines   PurchaseOrderLine[]
+  assemblyConfigurationsEntry AssemblyConfiguration[] @relation("AssemblyEntryFittingProduct")
+  assemblyConfigurationsHose  AssemblyConfiguration[] @relation("AssemblyHoseProduct")
+  assemblyConfigurationsExit  AssemblyConfiguration[] @relation("AssemblyExitFittingProduct")
+  assemblyWorkOrderLines      AssemblyWorkOrderLine[]
+  traceRecords TraceRecord[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([type])
+  @@index([brand])
+  @@index([categoryId])
+  @@index([subcategory])
+}
+
+model ProductTechnicalAttribute {
+  id              String  @id @default(uuid())
+  productId       String
+  key             String
+  keyNormalized   String
+  value           String
+  valueNormalized String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, keyNormalized, valueNormalized])
+  @@index([productId])
+  @@index([keyNormalized])
+  @@index([keyNormalized, valueNormalized])
+  @@index([valueNormalized])
+}
+
+model ProductEquivalence {
+  id             String   @id @default(uuid())
+  productId      String
+  equivProductId String
+  basisNorm      String?
+  basisDash      Int?
+  sourceSheet    String?
+  notes          String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  product      Product @relation("EquivalenceFrom", fields: [productId], references: [id], onDelete: Cascade)
+  equivProduct Product @relation("EquivalenceTo", fields: [equivProductId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, equivProductId])
+  @@index([productId])
+  @@index([equivProductId])
+  @@index([active])
+}
+
+model Category {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  products  Product[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Warehouse entity for multi-location support
+model Warehouse {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  name        String
+  description String?
+  address     String?
+  isActive    Boolean    @default(true)
+  
+  locations   Location[]
+  productionOrders ProductionOrder[]
+  salesInternalOrders SalesInternalOrder[]
+  assemblyWorkOrders AssemblyWorkOrder[]
+  traceRecords TraceRecord[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+// Location entity for bin/rack/zone management
+model Location {
+  id          String     @id @default(uuid())
+  code        String     @unique // e.g., "A-12-04" or "ZONE-A-RACK-12-BIN-04"
+  name        String
+  zone        String?    // e.g., "A", "B", "Receiving"
+  aisle       String?    // e.g., "12"
+  rack        String?    // e.g., "04"
+  level       String?    // e.g., "01" (shelf level)
+  isActive    Boolean    @default(true)
+  capacity    Float?     // Max capacity in units or volume
+  usageType   LocationUsageType @default(STORAGE)
+  
+  warehouseId String
+  warehouse   Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  
+  inventory   Inventory[]
+  movements   InventoryMovement[]
+  productionOrderItems ProductionOrderItem[]
+  purchaseReceipts     PurchaseReceipt[]
+  assemblyPickTasksSource PickTask[] @relation("PickTaskSourceLocation")
+  assemblyPickTasksTarget PickTask[] @relation("PickTaskTargetLocation")
+  salesOrderPickListsTarget SalesInternalOrderPickList[] @relation("SalesOrderPickListTargetLocation")
+  salesOrderPickTasksSource SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskSourceLocation")
+  salesOrderPickTasksTarget SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskTargetLocation")
+  assemblyWipWorkOrders  AssemblyWorkOrder[] @relation("AssemblyWipLocation")
+  traceRecords TraceRecord[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([warehouseId, isActive, code])
+}
+
+model Inventory {
+  id        String   @id @default(uuid())
+  quantity  Float    @default(0)     // On-hand quantity
+  reserved  Float    @default(0)     // Reserved for orders
+  available Float    @default(0)     // Available = quantity - reserved
+  
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  locationId String
+  location   Location  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  updatedAt DateTime @updatedAt
+  
+  @@unique([productId, locationId])
+  @@index([productId])
+  @@index([locationId])
+}
+
+enum InventoryMovementType {
+  IN           // Receiving/Entry
+  OUT          // Picking/Exit
+  TRANSFER     // Internal transfer between locations
+  ADJUSTMENT   // Inventory adjustment (cycle count, damage)
+}
+
+enum LocationUsageType {
+  STORAGE
+  RECEIVING
+  SHIPPING
+  STAGING
+  WIP
+}
+
+enum ProductionOrderStatus {
+  BORRADOR
+  ABIERTA
+  EN_PROCESO
+  COMPLETADA
+  CANCELADA
+}
+
+enum SalesInternalOrderStatus {
+  BORRADOR
+  CONFIRMADA
+  CANCELADA
+}
+
+enum SalesInternalOrderLineKind {
+  PRODUCT
+  CONFIGURED_ASSEMBLY
+}
+
+enum ProductionOrderKind {
+  GENERIC
+  ASSEMBLY_3PIECE
+}
+
+model InventoryMovement {
+  id        String                @id @default(uuid())
+  type      InventoryMovementType
+  quantity  Float
+  traceId   String?
+  operatorName String?
+  operatorUserId String?
+  reference String?                // PO, SO, Transfer Order, etc.
+  notes     String?
+  documentType String?
+  documentId String?
+  documentLineId String?
+  referenceFilePath String?
+  referenceFileName String?
+  referenceFileMime String?
+  referenceFileSize Int?
+  
+  productId  String
+  product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  operatorUser User?               @relation("MovementOperatorUser", fields: [operatorUserId], references: [id], onDelete: SetNull)
+  
+  locationId String?
+  location   Location?             @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  
+  // For TRANSFER type: track from/to locations
+  fromLocationCode String?
+  toLocationCode   String?
+  traceRecord TraceRecord?
+
+  createdAt DateTime              @default(now())
+  
+  @@index([productId])
+  @@index([locationId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([documentType, documentId])
+  @@index([traceId])
+  @@index([operatorUserId])
+}
+
+enum LabelType {
+  RECEIPT
+  PICKING
+  LOCATION
+  ADJUSTMENT
+  WIP
+}
+
+enum LabelRendererKind {
+  HTML
+  ZPL
+}
+
+enum LabelSymbolKind {
+  QR
+  CODE128
+}
+
+enum LabelPrintJobStatus {
+  PENDING
+  RENDERED
+  PRINTED
+  EXPORTED
+  FAILED
+}
+
+model TraceRecord {
+  id String @id @default(uuid())
+  traceId String @unique
+  labelType LabelType
+
+  sourceEntityType String
+  sourceEntityId String
+
+  sourceDocumentType String?
+  sourceDocumentId String?
+  sourceDocumentLineId String?
+  companyName String
+  operatorName String?
+  operatorUserId String?
+  reference String?
+
+  quantity Float?
+  unitLabel String?
+  payloadJson String
+
+  productId String?
+  warehouseId String?
+  locationId String?
+  originMovementId String? @unique
+
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  operatorUser User? @relation("TraceOperatorUser", fields: [operatorUserId], references: [id], onDelete: SetNull)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  originMovement InventoryMovement? @relation(fields: [originMovementId], references: [id], onDelete: SetNull)
+  labelPrintJobs LabelPrintJob[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sourceEntityType, sourceEntityId])
+  @@index([labelType])
+  @@index([sourceDocumentType, sourceDocumentId])
+  @@index([createdAt])
+  @@index([operatorUserId])
+}
+
+model LabelTemplate {
+  id String @id @default(uuid())
+  code String @unique
+  name String
+  labelType LabelType
+  rendererKind LabelRendererKind @default(HTML)
+  symbolKind LabelSymbolKind @default(QR)
+  paperSize String?
+  schemaVersion Int @default(1)
+  isActive Boolean @default(true)
+  isDefault Boolean @default(false)
+  definitionJson String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  printJobs LabelPrintJob[]
+
+  @@index([labelType, isActive, isDefault])
+}
+
+model LabelPrintJob {
+  id String @id @default(uuid())
+  traceRecordId String
+  labelTemplateId String
+  status LabelPrintJobStatus @default(PENDING)
+  copies Int @default(1)
+  outputFormat String @default("html")
+  payloadJson String
+  htmlSnapshot String?
+  requestedBy String?
+  printedAt DateTime?
+  exportedAt DateTime?
+  errorMessage String?
+
+  traceRecord TraceRecord @relation(fields: [traceRecordId], references: [id], onDelete: Cascade)
+  labelTemplate LabelTemplate @relation(fields: [labelTemplateId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([traceRecordId, createdAt])
+  @@index([labelTemplateId])
+  @@index([status])
+}
+
+model ProductionOrder {
+  id           String                @id @default(uuid())
+  code         String                @unique
+  kind         ProductionOrderKind   @default(GENERIC)
+  status       ProductionOrderStatus @default(BORRADOR)
+  priority     Int                   @default(3)
+  customerName String?
+  dueDate      DateTime?
+  notes        String?
+  sourceDocumentType String?
+  sourceDocumentId String?
+  sourceDocumentLineId String?
+
+  warehouseId String
+  warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  items ProductionOrderItem[]
+  assemblyWorkOrder AssemblyWorkOrder?
+  assemblyConfiguration AssemblyConfiguration?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([warehouseId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([sourceDocumentType, sourceDocumentId])
+}
+
+model ProductionOrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  productId String
+  locationId String
+  quantity  Float
+
+  order    ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  location Location        @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, productId, locationId])
+  @@index([orderId])
+  @@index([productId])
+  @@index([locationId])
+}
+
+model SalesInternalOrder {
+  id String @id @default(uuid())
+  code String @unique
+  status SalesInternalOrderStatus @default(BORRADOR)
+  customerName String?
+  warehouseId String?
+  dueDate DateTime?
+  notes String?
+
+  requestedByUserId String?
+  confirmedByUserId String?
+  cancelledByUserId String?
+
+  confirmedAt DateTime?
+  cancelledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  requestedByUser User? @relation("SalesInternalOrderRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser User? @relation("SalesInternalOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  lines SalesInternalOrderLine[]
+  pickLists SalesInternalOrderPickList[]
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([warehouseId])
+}
+
+model SalesInternalOrderLine {
+  id String @id @default(uuid())
+  orderId String
+  lineKind SalesInternalOrderLineKind @default(PRODUCT)
+  productId String?
+  requestedQty Float
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  assemblyConfiguration SalesInternalOrderAssemblyConfig?
+  pickTasks SalesInternalOrderPickTask[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([orderId, lineKind])
+}
+
+model SalesInternalOrderAssemblyConfig {
+  id String @id @default(uuid())
+  orderLineId String @unique
+
+  entryFittingProductId String
+  hoseProductId String
+  exitFittingProductId String
+
+  hoseLength Float
+  assemblyQuantity Float
+  totalHoseRequired Float
+  sourceDocumentRef String?
+  notes String?
+
+  orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  entryFittingProduct Product @relation("SalesAssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
+  hoseProduct Product @relation("SalesAssemblyHoseProduct", fields: [hoseProductId], references: [id], onDelete: Restrict)
+  exitFittingProduct Product @relation("SalesAssemblyExitFittingProduct", fields: [exitFittingProductId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entryFittingProductId])
+  @@index([hoseProductId])
+  @@index([exitFittingProductId])
+}
+
+model SalesInternalOrderPickList {
+  id String @id @default(uuid())
+  code String @unique
+  orderId String
+  targetLocationId String
+  status PickListStatus @default(DRAFT)
+  releasedAt DateTime?
+  completedAt DateTime?
+  canceledAt DateTime?
+
+  order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  targetLocation Location @relation("SalesOrderPickListTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  tasks SalesInternalOrderPickTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId, status])
+  @@index([targetLocationId])
+}
+
+model SalesInternalOrderPickTask {
+  id String @id @default(uuid())
+  pickListId String
+  orderLineId String
+  sourceLocationId String
+  targetLocationId String
+
+  sequence Int
+  requestedQty Float
+  reservedQty Float
+  pickedQty Float @default(0)
+  shortQty Float @default(0)
+  status PickTaskStatus @default(PENDING)
+  shortReason String?
+  notes String?
+
+  pickList SalesInternalOrderPickList @relation(fields: [pickListId], references: [id], onDelete: Cascade)
+  orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  sourceLocation Location @relation("SalesOrderPickTaskSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  targetLocation Location @relation("SalesOrderPickTaskTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pickListId, sequence])
+  @@index([orderLineId])
+  @@index([sourceLocationId, status])
+  @@index([targetLocationId, status])
+}
+
+enum AssemblyAvailabilityStatus {
+  EXACT
+  INSUFFICIENT
+}
+
+enum AssemblyReservationStatus {
+  NONE
+  RESERVED
+  PARTIAL
+  RELEASED
+}
+
+enum AssemblyPickStatus {
+  NOT_RELEASED
+  RELEASED
+  IN_PROGRESS
+  PARTIAL
+  COMPLETED
+  CANCELED
+}
+
+enum AssemblyWipStatus {
+  NOT_IN_WIP
+  PARTIAL
+  IN_WIP
+  CONSUMED
+}
+
+enum AssemblyConsumptionStatus {
+  NOT_CONSUMED
+  PARTIAL
+  CONSUMED
+}
+
+enum AssemblyComponentRole {
+  ENTRY_FITTING
+  HOSE
+  EXIT_FITTING
+}
+
+enum PickListStatus {
+  DRAFT
+  RELEASED
+  IN_PROGRESS
+  PARTIAL
+  COMPLETED
+  CANCELLED
+}
+
+enum PickTaskStatus {
+  PENDING
+  IN_PROGRESS
+  PARTIAL
+  COMPLETED
+  CANCELLED
+}
+
+model AssemblyConfiguration {
+  id String @id @default(uuid())
+  productionOrderId String @unique
+
+  entryFittingProductId String
+  hoseProductId String
+  exitFittingProductId String
+
+  hoseLength Float
+  assemblyQuantity Float
+  totalHoseRequired Float
+  sourceDocumentRef String?
+  notes String?
+
+  productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  entryFittingProduct Product @relation("AssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
+  hoseProduct Product @relation("AssemblyHoseProduct", fields: [hoseProductId], references: [id], onDelete: Restrict)
+  exitFittingProduct Product @relation("AssemblyExitFittingProduct", fields: [exitFittingProductId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productionOrderId])
+}
+
+model AssemblyWorkOrder {
+  id String @id @default(uuid())
+  productionOrderId String @unique
+  warehouseId String
+  wipLocationId String
+
+  availabilityStatus AssemblyAvailabilityStatus @default(EXACT)
+  reservationStatus AssemblyReservationStatus @default(NONE)
+  pickStatus AssemblyPickStatus @default(NOT_RELEASED)
+  wipStatus AssemblyWipStatus @default(NOT_IN_WIP)
+  consumptionStatus AssemblyConsumptionStatus @default(NOT_CONSUMED)
+  hasShortage Boolean @default(false)
+
+  releasedAt DateTime?
+  closedAt DateTime?
+  canceledAt DateTime?
+
+  productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  wipLocation Location @relation("AssemblyWipLocation", fields: [wipLocationId], references: [id], onDelete: Restrict)
+  lines AssemblyWorkOrderLine[]
+  pickLists PickList[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productionOrderId])
+  @@index([warehouseId, pickStatus])
+}
+
+model AssemblyWorkOrderLine {
+  id String @id @default(uuid())
+  assemblyWorkOrderId String
+  componentRole AssemblyComponentRole
+  productId String
+  unitLabel String?
+
+  perAssemblyQty Float
+  requiredQty Float
+  reservedQty Float @default(0)
+  pickedQty Float @default(0)
+  wipQty Float @default(0)
+  consumedQty Float @default(0)
+  shortQty Float @default(0)
+
+  reservationStatus AssemblyReservationStatus @default(NONE)
+  pickStatus AssemblyPickStatus @default(NOT_RELEASED)
+  wipStatus AssemblyWipStatus @default(NOT_IN_WIP)
+  consumptionStatus AssemblyConsumptionStatus @default(NOT_CONSUMED)
+
+  assemblyWorkOrder AssemblyWorkOrder @relation(fields: [assemblyWorkOrderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  pickTasks PickTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assemblyWorkOrderId, componentRole])
+  @@index([assemblyWorkOrderId])
+  @@index([productId])
+}
+
+model PickList {
+  id String @id @default(uuid())
+  code String @unique
+  assemblyWorkOrderId String
+  status PickListStatus @default(DRAFT)
+  releasedAt DateTime?
+  completedAt DateTime?
+  canceledAt DateTime?
+
+  assemblyWorkOrder AssemblyWorkOrder @relation(fields: [assemblyWorkOrderId], references: [id], onDelete: Cascade)
+  tasks PickTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assemblyWorkOrderId, status])
+}
+
+model PickTask {
+  id String @id @default(uuid())
+  pickListId String
+  assemblyWorkOrderLineId String
+  sourceLocationId String
+  targetWipLocationId String
+
+  sequence Int
+  requestedQty Float
+  reservedQty Float
+  pickedQty Float @default(0)
+  shortQty Float @default(0)
+  status PickTaskStatus @default(PENDING)
+  shortReason String?
+  notes String?
+
+  pickList PickList @relation(fields: [pickListId], references: [id], onDelete: Cascade)
+  assemblyWorkOrderLine AssemblyWorkOrderLine @relation(fields: [assemblyWorkOrderLineId], references: [id], onDelete: Cascade)
+  sourceLocation Location @relation("PickTaskSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  targetWipLocation Location @relation("PickTaskTargetLocation", fields: [targetWipLocationId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pickListId, sequence])
+  @@index([assemblyWorkOrderLineId])
+  @@index([sourceLocationId, status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityType String
+  entityId   String?
+  action     String
+  before     String?
+  after      String?
+  actor      String?
+  actorUserId String?
+  source     String?
+
+  actorUser User? @relation("AuditActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  createdAt  DateTime @default(now())
+
+  @@index([entityType])
+  @@index([entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([actorUserId])
+}
+
+model ImportLog {
+  id        String   @id @default(uuid())
+  fileName  String
+  fileSize  Int?
+  rows      Int?
+  skus      Int?
+  dryRun    Boolean  @default(false)
+  status    String
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─── Módulo de Compras ────────────────────────────────────────────────────────
+
+enum PurchaseOrderStatus {
+  BORRADOR
+  CONFIRMADA
+  EN_TRANSITO
+  RECIBIDA
+  PARCIAL
+  CANCELADA
+}
+
+model Supplier {
+  id        String   @id @default(uuid())
+  code      String   @unique   // PROV-001
+  name      String
+  taxId     String?            // RFC
+  email     String?
+  phone     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products       SupplierProduct[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([isActive])
+}
+
+model SupplierProduct {
+  id           String   @id @default(uuid())
+  supplierId   String
+  productId    String
+  supplierSku  String?
+  unitPrice    Float?
+  currency     String   @default("MXN")
+  leadTimeDays Int?
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([supplierId, productId])
+  @@index([supplierId])
+  @@index([productId])
+}
+
+model PurchaseOrder {
+  id           String              @id @default(uuid())
+  folio        String              @unique   // OC-2026-0001
+  supplierId   String
+  status       PurchaseOrderStatus @default(BORRADOR)
+  expectedDate DateTime?
+  notes        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  supplier Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines    PurchaseOrderLine[]
+  receipts PurchaseReceipt[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PurchaseOrderLine {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  productId       String
+  qtyOrdered      Int
+  qtyReceived     Int      @default(0)
+  unitPrice       Float?
+  currency        String   @default("MXN")
+
+  purchaseOrder PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  receiptLines  PurchaseReceiptLine[]
+
+  @@unique([purchaseOrderId, productId])
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model PurchaseReceipt {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  locationId      String
+  receivedAt      DateTime @default(now())
+  notes           String?
+  referenceDoc    String?
+
+  purchaseOrder PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  location      Location             @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  lines         PurchaseReceiptLine[]
+
+  @@index([purchaseOrderId])
+  @@index([receivedAt])
+}
+
+model PurchaseReceiptLine {
+  id                  String @id @default(uuid())
+  purchaseReceiptId   String
+  purchaseOrderLineId String
+  productId           String
+  qtyReceived         Int
+
+  purchaseReceipt   PurchaseReceipt   @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseReceiptId])
+  @@index([purchaseOrderLineId])
+}

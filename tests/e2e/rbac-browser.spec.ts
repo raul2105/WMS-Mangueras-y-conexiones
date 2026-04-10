@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 const USERS = {
-  SYSTEM_ADMIN: { email: "admin@scmayher.local", password: "Admin123*" },
-  MANAGER: { email: "manager@scmayher.local", password: "Manager123*" },
-  WAREHOUSE_OPERATOR: { email: "operator@scmayher.local", password: "Operator123*" },
-  SALES_EXECUTIVE: { email: "sales@scmayher.local", password: "Sales123*" },
+  SYSTEM_ADMIN: { email: "admin@scmayher.com", password: "Admin123*" },
+  MANAGER: { email: "manager@scmayher.com", password: "Manager123*" },
+  WAREHOUSE_OPERATOR: { email: "operator@scmayher.com", password: "Operator123*" },
+  SALES_EXECUTIVE: { email: "sales@scmayher.com", password: "Sales123*" },
 } as const;
 
 type RoleKey = keyof typeof USERS;
@@ -16,10 +16,10 @@ const EXPECTED_HOME: Record<RoleKey, string> = {
 };
 
 const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navItems: number }> = {
-  SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.local", navItems: 7 },
-  MANAGER: { name: "Manager WMS", email: "manager@scmayher.local", navItems: 7 },
-  WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.local", navItems: 4 },
-  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.local", navItems: 3 },
+  SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 7 },
+  MANAGER: { name: "Manager WMS", email: "manager@scmayher.com", navItems: 7 },
+  WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 4 },
+  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 3 },
 };
 
 async function loginAs(

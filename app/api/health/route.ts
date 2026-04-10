@@ -6,7 +6,11 @@ export async function GET() {
   const service = "wms-scmayher";
   const version = process.env.npm_package_version ?? "unknown";
   const timestamp = new Date().toISOString();
-  const dbPath = process.env.WMS_DB_PATH ?? resolvedDatabasePath ?? process.env.DATABASE_URL ?? "unknown";
+  const dbInfo =
+    process.env.WMS_DB_PATH ??
+    resolvedDatabasePath ??
+    process.env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ??
+    "unknown";
 
   try {
     await prismaReady;
@@ -17,7 +21,7 @@ export async function GET() {
         service,
         version,
         db: "up",
-        dbPath,
+        dbInfo,
         timestamp,
       },
       { status: 200 }
@@ -30,7 +34,7 @@ export async function GET() {
         service,
         version,
         db: "down",
-        dbPath,
+        dbInfo,
         error: message,
         timestamp,
       },

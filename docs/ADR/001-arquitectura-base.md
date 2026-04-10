@@ -61,6 +61,9 @@ El proyecto WMS "Mangueras y Conexiones" requiere una arquitectura sólida que s
 - **Feature branches:** `feature/[ticket]-descripcion`
 - **Hotfix branches:** `hotfix/[descripcion]`
 - **PR obligatorio** para merge a main
+- **Merge strategy en main:** Squash merge
+- **Eliminación de rama remota tras merge:** habilitada
+- **Limpieza de ramas stale:** manual mediante runbook
 
 ### 6. Quality Gates
 1. Linter (ESLint) → ✅
@@ -69,6 +72,12 @@ El proyecto WMS "Mangueras y Conexiones" requiere una arquitectura sólida que s
 4. Prisma validate → ✅
 5. Tests unitarios (cuando existan) → 🚧
 6. Code review → ✅
+
+### 7. Gobierno de Pull Request
+- Plantilla de PR obligatoria en `.github/pull_request_template.md`
+- Checklist de validación local antes de abrir PR
+- Resolución de conversaciones antes de merge
+- Push directo a main deshabilitado vía branch protection
 
 ## Consecuencias
 

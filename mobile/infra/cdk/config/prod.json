@@ -1,0 +1,31 @@
+{
+  "environment": "prod",
+  "region": "us-east-1",
+  "namePrefix": "rigentec-wms-mobile-prod",
+  "stackName": "RigentecWmsMobileProdStack",
+  "cognitoDomainPrefix": "rigentec-wms-mobile-prod",
+  "callbackUrls": [
+    "https://d2cqvl04yxlts4.cloudfront.net/index.html"
+  ],
+  "logoutUrls": [
+    "https://d2cqvl04yxlts4.cloudfront.net/index.html"
+  ],
+  "corsAllowedOrigins": [
+    "https://d2cqvl04yxlts4.cloudfront.net"
+  ],
+  "mobileServiceName": "wms-mobile-edge",
+  "mobileAuthMode": "cognito",
+  "mobileBuild": "prod",
+  "mobileReleaseDate": "2026-04-07",
+  "flags": {
+    "mobile_enabled": true,
+    "catalog_enabled": true,
+    "inventory_search_enabled": true,
+    "sales_requests_enabled": true,
+    "availability_enabled": true,
+    "equivalences_enabled": true,
+    "assembly_requests_enabled": true,
+    "product_drafts_enabled": true
+  },
+  "logRetentionDays": "ONE_MONTH"
+}

@@ -101,8 +101,14 @@ model Product {
   price       Float?
   attributes  String?  // JSON string for flexibility (Pressure, Diameter, Material)
   
-  categoryId  String?
-  category    Category? @relation(fields: [categoryId], references: [id])
+  categoryId        String?
+  category          Category?      @relation(fields: [categoryId], references: [id])
+
+  primarySupplierId String?
+  primarySupplier   Supplier?      @relation("PrimarySupplier", fields: [primarySupplierId], references: [id])
+
+  supplierBrandId   String?
+  supplierBrand     SupplierBrand? @relation(fields: [supplierBrandId], references: [id])
   
   inventory   Inventory[]
   movements   InventoryMovement[]
@@ -130,6 +136,8 @@ model Product {
   @@index([brand])
   @@index([categoryId])
   @@index([subcategory])
+  @@index([primarySupplierId])
+  @@index([supplierBrandId])
 }
 
 model ProductTechnicalAttribute {
@@ -860,21 +868,40 @@ enum PurchaseOrderStatus {
 }
 
 model Supplier {
-  id        String   @id @default(uuid())
-  code      String   @unique   // PROV-001
-  name      String
-  taxId     String?            // RFC
-  email     String?
-  phone     String?
-  address   String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  code         String   @unique   // PROV-001
+  name         String
+  legalName    String?            // Razón social
+  businessName String?            // Nombre comercial
+  taxId        String?            // RFC
+  email        String?
+  phone        String?
+  address      String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  products       SupplierProduct[]
-  purchaseOrders PurchaseOrder[]
+  products        SupplierProduct[]
+  purchaseOrders  PurchaseOrder[]
+  brands          SupplierBrand[]
+  primaryProducts Product[]       @relation("PrimarySupplier")
 
   @@index([isActive])
+}
+
+model SupplierBrand {
+  id         String   @id @default(uuid())
+  supplierId String
+  name       String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  supplier Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([supplierId, name])
+  @@index([supplierId])
 }
 
 model SupplierProduct {
@@ -959,4 +986,22 @@ model PurchaseReceiptLine {
 
   @@index([purchaseReceiptId])
   @@index([purchaseOrderLineId])
+}
+// ─── Sync Events (Outbox Pattern) ────────────────────────────────────────────
+
+model SyncEvent {
+  id          String   @id @default(uuid())
+  entityType  String   // INVENTORY | PRODUCT | ORDER | MOVEMENT
+  entityId    String
+  action      String   // CREATE | UPDATE | DELETE
+  payload     String   // JSON snapshot
+  status      String   @default("PENDING") // PENDING | SENT | FAILED | ACKED
+  retryCount  Int      @default(0)
+  error       String?
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }

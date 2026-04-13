@@ -73,6 +73,14 @@ async function updateStatus(orderId: string, formData: FormData) {
     source: "purchasing/orders",
   });
 
+  const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+  await emitSyncEventSafe({
+    entityType: "ORDER",
+    entityId: orderId,
+    action: "UPDATE",
+    payload: { orderId, type: "PURCHASE_ORDER", status: newStatus },
+  });
+
   redirect(`/purchasing/orders/${orderId}?ok=1`);
 }
 
@@ -154,7 +162,7 @@ export default async function PurchaseOrderDetailPage({
       status: true,
       expectedDate: true,
       notes: true,
-      supplier: { select: { id: true, code: true, name: true } },
+      supplier: { select: { id: true, code: true, name: true, businessName: true } },
       lines: {
         select: {
           id: true,
@@ -213,7 +221,7 @@ export default async function PurchaseOrderDetailPage({
               </span>
             </div>
             <p className="text-sm text-slate-400 mt-0.5">
-              {order.supplier.code} — {order.supplier.name}
+              {order.supplier.code} — {order.supplier.businessName ?? order.supplier.name}
             </p>
           </div>
         </div>

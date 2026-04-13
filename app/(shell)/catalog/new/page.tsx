@@ -5,7 +5,9 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
-import { TAXONOMY_CATEGORIES, TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
+import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
+import { ProductSupplierBrandSelect } from "../_components/ProductSupplierBrandSelect";
+import { CategorySubcategorySelect } from "../_components/CategorySubcategorySelect";
 import { saveProductImage } from "@/lib/product-images";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,12 +27,13 @@ async function createProduct(formData: FormData) {
   const type = String(formData.get("type") ?? "").trim().toUpperCase();
 
   const descriptionRaw = String(formData.get("description") ?? "").trim();
-  const brandRaw = String(formData.get("brand") ?? "").trim();
   const unitLabelRaw = String(formData.get("unitLabel") ?? "").trim();
   const referenceCodeRaw = String(formData.get("referenceCode") ?? "").trim();
   const imageUrlRaw = String(formData.get("imageUrl") ?? "").trim();
   const categoryRaw = String(formData.get("category") ?? "").trim();
   const subcategoryRaw = String(formData.get("subcategory") ?? "").trim();
+  const primarySupplierIdRaw = String(formData.get("primarySupplierId") ?? "").trim();
+  const supplierBrandIdRaw = String(formData.get("supplierBrandId") ?? "").trim();
   const baseCostRaw = String(formData.get("base_cost") ?? "").trim();
   const priceRaw = String(formData.get("price") ?? "").trim();
   const quantityRaw = String(formData.get("quantity") ?? "").trim();
@@ -88,6 +91,24 @@ async function createProduct(formData: FormData) {
     }
   }
 
+  // Resolve brand snapshot from SupplierBrand
+  let brandRaw: string | null = null;
+  let primarySupplierId: string | null = null;
+  let supplierBrandId: string | null = null;
+  if (supplierBrandIdRaw) {
+    const sb = await prisma.supplierBrand.findUnique({
+      where: { id: supplierBrandIdRaw },
+      select: { id: true, name: true, supplierId: true },
+    });
+    if (sb && (!primarySupplierIdRaw || sb.supplierId === primarySupplierIdRaw)) {
+      brandRaw = sb.name;
+      supplierBrandId = sb.id;
+      primarySupplierId = sb.supplierId;
+    }
+  } else if (primarySupplierIdRaw) {
+    primarySupplierId = primarySupplierIdRaw;
+  }
+
   const product = await prisma.product.upsert({
     where: { sku },
     create: {
@@ -98,26 +119,30 @@ async function createProduct(formData: FormData) {
       type: normalizedType,
       unitLabel: unitLabelRaw || "unidad",
       description: descriptionRaw || null,
-      brand: brandRaw || null,
+      brand: brandRaw,
       subcategory: subcategoryRaw || null,
       base_cost: Number.isFinite(base_cost) ? base_cost : null,
       price: Number.isFinite(price) ? price : null,
       attributes,
-      ...(category ? { category: { connect: { id: category.id } } } : {}),
+      categoryId: category?.id ?? null,
+      primarySupplierId,
+      supplierBrandId,
     },
     update: {
       name,
       type: normalizedType,
       unitLabel: unitLabelRaw || "unidad",
       description: descriptionRaw || null,
-      brand: brandRaw || null,
+      brand: brandRaw,
       referenceCode: referenceCodeRaw || null,
       imageUrl,
       subcategory: subcategoryRaw || null,
       base_cost: Number.isFinite(base_cost) ? base_cost : null,
       price: Number.isFinite(price) ? price : null,
       attributes,
-      ...(category ? { category: { connect: { id: category.id } } } : { categoryId: null }),
+      categoryId: category?.id ?? null,
+      primarySupplierId,
+      supplierBrandId,
     },
     select: { id: true },
   });
@@ -158,6 +183,14 @@ async function createProduct(formData: FormData) {
     source: "catalog/new",
   });
 
+  const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+  await emitSyncEventSafe({
+    entityType: "PRODUCT",
+    entityId: product.id,
+    action: "CREATE",
+    payload: { productId: product.id, sku, name, type: normalizedType, brand: brandRaw, price },
+  });
+
   redirect("/catalog");
 }
 
@@ -168,7 +201,7 @@ export default async function NewCatalogItemPage({
 }) {
   await pageGuard("catalog.edit");
   const sp = await searchParams;
-  const [locations, categories, brands, recentProducts] = await Promise.all([
+  const [locations, suppliers, recentProducts] = await Promise.all([
     prisma.location.findMany({
       where: { isActive: true },
       orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
@@ -178,15 +211,19 @@ export default async function NewCatalogItemPage({
         warehouse: { select: { code: true } },
       },
     }),
-    prisma.category.findMany({
+    prisma.supplier.findMany({
+      where: { isActive: true },
       orderBy: { name: "asc" },
-      select: { name: true },
-    }),
-    prisma.product.findMany({
-      where: { brand: { not: null } },
-      orderBy: { updatedAt: "desc" },
-      select: { brand: true },
-      take: 300,
+      select: {
+        id: true,
+        name: true,
+        businessName: true,
+        brands: {
+          where: { isActive: true },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        },
+      },
     }),
     prisma.product.findMany({
       orderBy: { updatedAt: "desc" },
@@ -194,12 +231,6 @@ export default async function NewCatalogItemPage({
       take: 250,
     }),
   ]);
-  const brandSuggestions = Array.from(
-    new Set(brands.map((row) => row.brand?.trim() ?? "").filter(Boolean))
-  );
-  const categorySuggestions = Array.from(
-    new Set([...categories.map((row) => row.name), ...TAXONOMY_CATEGORIES])
-  ).sort((a, b) => a.localeCompare(b, "es"));
   const skuSuggestions = Array.from(
     new Set(recentProducts.map((row) => row.sku.trim()).filter(Boolean))
   );
@@ -263,21 +294,13 @@ export default async function NewCatalogItemPage({
 
             <Textarea name="description" label="Descripcion" rootClassName="md:col-span-2" />
 
-            <Input
-              name="brand"
-              label="Marca"
-              list={brandSuggestions.length > 0 ? "catalog-brand-options" : undefined}
-              placeholder="Continental"
-            />
-            {brandSuggestions.length > 0 ? (
-              <datalist id="catalog-brand-options">
-                {brandSuggestions.map((brand) => (
-                  <option key={brand} value={brand} />
-                ))}
-              </datalist>
-            ) : null}
+            <ProductSupplierBrandSelect suppliers={suppliers} />
 
-            <Input name="unitLabel" label="Unidad" defaultValue="unidad" placeholder="pieza, m, kg" />
+            <Select name="unitLabel" label="Unidad" defaultValue="unidad">
+              {UNIT_LABELS.map((u) => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </Select>
 
             <Input
               name="referenceCode"
@@ -307,29 +330,7 @@ export default async function NewCatalogItemPage({
               <input name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" className="field px-4 py-2.5" />
             </label>
 
-            <Input
-              name="category"
-              label="Categoria"
-              list="catalog-category-options"
-              placeholder="Mangueras Hidraulicas SAE/EN"
-            />
-            <datalist id="catalog-category-options">
-              {categorySuggestions.map((category) => (
-                <option key={category} value={category} />
-              ))}
-            </datalist>
-
-            <Input
-              name="subcategory"
-              label="Subcategoria"
-              list="catalog-subcategory-options"
-              placeholder="SAE 100R2 / 2SN"
-            />
-            <datalist id="catalog-subcategory-options">
-              {TAXONOMY_SUBCATEGORIES.map((subcategory) => (
-                <option key={subcategory} value={subcategory} />
-              ))}
-            </datalist>
+            <CategorySubcategorySelect taxonomy={TAXONOMY} />
 
             <Input name="base_cost" label="Costo base" inputMode="decimal" placeholder="45.50" />
             <Input name="price" label="Precio" inputMode="decimal" placeholder="85.00" />

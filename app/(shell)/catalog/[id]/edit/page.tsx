@@ -4,7 +4,9 @@ import { redirect, notFound } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
-import { TAXONOMY_CATEGORIES, TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
+import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
+import { ProductSupplierBrandSelect } from "../../_components/ProductSupplierBrandSelect";
+import { CategorySubcategorySelect } from "../../_components/CategorySubcategorySelect";
 import { saveProductImage } from "@/lib/product-images";
 
 export const dynamic = "force-dynamic";
@@ -21,12 +23,13 @@ async function updateProduct(id: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const type = String(formData.get("type") ?? "").trim().toUpperCase();
   const description = String(formData.get("description") ?? "").trim() || null;
-  const brand = String(formData.get("brand") ?? "").trim() || null;
   const unitLabel = String(formData.get("unitLabel") ?? "").trim() || "unidad";
   const referenceCode = String(formData.get("referenceCode") ?? "").trim() || null;
   const imageUrl = String(formData.get("imageUrl") ?? "").trim() || null;
   const categoryRaw = String(formData.get("category") ?? "").trim();
   const subcategory = String(formData.get("subcategory") ?? "").trim() || null;
+  const primarySupplierIdRaw = String(formData.get("primarySupplierId") ?? "").trim();
+  const supplierBrandIdRaw = String(formData.get("supplierBrandId") ?? "").trim();
   const baseCostRaw = String(formData.get("base_cost") ?? "").trim();
   const priceRaw = String(formData.get("price") ?? "").trim();
   const attributesRaw = String(formData.get("attributes") ?? "").trim() || null;
@@ -44,6 +47,24 @@ async function updateProduct(id: string, formData: FormData) {
 
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
   const price = priceRaw ? Number(priceRaw.replace(",", ".")) : null;
+
+  // Resolve brand snapshot from SupplierBrand
+  let brand: string | null = null;
+  let primarySupplierId: string | null = null;
+  let supplierBrandId: string | null = null;
+  if (supplierBrandIdRaw) {
+    const sb = await prisma.supplierBrand.findUnique({
+      where: { id: supplierBrandIdRaw },
+      select: { id: true, name: true, supplierId: true },
+    });
+    if (sb && (!primarySupplierIdRaw || sb.supplierId === primarySupplierIdRaw)) {
+      brand = sb.name;
+      supplierBrandId = sb.id;
+      primarySupplierId = sb.supplierId;
+    }
+  } else if (primarySupplierIdRaw) {
+    primarySupplierId = primarySupplierIdRaw;
+  }
 
   const currentProduct = await prisma.product.findUnique({
     where: { id },
@@ -95,7 +116,9 @@ async function updateProduct(id: string, formData: FormData) {
       base_cost: Number.isFinite(base_cost ?? NaN) ? base_cost : null,
       price: Number.isFinite(price ?? NaN) ? price : null,
       attributes: attributesRaw,
-      ...(categoryId ? { category: { connect: { id: categoryId } } } : { categoryId: null }),
+      categoryId: categoryId ?? null,
+      primarySupplierId,
+      supplierBrandId,
     },
   });
 
@@ -106,9 +129,17 @@ async function updateProduct(id: string, formData: FormData) {
     entityId: id,
     action: "UPDATE_PRODUCT",
     before,
-    after: { name, type: normalizedType, brand, unitLabel },
+    after: { name, type: normalizedType, brand, unitLabel, primarySupplierId, supplierBrandId },
     source: "catalog/edit",
     actor: "system",
+  });
+
+  const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+  await emitSyncEventSafe({
+    entityType: "PRODUCT",
+    entityId: id,
+    action: "UPDATE",
+    payload: { productId: id, sku: currentProduct.sku, name, type: normalizedType, brand },
   });
 
   redirect(`/catalog/${id}`);
@@ -119,19 +150,28 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
   const { id } = await params;
   const sp = await searchParams;
 
-  const [product, categories] = await Promise.all([
+  const [product, suppliers] = await Promise.all([
     prisma.product.findUnique({
       where: { id },
       include: { category: true },
     }),
-    prisma.category.findMany({ orderBy: { name: "asc" }, select: { name: true } }),
+    prisma.supplier.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        businessName: true,
+        brands: {
+          where: { isActive: true },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        },
+      },
+    }),
   ]);
 
   if (!product) notFound();
-
-  const categorySuggestions = Array.from(
-    new Set([...categories.map((row) => row.name), ...TAXONOMY_CATEGORIES])
-  ).sort((a, b) => a.localeCompare(b, "es"));
 
   const updateProductWithId = updateProduct.bind(null, id);
 
@@ -176,14 +216,19 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <input name="name" required defaultValue={product.name} className="w-full px-4 py-3 glass rounded-lg" />
           </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Marca</span>
-            <input name="brand" defaultValue={product.brand ?? ""} className="w-full px-4 py-3 glass rounded-lg" />
-          </label>
+          <ProductSupplierBrandSelect
+            suppliers={suppliers}
+            defaultSupplierId={(product as { primarySupplierId?: string | null }).primarySupplierId}
+            defaultBrandId={(product as { supplierBrandId?: string | null }).supplierBrandId}
+          />
 
           <label className="space-y-1">
             <span className="text-sm text-slate-400">Unidad</span>
-            <input name="unitLabel" defaultValue={product.unitLabel ?? "unidad"} className="w-full px-4 py-3 glass rounded-lg" />
+            <select name="unitLabel" defaultValue={product.unitLabel ?? "unidad"} className="w-full px-4 py-3 glass rounded-lg">
+              {UNIT_LABELS.map((u) => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
           </label>
 
           <label className="space-y-1">
@@ -196,33 +241,11 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <textarea name="description" rows={3} defaultValue={product.description ?? ""} className="w-full px-4 py-3 glass rounded-lg" />
           </label>
 
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Categoría</span>
-            <input
-              name="category"
-              defaultValue={product.category?.name ?? ""}
-              list="category-options"
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="Conexiones Prensables Roscadas"
-            />
-            <datalist id="category-options">
-              {categorySuggestions.map((category) => <option key={category} value={category} />)}
-            </datalist>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">Subcategoría</span>
-            <input
-              name="subcategory"
-              defaultValue={product.subcategory ?? ""}
-              list="subcategory-options"
-              className="w-full px-4 py-3 glass rounded-lg"
-              placeholder="JIC 37°"
-            />
-            <datalist id="subcategory-options">
-              {TAXONOMY_SUBCATEGORIES.map((subcategoryOption) => <option key={subcategoryOption} value={subcategoryOption} />)}
-            </datalist>
-          </label>
+          <CategorySubcategorySelect
+            taxonomy={TAXONOMY}
+            defaultCategory={product.category?.name ?? ""}
+            defaultSubcategory={product.subcategory ?? ""}
+          />
 
           <label className="space-y-1 md:col-span-2">
             <span className="text-sm text-slate-400">URL de imagen</span>

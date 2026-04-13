@@ -16,12 +16,14 @@ async function createSupplier(formData: FormData) {
 
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
+  const legalName = String(formData.get("legalName") ?? "").trim() || undefined;
+  const businessName = String(formData.get("businessName") ?? "").trim() || undefined;
   const taxId = String(formData.get("taxId") ?? "").trim() || undefined;
   const email = String(formData.get("email") ?? "").trim() || undefined;
   const phone = String(formData.get("phone") ?? "").trim() || undefined;
   const address = String(formData.get("address") ?? "").trim() || undefined;
 
-  const parsed = supplierCreateSchema.safeParse({ code, name, taxId, email, phone, address });
+  const parsed = supplierCreateSchema.safeParse({ code, name, legalName, businessName, taxId, email, phone, address });
   if (!parsed.success) {
     redirect(`/purchasing/suppliers/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
@@ -35,6 +37,8 @@ async function createSupplier(formData: FormData) {
     data: {
       code: parsed.data.code,
       name: parsed.data.name,
+      legalName: parsed.data.legalName ?? parsed.data.name,
+      businessName: parsed.data.businessName ?? parsed.data.name,
       taxId: parsed.data.taxId ?? null,
       email: parsed.data.email || null,
       phone: parsed.data.phone ?? null,
@@ -105,8 +109,24 @@ export default async function NewSupplierPage({
               name="name"
               required
               maxLength={200}
-              label="Nombre"
+              label="Nombre (identificador interno)"
               placeholder="Distribuidora Ejemplo S.A."
+            />
+
+            <Input
+              name="legalName"
+              maxLength={200}
+              label="Razon Social"
+              placeholder="Distribuidora Ejemplo S.A. de C.V."
+              hint="Si se omite, se usará el Nombre."
+            />
+
+            <Input
+              name="businessName"
+              maxLength={200}
+              label="Nombre Comercial"
+              placeholder="Distribuidora Ejemplo"
+              hint="Nombre con el que opera comercialmente."
             />
 
             <Input name="taxId" maxLength={20} label="RFC" placeholder="EJMP010101AAA" inputClassName="font-mono" />

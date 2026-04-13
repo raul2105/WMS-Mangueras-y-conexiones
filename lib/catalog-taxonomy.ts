@@ -95,3 +95,18 @@ export const TAXONOMY_CATEGORIES = Object.keys(TAXONOMY);
 export const TAXONOMY_SUBCATEGORIES = Array.from(
   new Set(Object.values(TAXONOMY).flat())
 ).sort((a, b) => a.localeCompare(b, "es"));
+
+export const UNIT_LABELS = [
+  "pieza",
+  "metro",
+  "rollo",
+  "juego",
+  "kit",
+  "par",
+  "set",
+  "unidad",
+  "caja",
+  "bolsa",
+] as const;
+
+export type UnitLabel = (typeof UNIT_LABELS)[number];

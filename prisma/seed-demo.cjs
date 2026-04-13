@@ -114,8 +114,17 @@ async function seedDemoData(prisma) {
     }
   }
 
-  const sup1 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-001', name: 'HoseTech Monterrey', taxId: 'HTM260401AB1', email: 'compras@hosetech.example', phone: '81-5555-0101', address: 'Parque Industrial Norte', isActive: true } });
-  const sup2 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-002', name: 'Conecta Industrial Bajio', taxId: 'CIB260401CD2', email: 'ventas@conecta.example', phone: '442-555-0202', address: 'Zona Industrial Queretaro', isActive: true } });
+  const sup1 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-001', name: 'HoseTech Monterrey', legalName: 'HoseTech Monterrey S.A. de C.V.', businessName: 'HoseTech Monterrey', taxId: 'HTM260401AB1', email: 'compras@hosetech.example', phone: '81-5555-0101', address: 'Parque Industrial Norte', isActive: true } });
+  const sup2 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-002', name: 'Conecta Industrial Bajio', legalName: 'Conecta Industrial Bajio S.A. de C.V.', businessName: 'Conecta Industrial Bajio', taxId: 'CIB260401CD2', email: 'ventas@conecta.example', phone: '442-555-0202', address: 'Zona Industrial Queretaro', isActive: true } });
+
+  const [brandContinental, brandGates] = await Promise.all([
+    prisma.supplierBrand.create({ data: { supplierId: sup1.id, name: 'Continental' } }),
+    prisma.supplierBrand.create({ data: { supplierId: sup1.id, name: 'Gates' } }),
+  ]);
+  await Promise.all([
+    prisma.supplierBrand.create({ data: { supplierId: sup2.id, name: 'Parker' } }),
+    prisma.supplierBrand.create({ data: { supplierId: sup2.id, name: 'Alfagomma' } }),
+  ]);
   await prisma.supplierProduct.createMany({
     data: [
       { supplierId: sup1.id, productId: p['CON-R1AT-04'].id, supplierSku: 'HT-R1AT-04', unitPrice: 43.2, currency: 'MXN', leadTimeDays: 4 },
@@ -125,6 +134,12 @@ async function seedDemoData(prisma) {
       { supplierId: sup2.id, productId: p['DEV-ASM-FIT-OUT-DN16-JIC-90'].id, supplierSku: 'CI-DN16-OUT90', unitPrice: 21, currency: 'MXN', leadTimeDays: 2 },
     ],
   });
+
+  // Vincular proveedor principal y marca normalizada a los productos demo
+  await Promise.all([
+    prisma.product.update({ where: { sku: 'CON-R1AT-04' }, data: { primarySupplierId: sup1.id, supplierBrandId: brandContinental.id, brand: 'Continental' } }),
+    prisma.product.update({ where: { sku: 'DEV-ASM-HOSE-DN16-TP-2SN' }, data: { primarySupplierId: sup1.id, supplierBrandId: brandGates.id, brand: 'Gates' } }),
+  ]);
 
   const po1 = await prisma.purchaseOrder.create({ data: { folio: 'DEMO-OC-001', supplierId: sup1.id, status: 'BORRADOR', expectedDate: at(3, 16), notes: 'OC borrador para validar edición.', createdAt: at(-3, 9), updatedAt: at(-3, 9) } });
   await prisma.purchaseOrderLine.createMany({ data: [

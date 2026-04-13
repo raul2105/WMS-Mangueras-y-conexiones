@@ -179,7 +179,7 @@ export default async function ReceivePage({
       id: true,
       folio: true,
       status: true,
-      supplier: { select: { name: true, code: true } },
+      supplier: { select: { name: true, code: true, businessName: true } },
       lines: {
         select: {
           id: true,
@@ -220,7 +220,7 @@ export default async function ReceivePage({
         </Link>
         <div>
           <h1 className="text-2xl font-bold">Recibir Mercancía</h1>
-          <p className="text-sm text-slate-400">{order.supplier.code} — {order.supplier.name}</p>
+          <p className="text-sm text-slate-400">{order.supplier.code} — {order.supplier.businessName ?? order.supplier.name}</p>
         </div>
       </div>
 

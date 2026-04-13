@@ -143,10 +143,16 @@ export const supplierCreateSchema = z.object({
     .max(20, "Código máximo 20 caracteres")
     .regex(/^[A-Z0-9\-]+$/, "Solo mayúsculas, números y guiones"),
   name: requiredText("Nombre"),
+  legalName: z.string().trim().max(200).optional(),
+  businessName: z.string().trim().max(200).optional(),
   taxId: z.string().trim().max(20).optional(),
   email: z.union([z.string().trim().email("Email inválido"), z.literal("")]).optional(),
   phone: z.string().trim().max(20).optional(),
   address: z.string().trim().max(500).optional(),
+});
+
+export const supplierBrandSchema = z.object({
+  name: z.string().trim().min(1, "La marca es obligatoria").max(100, "Máximo 100 caracteres"),
 });
 
 export const purchaseOrderCreateSchema = z.object({

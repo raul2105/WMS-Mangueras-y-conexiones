@@ -51,7 +51,7 @@ export default async function PurchaseOrdersPage({
         folio: true,
         status: true,
         expectedDate: true,
-        supplier: { select: { name: true, code: true } },
+        supplier: { select: { name: true, code: true, businessName: true } },
         _count: { select: { lines: true, receipts: true } },
         lines: { select: { qtyOrdered: true, qtyReceived: true } },
       },
@@ -141,7 +141,7 @@ export default async function PurchaseOrdersPage({
                     </td>
                     <td className="py-3 text-slate-300">
                       <span className="text-xs text-slate-500 font-mono mr-1">{order.supplier.code}</span>
-                      {order.supplier.name}
+                      {order.supplier.businessName ?? order.supplier.name}
                     </td>
                     <td className="py-3">
                       <span className={`text-xs font-bold px-2 py-0.5 rounded ${STATUS_COLORS[order.status] ?? "text-slate-400 bg-slate-500/20"}`}>

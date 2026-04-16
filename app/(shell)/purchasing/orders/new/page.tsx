@@ -52,6 +52,14 @@ async function createOrder(formData: FormData) {
     source: "purchasing/orders/new",
   });
 
+  const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+  await emitSyncEventSafe({
+    entityType: "ORDER",
+    entityId: order.id,
+    action: "CREATE",
+    payload: { orderId: order.id, code: order.folio, type: "PURCHASE_ORDER", status: "BORRADOR" },
+  });
+
   redirect(`/purchasing/orders/${order.id}`);
 }
 

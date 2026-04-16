@@ -152,6 +152,25 @@ try {
     throw "Standalone build output missing: $standaloneDir\server.js"
   }
 
+  $standaloneAwsSdk = Join-Path $standaloneDir "node_modules\@aws-sdk"
+  if (-not (Test-Path $standaloneAwsSdk)) {
+    Write-Host ">> @aws-sdk not found in standalone output - copying from repo node_modules"
+    $repoAwsSdk = Join-Path $repoRoot "node_modules\@aws-sdk"
+    if (-not (Test-Path $repoAwsSdk)) {
+      Write-Warning "@aws-sdk not installed in repo. Sync workers will not function in release. Run: npm install @aws-sdk/client-sqs @aws-sdk/client-dynamodb"
+    } else {
+      $standaloneNodeModules = Join-Path $standaloneDir "node_modules\@aws-sdk"
+      Copy-Item -LiteralPath $repoAwsSdk -Destination $standaloneNodeModules -Recurse -Force
+      $smithy = Join-Path $repoRoot "node_modules\@smithy"
+      if (Test-Path $smithy) {
+        Copy-Item -LiteralPath $smithy -Destination (Join-Path $standaloneDir "node_modules\@smithy") -Recurse -Force
+      }
+      Write-Host "  @aws-sdk copied to standalone output"
+    }
+  } else {
+    Write-Host ">> @aws-sdk present in standalone output"
+  }
+
   $nextStaticDir = Join-Path $repoRoot ".next\static"
   $publicDir = Join-Path $repoRoot "public"
   $schemaPath = Join-Path $repoRoot "prisma\schema.prisma"
@@ -261,13 +280,13 @@ try {
   foreach ($launcher in @("launcher.cmd", "stop.cmd", "uninstall.cmd")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $launcher) -Destination $releaseDir -Force
   }
-  foreach ($maintenanceCmd in @("init-local.cmd", "healthcheck.cmd", "backup-db.cmd", "restore-db.cmd")) {
+  foreach ($maintenanceCmd in @("init-local.cmd", "healthcheck.cmd", "backup-db.cmd", "restore-db.cmd", "setup-aws.cmd")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "maintenance\$maintenanceCmd") -Destination $releaseMaintenanceDir -Force
   }
   foreach ($psLauncher in @("common.ps1", "launcher.ps1", "stop.ps1", "uninstall.ps1")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\release\$psLauncher") -Destination $releaseToolsDir -Force
   }
-  foreach ($maintenancePs in @("init-local.ps1", "healthcheck.ps1", "backup-db.ps1", "restore-db.ps1")) {
+  foreach ($maintenancePs in @("init-local.ps1", "healthcheck.ps1", "backup-db.ps1", "restore-db.ps1", "setup-aws.ps1")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\release\maintenance\$maintenancePs") -Destination $releaseToolsMaintenanceDir -Force
   }
 

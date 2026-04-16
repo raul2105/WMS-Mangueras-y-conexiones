@@ -50,6 +50,12 @@ npm run db:seed    # Seed inicial
 - `PurchaseOrder` — folio auto `OC-YYYY-NNNN`, estados: `BORRADOR | CONFIRMADA | EN_TRANSITO | RECIBIDA | PARCIAL | CANCELADA`
 - `Supplier` — código `PROV-NNN`, con `SupplierProduct` para precios por proveedor
 
+## Autenticación
+- **NextAuth v5** (`next-auth@^5.0.0-beta.31`) implementado con JWT + bcrypt (10 rounds)
+- `lib/auth.ts` — provider Credentials; `authorize()` paraleliza `user.findUnique` + `userRole.findMany`
+- `lib/auth/session-context.ts` — `getSessionContext()` con `cache()` per-request (no re-verifica JWT dos veces en el mismo render)
+- `middleware.ts` — guard de cookie edge-compatible (sin Prisma); redirige anónimos antes de renderizar el shell
+- `auth.config.ts` — config edge-compatible, callbacks JWT/session
+
 ## Pendiente crítico
-- Autenticación (NextAuth v5) — no implementada aún
 - `useFormStatus` en formularios para estados de carga

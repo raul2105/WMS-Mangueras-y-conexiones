@@ -62,6 +62,34 @@ function Convert-ToSqliteUrl {
   return "file:$($Path -replace '\\', '/')"
 }
 
+function Get-WmsAuthSecret {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$StateRoot
+  )
+
+  $secretFile = Join-Path $StateRoot "auth-secret.key"
+  if (Test-Path $secretFile) {
+    $existing = (Get-Content -LiteralPath $secretFile -Raw).Trim()
+    if ($existing.Length -ge 32) {
+      return $existing
+    }
+  }
+
+  $bytes = New-Object byte[] 32
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  $rng.GetBytes($bytes)
+  $rng.Dispose()
+  $secret = ($bytes | ForEach-Object { $_.ToString("x2") }) -join ""
+
+  $dir = Split-Path $secretFile -Parent
+  if (-not (Test-Path $dir)) {
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  }
+  Set-Content -LiteralPath $secretFile -Value $secret -Encoding ascii
+  return $secret
+}
+
 function Get-WmsDbMode {
   $mode = "$($env:WMS_DB_MODE)".Trim().ToLowerInvariant()
   if (-not $mode) {
@@ -120,6 +148,11 @@ function Get-WmsState {
     IsAwsDbMode = ($dbMode -eq "aws")
     SqliteUrl = Convert-ToSqliteUrl -Path $dbPath
     DatabaseUrl = $databaseUrl
+    AuthSecret = (Get-WmsAuthSecret -StateRoot $stateRoot)
+    SyncOutboundQueueUrl = "$($env:WMS_OUTBOUND_SYNC_QUEUE_URL)".Trim()
+    SyncInboundQueueUrl = "$($env:WMS_INBOUND_SYNC_QUEUE_URL)".Trim()
+    AwsRegion = ("$($env:AWS_REGION)".Trim(), "$($env:AWS_DEFAULT_REGION)".Trim(), "us-east-1" | Where-Object { $_ } | Select-Object -First 1)
+    MobileTablePrefix = "$($env:WMS_MOBILE_TABLE_PREFIX)".Trim()
     OpsLog = Resolve-NormalizedPath -Path (Join-Path $logDir "ops.log")
     PidFile = Resolve-NormalizedPath -Path (Join-Path $runDir "wms.pid")
     Port = $script:WmsPort
@@ -539,4 +572,344 @@ function Remove-WmsShortcutsForRelease {
   }
 
   return $removed
+}
+
+function Invoke-AwsDatabaseSetup {
+  $currentUrl = [System.Environment]::GetEnvironmentVariable("DATABASE_URL", "Machine")
+  if ($currentUrl) {
+    $maskedUrl = $currentUrl -replace "//[^:]+:[^@]+@", "//***:***@"
+    Write-Host "  Configuracion actual: $maskedUrl"
+    Write-Host ""
+  }
+
+  $url = (Read-Host "Ingresa la URL PostgreSQL (postgresql://usuario:clave@host:5432/db?schema=public)").Trim()
+
+  if (-not $url) {
+    return $null
+  }
+
+  if (-not ($url -match "^postgres(ql)?://")) {
+    Write-Host ""
+    Write-Host "  [ERROR] Formato invalido. Debe comenzar con postgresql:// o postgres://"
+    Write-Host "  Ejemplo: postgresql://usuario:clave@servidor.rds.amazonaws.com:5432/wms?schema=public"
+    return $null
+  }
+
+  try {
+    [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $url, "Machine")
+    [System.Environment]::SetEnvironmentVariable("WMS_DB_MODE", "aws", "Machine")
+  } catch {
+    Write-Host "  ADVERTENCIA: no se pudo guardar en variables de sistema (requiere Administrador)."
+    Write-Host "  La configuracion aplica solo para esta sesion. Ejecuta maintenance\setup-aws.cmd como Administrador para hacerla permanente."
+  }
+
+  $env:DATABASE_URL = $url
+  $env:WMS_DB_MODE  = "aws"
+
+  $maskedFinal = $url -replace "//[^:]+:[^@]+@", "//***:***@"
+  Write-Host "  DATABASE_URL = $maskedFinal"
+
+  try {
+    $uriObj   = [System.Uri]($url.Split("?")[0])
+    $hostName = $uriObj.Host
+    $port_    = if ($uriObj.Port -gt 0) { $uriObj.Port } else { 5432 }
+    $tc       = New-Object System.Net.Sockets.TcpClient
+    $waited   = $tc.BeginConnect($hostName, $port_, $null, $null).AsyncWaitHandle.WaitOne(4000)
+    $tc.Close()
+    if ($waited) {
+      Write-Host "  Red OK: $hostName`:$port_"
+    } else {
+      Write-Host "  ADVERTENCIA: servidor no alcanzable en $hostName`:$port_ - verifica VPN o firewall."
+    }
+  } catch {
+    Write-Host "  ADVERTENCIA: prueba de red no concluyente ($($_.Exception.Message))"
+  }
+
+  return $url
+}
+
+function Invoke-SyncSetup {
+  Write-Host ""
+  Write-Host "=== Configuracion de sincronizacion movil ==="
+  Write-Host "Configura las colas SQS y credenciales AWS para sync en tiempo real."
+  Write-Host "Los valores se obtienen de los outputs del stack CDK mobile."
+  Write-Host "(Dejar vacio para omitir)"
+  Write-Host ""
+
+  # --- Outbound Queue URL ---
+  $currentOutbound = [System.Environment]::GetEnvironmentVariable("WMS_OUTBOUND_SYNC_QUEUE_URL", "Machine")
+  if ($currentOutbound) {
+    $truncated = if ($currentOutbound.Length -gt 60) { $currentOutbound.Substring(0, 60) + "..." } else { $currentOutbound }
+    Write-Host "  Outbound actual: $truncated"
+  }
+  $outboundUrl = (Read-Host "URL de la cola SQS outbound (OutboundSyncQueueUrl)").Trim()
+  if (-not $outboundUrl -and $currentOutbound) {
+    $outboundUrl = $currentOutbound
+    Write-Host "  Manteniendo valor existente."
+  }
+
+  # --- Inbound Queue URL ---
+  $currentInbound = [System.Environment]::GetEnvironmentVariable("WMS_INBOUND_SYNC_QUEUE_URL", "Machine")
+  if ($currentInbound) {
+    $truncated = if ($currentInbound.Length -gt 60) { $currentInbound.Substring(0, 60) + "..." } else { $currentInbound }
+    Write-Host "  Inbound actual: $truncated"
+  }
+  $inboundUrl = (Read-Host "URL de la cola SQS inbound (InboundSyncQueueUrl)").Trim()
+  if (-not $inboundUrl -and $currentInbound) {
+    $inboundUrl = $currentInbound
+    Write-Host "  Manteniendo valor existente."
+  }
+
+  # --- AWS Region ---
+  $currentRegion = [System.Environment]::GetEnvironmentVariable("AWS_REGION", "Machine")
+  if ($currentRegion) {
+    Write-Host "  Region actual: $currentRegion"
+  }
+  $region = (Read-Host "Region AWS (default: us-east-1)").Trim()
+  if (-not $region) {
+    $region = if ($currentRegion) { $currentRegion } else { "us-east-1" }
+  }
+
+  # --- AWS Access Key ---
+  $currentAccessKey = [System.Environment]::GetEnvironmentVariable("AWS_ACCESS_KEY_ID", "Machine")
+  if ($currentAccessKey) {
+    $masked = $currentAccessKey.Substring(0, 4) + "****" + $currentAccessKey.Substring($currentAccessKey.Length - 4)
+    Write-Host "  Access Key actual: $masked"
+  }
+  $accessKey = (Read-Host "AWS Access Key ID").Trim()
+  if (-not $accessKey -and $currentAccessKey) {
+    $accessKey = $currentAccessKey
+    Write-Host "  Manteniendo valor existente."
+  }
+
+  # --- AWS Secret Key ---
+  $currentSecretKey = [System.Environment]::GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY", "Machine")
+  if ($currentSecretKey) {
+    Write-Host "  Secret Key actual: ********"
+  }
+  $secretKey = (Read-Host "AWS Secret Access Key").Trim()
+  if (-not $secretKey -and $currentSecretKey) {
+    $secretKey = $currentSecretKey
+    Write-Host "  Manteniendo valor existente."
+  }
+
+  # --- Mobile Table Prefix ---
+  $currentPrefix = [System.Environment]::GetEnvironmentVariable("WMS_MOBILE_TABLE_PREFIX", "Machine")
+  if ($currentPrefix) {
+    Write-Host "  Prefijo actual: $currentPrefix"
+  }
+  $tablePrefix = (Read-Host "Prefijo de tablas DynamoDB (ej: rigentec-wms-mobile-dev-)").Trim()
+  if (-not $tablePrefix -and $currentPrefix) {
+    $tablePrefix = $currentPrefix
+    Write-Host "  Manteniendo valor existente."
+  }
+
+  # --- Persist to Machine scope ---
+  $vars = @{
+    WMS_OUTBOUND_SYNC_QUEUE_URL = $outboundUrl
+    WMS_INBOUND_SYNC_QUEUE_URL  = $inboundUrl
+    AWS_REGION                  = $region
+    AWS_ACCESS_KEY_ID           = $accessKey
+    AWS_SECRET_ACCESS_KEY       = $secretKey
+    WMS_MOBILE_TABLE_PREFIX     = $tablePrefix
+  }
+
+  $persisted = 0
+  foreach ($entry in $vars.GetEnumerator()) {
+    if ($entry.Value) {
+      try {
+        [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Machine")
+        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+        $persisted++
+      } catch {
+        Write-Host "  ADVERTENCIA: no se pudo guardar $($entry.Key) en variables de sistema (requiere Administrador)."
+        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+      }
+    }
+  }
+
+  Write-Host ""
+  if ($persisted -gt 0) {
+    Write-Host "  $persisted variables de sincronizacion guardadas."
+  }
+
+  $configured = $outboundUrl -or $inboundUrl
+  if ($configured) {
+    Write-Host "  Sincronizacion movil quedara activa al iniciar WMS."
+  } else {
+    Write-Host "  Sin URLs de cola configuradas. La sincronizacion no se activara."
+  }
+
+  return $configured
+}
+
+# ---------------------------------------------------------------------------
+# Auto-configure: reads CDK stack outputs via AWS CLI (no manual input needed)
+# ---------------------------------------------------------------------------
+
+function Get-StackOutputsMap {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$StackName,
+    [string]$Profile = ""
+  )
+
+  $profileArg = if ($Profile) { "--profile $Profile" } else { "" }
+  $raw = Invoke-Expression "aws cloudformation describe-stacks --stack-name $StackName --query `"Stacks[0].Outputs`" --output json $profileArg 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo leer outputs del stack ${StackName}: $raw"
+  }
+
+  $outputs = $raw | ConvertFrom-Json
+  $map = @{}
+  foreach ($entry in $outputs) {
+    $map[$entry.OutputKey] = $entry.OutputValue
+  }
+  return $map
+}
+
+function Build-DatabaseUrlFromStack {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$OutputsMap,
+    [string]$Profile = ""
+  )
+
+  $dbSecretArn = $OutputsMap["DbSecretArn"]
+  $rdsEndpoint = $OutputsMap["RdsEndpoint"]
+  $rdsPort     = $OutputsMap["RdsPort"]
+
+  if (-not $dbSecretArn -or -not $rdsEndpoint -or -not $rdsPort) {
+    throw "Faltan outputs requeridos (DbSecretArn, RdsEndpoint, RdsPort) en el stack."
+  }
+
+  $profileArg = if ($Profile) { "--profile $Profile" } else { "" }
+  $secretRaw = Invoke-Expression "aws secretsmanager get-secret-value --secret-id $dbSecretArn --query `"SecretString`" --output text $profileArg 2>&1"
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo leer secreto DB ($dbSecretArn): $secretRaw"
+  }
+
+  $secret   = $secretRaw | ConvertFrom-Json
+  $username = $secret.username
+  $password = $secret.password
+  $dbname   = if ($secret.dbname) { $secret.dbname } else { "wms" }
+
+  if (-not $username -or -not $password) {
+    throw "El secreto DB no contiene username/password validos."
+  }
+
+  $usernameEnc = [System.Uri]::EscapeDataString($username)
+  $passwordEnc = [System.Uri]::EscapeDataString($password)
+  return "postgresql://${usernameEnc}:${passwordEnc}@${rdsEndpoint}:${rdsPort}/${dbname}?schema=public"
+}
+
+function Invoke-AutoSetup {
+  param(
+    [string]$Profile = "wms-mobile-dev",
+    [string]$WebStackName = "WmsWebDevStack",
+    [string]$MobileStackName = "RigentecWmsMobileDevStack"
+  )
+
+  Write-Host ""
+  Write-Host "=== Configuracion automatica desde AWS ==="
+  Write-Host "  Perfil AWS:    $Profile"
+  Write-Host "  Stack Web:     $WebStackName"
+  Write-Host "  Stack Mobile:  $MobileStackName"
+  Write-Host ""
+
+  # --- 1. Verify AWS CLI auth ---
+  Write-Host "[1/4] Verificando credenciales AWS..."
+  try {
+    $profileArg = if ($Profile) { "--profile $Profile" } else { "" }
+    $identity = Invoke-Expression "aws sts get-caller-identity --output json $profileArg 2>&1" | ConvertFrom-Json
+    Write-Host "  Cuenta: $($identity.Account) | ARN: $($identity.Arn)"
+  } catch {
+    Write-Host "  [ERROR] Credenciales AWS no validas o expiradas."
+    Write-Host "  Ejecuta: aws sso login --profile $Profile"
+    return $false
+  }
+
+  # --- 2. Read DATABASE_URL from web stack ---
+  Write-Host ""
+  Write-Host "[2/4] Leyendo DATABASE_URL del stack web ($WebStackName)..."
+  try {
+    $webOutputs = Get-StackOutputsMap -StackName $WebStackName -Profile $Profile
+    $databaseUrl = Build-DatabaseUrlFromStack -OutputsMap $webOutputs -Profile $Profile
+    $maskedUrl = $databaseUrl -replace "//[^:]+:[^@]+@", "//***:***@"
+    Write-Host "  DATABASE_URL = $maskedUrl"
+  } catch {
+    Write-Host "  [ERROR] $($_.Exception.Message)"
+    Write-Host "  Puedes configurar DATABASE_URL manualmente con la opcion manual."
+    return $false
+  }
+
+  # --- 3. Read sync config from mobile stack ---
+  Write-Host ""
+  Write-Host "[3/4] Leyendo configuracion de sync del stack mobile ($MobileStackName)..."
+  try {
+    $mobileOutputs = Get-StackOutputsMap -StackName $MobileStackName -Profile $Profile
+
+    $outboundQueueUrl = $mobileOutputs["OutboundSyncQueueUrl"]
+    $inboundQueueUrl  = if ($mobileOutputs["InboundSyncQueueUrl"]) { $mobileOutputs["InboundSyncQueueUrl"] } else { $mobileOutputs["MobileIntegrationQueueUrl"] }
+    $awsRegion        = if ($mobileOutputs["AwsRegion"]) { $mobileOutputs["AwsRegion"] } else { "us-east-1" }
+
+    # Derive table prefix from inventory table name (e.g. "rigentec-wms-mobile-dev-inventory" -> "rigentec-wms-mobile-dev-")
+    $inventoryTable = $mobileOutputs["MobileInventoryTableName"]
+    $tablePrefix    = if ($inventoryTable -and $inventoryTable -match "^(.+-)inventory$") { $Matches[1] } else { "" }
+
+    Write-Host "  Outbound Queue: $(if ($outboundQueueUrl) { 'OK' } else { 'no encontrada' })"
+    Write-Host "  Inbound Queue:  $(if ($inboundQueueUrl) { 'OK' } else { 'no encontrada' })"
+    Write-Host "  Region:         $awsRegion"
+    Write-Host "  Table Prefix:   $(if ($tablePrefix) { $tablePrefix } else { '(vacio)' })"
+  } catch {
+    Write-Host "  ADVERTENCIA: No se pudo leer el stack mobile ($MobileStackName): $($_.Exception.Message)"
+    Write-Host "  La base de datos se configurara pero sync quedara inactivo."
+    $outboundQueueUrl = ""
+    $inboundQueueUrl  = ""
+    $awsRegion        = "us-east-1"
+    $tablePrefix      = ""
+  }
+
+  # --- 4. Persist all to Machine scope ---
+  Write-Host ""
+  Write-Host "[4/4] Guardando configuracion..."
+  $allVars = @{
+    DATABASE_URL                = $databaseUrl
+    WMS_DB_MODE                 = "aws"
+    WMS_OUTBOUND_SYNC_QUEUE_URL = $outboundQueueUrl
+    WMS_INBOUND_SYNC_QUEUE_URL  = $inboundQueueUrl
+    AWS_REGION                  = $awsRegion
+    WMS_MOBILE_TABLE_PREFIX     = $tablePrefix
+  }
+
+  $persisted = 0
+  $failed    = 0
+  foreach ($entry in $allVars.GetEnumerator()) {
+    if ($entry.Value) {
+      try {
+        [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Machine")
+        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+        $persisted++
+      } catch {
+        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+        $failed++
+      }
+    }
+  }
+
+  if ($failed -gt 0) {
+    Write-Host "  ADVERTENCIA: $failed variables no se pudieron guardar permanentemente (requiere Administrador)."
+    Write-Host "  Esta sesion queda configurada. Ejecuta como Administrador para hacerlo permanente."
+  }
+
+  Write-Host ""
+  Write-Host "  --- Resumen ---"
+  $maskedFinal = $databaseUrl -replace "//[^:]+:[^@]+@", "//***:***@"
+  Write-Host "  Base de datos:         $maskedFinal"
+  $syncActive = $outboundQueueUrl -or $inboundQueueUrl
+  Write-Host "  Sincronizacion movil:  $(if ($syncActive) { 'ACTIVA' } else { 'INACTIVA' })"
+  Write-Host "  Variables guardadas:   $persisted"
+  Write-Host ""
+
+  return $true
 }

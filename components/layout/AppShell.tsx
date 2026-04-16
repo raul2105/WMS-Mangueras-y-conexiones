@@ -8,6 +8,7 @@ import SidebarNav from "@/components/layout/SidebarNav";
 import AppTopbar from "@/components/layout/AppTopbar";
 import MobileNav from "@/components/layout/MobileNav";
 import ThemeToggle from "@/components/ThemeToggle";
+import { SIDEBAR_COOKIE_KEY, SIDEBAR_STORAGE_KEY } from "@/lib/ui-preferences";
 
 type Props = {
   children: ReactNode;
@@ -15,25 +16,45 @@ type Props = {
   userEmail: string;
   roles: string[];
   permissions: string[];
+  initialSidebarCollapsed: boolean;
 };
 
-const SIDEBAR_STORAGE_KEY = "wms-shell-sidebar-collapsed";
-
-export default function AppShell({ children, userName, userEmail, roles, permissions }: Props) {
+export default function AppShell({
+  children,
+  userName,
+  userEmail,
+  roles,
+  permissions,
+  initialSidebarCollapsed,
+}: Props) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
     try {
-      return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
+      const stored = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+      if (stored === "1" && !sidebarCollapsed) {
+        setSidebarCollapsed(true);
+      }
+      if (stored === "0" && sidebarCollapsed) {
+        setSidebarCollapsed(false);
+      }
     } catch {
-      return false;
+      // Ignore storage failures.
     }
-  });
+    // Only re-sync once after mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try {
       window.localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
+      document.cookie = `${SIDEBAR_COOKIE_KEY}=${sidebarCollapsed ? "1" : "0"}; Path=/; Max-Age=31536000; SameSite=Lax`;
     } catch {
       // Ignore storage failures.
     }

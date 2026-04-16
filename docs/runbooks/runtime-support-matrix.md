@@ -2,11 +2,21 @@
 
 ## Activos
 
+### Dev local (web)
+
+- Estado: activo y canónico para desarrollo diario.
+- Runtime: `next dev` con Node 22.
+- Comando oficial: `npm run dev`.
+- Launcher oficial real-time DB: `dev-local-launcher.cmd` (PostgreSQL AWS).
+- Fallback diagnóstico: `npm run dev:webpack`.
+- Prisma schema para modo AWS: `prisma/postgresql/schema.prisma`.
+
 ### AWS web
 
 - Estado: activo y canónico para la experiencia web remota.
 - Infraestructura: `infra/cdk/`.
 - Deploy: `scripts/deploy/aws-web.ps1` o `npm run deploy:aws:web`.
+- Runbook recomendado: `docs/runbooks/aws-web-prod-deploy.md`.
 - Prisma schema dedicado: `prisma/postgresql/schema.prisma`.
 - Base de datos objetivo: PostgreSQL para el runtime remoto.
 - Verificación mínima: `npm run infra:synth`, `npm run infra:diff`, smoke web y `/api/health`.

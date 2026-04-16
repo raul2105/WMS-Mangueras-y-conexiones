@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import prisma from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +13,8 @@ import { StatCard } from "@/components/ui/stat-card";
 import { ArrowDownIcon, ArrowUpIcon, BoxIcon, DashboardIcon, InventoryIcon, SwapIcon, WarehouseIcon } from "@/components/ui/icons";
 import { ROLE_HOME } from "@/lib/rbac/route-access-map";
 import type { RoleCode } from "@/lib/rbac/permissions";
+import { startPerf } from "@/lib/perf";
+import { getRequestId } from "@/lib/request-meta";
 
 export const dynamic = "force-dynamic";
 
@@ -29,34 +32,54 @@ const MOVEMENT_TYPE_COLORS: Record<string, string> = {
   ADJUSTMENT: "warning",
 };
 
+const loadDashboardSnapshot = unstable_cache(
+  async (todayIso: string) => {
+    const today = new Date(todayIso);
+    return Promise.all([
+      prisma.product.count(),
+      prisma.productionOrder.count({ where: { status: { in: ["ABIERTA", "EN_PROCESO"] } } }),
+      prisma.inventoryMovement.count({ where: { createdAt: { gte: today } } }),
+      prisma.inventoryMovement.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        include: { product: { select: { sku: true, name: true } } },
+      }),
+      prisma.inventory.aggregate({ _sum: { quantity: true, available: true } }),
+      prisma.purchaseOrder.count({ where: { status: { in: ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] } } }),
+    ]);
+  },
+  ["dashboard-snapshot-v1"],
+  { revalidate: 30, tags: ["dashboard:summary"] },
+);
+
 export default async function Home() {
-  const session = await auth();
-  const roles = session?.user?.roles ?? [];
+  const perf = startPerf("page.dashboard");
+  const requestId = await getRequestId();
+  const sessionCtx = await getSessionContext();
+  const roles = sessionCtx.roles;
   const primaryRole = (roles[0] as RoleCode) ?? "MANAGER";
   const home = ROLE_HOME[primaryRole] ?? "/";
 
   if (home !== "/") {
+    perf.end({ requestId, redirected: true, home });
     redirect(home);
   }
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
-  const [totalProducts, openOrders, todayMovements, recentMovements, inventoryTotals, openPurchaseOrders] = await Promise.all([
-    prisma.product.count(),
-    prisma.productionOrder.count({ where: { status: { in: ["ABIERTA", "EN_PROCESO"] } } }),
-    prisma.inventoryMovement.count({ where: { createdAt: { gte: today } } }),
-    prisma.inventoryMovement.findMany({
-      take: 8,
-      orderBy: { createdAt: "desc" },
-      include: { product: { select: { sku: true, name: true } } },
-    }),
-    prisma.inventory.aggregate({ _sum: { quantity: true, available: true } }),
-    prisma.purchaseOrder.count({ where: { status: { in: ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] } } }),
-  ]);
+  const [totalProducts, openOrders, todayMovements, recentMovements, inventoryTotals, openPurchaseOrders] =
+    await loadDashboardSnapshot(today.toISOString());
 
   const totalStock = inventoryTotals._sum.quantity ?? 0;
   const totalAvailable = inventoryTotals._sum.available ?? 0;
+  perf.end({
+    requestId,
+    redirected: false,
+    totalProducts,
+    openOrders,
+    todayMovements,
+    openPurchaseOrders,
+  });
 
   return (
     <div className="space-y-6">
@@ -65,10 +88,10 @@ export default async function Home() {
         description="Vista ejecutiva de inventario, ensamble y abastecimiento."
         actions={
           <>
-            <Link href="/inventory/kardex" className={buttonStyles({ variant: "secondary" })}>
+            <Link href="/inventory/kardex" prefetch={false} className={buttonStyles({ variant: "secondary" })}>
               Ver kardex
             </Link>
-            <Link href="/purchasing/orders/new" className={buttonStyles()}>
+            <Link href="/purchasing/orders/new" prefetch={false} className={buttonStyles()}>
               Nueva OC
             </Link>
           </>
@@ -123,16 +146,16 @@ export default async function Home() {
 
         <SectionCard title="Acciones rapidas">
           <div className="grid gap-2">
-            <Link href="/inventory/receive" className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
+            <Link href="/inventory/receive" prefetch={false} className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
               <ArrowDownIcon className="h-4 w-4" /> Recibir stock
             </Link>
-            <Link href="/inventory/pick" className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
+            <Link href="/inventory/pick" prefetch={false} className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
               <ArrowUpIcon className="h-4 w-4" /> Despachar
             </Link>
-            <Link href="/inventory/transfer" className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
+            <Link href="/inventory/transfer" prefetch={false} className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
               <SwapIcon className="h-4 w-4" /> Transferir
             </Link>
-            <Link href="/warehouse" className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
+            <Link href="/warehouse" prefetch={false} className={buttonStyles({ variant: "secondary", className: "justify-start gap-2" })}>
               <WarehouseIcon className="h-4 w-4" /> Almacenes
             </Link>
           </div>

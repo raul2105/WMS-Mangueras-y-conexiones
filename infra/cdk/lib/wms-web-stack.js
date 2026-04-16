@@ -23,6 +23,8 @@ const s3deploy = require("aws-cdk-lib/aws-s3-deployment");
 const lambda = require("aws-cdk-lib/aws-lambda");
 const cloudfront = require("aws-cdk-lib/aws-cloudfront");
 const origins = require("aws-cdk-lib/aws-cloudfront-origins");
+const events = require("aws-cdk-lib/aws-events");
+const targets = require("aws-cdk-lib/aws-events-targets");
 const path = require("node:path");
 const fs = require("node:fs");
 
@@ -57,6 +59,13 @@ class WmsWebStack extends Stack {
       allowAllOutbound: false,
     });
 
+    const lambdaSecurityGroup = new ec2.SecurityGroup(this, "LambdaSecurityGroup", {
+      vpc,
+      securityGroupName: `${prefix}-lambda-sg`,
+      description: "Allow WMS Lambdas to reach PostgreSQL and VPC endpoints",
+      allowAllOutbound: true,
+    });
+
     // Allow from office IP
     if (config.officeIpCidr && config.officeIpCidr !== "0.0.0.0/0") {
       dbSecurityGroup.addIngressRule(
@@ -72,6 +81,17 @@ class WmsWebStack extends Stack {
         "PostgreSQL from anywhere (dev only - restrict in prod)"
       );
     }
+
+    dbSecurityGroup.addIngressRule(
+      lambdaSecurityGroup,
+      ec2.Port.tcp(5432),
+      "PostgreSQL from WMS Lambda security group"
+    );
+
+    vpc.addGatewayEndpoint("S3Endpoint", {
+      service: ec2.GatewayVpcEndpointAwsService.S3,
+      subnets: [{ subnetType: ec2.SubnetType.PUBLIC }],
+    });
 
     // ─── RDS PostgreSQL ───────────────────────────────────────────────
     // Free Tier: db.t4g.micro, 20GB gp2, single-AZ, no Multi-AZ
@@ -223,6 +243,9 @@ class WmsWebStack extends Stack {
     // Only deploy if the .open-next build output exists
     // projectRoot = repo root (infra/cdk/lib/../../..)
     const projectRoot = path.join(__dirname, "..", "..", "..");
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8")
+    );
     const openNextPath = path.join(projectRoot, ".open-next");
     if (!fs.existsSync(openNextPath)) {
       console.log(
@@ -274,7 +297,13 @@ class WmsWebStack extends Stack {
       dbInstance.dbInstanceEndpointPort,
       "/",
       config.dbName,
+      "?schema=public&connection_limit=2&pool_timeout=5",
     ]);
+    const serverReservedConcurrency =
+      Number.isFinite(Number(config.serverReservedConcurrency)) &&
+      Number(config.serverReservedConcurrency) > 0
+        ? Number(config.serverReservedConcurrency)
+        : undefined;
 
     // ─── Server Lambda ────────────────────────────────────────────────
     const serverFn = new lambda.Function(this, "ServerFunction", {
@@ -284,10 +313,19 @@ class WmsWebStack extends Stack {
       architecture: lambda.Architecture.ARM_64,
       handler: openNextOutput.origins.default.handler,
       code: lambda.Code.fromAsset(path.join(projectRoot, openNextOutput.origins.default.bundle)),
-      memorySize: 1024,
+      memorySize: 1536,
+      ...(serverReservedConcurrency
+        ? { reservedConcurrentExecutions: serverReservedConcurrency }
+        : {}),
       timeout: Duration.seconds(30),
+      tracing: lambda.Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      allowPublicSubnet: true,
+      securityGroups: [lambdaSecurityGroup],
       environment: {
         NODE_ENV: "production",
+        APP_VERSION: packageJson.version || "unknown",
         AUTH_TRUST_HOST: "true",
         DATABASE_URL: dbUrl,
         AUTH_SECRET: nextAuthSecret.secretValue.unsafeUnwrap(),
@@ -297,6 +335,8 @@ class WmsWebStack extends Stack {
         CACHE_BUCKET_KEY_PREFIX: "_cache",
         CACHE_BUCKET_REGION: this.region,
         OPEN_NEXT_ORIGIN: "default",
+        WMS_DISABLE_SYNC_EVENTS_IN_WEB: "true",
+        PERF_DEBUG_LOGS: config.environment === "dev" ? "true" : "false",
       },
     });
 
@@ -322,6 +362,10 @@ class WmsWebStack extends Stack {
       code: lambda.Code.fromAsset(path.join(projectRoot, imageOriginMeta.bundle)),
       memorySize: 512,
       timeout: Duration.seconds(25),
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      allowPublicSubnet: true,
+      securityGroups: [lambdaSecurityGroup],
       environment: {
         BUCKET_NAME: assetsBucket.bucketName,
         BUCKET_KEY_PREFIX: "_assets",
@@ -422,6 +466,63 @@ class WmsWebStack extends Stack {
         functionAssociations: fnAssociations,
       },
       additionalBehaviors,
+    });
+
+    // ─── Warmer Lambda + schedule (DEV performance tuning) ───────────
+    const warmerFn = new lambda.Function(this, "ServerWarmerFunction", {
+      functionName: `${prefix}-warmer`,
+      description: "Warm ping for web server Lambda",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "index.handler",
+      code: lambda.Code.fromInline(`
+const https = require("node:https");
+
+exports.handler = async () => {
+  const started = Date.now();
+  const baseUrl = process.env.WARM_TARGET_BASE_URL;
+  const target = baseUrl ? \`\${baseUrl}/api/health?warm=1\` : null;
+  if (!target) {
+    console.log(JSON.stringify({ ok: false, reason: "missing_target", durationMs: Date.now() - started }));
+    return { ok: false, reason: "missing_target" };
+  }
+
+  try {
+    await new Promise((resolve, reject) => {
+      const req = https.get(target, (res) => {
+        res.resume();
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) {
+          resolve();
+          return;
+        }
+        reject(new Error(\`status_\${res.statusCode ?? "unknown"}\`));
+      });
+      req.on("error", reject);
+      req.setTimeout(5000, () => req.destroy(new Error("timeout")));
+    });
+    const durationMs = Date.now() - started;
+    console.log(JSON.stringify({ ok: true, durationMs }));
+    return { ok: true, durationMs };
+  } catch (error) {
+    const durationMs = Date.now() - started;
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(JSON.stringify({ ok: false, error: message, durationMs }));
+    return { ok: false, error: message, durationMs };
+  }
+};
+      `),
+      memorySize: 128,
+      timeout: Duration.seconds(10),
+      environment: {
+        WARM_TARGET_BASE_URL: `https://${distribution.distributionDomainName}`,
+      },
+    });
+
+    new events.Rule(this, "ServerWarmerRule", {
+      ruleName: `${prefix}-warmer-every-5m`,
+      description: "Keep server lambda warm every 5 minutes",
+      schedule: events.Schedule.rate(Duration.minutes(5)),
+      targets: [new targets.LambdaFunction(warmerFn)],
     });
 
     // ─── Outputs (Lambda / CloudFront) ────────────────────────────────

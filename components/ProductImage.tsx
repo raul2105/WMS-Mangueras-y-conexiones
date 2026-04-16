@@ -63,7 +63,6 @@ export default function ProductImage({
                         setFailed(true);
                     }
                 }}
-                unoptimized
             />
         </div>
     );

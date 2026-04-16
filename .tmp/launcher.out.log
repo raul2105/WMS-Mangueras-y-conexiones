@@ -1,0 +1,7 @@
+[INFO] Detectando DATABASE_URL para modo AWS...
+[INFO] DATABASE_URL valida detectada para PostgreSQL AWS.
+[INFO] Verificando disponibilidad del puerto 3002...
+[ERROR] Puerto 3002 en uso (PID 17796).
+[ERROR] CommandLine: "C:\Program Files\nodejs\node.exe" "E:\VS CODE Projects\WMS-Mangueras-y-conexiones\node_modules\next\dist\server\lib\start-server.js"
+[ERROR] No se puede iniciar el entorno local porque el puerto 3002 esta ocupado.
+[INFO] Ejecuta stop_dev_server.cmd y vuelve a intentar.

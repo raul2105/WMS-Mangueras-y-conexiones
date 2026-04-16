@@ -1,20 +1,29 @@
 import type { ReactNode } from "react";
+import { cookies } from "next/headers";
 import AppShell from "@/components/layout/AppShell";
-import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { SIDEBAR_COOKIE_KEY, normalizeSidebarPreference } from "@/lib/ui-preferences";
 
 type Props = {
   children: ReactNode;
 };
 
 export default async function ShellLayout({ children }: Props) {
-  const session = await auth();
-  const userName = session?.user?.name ?? "Usuario";
-  const userEmail = session?.user?.email ?? "";
-  const roles = session?.user?.roles ?? [];
-  const permissions = session?.user?.permissions ?? [];
+  const [ctx, cookieStore] = await Promise.all([getSessionContext(), cookies()]);
+  const userName = ctx.user?.name ?? "Usuario";
+  const userEmail = ctx.user?.email ?? "";
+  const roles = ctx.roles;
+  const permissions = ctx.permissions;
+  const initialSidebarCollapsed = normalizeSidebarPreference(cookieStore.get(SIDEBAR_COOKIE_KEY)?.value);
 
   return (
-    <AppShell userName={userName} userEmail={userEmail} roles={roles} permissions={permissions}>
+    <AppShell
+      userName={userName}
+      userEmail={userEmail}
+      roles={roles}
+      permissions={permissions}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+    >
       {children}
     </AppShell>
   );

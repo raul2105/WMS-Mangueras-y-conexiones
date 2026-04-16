@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList } from "@/lib/sales/request-service";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
+import { startPerf } from "@/lib/perf";
+import { getRequestId } from "@/lib/request-meta";
 
 export const dynamic = "force-dynamic";
 
@@ -22,14 +24,20 @@ function isNextRedirectError(error: unknown) {
 
 async function releaseDirectPick(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.fulfillment.release_direct_pick");
+  const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
 
   try {
+    const servicePerf = startPerf("action.production.fulfillment.release_direct_pick.service");
     await releaseSalesRequestPickList(prisma, orderId);
+    servicePerf.end({ requestId, orderId });
+    perf.end({ requestId, orderId, ok: true });
   } catch (error) {
+    perf.end({ requestId, orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof InventoryServiceError
       ? error.message
@@ -42,6 +50,8 @@ async function releaseDirectPick(formData: FormData) {
 
 async function confirmDirectPick(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.fulfillment.confirm_direct_pick");
+  const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
   const orderId = String(formData.get("orderId") ?? "").trim();
@@ -66,13 +76,17 @@ async function confirmDirectPick(formData: FormData) {
   });
 
   try {
+    const servicePerf = startPerf("action.production.fulfillment.confirm_direct_pick.service");
     const result = await confirmSalesRequestPickTasksBatch(prisma, {
       orderId,
       operatorName,
       tasks,
     });
+    servicePerf.end({ requestId, orderId, processedCount: result.processedCount });
+    perf.end({ requestId, orderId, processedCount: result.processedCount, ok: true });
     redirect(`/production/fulfillment/${orderId}?ok=${encodeURIComponent(`Surtido confirmado (${result.processedCount} tareas)`)}`);
   } catch (error) {
+    perf.end({ requestId, orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof InventoryServiceError
       ? error.message

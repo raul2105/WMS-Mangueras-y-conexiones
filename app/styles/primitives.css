@@ -48,14 +48,14 @@
 .btn-secondary[aria-disabled="true"],
 .btn-ghost:disabled,
 .btn-ghost[aria-disabled="true"] {
-  opacity: 0.55;
+  opacity: var(--disabled-opacity);
   pointer-events: none;
 }
 
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #ffffff;
+  color: var(--text-inverse);
 }
 
 .btn-primary:hover {
@@ -166,6 +166,61 @@
   overflow: hidden;
 }
 
+.page-title {
+  color: var(--text-primary);
+}
+
+.page-subtitle {
+  color: var(--text-secondary);
+}
+
+.table-head {
+  color: var(--text-secondary);
+  background: var(--table-header);
+}
+
+.table-row {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.table-row:nth-child(even) {
+  background: var(--table-stripe);
+}
+
+.table-row:hover {
+  background: var(--table-hover);
+}
+
+.status-neutral {
+  color: var(--status-neutral-text);
+  background: var(--status-neutral-bg);
+  border-color: var(--status-neutral-border);
+}
+
+.status-info {
+  color: var(--status-info-text);
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
+}
+
+.status-success {
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
+}
+
+.status-warning {
+  color: var(--status-warning-text);
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+}
+
+.status-danger {
+  color: var(--status-danger-text);
+  background: var(--status-danger-bg);
+  border-color: var(--status-danger-border);
+}
+
 /* Compatibility aliases for gradual migration */
 @utility glass {
   background: var(--bg-surface);
@@ -185,4 +240,101 @@
 .glass-card:hover {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
+}
+
+[data-theme="light"] .text-white {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .hover\:text-white:hover {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .text-slate-100,
+[data-theme="light"] .text-slate-200,
+[data-theme="light"] .text-slate-300 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .text-slate-400 {
+  color: var(--text-secondary) !important;
+}
+
+[data-theme="light"] .text-slate-500,
+[data-theme="light"] .text-slate-600 {
+  color: var(--text-muted) !important;
+}
+
+[data-theme="light"] .bg-slate-700 {
+  background: var(--bg-interactive) !important;
+}
+
+[data-theme="light"] .bg-slate-500\/20 {
+  background: var(--status-neutral-bg) !important;
+}
+
+[data-theme="light"] .border-slate-500\/30 {
+  border-color: var(--status-neutral-border) !important;
+}
+
+[data-theme="light"] .bg-white\/5,
+[data-theme="light"] .bg-white\/10 {
+  background: var(--surface-hover) !important;
+}
+
+[data-theme="light"] .hover\:bg-white\/5:hover,
+[data-theme="light"] .hover\:bg-white\/10:hover {
+  background: var(--surface-selected) !important;
+}
+
+[data-theme="light"] .border-white\/5,
+[data-theme="light"] .border-white\/10 {
+  border-color: var(--border-soft) !important;
+}
+
+[data-theme="light"] .hover\:border-cyan-400\/40:hover {
+  border-color: var(--status-info-border) !important;
+}
+
+[data-theme="light"] .text-cyan-200,
+[data-theme="light"] .text-cyan-400 {
+  color: var(--text-accent) !important;
+}
+
+[data-theme="light"] .bg-cyan-500\/10 {
+  background: var(--status-info-bg) !important;
+}
+
+[data-theme="light"] .border-cyan-500\/30,
+[data-theme="light"] .border-cyan-400\/40 {
+  border-color: var(--status-info-border) !important;
+}
+
+[data-theme="light"] .text-emerald-400 {
+  color: var(--status-success-text) !important;
+}
+
+[data-theme="light"] .text-orange-400,
+[data-theme="light"] .text-amber-400 {
+  color: var(--status-warning-text) !important;
+}
+
+[data-theme="light"] .text-red-200,
+[data-theme="light"] .text-red-400 {
+  color: var(--status-danger-text) !important;
+}
+
+[data-theme="light"] .bg-red-500\/10 {
+  background: var(--status-danger-bg) !important;
+}
+
+[data-theme="light"] .border-red-500\/30,
+[data-theme="light"] .hover\:border-red-400\/40:hover {
+  border-color: var(--status-danger-border) !important;
+}
+
+[data-theme="light"] .from-white,
+[data-theme="light"] .to-slate-400 {
+  --tw-gradient-from: var(--text-primary) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: color-mix(in oklab, var(--text-secondary) 55%, transparent) var(--tw-gradient-to-position) !important;
 }

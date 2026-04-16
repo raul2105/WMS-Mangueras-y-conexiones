@@ -1,4 +1,5 @@
 import type { NextAuthConfig } from "next-auth";
+import { getPermissionsForRoles } from "@/lib/rbac/role-permissions";
 
 const authConfig = {
   pages: {
@@ -12,15 +13,18 @@ const authConfig = {
       if (user) {
         token.uid = user.id;
         token.roles = Array.isArray(user.roles) ? user.roles : [];
-        token.permissions = Array.isArray(user.permissions) ? user.permissions : [];
+        token.permVersion = Array.isArray(user.roles)
+          ? [...user.roles].sort().join("|")
+          : "";
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
+        const roles = Array.isArray(token.roles) ? token.roles : [];
         session.user.id = String(token.uid ?? "");
-        session.user.roles = Array.isArray(token.roles) ? token.roles : [];
-        session.user.permissions = Array.isArray(token.permissions) ? token.permissions : [];
+        session.user.roles = roles;
+        session.user.permissions = getPermissionsForRoles(roles);
       }
       return session;
     },

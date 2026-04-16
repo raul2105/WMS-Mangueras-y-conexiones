@@ -3,7 +3,7 @@
   "region": "us-east-1",
   "namePrefix": "wms-web-prod",
   "stackName": "WmsWebProdStack",
-  "officeIpCidr": "CHANGE_ME/32",
+  "officeIpCidr": "189.160.117.20/32",
   "dbInstanceClass": "db.t4g.micro",
   "dbAllocatedStorageGb": 20,
   "dbName": "wms",

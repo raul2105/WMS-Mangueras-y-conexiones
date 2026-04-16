@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import RequestProductLineForm from "@/components/RequestProductLineForm";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
-import { resolveProductInput } from "@/lib/product-search";
 import { requireSalesWriteAccess } from "@/lib/rbac/sales";
 import {
   addSalesRequestProductLine,
@@ -23,6 +23,8 @@ import {
   salesInternalOrderProductLineCreateSchema,
   salesInternalOrderTransitionSchema,
 } from "@/lib/schemas/wms";
+import { startPerf } from "@/lib/perf";
+import { getRequestId } from "@/lib/request-meta";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +40,10 @@ function isNextRedirectError(error: unknown) {
 
 async function confirmRequest(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.requests.detail.confirm");
+  const requestId = await getRequestId();
   await requireSalesWriteAccess();
-  const session = await auth();
+  const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
   });
@@ -48,12 +52,25 @@ async function confirmRequest(formData: FormData) {
   }
 
   try {
+    const servicePerf = startPerf("action.production.requests.detail.confirm.service");
     await confirmSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
-      confirmedByUserId: session?.user?.id ?? null,
+      confirmedByUserId: sessionCtx.user?.id ?? null,
     });
+    servicePerf.end({ requestId, orderId: parsed.data.orderId });
+
+    const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+    await emitSyncEventSafe({
+      entityType: "ORDER",
+      entityId: parsed.data.orderId,
+      action: "UPDATE",
+      payload: { orderId: parsed.data.orderId, status: "CONFIRMADA" },
+    });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
+
     redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido confirmado")}`);
   } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo confirmar el pedido";
     redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
@@ -62,8 +79,10 @@ async function confirmRequest(formData: FormData) {
 
 async function cancelRequest(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.requests.detail.cancel");
+  const requestId = await getRequestId();
   await requireSalesWriteAccess();
-  const session = await auth();
+  const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
   });
@@ -72,12 +91,25 @@ async function cancelRequest(formData: FormData) {
   }
 
   try {
+    const servicePerf = startPerf("action.production.requests.detail.cancel.service");
     await cancelSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
-      cancelledByUserId: session?.user?.id ?? null,
+      cancelledByUserId: sessionCtx.user?.id ?? null,
     });
+    servicePerf.end({ requestId, orderId: parsed.data.orderId });
+
+    const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+    await emitSyncEventSafe({
+      entityType: "ORDER",
+      entityId: parsed.data.orderId,
+      action: "UPDATE",
+      payload: { orderId: parsed.data.orderId, status: "CANCELADA" },
+    });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
+
     redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido cancelado")}`);
   } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo cancelar el pedido";
     redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
@@ -86,36 +118,18 @@ async function cancelRequest(formData: FormData) {
 
 async function addProductLine(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.requests.detail.add_line");
+  const requestId = await getRequestId();
   await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
-  const productQuery = String(formData.get("productQuery") ?? "").trim();
+  const productId = String(formData.get("productId") ?? "").trim();
   const requestedQtyRaw = String(formData.get("requestedQty") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
 
-  const resolved = await resolveProductInput(prisma, productQuery, {
-    select: {
-      id: true,
-      sku: true,
-      referenceCode: true,
-      name: true,
-      brand: true,
-      description: true,
-      type: true,
-      subcategory: true,
-      category: { select: { name: true } },
-      inventory: { select: { available: true } },
-      technicalAttributes: { take: 16, select: { keyNormalized: true, valueNormalized: true } },
-    },
-  });
-
-  if (!resolved.product) {
-    redirect(`/production/requests/${orderId}?error=${encodeURIComponent(`No se pudo resolver el producto "${productQuery}"`)}`);
-  }
-
   const parsed = salesInternalOrderProductLineCreateSchema.safeParse({
     orderId,
-    productId: resolved.product.id,
+    productId,
     requestedQtyRaw,
     notes: notes || undefined,
   });
@@ -124,14 +138,18 @@ async function addProductLine(formData: FormData) {
   }
 
   try {
+    const servicePerf = startPerf("action.production.requests.detail.add_line.service");
     await addSalesRequestProductLine(prisma, {
       orderId: parsed.data.orderId,
       productId: parsed.data.productId,
       requestedQty: parsed.data.requestedQtyRaw,
       notes: parsed.data.notes ?? null,
     });
+    servicePerf.end({ requestId, orderId, productId });
+    perf.end({ requestId, orderId, productId, ok: true });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Producto agregado al pedido")}`);
   } catch (error) {
+    perf.end({ requestId, orderId, productId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo agregar el producto";
     redirect(`/production/requests/${orderId}?error=${encodeURIComponent(message)}`);
@@ -140,6 +158,8 @@ async function addProductLine(formData: FormData) {
 
 async function deleteLine(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.requests.detail.delete_line");
+  const requestId = await getRequestId();
   await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
@@ -149,9 +169,13 @@ async function deleteLine(formData: FormData) {
   }
 
   try {
+    const servicePerf = startPerf("action.production.requests.detail.delete_line.service");
     await deleteSalesRequestLine(prisma, { orderId, lineId });
+    servicePerf.end({ requestId, orderId, lineId });
+    perf.end({ requestId, orderId, lineId, ok: true });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Línea eliminada")}`);
   } catch (error) {
+    perf.end({ requestId, orderId, lineId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo eliminar la línea";
     redirect(`/production/requests/${orderId}?error=${encodeURIComponent(message)}`);
@@ -175,7 +199,7 @@ export default async function ProductionRequestDetailPage({
   await pageGuard("sales.view");
   const { id } = await params;
   const sp = await searchParams;
-  const session = await auth();
+  const sessionCtx = await getSessionContext();
 
   const order = await prisma.salesInternalOrder.findUnique({
     where: { id },
@@ -290,13 +314,7 @@ export default async function ProductionRequestDetailPage({
       .map((row) => [row.sourceDocumentLineId as string, row])
   );
 
-  const productHints = await prisma.product.findMany({
-    orderBy: { updatedAt: "desc" },
-    take: 200,
-    select: { sku: true, referenceCode: true, name: true },
-  });
-
-  const canOperateDirectPick = isSystemAdmin(session?.user?.roles) || (session?.user?.permissions ?? []).includes("production.execute");
+  const canOperateDirectPick = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("production.execute");
   const latestPickList = order.pickLists[0] ?? null;
 
   const productLines = order.lines.filter((line) => line.lineKind === "PRODUCT");
@@ -382,36 +400,12 @@ export default async function ProductionRequestDetailPage({
               <h2 className="text-lg font-semibold text-white">Agregar producto independiente</h2>
               <p className="text-sm text-slate-400">Reserva stock exacto en almacenamiento y recalcula el surtido directo del pedido.</p>
             </div>
-            <form action={addProductLine} className="grid gap-4 md:grid-cols-[1.4fr_0.7fr]">
-              <input type="hidden" name="orderId" value={order.id} />
-              <label className="space-y-1 md:col-span-2">
-                <span className="text-sm text-slate-400">Producto</span>
-                <input
-                  name="productQuery"
-                  list="request-product-options"
-                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-                  placeholder="SKU, referencia o nombre"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-sm text-slate-400">Cantidad</span>
-                <input name="requestedQty" type="number" min={0.0001} step="0.0001" className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white" />
-              </label>
-              <label className="space-y-1">
-                <span className="text-sm text-slate-400">Notas</span>
-                <input name="notes" className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white" placeholder="Opcional" />
-              </label>
-              <div className="md:col-span-2 flex justify-end">
-                <button type="submit" className="btn-primary">Agregar producto</button>
-              </div>
-              <datalist id="request-product-options">
-                {productHints.map((product) => (
-                  <option key={`${product.sku}-${product.referenceCode ?? "ref"}`} value={product.sku}>
-                    {product.name}{product.referenceCode ? ` - ${product.referenceCode}` : ""}
-                  </option>
-                ))}
-              </datalist>
-            </form>
+            <RequestProductLineForm
+              orderId={order.id}
+              warehouseId={order.warehouse?.id ?? ""}
+              disabled={!order.warehouse}
+              action={addProductLine}
+            />
           </div>
 
           <div className="glass-card space-y-4">

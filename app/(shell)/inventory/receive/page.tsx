@@ -193,38 +193,20 @@ export default async function ReceivePage({
 }) {
   await pageGuard("inventory.receive");
   const sp = await searchParams;
-  const [warehouses, products, recentReferences] = await Promise.all([
-    prisma.warehouse.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        locations: {
-          where: { isActive: true },
-          orderBy: { code: "asc" },
-          select: { id: true, code: true, name: true, warehouseId: true },
-        },
+  const warehouses = await prisma.warehouse.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      locations: {
+        where: { isActive: true },
+        orderBy: { code: "asc" },
+        select: { id: true, code: true, name: true, warehouseId: true },
       },
-    }),
-    prisma.product.findMany({
-      orderBy: { updatedAt: "desc" },
-      take: 250,
-      select: { sku: true, referenceCode: true, name: true, brand: true },
-    }),
-    prisma.inventoryMovement.findMany({
-      where: { reference: { not: null } },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: { reference: true },
-    }),
-  ]);
-
-  const codeSuggestions = products.flatMap((p) => [p.sku, p.referenceCode ?? "", p.name, p.brand ?? ""]).filter(Boolean);
-  const referenceSuggestions = Array.from(
-    new Set(recentReferences.map((row) => row.reference?.trim() ?? "").filter(Boolean))
-  );
+    },
+  });
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -242,8 +224,6 @@ export default async function ReceivePage({
       <ReceiveForm
         action={receiveStock}
         warehouses={warehouses}
-        codeSuggestions={codeSuggestions}
-        referenceSuggestions={referenceSuggestions}
       />
     </div>
   );

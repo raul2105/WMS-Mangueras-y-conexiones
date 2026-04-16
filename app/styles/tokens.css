@@ -3,13 +3,18 @@
   --bg-app: #0c1424;
   --bg-surface: #142033;
   --bg-elevated: #1a2940;
+  --bg-interactive: #0f1a2d;
+  --bg-overlay: rgba(7, 13, 26, 0.72);
 
   --text-primary: #e7eef8;
   --text-secondary: #bcc9da;
   --text-muted: #8798ae;
+  --text-inverse: #ffffff;
+  --text-accent: #8ec5ff;
 
   --border-default: #28374e;
   --border-strong: #3b4d67;
+  --border-soft: rgba(255, 255, 255, 0.1);
 
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
@@ -33,6 +38,27 @@
   --danger-soft-hover: color-mix(in oklab, var(--danger) 24%, transparent);
   --danger-text: color-mix(in oklab, var(--danger) 60%, #ffffff);
   --shell-bg: color-mix(in oklab, var(--bg-surface) 72%, var(--bg-elevated));
+  --surface-hover: color-mix(in oklab, var(--bg-surface) 76%, var(--bg-elevated));
+  --surface-selected: color-mix(in oklab, var(--accent) 18%, var(--bg-elevated));
+  --table-stripe: rgba(255, 255, 255, 0.04);
+  --table-hover: rgba(255, 255, 255, 0.06);
+  --table-header: color-mix(in oklab, var(--bg-elevated) 82%, var(--bg-surface));
+  --disabled-opacity: 0.55;
+  --status-neutral-bg: rgba(148, 163, 184, 0.18);
+  --status-neutral-border: rgba(148, 163, 184, 0.28);
+  --status-neutral-text: #d7dfeb;
+  --status-info-bg: rgba(34, 211, 238, 0.12);
+  --status-info-border: rgba(34, 211, 238, 0.24);
+  --status-info-text: #a5f3fc;
+  --status-success-bg: rgba(34, 197, 94, 0.12);
+  --status-success-border: rgba(34, 197, 94, 0.26);
+  --status-success-text: #bbf7d0;
+  --status-warning-bg: rgba(249, 115, 22, 0.12);
+  --status-warning-border: rgba(249, 115, 22, 0.24);
+  --status-warning-text: #fdba74;
+  --status-danger-bg: rgba(239, 68, 68, 0.12);
+  --status-danger-border: rgba(239, 68, 68, 0.28);
+  --status-danger-text: #fecaca;
 
   --radius-sm: 0.375rem;
   --radius-md: 0.625rem;
@@ -49,17 +75,22 @@
   color-scheme: dark;
 }
 
-[data-theme="light"] {
+:root[data-theme="light"] {
   --bg-app: #f2f5f9;
   --bg-surface: #ffffff;
   --bg-elevated: #f8fafc;
+  --bg-interactive: #eef4fb;
+  --bg-overlay: rgba(148, 163, 184, 0.18);
 
   --text-primary: #102033;
   --text-secondary: #34475c;
   --text-muted: #667b93;
+  --text-inverse: #ffffff;
+  --text-accent: #1d4ed8;
 
   --border-default: #d3ddea;
   --border-strong: #c0cedf;
+  --border-soft: rgba(148, 163, 184, 0.18);
 
   --accent: #1d4ed8;
   --accent-hover: #1e40af;
@@ -82,6 +113,27 @@
   --danger-soft-hover: color-mix(in oklab, var(--danger) 18%, transparent);
   --danger-text: color-mix(in oklab, var(--danger) 72%, #0f172a);
   --shell-bg: color-mix(in oklab, var(--bg-surface) 80%, var(--bg-elevated));
+  --surface-hover: color-mix(in oklab, var(--bg-surface) 72%, var(--bg-elevated));
+  --surface-selected: color-mix(in oklab, var(--accent) 10%, var(--bg-surface));
+  --table-stripe: rgba(148, 163, 184, 0.08);
+  --table-hover: rgba(148, 163, 184, 0.12);
+  --table-header: color-mix(in oklab, var(--bg-elevated) 75%, var(--bg-surface));
+  --disabled-opacity: 0.48;
+  --status-neutral-bg: rgba(100, 116, 139, 0.12);
+  --status-neutral-border: rgba(100, 116, 139, 0.22);
+  --status-neutral-text: #334155;
+  --status-info-bg: rgba(14, 165, 233, 0.12);
+  --status-info-border: rgba(14, 165, 233, 0.22);
+  --status-info-text: #0369a1;
+  --status-success-bg: rgba(34, 197, 94, 0.12);
+  --status-success-border: rgba(22, 163, 74, 0.22);
+  --status-success-text: #166534;
+  --status-warning-bg: rgba(245, 158, 11, 0.14);
+  --status-warning-border: rgba(217, 119, 6, 0.24);
+  --status-warning-text: #92400e;
+  --status-danger-bg: rgba(239, 68, 68, 0.12);
+  --status-danger-border: rgba(220, 38, 38, 0.22);
+  --status-danger-text: #991b1b;
 
   --accent-primary: var(--accent);
   --accent-primary-hover: var(--accent-hover);

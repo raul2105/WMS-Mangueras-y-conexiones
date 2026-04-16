@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
 import { createSalesRequestDraftHeader } from "@/lib/sales/request-service";
 import { requireSalesWriteAccess } from "@/lib/rbac/sales";
 import { firstErrorMessage, parseDueDate, salesInternalOrderCreateSchema } from "@/lib/schemas/wms";
+import { startPerf } from "@/lib/perf";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,14 @@ function isNextRedirectError(error: unknown) {
 
 async function createSalesRequest(formData: FormData) {
   "use server";
+  const perf = startPerf("action.production.requests.new.create");
+  const rbacPerf = startPerf("action.production.requests.new.create.rbac");
   await requireSalesWriteAccess();
+  rbacPerf.end();
 
-  const session = await auth();
+  const sessionPerf = startPerf("action.production.requests.new.create.session");
+  const ctx = await getSessionContext();
+  sessionPerf.end();
   const customerName = String(formData.get("customerName") ?? "").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
@@ -46,15 +52,30 @@ async function createSalesRequest(formData: FormData) {
   }
 
   try {
+    const createPerf = startPerf("action.production.requests.new.create.service");
     const created = await createSalesRequestDraftHeader(prisma, {
       customerName,
       warehouseId,
       dueDate,
       notes: notes || null,
-      requestedByUserId: session?.user?.id ?? null,
+      requestedByUserId: ctx.user?.id ?? null,
     });
+    createPerf.end({ orderId: created.id });
+
+    const syncPerf = startPerf("action.production.requests.new.create.sync_event");
+    const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+    await emitSyncEventSafe({
+      entityType: "ORDER",
+      entityId: created.id,
+      action: "CREATE",
+      payload: { orderId: created.id, code: created.code, customerName, warehouseId, status: "BORRADOR" },
+    });
+    syncPerf.end();
+    perf.end({ orderId: created.id, ok: true });
+
     redirect(`/production/requests/${created.id}?ok=${encodeURIComponent("Pedido de surtido creado")}`);
   } catch (error) {
+    perf.end({ ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo crear el pedido";
     redirect(`/production/requests/new?error=${encodeURIComponent(message)}`);

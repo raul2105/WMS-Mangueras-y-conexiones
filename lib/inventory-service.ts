@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
+import { emitSyncEvent } from "@/lib/sync/sync-events";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -199,6 +200,13 @@ export class InventoryService {
         source: options.source ?? "inventory-service",
       });
 
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${locationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId, quantity: newQty, reserved, available, movementId: movement.id },
+      }, tx);
+
       return { quantity: newQty, reserved, available, movementId: movement.id };
     });
   }
@@ -271,6 +279,13 @@ export class InventoryService {
         actor: options.actor ?? null,
         source: options.source ?? "inventory-service",
       });
+
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${locationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId, quantity: newQty, reserved: existing.reserved, available, movementId: movement.id },
+      }, tx);
 
       return { quantity: newQty, reserved: existing.reserved, available, movementId: movement.id };
     });
@@ -351,6 +366,13 @@ export class InventoryService {
         actor: options.actor ?? null,
         source: options.source ?? "inventory-service",
       });
+
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${locationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId, quantity: newQty, reserved, available, movementId: movement.id },
+      }, tx);
 
       return { quantity: newQty, reserved, available, movementId: movement.id };
     });
@@ -450,6 +472,19 @@ export class InventoryService {
         source: options.source ?? "inventory-service",
       });
 
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${fromLocationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId: fromLocationId, quantity: newFromQty, reserved: fromInv.reserved, available: newFromAvailable },
+      }, tx);
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${toLocationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId: toLocationId, quantity: newToQty, reserved: toReserved, available: newToAvailable },
+      }, tx);
+
       return {
         from: { quantity: newFromQty, reserved: fromInv.reserved, available: newFromAvailable },
         to: { quantity: newToQty, reserved: toReserved, available: newToAvailable },
@@ -515,6 +550,13 @@ export class InventoryService {
         source: options.source ?? "inventory-service",
       });
 
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${locationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId, quantity: existing.quantity, reserved: newReserved, available: newAvailable },
+      }, tx);
+
       return { quantity: existing.quantity, reserved: newReserved, available: newAvailable };
     });
   }
@@ -575,6 +617,13 @@ export class InventoryService {
         actor: options.actor ?? null,
         source: options.source ?? "inventory-service",
       });
+
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${locationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId, quantity: existing.quantity, reserved: newReserved, available: newAvailable },
+      }, tx);
 
       return { quantity: existing.quantity, reserved: newReserved, available: newAvailable };
     });
@@ -674,6 +723,19 @@ export class InventoryService {
         source: options.source ?? "inventory-service",
       });
 
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${fromLocationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId: fromLocationId, quantity: newFromQty, reserved: newFromReserved, available: newFromAvailable },
+      }, tx);
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${toLocationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId: toLocationId, quantity: newToQty, reserved: toReserved, available: newToAvailable },
+      }, tx);
+
       return {
         from: { quantity: newFromQty, reserved: newFromReserved, available: newFromAvailable },
         to: { quantity: newToQty, reserved: toReserved, available: newToAvailable },
@@ -743,6 +805,13 @@ export class InventoryService {
         actor: options.actor ?? null,
         source: options.source ?? "inventory-service",
       });
+
+      await emitSyncEvent({
+        entityType: "INVENTORY",
+        entityId: `${productId}:${locationId}`,
+        action: "UPDATE",
+        payload: { productId, locationId, quantity: newQty, reserved: existing.reserved, available: newAvailable },
+      }, tx);
 
       return { quantity: newQty, reserved: existing.reserved, available: newAvailable };
     });

@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { cancelAssemblyWorkOrder, configureAssemblyOrderExact, createAssemblyOrderDraftHeader } from "@/lib/assembly/work-order-service";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
+import { startPerf } from "@/lib/perf";
 import { getNextSalesInternalOrderCode, getNextSalesPickListCode } from "@/lib/sales/internal-orders";
 
 type Tx = Prisma.TransactionClient;
@@ -34,6 +35,12 @@ type ProductAllocation = {
   locationId: string;
   locationCode: string;
   requestedQty: number;
+};
+
+type ReservationBatchItem = {
+  productId: string;
+  locationId: string;
+  qty: number;
 };
 
 function getInventoryService(prisma: PrismaClient) {
@@ -134,7 +141,9 @@ async function releaseDraftPickListReservations(
   options: { deleteDrafts?: boolean } = {},
 ) {
   const inventoryService = getInventoryService(prisma);
+  const perf = startPerf("sales.release_draft_picklist_reservations");
   const deleteDrafts = options.deleteDrafts ?? true;
+  const loadPerf = startPerf("sales.release_draft_picklist_reservations.load_drafts");
   const draftPickLists = await tx.salesInternalOrderPickList.findMany({
     where: { orderId, status: "DRAFT" },
     select: {
@@ -156,32 +165,52 @@ async function releaseDraftPickListReservations(
       },
     },
   });
+  loadPerf.end({ draftPickListCount: draftPickLists.length });
+
+  const releaseByKey = new Map<string, ReservationBatchItem>();
 
   for (const pickList of draftPickLists) {
     for (const task of pickList.tasks) {
       const productId = task.orderLine.productId;
       const pendingReserved = Math.max(0, task.reservedQty - task.pickedQty);
       if (!productId || pendingReserved <= 0) continue;
-
-      await inventoryService.releaseReservedStock(productId, task.sourceLocationId, pendingReserved, {
-        tx,
-        reference: pickList.code,
-        notes: "Liberación de reserva por recálculo de surtido",
-        documentType: "SALES_INTERNAL_ORDER",
-        documentId: orderId,
-        documentLineId: task.orderLineId,
-      });
+      const key = `${productId}:${task.sourceLocationId}`;
+      const current = releaseByKey.get(key);
+      if (current) {
+        current.qty += pendingReserved;
+      } else {
+        releaseByKey.set(key, {
+          productId,
+          locationId: task.sourceLocationId,
+          qty: pendingReserved,
+        });
+      }
     }
   }
 
+  const releasePerf = startPerf("sales.release_draft_picklist_reservations.release_batch");
+  for (const item of releaseByKey.values()) {
+    await inventoryService.releaseReservedStock(item.productId, item.locationId, item.qty, {
+      tx,
+      reference: `ORDER:${orderId}`,
+      notes: "Liberación de reserva por recálculo de surtido",
+      documentType: "SALES_INTERNAL_ORDER",
+      documentId: orderId,
+    });
+  }
+  releasePerf.end({ releaseOps: releaseByKey.size });
+
   if (deleteDrafts && draftPickLists.length > 0) {
+    const deletePerf = startPerf("sales.release_draft_picklist_reservations.delete_drafts");
     await tx.salesInternalOrderPickTask.deleteMany({
       where: { pickList: { orderId, status: "DRAFT" } },
     });
     await tx.salesInternalOrderPickList.deleteMany({
       where: { orderId, status: "DRAFT" },
     });
+    deletePerf.end();
   }
+  perf.end({ draftPickListCount: draftPickLists.length, releaseOps: releaseByKey.size, deleteDrafts });
 }
 
 async function buildProductAllocations(
@@ -276,6 +305,8 @@ async function buildProductAllocations(
 }
 
 async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId: string) {
+  const perf = startPerf("sales.rebuild_draft_product_picklist");
+  const loadPerf = startPerf("sales.rebuild_draft_product_picklist.load_order");
   const order = await tx.salesInternalOrder.findUnique({
     where: { id: orderId },
     select: {
@@ -302,13 +333,16 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
       },
     },
   });
+  loadPerf.end({ lineCount: order?.lines.length ?? 0 });
 
   if (!order?.warehouseId) {
     throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
   }
 
+  const guardPerf = startPerf("sales.rebuild_draft_product_picklist.guard");
   await ensureNoDirectFulfillmentStarted(tx, orderId);
   await releaseDraftPickListReservations(tx, prisma, orderId, { deleteDrafts: true });
+  guardPerf.end();
 
   const productLines = order.lines
     .filter((line): line is typeof line & { product: NonNullable<typeof line.product> } => Boolean(line.product));
@@ -318,7 +352,9 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
   }
 
   const targetLocation = await ensureWarehouseFulfillmentTarget(tx, order.warehouseId);
+  const allocPerf = startPerf("sales.rebuild_draft_product_picklist.allocations");
   const allocations = await buildProductAllocations(tx, order.warehouseId, productLines);
+  allocPerf.end({ allocationCount: allocations.length });
   const inventoryService = getInventoryService(prisma);
   const pickListCode = await getNextSalesPickListCode(tx);
 
@@ -332,17 +368,35 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
     select: { id: true, code: true },
   });
 
-  let sequence = 1;
+  const reservePerf = startPerf("sales.rebuild_draft_product_picklist.reserve");
+  const reserveByKey = new Map<string, ReservationBatchItem>();
   for (const allocation of allocations) {
-    await inventoryService.reserveStock(allocation.productId, allocation.locationId, allocation.requestedQty, {
+    const key = `${allocation.productId}:${allocation.locationId}`;
+    const current = reserveByKey.get(key);
+    if (current) {
+      current.qty += allocation.requestedQty;
+    } else {
+      reserveByKey.set(key, {
+        productId: allocation.productId,
+        locationId: allocation.locationId,
+        qty: allocation.requestedQty,
+      });
+    }
+  }
+  for (const item of reserveByKey.values()) {
+    await inventoryService.reserveStock(item.productId, item.locationId, item.qty, {
       tx,
       reference: order.code,
       notes: "Reserva para surtido directo del pedido",
       documentType: "SALES_INTERNAL_ORDER",
       documentId: orderId,
-      documentLineId: allocation.lineId,
     });
+  }
+  reservePerf.end({ reserveOps: reserveByKey.size });
 
+  const tasksPerf = startPerf("sales.rebuild_draft_product_picklist.create_tasks");
+  let sequence = 1;
+  for (const allocation of allocations) {
     await tx.salesInternalOrderPickTask.create({
       data: {
         pickListId: pickList.id,
@@ -359,6 +413,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
     });
     sequence += 1;
   }
+  tasksPerf.end({ taskCount: allocations.length });
 
   await createAuditLogSafeWithDb({
     entityType: "SALES_INTERNAL_ORDER",
@@ -373,6 +428,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
     },
   }, tx);
 
+  perf.end({ orderId, productLineCount: productLines.length, allocationCount: allocations.length });
   return pickList;
 }
 
@@ -386,8 +442,12 @@ export async function createSalesRequestDraftHeader(
     requestedByUserId?: string | null;
   }
 ) {
+  const perf = startPerf("sales.create_request_draft_header");
   return prisma.$transaction(async (tx) => {
+    const codePerf = startPerf("sales.create_request_draft_header.next_code");
     const code = await getNextSalesInternalOrderCode(tx);
+    codePerf.end({ code });
+    const createPerf = startPerf("sales.create_request_draft_header.insert_order");
     const created = await tx.salesInternalOrder.create({
       data: {
         code,
@@ -399,7 +459,9 @@ export async function createSalesRequestDraftHeader(
       },
       select: { id: true, code: true },
     });
+    createPerf.end({ orderId: created.id });
 
+    const auditPerf = startPerf("sales.create_request_draft_header.audit");
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
       entityId: created.id,
@@ -413,6 +475,8 @@ export async function createSalesRequestDraftHeader(
         dueDate: args.dueDate.toISOString(),
       },
     }, tx);
+    auditPerf.end();
+    perf.end({ orderId: created.id });
 
     return created;
   });
@@ -616,6 +680,7 @@ export async function confirmSalesRequestOrder(
     confirmedByUserId?: string | null;
   }
 ) {
+  const perf = startPerf("sales.confirm_order");
   return prisma.$transaction(async (tx) => {
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
@@ -648,6 +713,7 @@ export async function confirmSalesRequestOrder(
       source: "sales/request-service",
       after: { status: "CONFIRMADA", code: order.code },
     }, tx);
+    perf.end({ orderId: order.id });
   });
 }
 
@@ -658,7 +724,9 @@ export async function cancelSalesRequestOrder(
     cancelledByUserId?: string | null;
   }
 ) {
+  const perf = startPerf("sales.cancel_order");
   return prisma.$transaction(async (tx) => {
+    const loadPerf = startPerf("sales.cancel_order.load_order");
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
       select: {
@@ -667,6 +735,7 @@ export async function cancelSalesRequestOrder(
         status: true,
       },
     });
+    loadPerf.end();
     if (!order) {
       throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
     }
@@ -674,6 +743,7 @@ export async function cancelSalesRequestOrder(
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya está cancelado");
     }
 
+    const guardPerf = startPerf("sales.cancel_order.guard");
     const activeDirectPick = await tx.salesInternalOrderPickList.findFirst({
       where: {
         orderId: order.id,
@@ -689,7 +759,9 @@ export async function cancelSalesRequestOrder(
         `No se puede cancelar porque el surtido directo ya fue liberado (${activeDirectPick.code})`
       );
     }
+    guardPerf.end();
 
+    const draftPerf = startPerf("sales.cancel_order.cancel_draft_picklists");
     const draftPickLists = await tx.salesInternalOrderPickList.findMany({
       where: { orderId: order.id, status: "DRAFT" },
       select: {
@@ -710,7 +782,9 @@ export async function cancelSalesRequestOrder(
         },
       });
     }
+    draftPerf.end({ draftPickListCount: draftPickLists.length });
 
+    const linkedPerf = startPerf("sales.cancel_order.cancel_linked_production");
     const linkedProductionOrders = await tx.productionOrder.findMany({
       where: {
         sourceDocumentType: "SalesInternalOrder",
@@ -737,6 +811,7 @@ export async function cancelSalesRequestOrder(
       }
       await cancelAssemblyWorkOrder(tx, linked.id);
     }
+    linkedPerf.end({ linkedCount: linkedProductionOrders.length });
 
     await tx.salesInternalOrder.update({
       where: { id: order.id },
@@ -755,6 +830,7 @@ export async function cancelSalesRequestOrder(
       source: "sales/request-service",
       after: { status: "CANCELADA", code: order.code },
     }, tx);
+    perf.end({ orderId: order.id });
   });
 }
 
@@ -824,9 +900,11 @@ export async function confirmSalesRequestPickTasksBatch(
     tasks: Array<{ taskId: string; pickedQty?: number | null; shortReason?: string | null }>;
   }
 ) {
+  const perf = startPerf("sales.confirm_pick_tasks_batch");
   const inventoryService = getInventoryService(prisma);
 
   return prisma.$transaction(async (tx) => {
+    const loadPerf = startPerf("sales.confirm_pick_tasks_batch.load_tasks");
     const dbTasks = await tx.salesInternalOrderPickTask.findMany({
       where: { id: { in: args.tasks.map((task) => task.taskId) } },
       select: {
@@ -855,6 +933,7 @@ export async function confirmSalesRequestPickTasksBatch(
         },
       },
     });
+    loadPerf.end({ taskCount: dbTasks.length });
 
     const taskById = new Map(dbTasks.map((task) => [task.id, task]));
     for (const task of args.tasks) {
@@ -873,6 +952,15 @@ export async function confirmSalesRequestPickTasksBatch(
       }
     }
 
+    const moveByKey = new Map<string, { productId: string; fromLocationId: string; toLocationId: string; qty: number; reference: string }>();
+    const releaseByKey = new Map<string, { productId: string; locationId: string; qty: number; reference: string }>();
+    const updates: Array<{
+      id: string;
+      pickedQty: number;
+      shortQty: number;
+      status: "COMPLETED" | "PARTIAL";
+      shortReason: string | null;
+    }> = [];
     for (const task of args.tasks) {
       const dbTask = taskById.get(task.taskId);
       if (!dbTask || !dbTask.orderLine.productId) continue;
@@ -884,60 +972,102 @@ export async function confirmSalesRequestPickTasksBatch(
       }
 
       if (pickedQty > 0) {
-        await inventoryService.moveReservedStockToLocation(
-          dbTask.orderLine.productId,
-          dbTask.sourceLocationId,
-          dbTask.targetLocationId,
-          pickedQty,
-          {
-            tx,
+        const moveKey = `${dbTask.orderLine.productId}:${dbTask.sourceLocationId}:${dbTask.targetLocationId}:${dbTask.pickList.code}`;
+        const currentMove = moveByKey.get(moveKey);
+        if (currentMove) {
+          currentMove.qty += pickedQty;
+        } else {
+          moveByKey.set(moveKey, {
+            productId: dbTask.orderLine.productId,
+            fromLocationId: dbTask.sourceLocationId,
+            toLocationId: dbTask.targetLocationId,
+            qty: pickedQty,
             reference: dbTask.pickList.code,
-            notes: `Surtido directo (${dbTask.id})`,
-            fromLocationCode: undefined,
-            toLocationCode: undefined,
-            operatorName: args.operatorName,
-            documentType: "SALES_INTERNAL_ORDER",
-            documentId: args.orderId,
-            documentLineId: dbTask.orderLineId,
-          }
-        );
+          });
+        }
       }
 
       const shortQty = pending - pickedQty;
       if (shortQty > 0) {
-        await inventoryService.releaseReservedStock(
-          dbTask.orderLine.productId,
-          dbTask.sourceLocationId,
-          shortQty,
-          {
-            tx,
+        const releaseKey = `${dbTask.orderLine.productId}:${dbTask.sourceLocationId}:${dbTask.pickList.code}`;
+        const currentRelease = releaseByKey.get(releaseKey);
+        if (currentRelease) {
+          currentRelease.qty += shortQty;
+        } else {
+          releaseByKey.set(releaseKey, {
+            productId: dbTask.orderLine.productId,
+            locationId: dbTask.sourceLocationId,
+            qty: shortQty,
             reference: dbTask.pickList.code,
-            notes: `Liberacion de faltante (${dbTask.id})`,
-            actor: args.operatorName,
-            source: "sales/request-service",
-            documentType: "SALES_INTERNAL_ORDER",
-            documentId: args.orderId,
-            documentLineId: dbTask.orderLineId,
-          },
-        );
+          });
+        }
       }
-      await tx.salesInternalOrderPickTask.update({
-        where: { id: dbTask.id },
-        data: {
-          pickedQty: dbTask.pickedQty + pickedQty,
-          shortQty: dbTask.shortQty + shortQty,
-          status: shortQty > 0 ? "PARTIAL" : "COMPLETED",
-          shortReason: shortQty > 0 ? (task.shortReason?.trim() || "FALTANTE_EN_SURTIDO") : null,
-        },
+      updates.push({
+        id: dbTask.id,
+        pickedQty: dbTask.pickedQty + pickedQty,
+        shortQty: dbTask.shortQty + shortQty,
+        status: shortQty > 0 ? "PARTIAL" : "COMPLETED",
+        shortReason: shortQty > 0 ? (task.shortReason?.trim() || "FALTANTE_EN_SURTIDO") : null,
       });
     }
 
-    const pickListIds = Array.from(new Set(dbTasks.map((task) => task.pickListId)));
-    for (const pickListId of pickListIds) {
-      const tasks = await tx.salesInternalOrderPickTask.findMany({
-        where: { pickListId },
-        select: { status: true, pickedQty: true, shortQty: true },
+    const inventoryPerf = startPerf("sales.confirm_pick_tasks_batch.inventory");
+    for (const item of moveByKey.values()) {
+      await inventoryService.moveReservedStockToLocation(item.productId, item.fromLocationId, item.toLocationId, item.qty, {
+        tx,
+        reference: item.reference,
+        notes: "Surtido directo consolidado",
+        operatorName: args.operatorName,
+        documentType: "SALES_INTERNAL_ORDER",
+        documentId: args.orderId,
       });
+    }
+    for (const item of releaseByKey.values()) {
+      await inventoryService.releaseReservedStock(item.productId, item.locationId, item.qty, {
+        tx,
+        reference: item.reference,
+        notes: "Liberación consolidada por faltante",
+        actor: args.operatorName,
+        source: "sales/request-service",
+        documentType: "SALES_INTERNAL_ORDER",
+        documentId: args.orderId,
+      });
+    }
+    inventoryPerf.end({ moveOps: moveByKey.size, releaseOps: releaseByKey.size });
+
+    const taskUpdatePerf = startPerf("sales.confirm_pick_tasks_batch.update_tasks");
+    for (const update of updates) {
+      await tx.salesInternalOrderPickTask.update({
+        where: { id: update.id },
+        data: {
+          pickedQty: update.pickedQty,
+          shortQty: update.shortQty,
+          status: update.status,
+          shortReason: update.shortReason,
+        },
+      });
+    }
+    taskUpdatePerf.end({ updatedTasks: updates.length });
+
+    const pickListIds = Array.from(new Set(dbTasks.map((task) => task.pickListId)));
+    const pickListPerf = startPerf("sales.confirm_pick_tasks_batch.update_picklists");
+    const allTasksForPickLists = await tx.salesInternalOrderPickTask.findMany({
+      where: { pickListId: { in: pickListIds } },
+      select: { pickListId: true, status: true, pickedQty: true, shortQty: true },
+    });
+    const tasksByPickList = new Map<string, Array<{ status: string; pickedQty: number; shortQty: number }>>();
+    for (const task of allTasksForPickLists) {
+      if (!tasksByPickList.has(task.pickListId)) {
+        tasksByPickList.set(task.pickListId, []);
+      }
+      tasksByPickList.get(task.pickListId)?.push({
+        status: task.status,
+        pickedQty: task.pickedQty,
+        shortQty: task.shortQty,
+      });
+    }
+    for (const pickListId of pickListIds) {
+      const tasks = tasksByPickList.get(pickListId) ?? [];
       const nextStatus = computePickListStatusFromTasks(tasks);
       await tx.salesInternalOrderPickList.update({
         where: { id: pickListId },
@@ -947,6 +1077,7 @@ export async function confirmSalesRequestPickTasksBatch(
         },
       });
     }
+    pickListPerf.end({ pickListCount: pickListIds.length });
 
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
@@ -958,6 +1089,7 @@ export async function confirmSalesRequestPickTasksBatch(
         taskCount: args.tasks.length,
       },
     }, tx);
+    perf.end({ orderId: args.orderId, taskCount: args.tasks.length });
 
     return { processedCount: args.tasks.length };
   });

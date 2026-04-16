@@ -47,6 +47,7 @@ type SearchProductsOptions = {
   requiredQty?: number | null;
   take?: number;
   minScore?: number;
+  offset?: number;
 };
 
 type ProductSelectionOptions = {
@@ -73,6 +74,13 @@ function buildInventoryAvailabilityWhere(warehouseId: string): Prisma.InventoryW
       usageType: "STORAGE",
     },
   };
+}
+
+function buildInsensitiveContains(value: string): Prisma.StringFilter {
+  return ({
+    contains: value,
+    mode: "insensitive",
+  } as unknown) as Prisma.StringFilter;
 }
 
 function buildInventorySelect(warehouseId?: string) {
@@ -144,13 +152,13 @@ export function buildProductSearchWhere(query: string, options: ProductSearchWhe
   if (normalized) {
     clauses.push({
       OR: [
-        { sku: { contains: query } },
-        { referenceCode: { contains: query } },
-        { name: { contains: query } },
-        { brand: { contains: query } },
-        { description: { contains: query } },
-        { subcategory: { contains: query } },
-        { category: { name: { contains: query } } },
+        { sku: buildInsensitiveContains(query) },
+        { referenceCode: buildInsensitiveContains(query) },
+        { name: buildInsensitiveContains(query) },
+        { brand: buildInsensitiveContains(query) },
+        { description: buildInsensitiveContains(query) },
+        { subcategory: buildInsensitiveContains(query) },
+        { category: { name: buildInsensitiveContains(query) } },
         {
           technicalAttributes: {
             some: {
@@ -247,28 +255,158 @@ export function rankProductSearchCandidates(
   return ranked.slice(0, options.take ?? 8) as ProductSearchMatch[];
 }
 
+function getSearchCandidateWindow(query: string, take: number) {
+  const queryLength = query.trim().length;
+  if (queryLength <= 4) {
+    return Math.max(take * 15, 120);
+  }
+
+  return Math.max(take * 8, 60);
+}
+
+function isPostgresqlRuntime() {
+  const dbUrl = process.env.DATABASE_URL ?? "";
+  return dbUrl.startsWith("postgres://") || dbUrl.startsWith("postgresql://");
+}
+
+function normalizeLikePattern(value: string) {
+  return value
+    .replace(/[%_\\]/g, "\\$&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function findPostgresCandidateIds(
+  prisma: ProductSearchDb,
+  query: string,
+  options: {
+    type?: ProductTypeFilter;
+    warehouseId?: string;
+    requireAvailable?: boolean;
+    take: number;
+  }
+) {
+  const db = prisma as unknown as { $queryRaw?: (...args: unknown[]) => Promise<unknown> };
+  if (!db.$queryRaw) {
+    return null;
+  }
+
+  const normalized = normalizeSearchText(query);
+  const likeRaw = `%${normalizeLikePattern(query)}%`;
+  const likeNormalized = `%${normalizeLikePattern(normalized)}%`;
+  const types = normalizeProductTypes(options.type);
+  const requireAvailable = Boolean(options.requireAvailable && options.warehouseId);
+  const typeClause =
+    types.length > 0 ? Prisma.sql`AND p.type IN (${Prisma.join(types)})` : Prisma.empty;
+  const availabilityClause = requireAvailable
+    ? Prisma.sql`
+      AND EXISTS (
+        SELECT 1
+        FROM "Inventory" i
+        JOIN "Location" l ON l.id = i."locationId"
+        WHERE i."productId" = p.id
+          AND i.available > 0
+          AND l."warehouseId" = ${options.warehouseId ?? ""}
+          AND l."isActive" = true
+          AND l."usageType" = 'STORAGE'
+      )
+    `
+    : Prisma.empty;
+
+  try {
+    const rows = (await db.$queryRaw(Prisma.sql`
+      SELECT p.id
+      FROM "Product" p
+      LEFT JOIN "Category" c ON c.id = p."categoryId"
+      WHERE (
+        unaccent(lower(COALESCE(p.sku, ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR unaccent(lower(COALESCE(p."referenceCode", ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR unaccent(lower(COALESCE(p.name, ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR unaccent(lower(COALESCE(p.brand, ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR unaccent(lower(COALESCE(p.description, ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR unaccent(lower(COALESCE(p.subcategory, ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR unaccent(lower(COALESCE(c.name, ''))) LIKE unaccent(lower(${likeRaw})) ESCAPE '\\'
+        OR EXISTS (
+          SELECT 1
+          FROM "ProductTechnicalAttribute" pta
+          WHERE pta."productId" = p.id
+            AND (
+              pta."keyNormalized" LIKE ${likeNormalized} ESCAPE '\\'
+              OR pta."valueNormalized" LIKE ${likeNormalized} ESCAPE '\\'
+            )
+        )
+      )
+      ${typeClause}
+      ${availabilityClause}
+      ORDER BY p.sku ASC
+      LIMIT ${options.take}
+    `)) as Array<{ id: string }>;
+
+    return rows.map((row) => row.id);
+  } catch {
+    // If extensions (unaccent) are not available yet, fallback to Prisma filters.
+    return null;
+  }
+}
+
 export async function searchProducts(prisma: ProductSearchDb, options: SearchProductsOptions) {
   const query = options.query.trim();
   if (!query) return [] as ProductSearchMatch[];
 
-  const take = Math.min(Math.max(options.take ?? 8, 1), 20);
-  const candidates = await prisma.product.findMany({
-    where: buildProductSearchWhere(query, {
+  const take = Math.min(Math.max(options.take ?? 8, 1), 100);
+  const offset = Math.max(options.offset ?? 0, 0);
+  const rankedTake = Math.min(Math.max(take + offset, 1), 100);
+  const candidateWindow = getSearchCandidateWindow(query, rankedTake);
+  const where = buildProductSearchWhere(query, {
+    type: options.type,
+    warehouseId: options.warehouseId,
+    requireAvailable: Boolean(options.warehouseId),
+  });
+  const select = buildDefaultProductSearchSelect(options.warehouseId);
+
+  let candidates: ProductSearchCandidate[];
+  if (isPostgresqlRuntime()) {
+    const ids = await findPostgresCandidateIds(prisma, query, {
       type: options.type,
       warehouseId: options.warehouseId,
       requireAvailable: Boolean(options.warehouseId),
-    }),
-    orderBy: [{ sku: "asc" }],
-    take: Math.max(take * 5, 40),
-    select: buildDefaultProductSearchSelect(options.warehouseId),
-  });
+      take: candidateWindow,
+    });
 
-  return rankProductSearchCandidates(candidates, query, {
+    if (ids && ids.length > 0) {
+      candidates = await prisma.product.findMany({
+        where: { id: { in: ids } },
+        take: candidateWindow,
+        orderBy: [{ sku: "asc" }],
+        select,
+      });
+    } else if (ids) {
+      candidates = [];
+    } else {
+      candidates = await prisma.product.findMany({
+        where,
+        orderBy: [{ sku: "asc" }],
+        take: candidateWindow,
+        select,
+      });
+    }
+  } else {
+    candidates = await prisma.product.findMany({
+      where,
+      orderBy: [{ sku: "asc" }],
+      take: candidateWindow,
+      select,
+    });
+  }
+
+  const ranked = rankProductSearchCandidates(candidates, query, {
     minScore: options.minScore ?? 120,
-    take,
+    take: rankedTake,
     requiredQty: options.requiredQty,
     filterAvailable: Boolean(options.warehouseId),
   });
+
+  return ranked.slice(offset, offset + take);
 }
 
 export async function getProductSearchSelection(

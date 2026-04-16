@@ -1,0 +1,32 @@
+[INFO] Detectando DATABASE_URL para modo AWS...
+[INFO] DATABASE_URL valida detectada para PostgreSQL AWS.
+[INFO] Verificando disponibilidad del puerto 3002...
+[INFO] Generando cliente Prisma AWS (PostgreSQL)...
+Prisma schema loaded from prisma\postgresql\schema.prisma
+
+✔ Generated Prisma Client (v6.19.2) to .\node_modules\@prisma\client in 331ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+[INFO] Iniciando entorno dev local (AWS DB) en http://localhost:3002 ...
+[INFO] Para detener: stop_dev_server.cmd
+
+> wms-scmayher@0.1.0 dev
+> next dev -p 3002
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://192.168.1.65:3002
+- Environments: .env
+- Experiments (use with caution):
+  · serverActions
+
+✓ Starting...
+Creating turbopack project {
+  dir: 'E:\\VS CODE Projects\\WMS-Mangueras-y-conexiones',
+  testMode: true
+}
+✓ Ready in 1302ms
+[?25h

@@ -1,7 +1,7 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
@@ -23,8 +23,8 @@ async function releaseAssemblyPick(formData: FormData) {
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
 
-  const session = await auth();
-  const roles = session?.user?.roles ?? [];
+  const sessionCtx = await getSessionContext();
+  const roles = sessionCtx.roles;
   if (roles.includes("WAREHOUSE_OPERATOR")) {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent("El rol Operador de almacén no puede liberar surtido de ensamble")}`);
   }
@@ -142,6 +142,14 @@ async function cancelAssemblyOrder(formData: FormData) {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
+  const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+  await emitSyncEventSafe({
+    entityType: "ORDER",
+    entityId: orderId,
+    action: "UPDATE",
+    payload: { orderId, type: "PRODUCTION_ORDER", status: "CANCELADA" },
+  });
+
   redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cancelada y reservas liberadas")}`);
 }
 
@@ -154,7 +162,7 @@ export default async function ProductionOrderDetailPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const session = await auth();
+  const sessionCtx = await getSessionContext();
 
   const order = await prisma.productionOrder.findUnique({
     where: { id },
@@ -242,7 +250,7 @@ export default async function ProductionOrderDetailPage({
   });
   if (!order) redirect("/production");
 
-  const canViewSalesOrigin = isSystemAdmin(session?.user?.roles) || (session?.user?.permissions ?? []).includes("sales.view");
+  const canViewSalesOrigin = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("sales.view");
 
   const orderTrace = await prisma.traceRecord.findFirst({
     where: {
@@ -408,7 +416,7 @@ export default async function ProductionOrderDetailPage({
           select: { id: true, status: true, code: true },
         })
       : null;
-  const isWarehouseOperator = (session?.user?.roles ?? []).includes("WAREHOUSE_OPERATOR");
+  const isWarehouseOperator = sessionCtx.roles.includes("WAREHOUSE_OPERATOR");
   const hasValidSalesSource = order.sourceDocumentType === "SalesInternalOrder" && Boolean(order.sourceDocumentId);
   const isSourceConfirmed = sourceSalesOrder?.status === "CONFIRMADA";
   const releaseBlockedReason =

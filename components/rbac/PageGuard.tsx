@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
-import { isSystemAdmin } from "@/lib/rbac/permissions";
+import { getSessionContext } from "@/lib/auth/session-context";
 import type { PermissionCode } from "@/lib/rbac/permissions";
+import { startPerf } from "@/lib/perf";
+import { getRequestId } from "@/lib/request-meta";
 
 async function getCurrentPathname(): Promise<string> {
   const hdrs = await headers();
@@ -19,18 +20,21 @@ async function getCurrentPathname(): Promise<string> {
  * - Authorized      → returns void (continues rendering)
  */
 export async function pageGuard(permission: PermissionCode): Promise<void> {
-  const [session, pathname] = await Promise.all([auth(), getCurrentPathname()]);
+  const perf = startPerf("rbac.pageGuard");
+  const requestId = await getRequestId();
+  const [ctx, pathname] = await Promise.all([getSessionContext(), getCurrentPathname()]);
 
-  if (!session?.user) {
+  if (!ctx.isAuthenticated) {
+    perf.end({ requestId, allowed: false, reason: "unauthenticated", permission, pathname });
     redirect(`/login?callbackUrl=${encodeURIComponent(pathname)}`);
   }
 
-  const roles = session.user.roles ?? [];
-  const permissions = session.user.permissions ?? [];
-
-  if (!isSystemAdmin(roles) && !permissions.includes(permission)) {
+  if (!ctx.isSystemAdmin && !ctx.permissions.includes(permission)) {
+    perf.end({ requestId, allowed: false, reason: "forbidden", permission, pathname });
     redirect(`/forbidden?from=${encodeURIComponent(pathname)}`);
   }
+
+  perf.end({ requestId, allowed: true, permission, pathname });
 }
 
 /**

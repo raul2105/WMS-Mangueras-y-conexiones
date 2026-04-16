@@ -6,12 +6,14 @@ const cloudfront = require("aws-cdk-lib/aws-cloudfront");
 const origins = require("aws-cdk-lib/aws-cloudfront-origins");
 const cognito = require("aws-cdk-lib/aws-cognito");
 const lambda = require("aws-cdk-lib/aws-lambda");
+const lambdaEventSources = require("aws-cdk-lib/aws-lambda-event-sources");
 const apigwv2 = require("aws-cdk-lib/aws-apigatewayv2");
 const integrations = require("aws-cdk-lib/aws-apigatewayv2-integrations");
 const authorizers = require("aws-cdk-lib/aws-apigatewayv2-authorizers");
 const logs = require("aws-cdk-lib/aws-logs");
 const dynamodb = require("aws-cdk-lib/aws-dynamodb");
 const sqs = require("aws-cdk-lib/aws-sqs");
+const iam = require("aws-cdk-lib/aws-iam");
 
 function resolveRetention(retention) {
   const map = {
@@ -159,6 +161,33 @@ class MobileEdgeStack extends Stack {
       },
     });
 
+    // ─── Outbound Sync Queue (Local WMS → AWS) ──────────────────────────────
+    const outboundSyncDlq = new sqs.Queue(this, "OutboundSyncDlq", {
+      queueName: `${prefix}-outbound-sync-dlq`,
+      retentionPeriod: Duration.days(14),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+    });
+
+    const outboundSyncQueue = new sqs.Queue(this, "OutboundSyncQueue", {
+      queueName: `${prefix}-outbound-sync`,
+      retentionPeriod: Duration.days(4),
+      visibilityTimeout: Duration.seconds(120),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      deadLetterQueue: {
+        queue: outboundSyncDlq,
+        maxReceiveCount: 5,
+      },
+    });
+
+    // ─── WebSocket Connections Table ─────────────────────────────────────────
+    const wsConnectionsTable = new dynamodb.Table(this, "WsConnectionsTable", {
+      tableName: `${prefix}-ws-connections`,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "connectionId", type: dynamodb.AttributeType.STRING },
+      removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: "ttl",
+    });
+
     const commonEnvironment = {
       MOBILE_SERVICE_NAME: config.mobileServiceName || "wms-mobile-edge",
       MOBILE_AUTH_MODE: config.mobileAuthMode || "cognito",
@@ -205,6 +234,91 @@ class MobileEdgeStack extends Stack {
     const assemblyRequestCreateFn = createFunction("MobileAssemblyRequestCreateFn", "assembly-request-create");
     const assemblyRequestGetFn = createFunction("MobileAssemblyRequestGetFn", "assembly-request-get");
     const productDraftCreateFn = createFunction("MobileProductDraftCreateFn", "product-draft-create");
+
+    // ─── Sync Outbound Processor Lambda ──────────────────────────────────────
+    const syncOutboundProcessorFn = new lambda.Function(this, "SyncOutboundProcessorFn", {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(30),
+      memorySize: 512,
+      handler: "handlers/sync-outbound-processor.handler",
+      code: lambda.Code.fromAsset(lambdaCodePath),
+      environment: {
+        ...commonEnvironment,
+        MOBILE_DDB_WS_CONNECTIONS_TABLE: wsConnectionsTable.tableName,
+      },
+    });
+
+    syncOutboundProcessorFn.addEventSource(
+      new lambdaEventSources.SqsEventSource(outboundSyncQueue, {
+        batchSize: 10,
+        maxBatchingWindow: Duration.seconds(5),
+        reportBatchItemFailures: true,
+      }),
+    );
+
+    // Grant sync processor write access to all DynamoDB read model tables
+    inventoryTable.grantReadWriteData(syncOutboundProcessorFn);
+    catalogTable.grantReadWriteData(syncOutboundProcessorFn);
+    salesRequestsTable.grantReadWriteData(syncOutboundProcessorFn);
+    assemblyRequestsTable.grantReadWriteData(syncOutboundProcessorFn);
+    productDraftsTable.grantReadWriteData(syncOutboundProcessorFn);
+    wsConnectionsTable.grantReadData(syncOutboundProcessorFn);
+
+    // ─── WebSocket API ───────────────────────────────────────────────────────
+    const wsConnectFn = new lambda.Function(this, "WsConnectFn", {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(10),
+      memorySize: 256,
+      handler: "handlers/ws-connect.handler",
+      code: lambda.Code.fromAsset(lambdaCodePath),
+      environment: {
+        MOBILE_DDB_WS_CONNECTIONS_TABLE: wsConnectionsTable.tableName,
+      },
+    });
+
+    const wsDisconnectFn = new lambda.Function(this, "WsDisconnectFn", {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(10),
+      memorySize: 256,
+      handler: "handlers/ws-disconnect.handler",
+      code: lambda.Code.fromAsset(lambdaCodePath),
+      environment: {
+        MOBILE_DDB_WS_CONNECTIONS_TABLE: wsConnectionsTable.tableName,
+      },
+    });
+
+    wsConnectionsTable.grantReadWriteData(wsConnectFn);
+    wsConnectionsTable.grantReadWriteData(wsDisconnectFn);
+
+    const webSocketApi = new apigwv2.WebSocketApi(this, "MobileWebSocketApi", {
+      apiName: `${prefix}-ws`,
+      connectRouteOptions: {
+        integration: new integrations.WebSocketLambdaIntegration("WsConnectIntegration", wsConnectFn),
+      },
+      disconnectRouteOptions: {
+        integration: new integrations.WebSocketLambdaIntegration("WsDisconnectIntegration", wsDisconnectFn),
+      },
+    });
+
+    const webSocketStage = new apigwv2.WebSocketStage(this, "MobileWebSocketStage", {
+      webSocketApi,
+      stageName: "live",
+      autoDeploy: true,
+    });
+
+    // Grant sync processor ability to push messages via WebSocket API
+    syncOutboundProcessorFn.addEnvironment(
+      "MOBILE_WS_API_ENDPOINT",
+      `https://${webSocketApi.apiId}.execute-api.${this.region}.amazonaws.com/${webSocketStage.stageName}`,
+    );
+    syncOutboundProcessorFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["execute-api:ManageConnections"],
+        resources: [
+          `arn:aws:execute-api:${this.region}:${this.account}:${webSocketApi.apiId}/${webSocketStage.stageName}/POST/@connections/*`,
+        ],
+      }),
+    );
 
     catalogTable.grantReadData(catalogListFn);
     catalogTable.grantReadData(catalogGetFn);
@@ -409,6 +523,22 @@ class MobileEdgeStack extends Stack {
 
     new cdk.CfnOutput(this, "MobileIntegrationQueueUrl", {
       value: integrationQueue.queueUrl,
+    });
+
+    new cdk.CfnOutput(this, "InboundSyncQueueUrl", {
+      value: integrationQueue.queueUrl,
+    });
+
+    new cdk.CfnOutput(this, "OutboundSyncQueueUrl", {
+      value: outboundSyncQueue.queueUrl,
+    });
+
+    new cdk.CfnOutput(this, "WebSocketApiUrl", {
+      value: webSocketStage.url,
+    });
+
+    new cdk.CfnOutput(this, "WsConnectionsTableName", {
+      value: wsConnectionsTable.tableName,
     });
   }
 }

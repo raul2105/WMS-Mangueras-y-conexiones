@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b1324" />
+    <meta name="theme-color" content="#0b1324" id="themeColorMeta" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <link rel="stylesheet" href="./styles.css" />
@@ -17,7 +17,10 @@
             <h1>WMS Mobile</h1>
             <p>Operacion movil conectada al ecosistema WMS</p>
           </div>
-          <div class="env-badge" id="environmentBadge">ENV</div>
+          <div class="top-actions">
+            <button id="themeToggleBtn" class="ghost icon-button" type="button" aria-label="Cambiar tema" title="Cambiar tema">Modo claro</button>
+            <div class="env-badge" id="environmentBadge">ENV</div>
+          </div>
         </div>
       </header>
 

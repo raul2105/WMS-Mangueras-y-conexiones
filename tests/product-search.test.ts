@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildProductSearchWhere,
+  getProductSearchSelection,
   rankProductSearchCandidates,
   searchProducts,
   type ProductSearchCandidate,
@@ -17,13 +18,13 @@ function makeCandidate(overrides: Partial<ProductSearchCandidate> = {}): Product
     type: overrides.type ?? "FITTING",
     subcategory: overrides.subcategory ?? "Linea base",
     category: overrides.category ?? { name: "Categoria base" },
-    inventory: overrides.inventory ?? [{ available: 5 }],
+    inventory: overrides.inventory ?? [{ quantity: 5, available: 5 }],
     technicalAttributes: overrides.technicalAttributes ?? [],
   };
 }
 
 describe("product-search", () => {
-  it("buildProductSearchWhere incluye texto, type y filtro por almacen", () => {
+  it("buildProductSearchWhere incluye contains insensible a mayúsculas y filtro operativo por almacén", () => {
     const where = buildProductSearchWhere("DN16", {
       type: "FITTING",
       warehouseId: "WH-ENS",
@@ -52,8 +53,8 @@ describe("product-search", () => {
       AND: expect.arrayContaining([
         {
           OR: expect.arrayContaining([
-            { sku: { contains: "DN16" } },
-            { name: { contains: "DN16" } },
+            { sku: { contains: "DN16", mode: "insensitive" } },
+            { name: { contains: "DN16", mode: "insensitive" } },
             {
               technicalAttributes: {
                 some: {
@@ -70,7 +71,7 @@ describe("product-search", () => {
     });
   });
 
-  it("rankProductSearchCandidates encuentra coincidencias por sku, nombre y atributo tecnico", () => {
+  it("rankProductSearchCandidates encuentra coincidencias por sku, nombre y atributo técnico", () => {
     const ranked = rankProductSearchCandidates(
       [
         makeCandidate({
@@ -113,14 +114,14 @@ describe("product-search", () => {
           sku: "HOSE-ENOUGH",
           name: "Manguera reforzada",
           type: "HOSE",
-          inventory: [{ available: 2.5 }, { available: 3.5 }],
+          inventory: [{ quantity: 2.5, available: 2.5 }, { quantity: 3.5, available: 3.5 }],
         }),
         makeCandidate({
           id: "short",
           sku: "HOSE-SHORT",
           name: "Manguera corta",
           type: "HOSE",
-          inventory: [{ available: 5 }],
+          inventory: [{ quantity: 5, available: 5 }],
         }),
       ],
       "Manguera",
@@ -135,27 +136,13 @@ describe("product-search", () => {
     expect(ranked[0]?.totalAvailable).toBe(6);
   });
 
-  it("searchProducts prioriza relevancia textual y luego disponibilidad, y aplica filtros", async () => {
+  it("searchProducts busca sku FIT con query minúscula usando contains insensible", async () => {
     const findMany = vi.fn().mockResolvedValue([
       makeCandidate({
-        id: "tie-high",
-        sku: "FIT-TIE-HIGH",
-        name: "Conector operativo",
-        inventory: [{ available: 10 }],
-      }),
-      makeCandidate({
-        id: "tie-low",
-        sku: "FIT-TIE-LOW",
-        name: "Conector operativo",
-        inventory: [{ available: 4 }],
-      }),
-      makeCandidate({
-        id: "less-relevant",
-        sku: "FIT-ALT-001",
-        name: "Pieza auxiliar",
-        description: "Compatible con conector operativo",
-        subcategory: "Conector operativo auxiliar",
-        inventory: [{ available: 25 }],
+        id: "fit-sku",
+        sku: "FIT-JIC-04-04",
+        name: "Conector JIC",
+        inventory: [{ quantity: 10, available: 10 }],
       }),
     ]);
 
@@ -166,11 +153,10 @@ describe("product-search", () => {
         },
       },
       {
-        query: "Conector operativo",
+        query: "fit",
         type: "FITTING",
-        warehouseId: "WH-ENS",
-        requiredQty: 1,
-        take: 4,
+        warehouseId: "WH-01",
+        take: 5,
       }
     );
 
@@ -180,11 +166,17 @@ describe("product-search", () => {
         AND: expect.arrayContaining([
           { type: "FITTING" },
           {
+            OR: expect.arrayContaining([
+              { sku: { contains: "fit", mode: "insensitive" } },
+              { referenceCode: { contains: "fit", mode: "insensitive" } },
+            ]),
+          },
+          {
             inventory: {
               some: {
                 available: { gt: 0 },
                 location: {
-                  warehouseId: "WH-ENS",
+                  warehouseId: "WH-01",
                   isActive: true,
                   usageType: "STORAGE",
                 },
@@ -193,12 +185,89 @@ describe("product-search", () => {
           },
         ]),
       },
+      take: 120,
     });
+    expect(results.map((candidate) => candidate.id)).toEqual(["fit-sku"]);
+  });
 
-    expect(results.map((candidate) => candidate.id)).toEqual([
-      "tie-high",
-      "tie-low",
-      "less-relevant",
+  it("searchProducts amplía la ventana previa para queries largas y mantiene el filtro de tipo", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      makeCandidate({
+        id: "hose-match",
+        sku: "HOSE-DN16-001",
+        name: "Manguera DN16 hidráulica",
+        type: "HOSE",
+        inventory: [{ quantity: 8, available: 8 }],
+      }),
     ]);
+
+    const results = await searchProducts(
+      {
+        product: {
+          findMany,
+        },
+      },
+      {
+        query: "manguera dn16",
+        type: "HOSE",
+        warehouseId: "WH-01",
+        requiredQty: 1,
+        take: 4,
+      }
+    );
+
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany.mock.calls[0][0]).toMatchObject({
+      where: {
+        AND: expect.arrayContaining([
+          { type: "HOSE" },
+          {
+            inventory: {
+              some: {
+                available: { gt: 0 },
+                location: {
+                  warehouseId: "WH-01",
+                  isActive: true,
+                  usageType: "STORAGE",
+                },
+              },
+            },
+          },
+        ]),
+      },
+      take: 60,
+    });
+    expect(results[0]).toMatchObject({ id: "hose-match", totalAvailable: 8 });
+  });
+
+  it("getProductSearchSelection conserva la selección previa por selectedId", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      makeCandidate({
+        id: "selected-product",
+        sku: "FIT-SEL-001",
+        name: "Conector seleccionado",
+        type: "FITTING",
+        inventory: [{ quantity: 6, available: 2 }],
+      }),
+    ]);
+
+    const selected = await getProductSearchSelection(
+      {
+        product: {
+          findMany,
+        },
+      },
+      "selected-product",
+      {
+        type: "FITTING",
+        warehouseId: "WH-01",
+      }
+    );
+
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(selected).toMatchObject({
+      id: "selected-product",
+      totalAvailable: 2,
+    });
   });
 });

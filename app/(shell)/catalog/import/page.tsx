@@ -5,7 +5,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
-import { createRequire } from "module";
 import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -32,14 +31,13 @@ async function importCsv(formData: FormData) {
     redirect(`/catalog/import?error=${encodeURIComponent("El archivo debe ser CSV")}`);
   }
 
-  const require = createRequire(import.meta.url);
-  const importerPath = path.join(process.cwd(), "scripts", "data", "import-products-from-csv.cjs");
-  // Keep runtime resolution based on process.cwd() for release packaging.
-  const runtimeRequire = new Function("req", "modulePath", "return req(modulePath);") as (
-    req: NodeRequire,
-    modulePath: string
-  ) => { importProductsFromCsv: (input: { filePath: string; dryRun: boolean }) => Promise<{ rows?: number; skus?: number } | null> };
-  const { importProductsFromCsv } = runtimeRequire(require, importerPath);
+  const { importProductsFromCsv } = (await import("../../../../scripts/data/import-products-from-csv.cjs")) as {
+    importProductsFromCsv: (input: {
+      filePath: string;
+      dryRun: boolean;
+      prismaClient: typeof prisma;
+    }) => Promise<{ rows?: number; skus?: number } | null>;
+  };
 
   const tmpDir = path.join(os.tmpdir(), "wms-imports");
   await fs.mkdir(tmpDir, { recursive: true });
@@ -51,7 +49,7 @@ async function importCsv(formData: FormData) {
 
   let stats: { rows?: number; skus?: number } | null = null;
   try {
-    const result = await importProductsFromCsv({ filePath, dryRun });
+    const result = await importProductsFromCsv({ filePath, dryRun, prismaClient: prisma });
     stats = result ?? null;
     await prisma.importLog.create({
       data: {

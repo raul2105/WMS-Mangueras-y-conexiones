@@ -33,7 +33,26 @@ function createPrismaClient() {
     );
   }
 
-  return new PrismaClient();
+  const isDev = process.env.NODE_ENV !== "production";
+
+  const client = new PrismaClient({
+    // In dev: emit query events so we can detect slow queries below.
+    // In prod: only surface warnings and errors.
+    log: isDev
+      ? [{ emit: "event", level: "query" }, "warn", "error"]
+      : ["error"],
+  });
+
+  // In dev: log queries that take longer than 200ms so slow paths are visible.
+  if (isDev) {
+    client.$on("query", (e) => {
+      if (e.duration > 200) {
+        console.warn(`[prisma:slow] ${e.query.substring(0, 120)} — ${e.duration}ms`);
+      }
+    });
+  }
+
+  return client;
 }
 
 declare global {

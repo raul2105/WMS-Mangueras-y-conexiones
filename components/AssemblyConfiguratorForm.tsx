@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ProductSearchMatch } from "@/lib/product-search";
+import ProductSearchField from "@/components/ProductSearchField";
 
 type WarehouseOption = {
   id: string;
@@ -35,11 +36,6 @@ type Props = {
   notesLabel?: string;
 };
 
-type ProductSearchResponse = {
-  results: ProductSearchMatch[];
-  selected: ProductSearchMatch | null;
-};
-
 function parsePositiveDecimal(value: string) {
   if (!value) return null;
   const parsed = Number(String(value).replace(",", "."));
@@ -49,16 +45,6 @@ function parsePositiveDecimal(value: string) {
 
 function formatWarehouseLabel(warehouse: WarehouseOption) {
   return `${warehouse.name} (${warehouse.code})`;
-}
-
-function formatProductLabel(product: ProductSearchMatch) {
-  return `${product.sku} - ${product.name}`;
-}
-
-function formatQty(value: number) {
-  return new Intl.NumberFormat("es-MX", {
-    maximumFractionDigits: 4,
-  }).format(value);
 }
 
 type WarehouseComboboxProps = {
@@ -175,266 +161,6 @@ function WarehouseCombobox({
   );
 }
 
-type AssemblyProductSearchFieldProps = {
-  fieldKey: string;
-  name: string;
-  label: string;
-  productType: "FITTING" | "HOSE";
-  warehouseId: string;
-  requiredQty: number | null;
-  initialProductId: string;
-  initialSelection: ProductSearchMatch | null;
-  disabled: boolean;
-};
-
-function AssemblyProductSearchField({
-  fieldKey,
-  name,
-  label,
-  productType,
-  warehouseId,
-  requiredQty,
-  initialProductId,
-  initialSelection,
-  disabled,
-}: AssemblyProductSearchFieldProps) {
-  const [query, setQuery] = useState(initialSelection ? formatProductLabel(initialSelection) : "");
-  const [selectedId, setSelectedId] = useState(initialProductId);
-  const [selected, setSelected] = useState<ProductSearchMatch | null>(initialSelection);
-  const [results, setResults] = useState<ProductSearchMatch[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const searchRequestRef = useRef(0);
-  const selectionRequestRef = useRef(0);
-  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectedLabel = selected ? formatProductLabel(selected) : "";
-  const trimmedQuery = query.trim();
-  const isSelectedQuery = Boolean(selectedId && selectedLabel && trimmedQuery === selectedLabel);
-  const shouldSearch = !disabled && Boolean(warehouseId) && trimmedQuery.length >= 2 && !isSelectedQuery;
-
-  useEffect(() => () => {
-    if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (!selectedId || !warehouseId) return;
-
-    const requestId = ++selectionRequestRef.current;
-    const params = new URLSearchParams({
-      selectedId,
-      type: productType,
-      warehouseId,
-    });
-
-    fetch(`/api/products/search?${params.toString()}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error("SEARCH_SELECTION_FAILED");
-        return response.json() as Promise<ProductSearchResponse>;
-      })
-      .then((payload) => {
-        if (requestId !== selectionRequestRef.current) return;
-        if (!payload.selected) {
-          setSelected(null);
-          setSelectedId("");
-          return;
-        }
-
-        const refreshedSelection = payload.selected;
-        setSelected(refreshedSelection);
-        setSearchError(null);
-        setQuery((current) => {
-          const currentTrimmed = current.trim();
-          if (!currentTrimmed) return formatProductLabel(refreshedSelection);
-          if (currentTrimmed === selectedLabel) {
-            return formatProductLabel(refreshedSelection);
-          }
-          return current;
-        });
-      })
-      .catch(() => {
-        if (requestId !== selectionRequestRef.current) return;
-        setSearchError("No se pudo actualizar el stock del producto seleccionado.");
-      });
-  }, [selectedId, warehouseId, productType, selectedLabel]);
-
-  useEffect(() => {
-    if (!shouldSearch) {
-      searchRequestRef.current += 1;
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      const requestId = ++searchRequestRef.current;
-      const params = new URLSearchParams({
-        q: trimmedQuery,
-        type: productType,
-        warehouseId,
-      });
-
-      if (requiredQty) {
-        params.set("requiredQty", String(requiredQty));
-      }
-
-      setIsLoading(true);
-      fetch(`/api/products/search?${params.toString()}`)
-        .then(async (response) => {
-          if (!response.ok) throw new Error("SEARCH_FAILED");
-          return response.json() as Promise<ProductSearchResponse>;
-        })
-        .then((payload) => {
-          if (requestId !== searchRequestRef.current) return;
-          setResults(payload.results ?? []);
-          setSearchError((payload.results ?? []).length === 0 ? "No se encontraron coincidencias con stock suficiente." : null);
-        })
-        .catch(() => {
-          if (requestId !== searchRequestRef.current) return;
-          setResults([]);
-          setSearchError("No se pudo consultar el catálogo de ensamble.");
-        })
-        .finally(() => {
-          if (requestId === searchRequestRef.current) {
-            setIsLoading(false);
-          }
-        });
-    }, 220);
-
-    return () => clearTimeout(timeoutId);
-  }, [shouldSearch, trimmedQuery, warehouseId, productType, requiredQty]);
-
-  const hasRequiredQty = typeof requiredQty === "number" && Number.isFinite(requiredQty) && requiredQty > 0;
-  const isInsufficient = Boolean(
-    selected &&
-      warehouseId &&
-      (hasRequiredQty ? selected.totalAvailable < requiredQty! : selected.totalAvailable <= 0)
-  );
-  const visibleResults = shouldSearch ? results : [];
-  const visibleIsLoading = shouldSearch ? isLoading : false;
-  const visibleSearchError = shouldSearch ? searchError : null;
-
-  return (
-    <div className="space-y-2">
-      <span className="text-sm text-slate-400">{label}</span>
-      <input type="hidden" name={name} value={selectedId} />
-      <input
-        data-testid={`assembly-${fieldKey}-input`}
-        value={query}
-        disabled={disabled}
-        onChange={(event) => {
-          const next = event.target.value;
-          setQuery(next);
-          setIsOpen(true);
-          setSearchError(null);
-          searchRequestRef.current += 1;
-          if (selectedId) {
-            setSelectedId("");
-            setSelected(null);
-          }
-        }}
-        onFocus={() => {
-          if (!disabled) setIsOpen(true);
-        }}
-        onBlur={() => {
-          blurTimerRef.current = setTimeout(() => setIsOpen(false), 120);
-        }}
-        placeholder={disabled ? "Selecciona un almacén para habilitar la búsqueda" : "Busca por SKU, nombre o atributo"}
-        className="w-full px-4 py-3 glass rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
-      />
-
-      {visibleIsLoading && <p className="text-xs text-slate-500">Buscando coincidencias operativas...</p>}
-      {!visibleIsLoading && !disabled && trimmedQuery.length > 0 && trimmedQuery.length < 2 && (
-        <p className="text-xs text-slate-500">Escribe al menos 2 caracteres para buscar.</p>
-      )}
-      {visibleSearchError && <p className="text-xs text-amber-300">{visibleSearchError}</p>}
-
-      {isOpen && visibleResults.length > 0 && (
-        <div className="grid grid-cols-1 gap-2">
-          {visibleResults.map((option) => (
-            <button
-              type="button"
-              key={`${fieldKey}-${option.id}`}
-              className="text-left p-3 rounded-lg border border-white/10 hover:border-cyan-400/40 hover:bg-white/5 transition-colors"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                searchRequestRef.current += 1;
-                setSelected(option);
-                setSelectedId(option.id);
-                setQuery(formatProductLabel(option));
-                setResults([]);
-                setSearchError(null);
-                setIsOpen(false);
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-mono text-sm text-cyan-300">{option.sku}</p>
-                  <p className="text-sm text-slate-100 truncate">{option.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {[option.referenceCode, option.brand, option.category?.name, option.subcategory].filter(Boolean).join(" • ") || "Sin metadatos adicionales"}
-                  </p>
-                </div>
-                <span className="text-xs font-semibold text-green-300">
-                  {formatQty(option.totalAvailable)} disp.
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {selected && (
-        <div
-          data-testid={`assembly-${fieldKey}-selected`}
-          className={`rounded-lg border p-3 space-y-2 ${
-            isInsufficient
-              ? "border-red-500/30 bg-red-500/5"
-              : "border-cyan-400/20 bg-cyan-500/5"
-          }`}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-mono text-sm text-cyan-300">{selected.sku}</p>
-              <p className="text-sm text-slate-100">{selected.name}</p>
-              <p className="text-xs text-slate-500">
-                {[selected.referenceCode, selected.brand, selected.category?.name, selected.subcategory].filter(Boolean).join(" • ") || "Sin metadatos adicionales"}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="px-2 py-1 rounded border border-white/10 text-xs text-slate-300 hover:text-white hover:border-cyan-400/40"
-              onClick={() => {
-                searchRequestRef.current += 1;
-                setSelected(null);
-                setSelectedId("");
-                setQuery("");
-                setResults([]);
-                setSearchError(null);
-              }}
-            >
-              Cambiar
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-            <p className={isInsufficient ? "text-red-200" : "text-slate-300"}>
-              Disponible en almacén: {formatQty(selected.totalAvailable)}
-            </p>
-            <p className={isInsufficient ? "text-red-200" : "text-slate-300"}>
-              {hasRequiredQty
-                ? `Requerido para ensamble: ${formatQty(requiredQty!)}`
-                : "Stock filtrado con base en disponibilidad actual"}
-            </p>
-          </div>
-          {isInsufficient && (
-            <p className="text-xs text-red-200">
-              La selección se conserva, pero ya no cumple con el stock suficiente para el ensamble actual.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function AssemblyConfiguratorForm({
   warehouses,
   initialValues,
@@ -468,8 +194,8 @@ export default function AssemblyConfiguratorForm({
           locked={warehouseLocked}
         />
 
-        <AssemblyProductSearchField
-          fieldKey="entry-fitting"
+        <ProductSearchField
+          fieldKey="assembly-entry-fitting"
           name="entryFittingProductId"
           label="Conexión entrada"
           productType="FITTING"
@@ -478,10 +204,13 @@ export default function AssemblyConfiguratorForm({
           initialProductId={initialValues.entryFittingProductId}
           initialSelection={initialSelections.entryFitting}
           disabled={!warehouseId}
+          searchErrorMessage="No se pudo consultar el catálogo de ensamble."
+          requiredLabel="Requerido para ensamble"
+          insufficientMessage="La selección se conserva, pero ya no cumple con el stock suficiente para el ensamble actual."
         />
 
-        <AssemblyProductSearchField
-          fieldKey="exit-fitting"
+        <ProductSearchField
+          fieldKey="assembly-exit-fitting"
           name="exitFittingProductId"
           label="Conexión salida"
           productType="FITTING"
@@ -490,11 +219,14 @@ export default function AssemblyConfiguratorForm({
           initialProductId={initialValues.exitFittingProductId}
           initialSelection={initialSelections.exitFitting}
           disabled={!warehouseId}
+          searchErrorMessage="No se pudo consultar el catálogo de ensamble."
+          requiredLabel="Requerido para ensamble"
+          insufficientMessage="La selección se conserva, pero ya no cumple con el stock suficiente para el ensamble actual."
         />
 
         <div className="md:col-span-2">
-          <AssemblyProductSearchField
-            fieldKey="hose"
+          <ProductSearchField
+            fieldKey="assembly-hose"
             name="hoseProductId"
             label="Manguera"
             productType="HOSE"
@@ -503,6 +235,9 @@ export default function AssemblyConfiguratorForm({
             initialProductId={initialValues.hoseProductId}
             initialSelection={initialSelections.hose}
             disabled={!warehouseId}
+            searchErrorMessage="No se pudo consultar el catálogo de ensamble."
+            requiredLabel="Requerido para ensamble"
+            insufficientMessage="La selección se conserva, pero ya no cumple con el stock suficiente para el ensamble actual."
           />
         </div>
 

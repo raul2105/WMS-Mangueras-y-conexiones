@@ -18,12 +18,14 @@ import { logout, restoreSession, startLogin } from "./auth-adapter.js";
 import { getModulesForProfile, resolveEffectiveRoleCode } from "./module-config.js";
 
 const runtimeConfig = window.__WMS_MOBILE_CONFIG__ || {};
+const THEME_KEY = "wms-mobile-theme";
 const loginView = document.querySelector("#loginView");
 const homeView = document.querySelector("#homeView");
 const loginBtn = document.querySelector("#loginBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const environmentBadgeEl = document.querySelector("#environmentBadge");
 const loginErrorEl = document.querySelector("#loginError");
+const themeToggleBtn = document.querySelector("#themeToggleBtn");
 
 const displayNameEl = document.querySelector("#displayName");
 const userMetaEl = document.querySelector("#userMeta");
@@ -90,7 +92,28 @@ const state = {
   visibleModules: [],
   effectiveRoleCode: "MANAGER",
   activePanelId: "homePanel",
+  theme: "dark",
 };
+
+function getPreferredTheme() {
+  const stored = window.localStorage.getItem(THEME_KEY);
+  if (stored === "dark" || stored === "light") return stored;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  state.theme = theme;
+  document.documentElement.setAttribute("data-theme", theme);
+  document.documentElement.style.colorScheme = theme;
+  window.localStorage.setItem(THEME_KEY, theme);
+  if (themeToggleBtn) {
+    themeToggleBtn.textContent = theme === "dark" ? "Modo claro" : "Modo oscuro";
+  }
+  const themeColorMeta = document.querySelector("#themeColorMeta");
+  if (themeColorMeta) {
+    themeColorMeta.setAttribute("content", theme === "dark" ? "#0b1324" : "#eef3f9");
+  }
+}
 
 function setView(isAuthenticated) {
   loginView.classList.toggle("hidden", isAuthenticated);
@@ -819,6 +842,7 @@ async function handleDraftSubmit(event) {
 }
 
 async function bootstrap() {
+  applyTheme(getPreferredTheme());
   environmentBadgeEl.textContent = String(runtimeConfig.environment || "dev").toUpperCase();
   try {
     const session = await restoreSession();
@@ -850,6 +874,10 @@ logoutBtn.addEventListener("click", () => {
   setView(false);
   userEmailChipEl.textContent = "email: -";
   userRoleChipEl.textContent = "perfil: -";
+});
+
+themeToggleBtn?.addEventListener("click", () => {
+  applyTheme(state.theme === "dark" ? "light" : "dark");
 });
 
 catalogFormEl.addEventListener("submit", handleCatalogSubmit);

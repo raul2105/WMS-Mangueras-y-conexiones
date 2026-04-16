@@ -53,6 +53,7 @@ export default function SidebarNav({
           <Link
             key={item.href}
             href={item.href}
+            prefetch={false}
             onClick={onNavigate}
             title={compact ? item.label : undefined}
             aria-current={active ? "page" : undefined}

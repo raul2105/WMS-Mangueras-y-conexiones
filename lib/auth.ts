@@ -4,23 +4,17 @@ import bcrypt from "bcryptjs";
 import type { User as NextAuthUser } from "next-auth";
 import authConfig from "@/auth.config";
 import prisma from "@/lib/prisma";
+import { startPerf } from "@/lib/perf";
+import { getPermissionsForRoles } from "@/lib/rbac/role-permissions";
 function buildAuthUser(
   user: {
     id: string;
-    name: string | null;
+    name: string;
     email: string;
-    userRoles: Array<{
-      role: {
-        code: string;
-        rolePermissions: Array<{ permission: { code: string } }>;
-      };
-    }>;
   },
+  roles: string[],
 ): NextAuthUser {
-  const roles = Array.from(new Set(user.userRoles.map((ur) => ur.role.code)));
-  const permissions = Array.from(
-    new Set(user.userRoles.flatMap((ur) => ur.role.rolePermissions.map((rp) => rp.permission.code))),
-  );
+  const permissions = getPermissionsForRoles(roles);
   return { id: user.id, name: user.name, email: user.email, roles, permissions };
 }
 
@@ -34,32 +28,63 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials): Promise<NextAuthUser | null> {
+        const perf = startPerf("auth.authorize");
         const email = String(credentials?.email ?? "").trim().toLowerCase();
         const password = String(credentials?.password ?? "");
-        if (!email || !password) return null;
+        if (!email || !password) {
+          perf.end({ ok: false, reason: "missing_credentials" });
+          return null;
+        }
 
-        const user = await prisma.user.findUnique({
-          where: { email },
-          include: {
-            userRoles: {
-              include: {
-                role: {
-                  include: {
-                    rolePermissions: {
-                      include: { permission: true },
-                    },
-                  },
+        // Fetch user and roles in parallel — roles query uses email filter
+        // so it can run concurrently before we have the userId.
+        const userPerf = startPerf("auth.authorize.user_minimal");
+        const rolePerf = startPerf("auth.authorize.roles");
+        const [user, userRoles] = await Promise.all([
+          prisma.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              isActive: true,
+              passwordHash: true,
+            },
+          }),
+          prisma.userRole.findMany({
+            where: {
+              user: { email },
+              role: { isActive: true },
+            },
+            select: {
+              role: {
+                select: {
+                  code: true,
                 },
               },
             },
-          },
-        });
+          }),
+        ]);
+        userPerf.end({ found: Boolean(user) });
+        rolePerf.end({ roleCount: userRoles.length });
 
-        if (!user || !user.isActive) return null;
+        if (!user || !user.isActive) {
+          perf.end({ ok: false, reason: "user_not_active" });
+          return null;
+        }
+
+        const bcryptPerf = startPerf("auth.authorize.bcrypt");
         const isValid = await bcrypt.compare(password, user.passwordHash);
-        if (!isValid) return null;
+        bcryptPerf.end({ ok: isValid });
+        if (!isValid) {
+          perf.end({ ok: false, reason: "invalid_password" });
+          return null;
+        }
 
-        return buildAuthUser(user);
+        const roles = userRoles.map((entry) => entry.role.code);
+        const authUser = buildAuthUser(user, roles);
+        perf.end({ ok: true, roleCount: authUser.roles.length, permissionCount: authUser.permissions.length });
+        return authUser;
       },
     }),
   ],

@@ -158,33 +158,15 @@ export default async function PickPage({
 }) {
   await pageGuard("inventory.pick");
   const sp = await searchParams;
-  const [locations, products, recentReferences] = await Promise.all([
-    prisma.location.findMany({
-      where: { isActive: true },
-      orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
-      select: {
-        code: true,
-        name: true,
-        warehouse: { select: { code: true } },
-      },
-    }),
-    prisma.product.findMany({
-      orderBy: { updatedAt: "desc" },
-      take: 250,
-      select: { sku: true, referenceCode: true, name: true, brand: true },
-    }),
-    prisma.inventoryMovement.findMany({
-      where: { reference: { not: null } },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: { reference: true },
-    }),
-  ]);
-
-  const codeSuggestions = products.flatMap((p) => [p.sku, p.referenceCode ?? "", p.name, p.brand ?? ""]).filter(Boolean);
-  const referenceSuggestions = Array.from(
-    new Set(recentReferences.map((row) => row.reference?.trim() ?? "").filter(Boolean))
-  );
+  const locations = await prisma.location.findMany({
+    where: { isActive: true },
+    orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
+    select: {
+      code: true,
+      name: true,
+      warehouse: { select: { code: true } },
+    },
+  });
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -223,7 +205,6 @@ export default async function PickPage({
             label="SKU o Referencia *"
             placeholder="CON-R1AT-04"
             required
-            suggestions={codeSuggestions}
             showDetails
           />
 
@@ -244,16 +225,8 @@ export default async function PickPage({
           <Input
             name="reference"
             label="Referencia pedido/OT"
-            list={referenceSuggestions.length > 0 ? "pick-reference-options" : undefined}
             placeholder="Pedido/OT"
           />
-            {referenceSuggestions.length > 0 && (
-              <datalist id="pick-reference-options">
-                {referenceSuggestions.map((reference) => (
-                  <option key={reference} value={reference} />
-                ))}
-              </datalist>
-            )}
 
           <Textarea name="notes" label="Notas" rootClassName="md:col-span-2" textareaClassName="min-h-[96px]" />
         </div>

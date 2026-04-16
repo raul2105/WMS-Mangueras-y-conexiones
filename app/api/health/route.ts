@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const service = "wms-scmayher";
-  const version = process.env.npm_package_version ?? "unknown";
+  const version = process.env.APP_VERSION ?? process.env.npm_package_version ?? "unknown";
   const timestamp = new Date().toISOString();
   const dbInfo =
     process.env.WMS_DB_PATH ??

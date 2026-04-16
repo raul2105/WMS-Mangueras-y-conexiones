@@ -41,17 +41,29 @@ export default function MobileNav({ open, pathname, modules, userName, userEmail
     };
   }, [open, onClose]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-nav-title">
+    <div
+      className={cn("fixed inset-0 z-50 md:hidden transition-[visibility] duration-150", open ? "visible" : "invisible")}
+      role="dialog"
+      aria-modal="true"
+      aria-hidden={!open}
+      aria-labelledby="mobile-nav-title"
+    >
       <button
         type="button"
         aria-label="Cerrar menu"
-        className="absolute inset-0 bg-black/40"
+        className={cn(
+          "absolute inset-0 bg-black/40 transition-opacity duration-150",
+          open ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
         onClick={onClose}
       />
-      <aside className="relative h-full w-[86%] max-w-[20rem] border-r border-[var(--border-subtle)] bg-[var(--shell-bg)] p-3 shadow-xl">
+      <aside
+        className={cn(
+          "relative h-full w-[86%] max-w-[20rem] border-r border-[var(--border-subtle)] bg-[var(--shell-bg)] p-3 shadow-xl transition-transform duration-150",
+          open ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
         <div className="mb-2 flex items-center justify-between border-b border-[var(--border-subtle)] px-2 pb-3 pt-1">
           <div>
             <p id="mobile-nav-title" className="text-sm font-semibold text-[var(--text-primary)]">WMS ERP</p>

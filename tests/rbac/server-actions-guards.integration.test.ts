@@ -35,4 +35,25 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(newOrderContent).toContain("requireSalesWriteAccess()");
     expect(detailContent).toContain("requireSalesWriteAccess()");
   });
+
+  it("request detail uses selected product ids for direct product lines", () => {
+    const detailContent = readWorkspaceFile("app/(shell)/production/requests/[id]/page.tsx");
+    const formContent = readWorkspaceFile("components/RequestProductLineForm.tsx");
+
+    expect(detailContent).toContain('formData.get("productId")');
+    expect(detailContent).not.toContain('formData.get("productQuery")');
+    expect(formContent).toContain('name="productId"');
+    expect(formContent).toContain("ProductSearchField");
+  });
+
+  it("product search wiring keeps direct request lines broad and assembly search typed", () => {
+    const directFormContent = readWorkspaceFile("components/RequestProductLineForm.tsx");
+    const assemblyFormContent = readWorkspaceFile("components/AssemblyConfiguratorForm.tsx");
+
+    expect(directFormContent).not.toContain('productType=');
+    expect(assemblyFormContent).toContain('productType="FITTING"');
+    expect(assemblyFormContent).toContain('productType="HOSE"');
+    expect(directFormContent).toContain('name="productId"');
+    expect(assemblyFormContent).toContain('fieldKey="assembly-entry-fitting"');
+  });
 });

@@ -16,19 +16,25 @@ foreach ($requiredPath in @($state.NodeExe, $state.AppServerPath)) {
 }
 
 if ($isAwsDbMode) {
-  if (-not $state.DatabaseUrl) {
-    $message = "WMS_DB_MODE=aws requiere DATABASE_URL (postgresql://...) definido antes de iniciar."
-    Write-OpsLog -State $state -Level "ERROR" -Message $message
-    throw $message
+  if (-not $state.DatabaseUrl -or -not ($state.DatabaseUrl -match "^postgres(ql)?://")) {
+    Write-Host ""
+    if (-not $state.DatabaseUrl) {
+      Write-Host "Primera configuracion: ingresa la URL de la base de datos central."
+    } else {
+      Write-Host "La URL de base de datos guardada no es valida. Reconfigura."
+    }
+    Write-Host "(Se guarda de forma permanente y no se volvera a pedir)"
+    Write-Host ""
+    $setupUrl = Invoke-AwsDatabaseSetup
+    if (-not $setupUrl) {
+      $message = "Configuracion cancelada. DATABASE_URL es requerida para iniciar WMS."
+      Write-OpsLog -State $state -Level "ERROR" -Message $message
+      throw $message
+    }
+    $databaseUrl = $setupUrl
+  } else {
+    $databaseUrl = $state.DatabaseUrl
   }
-
-  if (-not ($state.DatabaseUrl -match "^postgres(ql)?://")) {
-    $message = "DATABASE_URL invalido para modo aws. Se esperaba un URL PostgreSQL."
-    Write-OpsLog -State $state -Level "ERROR" -Message $message
-    throw $message
-  }
-
-  $databaseUrl = $state.DatabaseUrl
 } else {
   if (-not (Test-Path $state.DbPath)) {
     if (-not (Test-Path $state.BootstrapDbPath)) {
@@ -85,6 +91,8 @@ $env:NODE_ENV = "production"
 $env:NEXT_TELEMETRY_DISABLED = "1"
 $env:HOSTNAME = "127.0.0.1"
 $env:PORT = "$($state.Port)"
+$env:AUTH_SECRET = $state.AuthSecret
+$env:AUTH_TRUST_HOST = "true"
 $env:WMS_DATA_DIR = $state.DataDir
 $env:WMS_BACKUP_DIR = $state.BackupDir
 $env:WMS_LOG_DIR = $state.LogDir
@@ -101,6 +109,19 @@ if ($isAwsDbMode) {
 
 $dbLogTarget = if ($isAwsDbMode) { "AWS PostgreSQL" } else { $state.DbPath }
 Write-OpsLog -State $state -Message "Starting WMS (dbMode=$($state.DbMode)) with DB target: $dbLogTarget"
+
+# Sync environment
+$env:WMS_SYNC_ENABLED = "true"
+if ($state.SyncOutboundQueueUrl) {
+  $env:WMS_OUTBOUND_SYNC_QUEUE_URL = $state.SyncOutboundQueueUrl
+}
+if ($state.SyncInboundQueueUrl) {
+  $env:WMS_INBOUND_SYNC_QUEUE_URL = $state.SyncInboundQueueUrl
+}
+$env:AWS_REGION = $state.AwsRegion
+if ($state.MobileTablePrefix) {
+  $env:WMS_MOBILE_TABLE_PREFIX = $state.MobileTablePrefix
+}
 
 $process = Start-Process `
   -FilePath $state.NodeExe `
@@ -131,5 +152,10 @@ if (-not $healthy) {
 }
 
 Write-OpsLog -State $state -Message "WMS started (PID $($process.Id)). stdout=$stdoutLog stderr=$stderrLog"
+
+$syncStatus = if ($state.SyncOutboundQueueUrl -or $state.SyncInboundQueueUrl) { "activa" } else { "inactiva (sin URLs configuradas)" }
+Write-OpsLog -State $state -Message "Sincronizacion movil: $syncStatus"
+Write-Host "Sincronizacion movil: $syncStatus"
+
 Write-Host "WMS listo."
 Start-Process "$($state.BaseUrl)/"

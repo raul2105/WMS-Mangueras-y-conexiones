@@ -9,4 +9,10 @@ if not exist "%SCRIPT%" (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
-exit /b %ERRORLEVEL%
+if errorlevel 1 (
+  echo.
+  echo [ERROR] build-release fallo. Revisa el mensaje de arriba.
+  pause
+  exit /b %ERRORLEVEL%
+)
+exit /b 0

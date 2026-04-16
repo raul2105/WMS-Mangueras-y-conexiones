@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { isSystemAdmin, type PermissionCode, type RoleCode } from "@/lib/rbac/permissions";
 
 export class RbacPermissionError extends Error {
@@ -12,31 +12,26 @@ export class RbacPermissionError extends Error {
 }
 
 export async function getAuthSession() {
-  return auth();
+  return (await getSessionContext()).session;
 }
 
 export async function hasRole(role: RoleCode) {
-  const session = await auth();
-  const roles = session?.user?.roles ?? [];
+  const { roles } = await getSessionContext();
   return roles.includes(role);
 }
 
 export async function hasPermission(permission: PermissionCode) {
-  const session = await auth();
-  const roles = session?.user?.roles ?? [];
-  const permissions = session?.user?.permissions ?? [];
+  const { roles, permissions } = await getSessionContext();
   if (isSystemAdmin(roles)) return true;
   return permissions.includes(permission);
 }
 
 export async function requirePermission(permission: PermissionCode) {
-  const session = await auth();
-  if (!session?.user) {
+  const { session, roles, permissions, isAuthenticated } = await getSessionContext();
+  if (!isAuthenticated || !session?.user) {
     throw new RbacPermissionError("Authentication required");
   }
 
-  const roles = session.user.roles ?? [];
-  const permissions = session.user.permissions ?? [];
   if (isSystemAdmin(roles) || permissions.includes(permission)) {
     return session;
   }

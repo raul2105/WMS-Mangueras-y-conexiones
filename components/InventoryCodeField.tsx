@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import SkuScanner from "@/components/SkuScanner";
 
 type Props = {
@@ -45,6 +45,8 @@ export default function InventoryCodeField({
   const [remoteSuggestions, setRemoteSuggestions] = useState<ProductInfo[]>([]);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const lookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const lookupCacheRef = useRef(new Map<string, LookupResponse>());
   const listId = useId();
   const options = useMemo(() => {
     const source = suggestions ?? [];
@@ -56,29 +58,72 @@ export default function InventoryCodeField({
     return options.filter((option) => option.toLowerCase().includes(v)).slice(0, 8);
   }, [options, value]);
 
+  const clearPendingLookup = () => {
+    if (lookupTimerRef.current) {
+      clearTimeout(lookupTimerRef.current);
+      lookupTimerRef.current = null;
+    }
+    abortRef.current?.abort();
+    abortRef.current = null;
+  };
+
+  useEffect(
+    () => () => {
+      if (lookupTimerRef.current) {
+        clearTimeout(lookupTimerRef.current);
+        lookupTimerRef.current = null;
+      }
+      abortRef.current?.abort();
+      abortRef.current = null;
+    },
+    [],
+  );
+
   async function lookup(code: string) {
     if (!showDetails) return;
-    if (!code || code.trim().length < 2) {
+    const trimmed = code.trim();
+    if (!trimmed || trimmed.length < 3) {
+      abortRef.current?.abort();
       setInfo(null);
       setRemoteSuggestions([]);
       setLookupError(null);
       return;
     }
+
+    const cacheKey = trimmed.toLowerCase();
+    const cached = lookupCacheRef.current.get(cacheKey);
+    if (cached) {
+      setInfo(cached.selected ?? null);
+      setRemoteSuggestions(cached.suggestions ?? []);
+      setLookupError(!cached.selected && (cached.suggestions?.length ?? 0) === 0 ? "No se encontraron coincidencias." : null);
+      return;
+    }
+
     setLookupError(null);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const res = await fetch(`/api/products/lookup?code=${encodeURIComponent(code.trim())}`);
+      const res = await fetch(`/api/products/lookup?code=${encodeURIComponent(trimmed)}`, {
+        signal: controller.signal,
+      });
       if (!res.ok) {
         setInfo(null);
         setRemoteSuggestions([]);
         return;
       }
       const data = (await res.json()) as LookupResponse;
+      lookupCacheRef.current.set(cacheKey, data);
       setInfo(data.selected ?? null);
       setRemoteSuggestions(data.suggestions ?? []);
       if (!data.selected && (data.suggestions?.length ?? 0) === 0) {
         setLookupError("No se encontraron coincidencias.");
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return;
+      }
       setLookupError("No se pudo consultar el SKU.");
     }
   }
@@ -88,8 +133,8 @@ export default function InventoryCodeField({
       <SkuScanner
         onDetected={(text) => {
           setValue(text);
-          if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current);
-          lookupTimerRef.current = setTimeout(() => lookup(text), 300);
+          clearPendingLookup();
+          lookupTimerRef.current = setTimeout(() => lookup(text), 400);
         }}
       />
 
@@ -102,8 +147,8 @@ export default function InventoryCodeField({
           onChange={(e) => {
             const next = e.target.value;
             setValue(next);
-            if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current);
-            lookupTimerRef.current = setTimeout(() => lookup(next), 300);
+            clearPendingLookup();
+            lookupTimerRef.current = setTimeout(() => lookup(next), 400);
           }}
           list={options.length > 0 ? listId : undefined}
           className="w-full px-4 py-3 glass rounded-lg font-mono"
@@ -128,8 +173,8 @@ export default function InventoryCodeField({
               className="px-2 py-1 rounded border border-white/10 text-slate-300 hover:text-white hover:border-cyan-400/40"
               onClick={() => {
                 setValue(option);
-                if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current);
-                lookupTimerRef.current = setTimeout(() => lookup(option), 300);
+                clearPendingLookup();
+                lookupTimerRef.current = setTimeout(() => lookup(option), 400);
               }}
             >
               {option}
@@ -190,7 +235,7 @@ export default function InventoryCodeField({
               </div>
             </div>
           ) : (
-            <p className="text-slate-500">{lookupError ?? "Escribe SKU, referencia, nombre o marca para ver coincidencias."}</p>
+            <p className="text-slate-500">{lookupError ?? "Escribe al menos 3 caracteres para ver coincidencias."}</p>
           )}
         </div>
       )}

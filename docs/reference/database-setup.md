@@ -1,90 +1,35 @@
-# Manual de configuración de base de datos
+# Configuración de base de datos (dev local + AWS web)
 
-El proyecto usa Prisma con SQLite para desarrollo local. La base vive en `prisma/dev.db`.
+## Modo recomendado para desarrollo diario
 
-## Requisitos previos
+- `dev-local-launcher.cmd` usa PostgreSQL AWS (misma data de pruebas en tiempo real).
+- Requiere `DATABASE_URL` PostgreSQL en `.env`.
+- Prisma client esperado en launcher: `prisma/postgresql/schema.prisma`.
+- `DATABASE_URL` en `.env` puede declararse con o sin comillas (`DATABASE_URL=...` o `DATABASE_URL="..."`).
 
-- Estar en la raíz del proyecto `WMS-Mangueras-y-conexiones`.
-- Tener Node.js y npm instalados.
-
-## Verificar configuración
-
-Confirma que `prisma/schema.prisma` apunte a SQLite:
-
-```prisma
-datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
-}
-```
-
-## Generar Prisma Client
+### Inicio rápido (AWS DB)
 
 ```powershell
-npx prisma generate
+dev-local-launcher.cmd
 ```
 
-O usando el script del proyecto:
+Si `DATABASE_URL` no apunta a `postgresql://` el launcher se detiene por seguridad.
+Si falta o es invalida, el launcher ejecuta `maintenance\setup-aws.cmd`, reintenta lectura de `.env` y luego prueba `DATABASE_URL` de entorno de maquina antes de detenerse.
+
+## AWS web runtime
+
+- Schema: `prisma/postgresql/schema.prisma`.
+- Deploy/migraciones: `scripts/deploy/aws-web.ps1`.
+- El deploy ejecuta `prisma migrate deploy` y valida tablas base.
+
+## Modo SQLite (solo compatibilidad local)
+
+Se mantiene para pruebas aisladas o escenarios offline, pero no es el flujo principal de pruebas integradas.
+
+- Schema SQLite: `prisma/schema.prisma`.
+- Comandos manuales:
 
 ```powershell
-npm run prisma:generate
-```
-
-## Crear base y tablas
-
-Opción recomendada para entorno local:
-
-```powershell
-npm run db:setup
-```
-
-Alternativas:
-
-```powershell
-npm run db:migrate
-npm run db:push
-npm run db:seed
-```
-
-## Verificar la base
-
-Después del setup debe existir `prisma/dev.db`.
-
-Para inspeccionarla:
-
-```powershell
-npx prisma studio
-```
-
-O:
-
-```powershell
-npm run db:studio
-```
-
-Prisma Studio abre en `http://localhost:5555`.
-
-## Datos de ejemplo
-
-El seed crea:
-
-- 2 almacenes
-- ubicaciones operativas y de staging
-- productos de ejemplo
-- inventario inicial por ubicación
-
-Esto sirve para validar catálogo, recepción, picking y producción en local.
-
-## Troubleshooting
-
-Si aparecen errores de permisos o bloqueo del archivo:
-
-1. Cierra procesos que estén usando la base.
-2. Cierra Prisma Studio si está abierto.
-3. Reintenta `npm run db:setup`.
-
-Si Prisma Client queda desactualizado:
-
-```powershell
-npx prisma generate
+npx prisma generate --schema prisma/schema.prisma
+npx prisma db push --schema prisma/schema.prisma
 ```

@@ -5,13 +5,11 @@ import { useEffect, useState } from "react";
 import { MoonIcon, SunIcon } from "@/components/ui/icons";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-
-const STORAGE_KEY = "wms-theme";
-
-type Theme = "dark" | "light";
+import { THEME_COOKIE_KEY, THEME_STORAGE_KEY, type ThemePreference } from "@/lib/ui-preferences";
+type Theme = ThemePreference;
 
 function getPreferredTheme(): Theme {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (stored === "dark" || stored === "light") return stored;
   return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
     ? "light"
@@ -26,6 +24,7 @@ function getAppliedTheme(): Theme | null {
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute("data-theme", theme);
   document.documentElement.style.colorScheme = theme;
+  document.cookie = `${THEME_COOKIE_KEY}=${theme}; Path=/; Max-Age=31536000; SameSite=Lax`;
 }
 
 type ThemeToggleProps = {
@@ -44,7 +43,7 @@ export default function ThemeToggle({ compact = false, className }: ThemeToggleP
 
   useEffect(() => {
     applyTheme(theme);
-    window.localStorage.setItem(STORAGE_KEY, theme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
   const toggleTheme = () => {

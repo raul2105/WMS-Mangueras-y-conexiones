@@ -22,6 +22,16 @@ npm run build
 npm run dev
 ```
 
+Flujo local con base AWS en tiempo real:
+
+```bash
+dev-local-launcher.cmd
+```
+
+Notas del launcher AWS local:
+- Acepta `DATABASE_URL` en `.env` con o sin comillas.
+- Si la URL falta o es invalida, ejecuta automaticamente `maintenance\setup-aws.cmd`, reintenta `.env` y luego `DATABASE_URL` de entorno de maquina.
+
 Comandos operativos relevantes:
 
 ## 📁 Estructura del Proyecto
@@ -48,6 +58,7 @@ Comandos operativos relevantes:
 ### Desarrollo
 ```bash
 npm run dev              # Servidor de desarrollo (puerto 3002)
+npm run dev:webpack      # Fallback para diagnóstico con webpack
 npm run build            # Build de producción
 npm run start            # Servidor de producción
 npm run lint             # Linter (ESLint)
@@ -80,12 +91,14 @@ npm run mobile:staging:deploy
 ## Documentación
 
 - [Matriz de soporte de runtimes](./docs/runbooks/runtime-support-matrix.md)
+- [Guía de contraste y tokens](./docs/reference/theme-contrast-guide.md)
 - [Operación Windows portable](./docs/runbooks/windows-portable-install.md)
 - [Operación local Windows](./docs/runbooks/windows-local-operations.md)
+- [Deploy AWS web prod-ready](./docs/runbooks/aws-web-prod-deploy.md)
 - [Runbook de limpieza manual de ramas Git](./docs/runbooks/git-branch-cleanup.md)
 - [Base de datos y Prisma](./docs/reference/database-setup.md)
 - [Importación de productos CSV](./docs/reference/import-products-csv.md)
-- [Deploy AWS web](./docs/mobile/aws-deploy.md)
+- [Deploy AWS móvil](./docs/mobile/aws-deploy.md)
 - [Contratos mobile v1](./docs/mobile/v1-contracts.md)
 - [Estado real de capacidades WMS](./docs/WMS_CAPABILITIES_STATUS.md)
 - [Architecture Decision Records](./docs/ADR/README.md)

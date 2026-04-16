@@ -5,7 +5,6 @@ import { cn } from "@/lib/cn";
 import type { NavItem } from "@/components/layout/nav-config";
 import { MenuIcon, PanelCloseIcon, PanelOpenIcon, UserCircleIcon } from "@/components/ui/icons";
 import ThemeToggle from "@/components/ThemeToggle";
-import { signOut } from "next-auth/react";
 
 type Props = {
   activeModule: NavItem;
@@ -60,12 +59,11 @@ export default function AppTopbar({
               <p className="text-[11px] text-[var(--text-muted)]">{userEmail}</p>
             </div>
           </div>
-          <button
-            type="button"
+          <a
+            href="/logout"
             aria-label="Cerrar sesión"
             title="Cerrar sesión"
             className={cn(buttonStyles({ variant: "secondary", size: "sm" }))}
-            onClick={() => signOut({ callbackUrl: "/login" })}
           >
             <span className="hidden text-xs md:inline">Salir</span>
             <svg className="h-4 w-4 md:ml-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -73,7 +71,7 @@ export default function AppTopbar({
               <polyline points="16 17 21 12 16 7"/>
               <line x1="21" y1="12" x2="9" y2="12"/>
             </svg>
-          </button>
+          </a>
         </div>
       </div>
     </header>

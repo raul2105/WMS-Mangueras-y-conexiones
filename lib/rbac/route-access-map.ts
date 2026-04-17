@@ -32,6 +32,32 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR", "SALES_EXECUTIVE"],
   },
 
+  // ── Administración de usuarios ───────────────────────────────────────
+  {
+    route: "/users",
+    description: "Listado administrativo de usuarios del sistema",
+    permission: "users.manage",
+    roles: ["SYSTEM_ADMIN"],
+  },
+  {
+    route: "/users/new",
+    description: "Formulario para crear un nuevo usuario",
+    permission: "users.manage",
+    roles: ["SYSTEM_ADMIN"],
+  },
+  {
+    route: "/users/[id]",
+    description: "Detalle del usuario con estado, roles y reset de contraseña",
+    permission: "users.manage",
+    roles: ["SYSTEM_ADMIN"],
+  },
+  {
+    route: "/users/[id]/edit",
+    description: "Formulario para editar datos y roles del usuario",
+    permission: "users.manage",
+    roles: ["SYSTEM_ADMIN"],
+  },
+
   // ── Catálogo ───────────────────────────────────────────────────────────
   {
     route: "/catalog",

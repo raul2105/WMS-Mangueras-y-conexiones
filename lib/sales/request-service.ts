@@ -440,6 +440,7 @@ export async function createSalesRequestDraftHeader(
     dueDate: Date;
     notes?: string | null;
     requestedByUserId?: string | null;
+    requestedByRoles?: string[] | null;
   }
 ) {
   const perf = startPerf("sales.create_request_draft_header");
@@ -448,6 +449,12 @@ export async function createSalesRequestDraftHeader(
     const code = await getNextSalesInternalOrderCode(tx);
     codePerf.end({ code });
     const createPerf = startPerf("sales.create_request_draft_header.insert_order");
+    const shouldAutoAssignToRequester = Boolean(
+      args.requestedByUserId
+      && args.requestedByRoles?.includes("SALES_EXECUTIVE")
+      && !args.requestedByRoles?.includes("MANAGER")
+      && !args.requestedByRoles?.includes("SYSTEM_ADMIN")
+    );
     const created = await tx.salesInternalOrder.create({
       data: {
         code,
@@ -456,6 +463,8 @@ export async function createSalesRequestDraftHeader(
         dueDate: args.dueDate,
         notes: args.notes ?? null,
         requestedByUserId: args.requestedByUserId ?? null,
+        assignedToUserId: shouldAutoAssignToRequester ? args.requestedByUserId : null,
+        assignedAt: shouldAutoAssignToRequester ? new Date() : null,
       },
       select: { id: true, code: true },
     });
@@ -473,6 +482,7 @@ export async function createSalesRequestDraftHeader(
         customerName: args.customerName,
         warehouseId: args.warehouseId,
         dueDate: args.dueDate.toISOString(),
+        assignedToUserId: shouldAutoAssignToRequester ? args.requestedByUserId : null,
       },
     }, tx);
     auditPerf.end();
@@ -668,6 +678,210 @@ export async function deleteSalesRequestLine(
       after: {
         lineId: line.id,
         lineKind: line.lineKind,
+      },
+    }, tx);
+  });
+}
+
+export async function pullSalesRequestOrder(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    assignedToUserId: string;
+  }
+) {
+  return prisma.$transaction(async (tx) => {
+    const [order, assignee] = await Promise.all([
+      tx.salesInternalOrder.findUnique({
+        where: { id: args.orderId },
+        select: {
+          id: true,
+          code: true,
+          status: true,
+          assignedToUserId: true,
+          requestedByUser: {
+            select: {
+              id: true,
+              userRoles: {
+                where: {
+                  role: {
+                    code: "MANAGER",
+                    isActive: true,
+                  },
+                },
+                select: { roleId: true },
+              },
+            },
+          },
+        },
+      }),
+      tx.user.findUnique({
+        where: { id: args.assignedToUserId },
+        select: {
+          id: true,
+          isActive: true,
+          userRoles: {
+            where: {
+              role: {
+                code: "SALES_EXECUTIVE",
+                isActive: true,
+              },
+            },
+            select: { roleId: true },
+          },
+        },
+      }),
+    ]);
+
+    if (!order) {
+      throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    }
+    if (order.status === "CANCELADA") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede tomar un pedido cancelado");
+    }
+    if (order.assignedToUserId) {
+      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya está asignado");
+    }
+    if (!assignee || !assignee.isActive || assignee.userRoles.length === 0) {
+      throw new InventoryServiceError("INVALID_ASSIGNEE", "Solo un ejecutivo de ventas activo puede tomar el pedido");
+    }
+    if ((order.requestedByUser?.userRoles.length ?? 0) === 0) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se pueden tomar pedidos no asignados creados por manager");
+    }
+
+    const now = new Date();
+    const updated = await tx.salesInternalOrder.updateMany({
+      where: {
+        id: order.id,
+        assignedToUserId: null,
+        status: { not: "CANCELADA" },
+      },
+      data: {
+        assignedToUserId: args.assignedToUserId,
+        assignedAt: now,
+        pulledAt: now,
+      },
+    });
+    if (updated.count !== 1) {
+      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya fue tomado por otro usuario");
+    }
+
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "PULL_REQUEST",
+      actor: "system",
+      actorUserId: args.assignedToUserId,
+      source: "sales/request-service",
+      after: {
+        orderCode: order.code,
+        assignedToUserId: args.assignedToUserId,
+        assignedAt: now.toISOString(),
+      },
+    }, tx);
+  });
+}
+
+export async function markSalesRequestDelivered(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    deliveredByUserId: string;
+  }
+) {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        deliveredToCustomerAt: true,
+        lines: {
+          select: {
+            id: true,
+            lineKind: true,
+          },
+        },
+        pickLists: {
+          where: { status: { not: "CANCELLED" } },
+          orderBy: [
+            { updatedAt: "desc" },
+            { createdAt: "desc" },
+          ],
+          take: 1,
+          select: { id: true, status: true, code: true },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    }
+    if (order.status === "CANCELADA") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede marcar entregado un pedido cancelado");
+    }
+    if (order.status !== "CONFIRMADA") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se puede marcar entregado un pedido confirmado");
+    }
+    if (order.deliveredToCustomerAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya está marcado como entregado");
+    }
+
+    const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");
+    const hasAssemblyLines = order.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+
+    if (hasProductLines) {
+      const latestDirectPick = order.pickLists[0];
+      if (!latestDirectPick || latestDirectPick.status !== "COMPLETED") {
+        throw new InventoryServiceError(
+          "INVALID_ORDER_STATE",
+          "No se puede marcar entregado hasta completar el surtido directo del pedido"
+        );
+      }
+    }
+
+    if (hasAssemblyLines) {
+      const linkedProductionOrders = await tx.productionOrder.findMany({
+        where: {
+          sourceDocumentType: "SalesInternalOrder",
+          sourceDocumentId: order.id,
+          sourceDocumentLineId: {
+            in: order.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line) => line.id),
+          },
+        },
+        select: { id: true, status: true },
+      });
+
+      const expectedAssemblyLines = order.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+      if (linkedProductionOrders.length !== expectedAssemblyLines.length || linkedProductionOrders.some((row) => row.status !== "COMPLETADA")) {
+        throw new InventoryServiceError(
+          "INVALID_ORDER_STATE",
+          "No se puede marcar entregado hasta concluir todas las órdenes de ensamble ligadas"
+        );
+      }
+    }
+
+    const now = new Date();
+    await tx.salesInternalOrder.update({
+      where: { id: order.id },
+      data: {
+        deliveredToCustomerAt: now,
+        deliveredByUserId: args.deliveredByUserId,
+      },
+    });
+
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "MARK_DELIVERED_TO_CUSTOMER",
+      actor: "system",
+      actorUserId: args.deliveredByUserId,
+      source: "sales/request-service",
+      after: {
+        orderCode: order.code,
+        deliveredToCustomerAt: now.toISOString(),
+        deliveredByUserId: args.deliveredByUserId,
       },
     }, tx);
   });

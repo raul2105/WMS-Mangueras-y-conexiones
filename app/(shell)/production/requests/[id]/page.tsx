@@ -5,14 +5,19 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import RequestProductLineForm from "@/components/RequestProductLineForm";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
-import { requireSalesWriteAccess } from "@/lib/rbac/sales";
+import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
 import {
   addSalesRequestProductLine,
   cancelSalesRequestOrder,
   confirmSalesRequestOrder,
   deleteSalesRequestLine,
+  markSalesRequestDelivered,
+  pullSalesRequestOrder,
 } from "@/lib/sales/request-service";
+import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
+  getMarkDeliveredEligibility,
+  getTakeOrderEligibility,
   SALES_INTERNAL_ORDER_STATUS_LABELS,
   SALES_INTERNAL_ORDER_STATUS_STYLES,
   summarizePickListStatus,
@@ -116,6 +121,72 @@ async function cancelRequest(formData: FormData) {
   }
 }
 
+async function takeRequest(formData: FormData) {
+  "use server";
+  const perf = startPerf("action.production.requests.detail.pull");
+  const requestId = await getRequestId();
+  await requireSalesWriteAccess();
+  const sessionCtx = await getSessionContext();
+  const parsed = salesInternalOrderTransitionSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+  });
+  if (!parsed.success) {
+    redirect(`/production/requests?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+  if (!sessionCtx.user?.id) {
+    redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent("Sesión inválida para tomar pedido")}`);
+  }
+
+  try {
+    const servicePerf = startPerf("action.production.requests.detail.pull.service");
+    await pullSalesRequestOrder(prisma, {
+      orderId: parsed.data.orderId,
+      assignedToUserId: sessionCtx.user.id,
+    });
+    servicePerf.end({ requestId, orderId: parsed.data.orderId });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido tomado y asignado")}`);
+  } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "No se pudo tomar el pedido";
+    redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function markDelivered(formData: FormData) {
+  "use server";
+  const perf = startPerf("action.production.requests.detail.delivered");
+  const requestId = await getRequestId();
+  await requireSalesWriteAccess();
+  const sessionCtx = await getSessionContext();
+  const parsed = salesInternalOrderTransitionSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+  });
+  if (!parsed.success) {
+    redirect(`/production/requests?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+  if (!sessionCtx.user?.id) {
+    redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent("Sesión inválida para marcar entrega")}`);
+  }
+
+  try {
+    const servicePerf = startPerf("action.production.requests.detail.delivered.service");
+    await markSalesRequestDelivered(prisma, {
+      orderId: parsed.data.orderId,
+      deliveredByUserId: sessionCtx.user.id,
+    });
+    servicePerf.end({ requestId, orderId: parsed.data.orderId });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido marcado como entregado al cliente")}`);
+  } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "No se pudo marcar la entrega";
+    redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
 async function addProductLine(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.add_line");
@@ -200,9 +271,14 @@ export default async function ProductionRequestDetailPage({
   const { id } = await params;
   const sp = await searchParams;
   const sessionCtx = await getSessionContext();
+  const visibilityWhere = buildSalesRequestVisibilityWhere({
+    roles: sessionCtx.roles,
+    userId: sessionCtx.user?.id ?? null,
+    baseWhere: { id },
+  });
 
-  const order = await prisma.salesInternalOrder.findUnique({
-    where: { id },
+  const order = await prisma.salesInternalOrder.findFirst({
+    where: visibilityWhere,
     select: {
       id: true,
       code: true,
@@ -210,13 +286,33 @@ export default async function ProductionRequestDetailPage({
       customerName: true,
       dueDate: true,
       notes: true,
+      assignedToUserId: true,
+      assignedAt: true,
+      pulledAt: true,
+      deliveredToCustomerAt: true,
       createdAt: true,
       confirmedAt: true,
       cancelledAt: true,
       warehouse: { select: { id: true, code: true, name: true } },
-      requestedByUser: { select: { name: true, email: true } },
+      requestedByUser: {
+        select: {
+          name: true,
+          email: true,
+          userRoles: {
+            where: {
+              role: {
+                code: "MANAGER",
+                isActive: true,
+              },
+            },
+            select: { roleId: true },
+          },
+        },
+      },
+      assignedToUser: { select: { name: true, email: true } },
       confirmedByUser: { select: { name: true, email: true } },
       cancelledByUser: { select: { name: true, email: true } },
+      deliveredByUser: { select: { name: true, email: true } },
       pickLists: {
         orderBy: { createdAt: "desc" },
         select: {
@@ -316,9 +412,30 @@ export default async function ProductionRequestDetailPage({
 
   const canOperateDirectPick = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("production.execute");
   const latestPickList = order.pickLists[0] ?? null;
+  const isCreatedByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
+  const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
+  const takeEligibility = getTakeOrderEligibility({
+    roles: sessionCtx.roles,
+    status: order.status,
+    assignedToUserId: order.assignedToUserId,
+    isCreatedByManager,
+  });
 
   const productLines = order.lines.filter((line) => line.lineKind === "PRODUCT");
   const configuredLines = order.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+  const hasCompletedDirectPick = productLines.length === 0 || latestPickList?.status === "COMPLETED";
+  const expectedAssemblyLineIds = new Set(configuredLines.map((line) => line.id));
+  const hasCompletedConfiguredAssembly = configuredLines.length === 0
+    || (
+      linkedProductionOrders.length === configuredLines.length
+      && linkedProductionOrders.every((row) => expectedAssemblyLineIds.has(row.sourceDocumentLineId ?? "") && row.status === "COMPLETADA")
+    );
+  const deliveredEligibility = getMarkDeliveredEligibility({
+    status: order.status,
+    deliveredToCustomerAt: order.deliveredToCustomerAt,
+    hasCompletedDirectPick,
+    hasCompletedConfiguredAssembly,
+  });
 
   return (
     <div className="space-y-6">
@@ -347,10 +464,15 @@ export default async function ProductionRequestDetailPage({
         <div className="glass-card space-y-3 text-sm text-slate-300">
           <h2 className="text-lg font-semibold text-white">Resumen</h2>
           <p>Solicitado por: {order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}</p>
+          <p>Asignado a: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "--"}</p>
+          <p>Asignado el: {order.assignedAt ? new Date(order.assignedAt).toLocaleString("es-MX") : "--"}</p>
+          <p>Tomado el: {order.pulledAt ? new Date(order.pulledAt).toLocaleString("es-MX") : "--"}</p>
           <p>Fecha compromiso: {formatDate(order.dueDate)}</p>
           <p>Creado: {new Date(order.createdAt).toLocaleString("es-MX")}</p>
           <p>Confirmado: {order.confirmedAt ? new Date(order.confirmedAt).toLocaleString("es-MX") : "--"}</p>
           <p>Cancelado: {order.cancelledAt ? new Date(order.cancelledAt).toLocaleString("es-MX") : "--"}</p>
+          <p>Entregado al cliente: {order.deliveredToCustomerAt ? new Date(order.deliveredToCustomerAt).toLocaleString("es-MX") : "--"}</p>
+          <p>Entrega registrada por: {order.deliveredByUser?.name ?? order.deliveredByUser?.email ?? "--"}</p>
           {order.notes ? <p className="rounded-xl border border-white/10 bg-white/5 p-3 text-slate-300">{order.notes}</p> : null}
         </div>
 
@@ -372,6 +494,48 @@ export default async function ProductionRequestDetailPage({
                   Cancelar pedido
                 </button>
               </form>
+            ) : null}
+            {canRenderWriteActions ? (
+              <>
+                <div className="space-y-1">
+                  <form action={takeRequest}>
+                    <input type="hidden" name="orderId" value={order.id} />
+                    <button
+                      type="submit"
+                      disabled={!takeEligibility.canTakeOrder}
+                      className={`rounded-lg border px-4 py-2 text-sm ${
+                        takeEligibility.canTakeOrder
+                          ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:border-cyan-400/40 hover:text-white"
+                          : "cursor-not-allowed border-white/10 bg-white/5 text-slate-500"
+                      }`}
+                    >
+                      Tomar pedido
+                    </button>
+                  </form>
+                  {!takeEligibility.canTakeOrder ? (
+                    <p className="text-xs text-[var(--warning)]">{takeEligibility.takeBlockedReason}</p>
+                  ) : null}
+                </div>
+                <div className="space-y-1">
+                  <form action={markDelivered}>
+                    <input type="hidden" name="orderId" value={order.id} />
+                    <button
+                      type="submit"
+                      disabled={!deliveredEligibility.canMarkDelivered}
+                      className={`rounded-lg border px-4 py-2 text-sm ${
+                        deliveredEligibility.canMarkDelivered
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/40 hover:text-white"
+                          : "cursor-not-allowed border-white/10 bg-white/5 text-slate-500"
+                      }`}
+                    >
+                      Entregado al cliente
+                    </button>
+                  </form>
+                  {!deliveredEligibility.canMarkDelivered ? (
+                    <p className="text-xs text-[var(--warning)]">{deliveredEligibility.deliveredBlockedReason}</p>
+                  ) : null}
+                </div>
+              </>
             ) : null}
             {canOperateDirectPick && productLines.length > 0 ? (
               <Link href={`/production/fulfillment/${order.id}`} className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:border-cyan-400/40 hover:text-white">

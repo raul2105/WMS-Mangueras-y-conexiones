@@ -59,6 +59,7 @@ async function createSalesRequest(formData: FormData) {
       dueDate,
       notes: notes || null,
       requestedByUserId: ctx.user?.id ?? null,
+      requestedByRoles: ctx.roles,
     });
     createPerf.end({ orderId: created.id });
 

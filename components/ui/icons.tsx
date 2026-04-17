@@ -25,6 +25,17 @@ export function DashboardIcon(props: Props) {
   );
 }
 
+export function UsersIcon(props: Props) {
+  return (
+    <BaseIcon {...props}>
+      <path d="M16 21v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1" />
+      <circle cx="9.5" cy="8" r="3" />
+      <path d="M21 21v-1a4 4 0 0 0-3-3.9" />
+      <path d="M15 4.3a3 3 0 0 1 0 5.8" />
+    </BaseIcon>
+  );
+}
+
 export function BoxIcon(props: Props) {
   return (
     <BaseIcon {...props}>

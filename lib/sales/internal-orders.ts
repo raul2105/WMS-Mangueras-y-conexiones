@@ -96,3 +96,57 @@ export function summarizePickListStatus(status: string | null | undefined) {
       return status ?? "Sin surtido";
   }
 }
+
+type TakeOrderEligibilityInput = {
+  roles: string[];
+  status: SalesInternalOrderStatus;
+  assignedToUserId?: string | null;
+  isCreatedByManager: boolean;
+};
+
+export function getTakeOrderEligibility(input: TakeOrderEligibilityInput) {
+  if (!input.roles.includes("SALES_EXECUTIVE")) {
+    return { canTakeOrder: false, takeBlockedReason: "Solo un ejecutivo de ventas puede tomar el pedido" };
+  }
+
+  if (input.status === "CANCELADA") {
+    return { canTakeOrder: false, takeBlockedReason: "El pedido está cancelado" };
+  }
+
+  if (input.assignedToUserId) {
+    return { canTakeOrder: false, takeBlockedReason: "El pedido ya está asignado" };
+  }
+
+  if (!input.isCreatedByManager) {
+    return { canTakeOrder: false, takeBlockedReason: "Solo se pueden tomar pedidos creados por manager" };
+  }
+
+  return { canTakeOrder: true, takeBlockedReason: null };
+}
+
+type MarkDeliveredEligibilityInput = {
+  status: SalesInternalOrderStatus;
+  deliveredToCustomerAt?: Date | string | null;
+  hasCompletedDirectPick: boolean;
+  hasCompletedConfiguredAssembly: boolean;
+};
+
+export function getMarkDeliveredEligibility(input: MarkDeliveredEligibilityInput) {
+  if (input.deliveredToCustomerAt) {
+    return { canMarkDelivered: false, deliveredBlockedReason: "El pedido ya fue marcado como entregado" };
+  }
+
+  if (input.status !== "CONFIRMADA") {
+    return { canMarkDelivered: false, deliveredBlockedReason: "El pedido debe estar confirmado" };
+  }
+
+  if (!input.hasCompletedDirectPick) {
+    return { canMarkDelivered: false, deliveredBlockedReason: "El surtido directo debe estar completado" };
+  }
+
+  if (!input.hasCompletedConfiguredAssembly) {
+    return { canMarkDelivered: false, deliveredBlockedReason: "Todas las órdenes de ensamble ligadas deben estar completadas" };
+  }
+
+  return { canMarkDelivered: true, deliveredBlockedReason: null };
+}

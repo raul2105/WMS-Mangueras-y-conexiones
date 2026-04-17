@@ -3,7 +3,7 @@ import type { RoleCode } from "@/lib/rbac/permissions";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
 import { ROLE_HOME } from "@/lib/rbac/route-access-map";
 
-export type NavIcon = "dashboard" | "catalog" | "warehouse" | "inventory" | "sales" | "purchasing" | "production" | "audit";
+export type NavIcon = "dashboard" | "users" | "catalog" | "warehouse" | "inventory" | "sales" | "purchasing" | "production" | "audit";
 
 export type NavMatchMode = "exact" | "prefix";
 
@@ -23,6 +23,14 @@ const BASE_NAV_ITEMS: NavItem[] = [
     icon: "dashboard",
     description: "Resumen operativo de inventario, abastecimiento y ensamble.",
     match: "exact",
+  },
+  {
+    href: "/users",
+    label: "Usuarios",
+    icon: "users",
+    description: "Administracion de usuarios, roles y estado de acceso al sistema.",
+    match: "prefix",
+    requiredPermission: "users.manage",
   },
   {
     href: "/catalog",

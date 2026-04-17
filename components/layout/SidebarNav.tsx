@@ -13,11 +13,13 @@ import {
   ProductionIcon,
   PurchasingIcon,
   SalesIcon,
+  UsersIcon,
   WarehouseIcon,
 } from "@/components/ui/icons";
 
 const iconMap: Record<NavIcon, ComponentType<SVGProps<SVGSVGElement>>> = {
   dashboard: DashboardIcon,
+  users: UsersIcon,
   catalog: BoxIcon,
   warehouse: WarehouseIcon,
   inventory: InventoryIcon,

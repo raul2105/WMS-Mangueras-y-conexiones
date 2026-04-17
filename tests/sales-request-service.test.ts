@@ -3,11 +3,15 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { InventoryService } from "@/lib/inventory-service";
+import { releaseAssemblyPickList } from "@/lib/assembly/picking-service";
+import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   addSalesRequestProductLine,
   confirmSalesRequestOrder,
   confirmSalesRequestPickTasksBatch,
   createSalesRequestDraftHeader,
+  markSalesRequestDelivered,
+  pullSalesRequestOrder,
   releaseSalesRequestPickList,
 } from "@/lib/sales/request-service";
 
@@ -117,6 +121,39 @@ async function createRequestFixture() {
   });
 
   return { warehouse, storageA, storageB, staging, productA, productB, order };
+}
+
+async function ensureRole(code: string) {
+  return prisma.role.upsert({
+    where: { code },
+    update: { isActive: true, name: code },
+    create: { code, name: code, isActive: true },
+    select: { id: true },
+  });
+}
+
+async function createUserWithRole(args: { email: string; name: string; roleCode: "MANAGER" | "SALES_EXECUTIVE" }) {
+  const role = await ensureRole(args.roleCode);
+  const user = await prisma.user.upsert({
+    where: { email: args.email },
+    update: {
+      name: args.name,
+      isActive: true,
+      userRoles: {
+        deleteMany: {},
+        create: [{ roleId: role.id }],
+      },
+    },
+    create: {
+      email: args.email,
+      name: args.name,
+      passwordHash: "test-hash",
+      isActive: true,
+      userRoles: { create: [{ roleId: role.id }] },
+    },
+    select: { id: true, email: true, name: true },
+  });
+  return user;
 }
 
 beforeAll(async () => {
@@ -268,5 +305,254 @@ describe("sales request service", () => {
     expect(taskAfter?.shortQty).toBe(2);
     expect(taskAfter?.status).toBe("PARTIAL");
     expect(pickListAfter?.status).toBe("PARTIAL");
+  });
+
+  it("filters orders by customer and visibility for sales executive", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-visibility@scmayher.com",
+      name: "Manager Visibility",
+      roleCode: "MANAGER",
+    });
+    const salesA = await createUserWithRole({
+      email: "sales-a-visibility@scmayher.com",
+      name: "Sales A Visibility",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    const { warehouse } = await createRequestFixture();
+    const ownOrder = await createSalesRequestDraftHeader(prisma, {
+      customerName: "ACME INDUSTRIAL",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      requestedByUserId: salesA.id,
+      requestedByRoles: ["SALES_EXECUTIVE"],
+    });
+    await createSalesRequestDraftHeader(prisma, {
+      customerName: "BETA SERVICES",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    const visibleWhere = buildSalesRequestVisibilityWhere({
+      roles: ["SALES_EXECUTIVE"],
+      userId: salesA.id,
+      baseWhere: { customerName: { contains: "ACME" } },
+    });
+
+    const visibleOrders = await prisma.salesInternalOrder.findMany({
+      where: visibleWhere,
+      select: { id: true, customerName: true },
+    });
+
+    expect(visibleOrders).toHaveLength(1);
+    expect(visibleOrders[0]?.id).toBe(ownOrder.id);
+    expect(visibleOrders[0]?.customerName).toBe("ACME INDUSTRIAL");
+  });
+
+  it("allows sales executive to pull an unassigned manager order", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-pull@scmayher.com",
+      name: "Manager Pull",
+      roleCode: "MANAGER",
+    });
+    const sales = await createUserWithRole({
+      email: "sales-pull@scmayher.com",
+      name: "Sales Pull",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const { warehouse } = await createRequestFixture();
+
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Pull",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
+    });
+
+    const pulled = await prisma.salesInternalOrder.findUnique({
+      where: { id: order.id },
+      select: { assignedToUserId: true, assignedAt: true, pulledAt: true },
+    });
+
+    expect(pulled?.assignedToUserId).toBe(sales.id);
+    expect(pulled?.assignedAt).toBeTruthy();
+    expect(pulled?.pulledAt).toBeTruthy();
+  });
+
+  it("hides orders assigned to another sales executive", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-hide@scmayher.com",
+      name: "Manager Hide",
+      roleCode: "MANAGER",
+    });
+    const salesA = await createUserWithRole({
+      email: "sales-a-hide@scmayher.com",
+      name: "Sales A Hide",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const salesB = await createUserWithRole({
+      email: "sales-b-hide@scmayher.com",
+      name: "Sales B Hide",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const { warehouse } = await createRequestFixture();
+
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Oculto",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: salesA.id,
+    });
+
+    const visibleWhereSalesB = buildSalesRequestVisibilityWhere({
+      roles: ["SALES_EXECUTIVE"],
+      userId: salesB.id,
+      baseWhere: { id: order.id },
+    });
+
+    const visibleForSalesB = await prisma.salesInternalOrder.findMany({
+      where: visibleWhereSalesB,
+      select: { id: true },
+    });
+
+    expect(visibleForSalesB).toHaveLength(0);
+  });
+
+  it("allows releasing assembly pick list when source sales order is confirmed", async () => {
+    const { warehouse, staging, productA } = await createRequestFixture();
+    const source = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Ensamble",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-05T00:00:00.000Z"),
+    });
+    await addSalesRequestProductLine(prisma, {
+      orderId: source.id,
+      productId: productA.id,
+      requestedQty: 1,
+    });
+    await confirmSalesRequestOrder(prisma, { orderId: source.id });
+
+    const production = await prisma.productionOrder.create({
+      data: {
+        code: "SOE-TEST-RELEASE-01",
+        kind: "ASSEMBLY_3PIECE",
+        status: "ABIERTA",
+        warehouseId: warehouse.id,
+        sourceDocumentType: "SalesInternalOrder",
+        sourceDocumentId: source.id,
+      },
+      select: { id: true },
+    });
+
+    const workOrder = await prisma.assemblyWorkOrder.create({
+      data: {
+        productionOrderId: production.id,
+        warehouseId: warehouse.id,
+        wipLocationId: staging.id,
+      },
+      select: { id: true },
+    });
+
+    const pickList = await prisma.pickList.create({
+      data: {
+        code: "PK-ASM-REL-01",
+        assemblyWorkOrderId: workOrder.id,
+        status: "DRAFT",
+      },
+      select: { id: true },
+    });
+
+    await releaseAssemblyPickList(prisma, production.id);
+
+    const releasedPickList = await prisma.pickList.findUnique({
+      where: { id: pickList.id },
+      select: { status: true },
+    });
+
+    expect(releasedPickList?.status).toBe("RELEASED");
+  });
+
+  it("rejects delivered mark before direct pick is completed", async () => {
+    const { order, productA } = await createRequestFixture();
+    const sales = await createUserWithRole({
+      email: "sales-deliver-block@scmayher.com",
+      name: "Sales Deliver Block",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 4,
+      notes: "Entrega no permitida",
+    });
+
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+    await releaseSalesRequestPickList(prisma, order.id);
+
+    await expect(
+      markSalesRequestDelivered(prisma, {
+        orderId: order.id,
+        deliveredByUserId: sales.id,
+      })
+    ).rejects.toMatchObject({ code: "INVALID_ORDER_STATE" });
+  });
+
+  it("marks order delivered when direct fulfillment is completed", async () => {
+    const { order, productA } = await createRequestFixture();
+    const sales = await createUserWithRole({
+      email: "sales-deliver-ok@scmayher.com",
+      name: "Sales Deliver OK",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 4,
+      notes: "Entrega permitida",
+    });
+
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+    await releaseSalesRequestPickList(prisma, order.id);
+
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    expect(pickList?.tasks.length).toBe(1);
+
+    await confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador entrega",
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 4 }],
+    });
+
+    await markSalesRequestDelivered(prisma, {
+      orderId: order.id,
+      deliveredByUserId: sales.id,
+    });
+
+    const delivered = await prisma.salesInternalOrder.findUnique({
+      where: { id: order.id },
+      select: { deliveredToCustomerAt: true, deliveredByUserId: true },
+    });
+
+    expect(delivered?.deliveredToCustomerAt).toBeTruthy();
+    expect(delivered?.deliveredByUserId).toBe(sales.id);
   });
 });

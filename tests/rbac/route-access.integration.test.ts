@@ -12,6 +12,10 @@ function canAccess(role: RoleCode, pathname: string) {
 
 describe("rbac role-route access matrix", () => {
   const criticalRoutes = [
+    "/users",
+    "/users/new",
+    "/users/abc",
+    "/users/abc/edit",
     "/inventory/adjust",
     "/inventory/transfer",
     "/inventory/pick",
@@ -23,6 +27,10 @@ describe("rbac role-route access matrix", () => {
   ] as const;
 
   it("maps critical routes to expected permissions", () => {
+    expect(getRequiredPermissionForPath("/users")).toBe("users.manage");
+    expect(getRequiredPermissionForPath("/users/new")).toBe("users.manage");
+    expect(getRequiredPermissionForPath("/users/abc")).toBe("users.manage");
+    expect(getRequiredPermissionForPath("/users/abc/edit")).toBe("users.manage");
     expect(getRequiredPermissionForPath("/inventory/adjust")).toBe("inventory.adjust");
     expect(getRequiredPermissionForPath("/inventory/transfer")).toBe("inventory.transfer");
     expect(getRequiredPermissionForPath("/inventory/pick")).toBe("inventory.pick");
@@ -54,6 +62,7 @@ describe("rbac role-route access matrix", () => {
   });
 
   it("SALES_EXECUTIVE cannot access physical inventory routes or audit", () => {
+    expect(canAccess("SALES_EXECUTIVE", "/users")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/inventory/adjust")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/inventory/transfer")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/inventory/pick")).toBe(false);
@@ -85,5 +94,8 @@ describe("rbac role-route access matrix", () => {
     });
 
     expect(adminsWithUsersManage).toEqual(["SYSTEM_ADMIN"]);
+    expect(canAccess("MANAGER", "/users")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/users")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/users")).toBe(false);
   });
 });

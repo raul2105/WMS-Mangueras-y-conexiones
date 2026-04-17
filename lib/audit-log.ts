@@ -8,6 +8,7 @@ type AuditPayload = {
   before?: unknown;
   after?: unknown;
   actor?: string | null;
+  actorUserId?: string | null;
   source?: string | null;
 };
 
@@ -31,6 +32,7 @@ export async function createAuditLog(payload: AuditPayload, db: AuditDb = prisma
       before: safeStringify(payload.before),
       after: safeStringify(payload.after),
       actor: payload.actor ?? null,
+      actorUserId: payload.actorUserId ?? null,
       source: payload.source ?? null,
     },
   });

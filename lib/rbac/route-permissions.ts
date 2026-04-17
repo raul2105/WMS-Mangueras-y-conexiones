@@ -7,6 +7,10 @@ type RoutePermissionRule = {
 
 // Keep most specific prefixes first.
 export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
+  { prefix: "/users/new", permission: "users.manage" },
+  { prefix: "/users/", permission: "users.manage" },
+  { prefix: "/users", permission: "users.manage" },
+
   { prefix: "/catalog/new", permission: "catalog.edit" },
   { prefix: "/catalog/import", permission: "catalog.edit" },
   { prefix: "/catalog/", permission: "catalog.view" },

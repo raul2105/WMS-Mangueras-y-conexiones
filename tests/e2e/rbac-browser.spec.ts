@@ -16,7 +16,7 @@ const EXPECTED_HOME: Record<RoleKey, string> = {
 };
 
 const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navItems: number }> = {
-  SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 7 },
+  SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 8 },
   MANAGER: { name: "Manager WMS", email: "manager@scmayher.com", navItems: 7 },
   WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 4 },
   SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 3 },
@@ -84,6 +84,7 @@ test.describe("RBAC en navegador por rol", () => {
 
   test("SYSTEM_ADMIN puede acceder a rutas criticas", async ({ page }) => {
     await loginAs(page, "SYSTEM_ADMIN");
+    await expectAllowed(page, "/users", /Usuarios/i);
     await expectAllowed(page, "/inventory/adjust", /Ajuste de Inventario/i);
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
@@ -92,6 +93,7 @@ test.describe("RBAC en navegador por rol", () => {
 
   test("MANAGER puede acceder a inventario critico y auditoria", async ({ page }) => {
     await loginAs(page, "MANAGER");
+    await expectForbidden(page, "/users");
     await expectAllowed(page, "/inventory/adjust", /Ajuste de Inventario/i);
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
@@ -100,6 +102,7 @@ test.describe("RBAC en navegador por rol", () => {
 
   test("WAREHOUSE_OPERATOR no accede a auditoria pero si a operaciones fisicas", async ({ page }) => {
     await loginAs(page, "WAREHOUSE_OPERATOR");
+    await expectForbidden(page, "/users");
     await expectAllowed(page, "/inventory/adjust", /Ajuste de Inventario/i);
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
@@ -108,6 +111,7 @@ test.describe("RBAC en navegador por rol", () => {
 
   test("SALES_EXECUTIVE no accede a ajustes, transferencias, picking ni auditoria", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
+    await expectForbidden(page, "/users");
     await expectForbidden(page, "/inventory/adjust");
     await expectForbidden(page, "/inventory/transfer");
     await expectForbidden(page, "/inventory/pick");

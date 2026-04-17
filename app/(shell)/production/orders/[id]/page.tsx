@@ -23,12 +23,6 @@ async function releaseAssemblyPick(formData: FormData) {
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
 
-  const sessionCtx = await getSessionContext();
-  const roles = sessionCtx.roles;
-  if (roles.includes("WAREHOUSE_OPERATOR")) {
-    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("El rol Operador de almacén no puede liberar surtido de ensamble")}`);
-  }
-
   try {
     await releaseAssemblyPickList(prisma, orderId);
   } catch (error) {
@@ -416,15 +410,12 @@ export default async function ProductionOrderDetailPage({
           select: { id: true, status: true, code: true },
         })
       : null;
-  const isWarehouseOperator = sessionCtx.roles.includes("WAREHOUSE_OPERATOR");
   const hasValidSalesSource = order.sourceDocumentType === "SalesInternalOrder" && Boolean(order.sourceDocumentId);
   const isSourceConfirmed = sourceSalesOrder?.status === "CONFIRMADA";
   const releaseBlockedReason =
     order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"
       ? "El surtido ya fue liberado o procesado"
-      : isWarehouseOperator
-        ? "El rol Operador de almacén no puede liberar surtido de ensamble"
-        : !hasValidSalesSource
+      : !hasValidSalesSource
           ? "La orden no tiene pedido de origen vinculado"
           : !sourceSalesOrder
             ? "No se encontró el pedido de origen vinculado"

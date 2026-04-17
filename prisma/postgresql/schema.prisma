@@ -22,6 +22,8 @@ model User {
   requestedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderRequestedBy")
   confirmedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderConfirmedBy")
   cancelledSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderCancelledBy")
+  assignedSalesOrders  SalesInternalOrder[] @relation("SalesInternalOrderAssignedTo")
+  deliveredSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderDeliveredBy")
 
   inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
   traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
@@ -512,9 +514,14 @@ model SalesInternalOrder {
   requestedByUserId String?
   confirmedByUserId String?
   cancelledByUserId String?
+  assignedToUserId String?
+  deliveredByUserId String?
 
   confirmedAt DateTime?
   cancelledAt DateTime?
+  assignedAt DateTime?
+  pulledAt DateTime?
+  deliveredToCustomerAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -522,11 +529,15 @@ model SalesInternalOrder {
   requestedByUser User? @relation("SalesInternalOrderRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
   confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
   cancelledByUser User? @relation("SalesInternalOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  assignedToUser User? @relation("SalesInternalOrderAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  deliveredByUser User? @relation("SalesInternalOrderDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
   lines SalesInternalOrderLine[]
   pickLists SalesInternalOrderPickList[]
 
   @@index([status, createdAt])
   @@index([requestedByUserId])
+  @@index([assignedToUserId])
+  @@index([deliveredToCustomerAt])
   @@index([warehouseId])
 }
 

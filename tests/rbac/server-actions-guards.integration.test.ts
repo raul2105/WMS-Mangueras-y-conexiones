@@ -28,6 +28,28 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(content).toContain('pageGuard("audit.view")');
   });
 
+  it("users pages are protected by users.manage page guard", () => {
+    const listContent = readWorkspaceFile("app/(shell)/users/page.tsx");
+    const newContent = readWorkspaceFile("app/(shell)/users/new/page.tsx");
+    const detailContent = readWorkspaceFile("app/(shell)/users/[id]/page.tsx");
+    const editContent = readWorkspaceFile("app/(shell)/users/[id]/edit/page.tsx");
+
+    expect(listContent).toContain('pageGuard("users.manage")');
+    expect(newContent).toContain('pageGuard("users.manage")');
+    expect(detailContent).toContain('pageGuard("users.manage")');
+    expect(editContent).toContain('pageGuard("users.manage")');
+  });
+
+  it("users server actions enforce users.manage", () => {
+    const newContent = readWorkspaceFile("app/(shell)/users/new/page.tsx");
+    const detailContent = readWorkspaceFile("app/(shell)/users/[id]/page.tsx");
+    const editContent = readWorkspaceFile("app/(shell)/users/[id]/edit/page.tsx");
+
+    expect(newContent).toContain('requirePermission("users.manage")');
+    expect(detailContent).toContain('requirePermission("users.manage")');
+    expect(editContent).toContain('requirePermission("users.manage")');
+  });
+
   it("request write flows use write guard helper", () => {
     const newOrderContent = readWorkspaceFile("app/(shell)/production/requests/new/page.tsx");
     const detailContent = readWorkspaceFile("app/(shell)/production/requests/[id]/page.tsx");
@@ -55,5 +77,12 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(assemblyFormContent).toContain('productType="HOSE"');
     expect(directFormContent).toContain('name="productId"');
     expect(assemblyFormContent).toContain('fieldKey="assembly-entry-fitting"');
+  });
+
+  it("assembly release action no longer blocks warehouse operator by hardcoded role check", () => {
+    const productionOrderDetail = readWorkspaceFile("app/(shell)/production/orders/[id]/page.tsx");
+
+    expect(productionOrderDetail).toContain("releaseAssemblyPickList(prisma, orderId)");
+    expect(productionOrderDetail).not.toContain("Operador de almacén no puede liberar surtido de ensamble");
   });
 });

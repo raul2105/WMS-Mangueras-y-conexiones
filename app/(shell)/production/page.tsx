@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Prisma, ProductionOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
+import { isProductionOpsFilter, type ProductionOpsFilter } from "@/lib/dashboard/fulfillment-dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,13 @@ const STATUS_LABELS: Record<string, string> = {
   EN_PROCESO: "En proceso",
   COMPLETADA: "Completada",
   CANCELADA: "Cancelada",
+};
+
+const OPS_LABELS: Record<ProductionOpsFilter, string> = {
+  direct_active: "Surtidos directos activos",
+  assembly_open: "Ensambles abiertos",
+  assembly_blocked: "Ensambles bloqueados",
+  at_risk: "Ordenes en riesgo",
 };
 
 const ACTIVE_DIRECT_PICK_STATUSES = ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] as const;
@@ -32,6 +40,7 @@ function formatDateTime(value: Date | string | null | undefined) {
 type SearchParams = {
   status?: string;
   page?: string;
+  ops?: string;
 };
 
 export default async function ProductionPage({
@@ -44,7 +53,38 @@ export default async function ProductionPage({
   const statusCandidate = sp.status?.trim();
   const statusFilter: ProductionOrderStatus | undefined =
     statusCandidate && statusCandidate in STATUS_LABELS ? (statusCandidate as ProductionOrderStatus) : undefined;
-  const where: Prisma.ProductionOrderWhereInput | undefined = statusFilter ? { status: statusFilter } : undefined;
+  const opsFilter = isProductionOpsFilter(sp.ops) ? sp.ops : undefined;
+
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+
+  const andConditions: Prisma.ProductionOrderWhereInput[] = [];
+  if (statusFilter) {
+    andConditions.push({ status: statusFilter });
+  }
+
+  if (opsFilter === "assembly_open") {
+    andConditions.push({ status: { in: ["BORRADOR", "ABIERTA", "EN_PROCESO"] } });
+  } else if (opsFilter === "assembly_blocked") {
+    andConditions.push({
+      status: { in: ["BORRADOR", "ABIERTA", "EN_PROCESO"] },
+      assemblyWorkOrder: {
+        is: {
+          OR: [
+            { pickStatus: "NOT_RELEASED" },
+            { hasShortage: true },
+          ],
+        },
+      },
+    });
+  } else if (opsFilter === "at_risk") {
+    andConditions.push({
+      status: { in: ["BORRADOR", "ABIERTA", "EN_PROCESO"] },
+      dueDate: { lte: todayEnd },
+    });
+  }
+
+  const where: Prisma.ProductionOrderWhereInput | undefined = andConditions.length > 0 ? { AND: andConditions } : undefined;
 
   const [orders, totalCount, filteredCount, statusCounts, activeDirectPickOrders] = await Promise.all([
     prisma.productionOrder.findMany({
@@ -60,7 +100,7 @@ export default async function ProductionPage({
         customerName: true,
         priority: true,
         dueDate: true,
-        assemblyWorkOrder: { select: { id: true } },
+        assemblyWorkOrder: { select: { id: true, pickStatus: true, hasShortage: true } },
         warehouse: { select: { id: true, name: true, code: true } },
       },
     }),
@@ -75,7 +115,7 @@ export default async function ProductionPage({
         },
       },
       orderBy: { updatedAt: "desc" },
-      take: 10,
+      take: opsFilter === "direct_active" ? 50 : 10,
       select: {
         id: true,
         code: true,
@@ -101,9 +141,10 @@ export default async function ProductionPage({
   const safePage = Math.min(currentPage, totalPages);
   const statusCountMap = Object.fromEntries(statusCounts.map((row) => [row.status, row._count.status]));
 
-  const buildHref = (page: number) => {
+  const buildHref = (page: number, status = statusFilter, ops = opsFilter) => {
     const params = new URLSearchParams();
-    if (statusFilter) params.set("status", statusFilter);
+    if (status) params.set("status", status);
+    if (ops) params.set("ops", ops);
     if (page > 1) params.set("page", String(page));
     const query = params.toString();
     return query ? `/production?${query}` : "/production";
@@ -113,13 +154,32 @@ export default async function ProductionPage({
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Producción de Ensambles</h1>
-          <p className="text-slate-400 mt-1">Configuración exacta, reserva, surtido, WIP y consumo final.</p>
+          <h1 className="text-3xl font-bold">Produccion de ensambles</h1>
+          <p className="text-slate-400 mt-1">Configuracion exacta, reserva, surtido, WIP y consumo final.</p>
+          {opsFilter ? <p className="text-xs text-cyan-300 mt-1">Filtro operativo activo: {OPS_LABELS[opsFilter]}</p> : null}
         </div>
         <div className="flex gap-3">
           <Link href="/production/orders/new" className="btn-primary">+ Nueva orden de ensamble</Link>
-          <Link href="/production/orders/new/generic" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">+ Nueva Genérica</Link>
+          <Link href="/production/orders/new/generic" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">+ Nueva Generica</Link>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href={buildHref(1, statusFilter, undefined)}
+          className={`px-3 py-1.5 rounded-lg text-sm glass ${!opsFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+        >
+          Operacion normal
+        </Link>
+        {(Object.keys(OPS_LABELS) as ProductionOpsFilter[]).map((ops) => (
+          <Link
+            key={ops}
+            href={buildHref(1, statusFilter, ops)}
+            className={`px-3 py-1.5 rounded-lg text-sm glass ${opsFilter === ops ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+          >
+            {OPS_LABELS[ops]}
+          </Link>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -129,7 +189,7 @@ export default async function ProductionPage({
         </div>
         <div className="glass p-4 rounded-xl">
           <p className="text-xs text-slate-400 uppercase font-bold">2. Configurar</p>
-          <p className="text-slate-300 mt-2">Selecciona conexión entrada, manguera y conexión salida con stock exacto.</p>
+          <p className="text-slate-300 mt-2">Selecciona conexion entrada, manguera y conexion salida con stock exacto.</p>
         </div>
         <div className="glass p-4 rounded-xl">
           <p className="text-xs text-slate-400 uppercase font-bold">3. Ejecutar</p>
@@ -142,7 +202,7 @@ export default async function ProductionPage({
           <div>
             <h2 className="text-lg font-bold">Surtidos directos activos</h2>
             <p className="text-sm text-slate-400 mt-1">
-              Top 10 pedidos con picking independiente en curso.
+              {opsFilter === "direct_active" ? "Vista ampliada de surtidos directos activos." : "Top 10 pedidos con picking independiente en curso."}
             </p>
           </div>
           <Link href="/production/requests" className="text-sm text-cyan-300 hover:text-white">
@@ -209,7 +269,7 @@ export default async function ProductionPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/production"
+              href={buildHref(1, undefined, opsFilter)}
               className={`px-3 py-1.5 rounded-lg text-sm glass ${!statusFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
             >
               Todas ({totalCount})
@@ -217,7 +277,7 @@ export default async function ProductionPage({
             {Object.entries(STATUS_LABELS).map(([key, label]) => (
               <Link
                 key={key}
-                href={`/production?status=${key}`}
+                href={buildHref(1, key as ProductionOrderStatus, opsFilter)}
                 className={`px-3 py-1.5 rounded-lg text-sm glass ${statusFilter === key ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
               >
                 {label} ({statusCountMap[key] ?? 0})

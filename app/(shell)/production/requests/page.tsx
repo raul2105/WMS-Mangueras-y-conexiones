@@ -16,15 +16,33 @@ import {
   SALES_INTERNAL_ORDER_STATUS_STYLES,
 } from "@/lib/sales/internal-orders";
 import { buildSalesRequestVisibilityWhere, canManageAllSalesRequests } from "@/lib/sales/visibility";
+import {
+  evaluateFulfillmentSignals,
+  isFulfillmentQueueFilter,
+  matchQueueFilter,
+  type FulfillmentQueueFilter,
+} from "@/lib/dashboard/fulfillment-dashboard";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
+const STALE_HOURS = 4;
+const OPEN_ASSEMBLY_STATUSES = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO"]);
+
+const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
+  overdue: "Vencidos",
+  today: "Vencen hoy",
+  partial: "Parciales",
+  stale: "Sin movimiento",
+  unreleased: "Sin liberar",
+  assembly_blocked: "Ensamble bloqueado",
+};
 
 type SearchParams = {
   status?: string;
   page?: string;
   customer?: string;
+  queue?: string;
   ok?: string;
   error?: string;
 };
@@ -44,10 +62,11 @@ function isNextRedirectError(error: unknown) {
   );
 }
 
-function buildReturnHref(args: { status?: SalesInternalOrderStatus; customer?: string; page: number }) {
+function buildReturnHref(args: { status?: SalesInternalOrderStatus; customer?: string; queue?: FulfillmentQueueFilter; page: number }) {
   const params = new URLSearchParams();
   if (args.status) params.set("status", args.status);
   if (args.customer) params.set("customer", args.customer);
+  if (args.queue) params.set("queue", args.queue);
   if (args.page > 1) params.set("page", String(args.page));
   const qs = params.toString();
   return qs ? `/production/requests?${qs}` : "/production/requests";
@@ -70,7 +89,7 @@ async function takeRequestFromList(formData: FormData) {
   }
 
   if (!sessionCtx.user?.id) {
-    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("Sesión inválida para tomar pedido")}`);
+    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("Sesion invalida para tomar pedido")}`);
   }
 
   try {
@@ -100,6 +119,7 @@ export default async function ProductionRequestsPage({
   const currentPage = parsePage(sp.page);
   const statusFilter: SalesInternalOrderStatus | undefined =
     sp.status === "BORRADOR" || sp.status === "CONFIRMADA" || sp.status === "CANCELADA" ? sp.status : undefined;
+  const queueFilter = isFulfillmentQueueFilter(sp.queue) ? sp.queue : undefined;
   const customerFilter = (sp.customer ?? "").trim();
 
   const baseWhere: Prisma.SalesInternalOrderWhereInput = {
@@ -115,36 +135,8 @@ export default async function ProductionRequestsPage({
     ? { AND: [visibleWhere, { status: statusFilter }] }
     : visibleWhere;
 
-  const [orders, totalCount, filteredCount, groupedStatuses, linkedAssemblyCount, directPickCount] = await Promise.all([
-    prisma.salesInternalOrder.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip: (currentPage - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      select: {
-        id: true,
-        code: true,
-        status: true,
-        customerName: true,
-        dueDate: true,
-        assignedToUserId: true,
-        warehouse: { select: { code: true, name: true } },
-        requestedByUser: {
-          select: {
-            name: true,
-            email: true,
-            userRoles: {
-              where: { role: { code: "MANAGER", isActive: true } },
-              select: { roleId: true },
-            },
-          },
-        },
-        assignedToUser: { select: { name: true, email: true } },
-        _count: { select: { lines: true, pickLists: true } },
-      },
-    }),
+  const [totalCount, groupedStatuses, linkedAssemblyCount, directPickCount] = await Promise.all([
     prisma.salesInternalOrder.count({ where: visibleWhere }),
-    prisma.salesInternalOrder.count({ where }),
     prisma.salesInternalOrder.groupBy({ by: ["status"], _count: { status: true }, where: visibleWhere }),
     prisma.salesInternalOrder.count({
       where: {
@@ -166,16 +158,152 @@ export default async function ProductionRequestsPage({
     }),
   ]);
 
+  const orderSelect = {
+    id: true,
+    code: true,
+    status: true,
+    customerName: true,
+    dueDate: true,
+    assignedToUserId: true,
+    updatedAt: true,
+    warehouse: { select: { code: true, name: true } },
+    requestedByUser: {
+      select: {
+        name: true,
+        email: true,
+        userRoles: {
+          where: { role: { code: "MANAGER", isActive: true } },
+          select: { roleId: true },
+        },
+      },
+    },
+    assignedToUser: { select: { name: true, email: true } },
+    _count: { select: { lines: true, pickLists: true } },
+    lines: { select: { id: true, lineKind: true } },
+    pickLists: {
+      where: { status: { not: "CANCELLED" } },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      take: 1,
+      select: { status: true, updatedAt: true },
+    },
+  } satisfies Prisma.SalesInternalOrderSelect;
+
+  let orders: Array<Prisma.SalesInternalOrderGetPayload<{ select: typeof orderSelect }>> = [];
+  let filteredCount = 0;
+
+  if (queueFilter) {
+    const queueCandidates = await prisma.salesInternalOrder.findMany({
+      where,
+      select: {
+        id: true,
+        dueDate: true,
+        updatedAt: true,
+        assignedToUserId: true,
+        lines: { select: { id: true, lineKind: true } },
+        pickLists: {
+          where: { status: { not: "CANCELLED" } },
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 1,
+          select: { status: true, updatedAt: true },
+        },
+      },
+    });
+
+    const candidateIds = queueCandidates.map((row) => row.id);
+    const linkedProduction = candidateIds.length
+      ? await prisma.productionOrder.findMany({
+          where: {
+            sourceDocumentType: "SalesInternalOrder",
+            sourceDocumentId: { in: candidateIds },
+          },
+          select: {
+            sourceDocumentId: true,
+            sourceDocumentLineId: true,
+            status: true,
+            updatedAt: true,
+          },
+        })
+      : [];
+
+    const linkedByOrder = new Map<string, typeof linkedProduction>();
+    for (const row of linkedProduction) {
+      const orderId = row.sourceDocumentId ?? "";
+      if (!orderId) continue;
+      const bucket = linkedByOrder.get(orderId);
+      if (bucket) {
+        bucket.push(row);
+      } else {
+        linkedByOrder.set(orderId, [row]);
+      }
+    }
+
+    const now = new Date();
+    const matchedIds = queueCandidates
+      .filter((candidate) => {
+        const latestPick = candidate.pickLists[0] ?? null;
+        const assemblyLineIds = new Set(candidate.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line) => line.id));
+        const linkedForOrder = (linkedByOrder.get(candidate.id) ?? []).filter((row) => (row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false));
+        const linkedAssemblyOpen = linkedForOrder.filter((row) => OPEN_ASSEMBLY_STATUSES.has(row.status)).length;
+        const latestAssemblyUpdatedAt = linkedForOrder
+          .map((row) => row.updatedAt)
+          .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+        const signals = evaluateFulfillmentSignals({
+          dueDate: candidate.dueDate,
+          orderUpdatedAt: candidate.updatedAt,
+          assignedToUserId: candidate.assignedToUserId,
+          hasProductLines: candidate.lines.some((line) => line.lineKind === "PRODUCT"),
+          hasAssemblyLines: candidate.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY"),
+          latestPickStatus: latestPick?.status ?? null,
+          latestPickUpdatedAt: latestPick?.updatedAt ?? null,
+          linkedAssemblyTotal: linkedForOrder.length,
+          linkedAssemblyOpen,
+          linkedAssemblyUpdatedAt: latestAssemblyUpdatedAt,
+          now,
+          staleHours: STALE_HOURS,
+        });
+        return matchQueueFilter(signals, queueFilter);
+      })
+      .map((row) => row.id);
+
+    filteredCount = matchedIds.length;
+    const totalPagesForQueue = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
+    const safeCandidatePage = Math.min(currentPage, totalPagesForQueue);
+    const pagedIds = matchedIds.slice((safeCandidatePage - 1) * PAGE_SIZE, safeCandidatePage * PAGE_SIZE);
+
+    orders = pagedIds.length
+      ? await prisma.salesInternalOrder.findMany({
+          where: { id: { in: pagedIds } },
+          select: orderSelect,
+        })
+      : [];
+
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    orders = pagedIds.map((id) => orderById.get(id)).filter((row): row is Prisma.SalesInternalOrderGetPayload<{ select: typeof orderSelect }> => Boolean(row));
+  } else {
+    [orders, filteredCount] = await Promise.all([
+      prisma.salesInternalOrder.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (currentPage - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        select: orderSelect,
+      }),
+      prisma.salesInternalOrder.count({ where }),
+    ]);
+  }
+
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const statusCountMap = Object.fromEntries(groupedStatuses.map((row) => [row.status, row._count.status]));
   const managerOrAdmin = canManageAllSalesRequests(sessionCtx.roles);
   const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
 
-  const buildHref = (page: number, status = statusFilter) => {
+  const buildHref = (page: number, status = statusFilter, queue = queueFilter) => {
     return buildReturnHref({
       status,
       customer: customerFilter || undefined,
+      queue,
       page,
     });
   };
@@ -184,8 +312,8 @@ export default async function ProductionRequestsPage({
     <div className="space-y-6">
       <PageHeader
         title="Pedidos de surtido"
-        description="Captura mixta de productos y ensambles configurados dentro del módulo de ensamble."
-        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos`}
+        description="Captura mixta de productos y ensambles configurados dentro del modulo de ensamble."
+        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}`}
         actions={
           <>
             <Link href="/production/availability" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
@@ -225,6 +353,7 @@ export default async function ProductionRequestsPage({
 
       <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">
         {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}
+        {queueFilter ? <input type="hidden" name="queue" value={queueFilter} /> : null}
         <label className="flex-1 space-y-1">
           <span className="text-sm text-slate-400">Filtrar por cliente</span>
           <input
@@ -239,20 +368,35 @@ export default async function ProductionRequestsPage({
           <button type="submit" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-200 hover:text-white">
             Filtrar
           </button>
-          <Link href={buildHref(1, undefined)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
+          <Link href={buildHref(1, undefined, undefined)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
             Limpiar
           </Link>
         </div>
       </form>
 
       <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, undefined)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!statusFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+        <Link href={buildHref(1, statusFilter, undefined)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!queueFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+          Todos por atender
+        </Link>
+        {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map((queue) => (
+          <Link
+            key={queue}
+            href={buildHref(1, statusFilter, queue)}
+            className={`rounded-lg px-3 py-1.5 text-sm glass ${queueFilter === queue ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+          >
+            {QUEUE_LABELS[queue]}
+          </Link>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Link href={buildHref(1, undefined, queueFilter)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!statusFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
           Todos ({totalCount})
         </Link>
         {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(([status, label]) => (
           <Link
             key={status}
-            href={buildHref(1, status as SalesInternalOrderStatus)}
+            href={buildHref(1, status as SalesInternalOrderStatus, queueFilter)}
             className={`rounded-lg px-3 py-1.5 text-sm glass ${statusFilter === status ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
           >
             {label} ({statusCountMap[status] ?? 0})
@@ -264,14 +408,14 @@ export default async function ProductionRequestsPage({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-white/10 text-slate-400">
-              <th className="py-3 text-left">Código</th>
+              <th className="py-3 text-left">Codigo</th>
               <th className="py-3 text-left">Cliente</th>
               <th className="py-3 text-left">Estado</th>
-              <th className="py-3 text-left">Almacén</th>
+              <th className="py-3 text-left">Almacen</th>
               <th className="py-3 text-left">Solicitado por</th>
               <th className="py-3 text-left">Asignado a</th>
               <th className="py-3 text-left">Entrega</th>
-              <th className="py-3 text-right">Líneas</th>
+              <th className="py-3 text-right">Lineas</th>
               <th className="py-3 text-left">Acciones</th>
             </tr>
           </thead>
@@ -358,7 +502,7 @@ export default async function ProductionRequestsPage({
           <Link href={buildHref(Math.max(1, safePage - 1))} className={`rounded-lg border border-white/10 px-4 py-2 ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}>
             ← Anterior
           </Link>
-          <span className="text-slate-500">Página {safePage} de {totalPages}</span>
+          <span className="text-slate-500">Pagina {safePage} de {totalPages}</span>
           <Link href={buildHref(Math.min(totalPages, safePage + 1))} className={`rounded-lg border border-white/10 px-4 py-2 ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}>
             Siguiente →
           </Link>

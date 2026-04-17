@@ -62,6 +62,7 @@ foreach ($toolPath in $toolPaths) {
 $env:AWS_PROFILE = $Profile
 $env:AWS_PAGER = ""
 $env:WMS_ENV = $Environment
+$env:AWS_SDK_LOAD_CONFIG = "1"
 
 function Write-Phase {
     param(
@@ -169,6 +170,27 @@ function Assert-ProdConfigSafe {
     $officeIp = [string]$Config.officeIpCidr
     if (-not $officeIp -or $officeIp -eq "0.0.0.0/0" -or $officeIp -eq "CHANGE_ME/32") {
         throw "Configuración insegura para prod: officeIpCidr debe estar restringido y no puede ser '$officeIp'."
+    }
+}
+
+function Set-AwsSdkCredentialsFromProfile {
+    param([string]$CurrentProfile)
+
+    $raw = aws configure export-credentials --profile $CurrentProfile --format process 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudo exportar credenciales del profile '$CurrentProfile': $raw"
+    }
+
+    $credentials = $raw | ConvertFrom-Json
+    if (-not $credentials.AccessKeyId -or -not $credentials.SecretAccessKey -or -not $credentials.SessionToken) {
+        throw "Credenciales exportadas incompletas para profile '$CurrentProfile'."
+    }
+
+    $env:AWS_ACCESS_KEY_ID = [string]$credentials.AccessKeyId
+    $env:AWS_SECRET_ACCESS_KEY = [string]$credentials.SecretAccessKey
+    $env:AWS_SESSION_TOKEN = [string]$credentials.SessionToken
+    if ($credentials.Expiration) {
+        $env:AWS_CREDENTIAL_EXPIRATION = [string]$credentials.Expiration
     }
 }
 
@@ -564,6 +586,7 @@ $restoreDefaultClient = $false
 $config = Load-WebConfig -TargetEnvironment $Environment
 $resolvedStackName = if ($StackName) { $StackName } else { [string]$config.stackName }
 $resolvedLambdaFunctionName = if ($LambdaFunctionName) { $LambdaFunctionName } else { "$($config.namePrefix)-server" }
+$webRuntimeEnabled = ($null -eq $config.enableWebRuntime) -or [bool]$config.enableWebRuntime
 
 try {
     Write-Host "`n=== WMS AWS Deploy ($Environment) ===" -ForegroundColor Cyan
@@ -573,6 +596,9 @@ try {
     try {
         $identity = aws sts get-caller-identity --output json 2>&1 | ConvertFrom-Json
         Write-Host "  Account: $($identity.Account) | ARN: $($identity.Arn)"
+        $env:CDK_DEFAULT_ACCOUNT = [string]$identity.Account
+        $env:CDK_DEFAULT_REGION = [string]$config.region
+        Set-AwsSdkCredentialsFromProfile -CurrentProfile $Profile
     } catch {
         throw "AWS credentials expired or unavailable. Run: aws sso login --profile $Profile"
     }
@@ -581,22 +607,32 @@ try {
     Write-Host "  Region: $($config.region)"
     Write-Host "  Stack: $resolvedStackName"
     Write-Host "  Lambda: $resolvedLambdaFunctionName"
+    Write-Host "  enableWebRuntime: $webRuntimeEnabled"
     Write-Host "  officeIpCidr: $($config.officeIpCidr)"
 
     Write-Phase "2" "Preparing Prisma client and OpenNext build..."
-    Use-AwsPrismaClient
-    $restoreDefaultClient = $true
-
-    if (-not $SkipBuild) {
-        Invoke-Checked -Command "npx @opennextjs/aws build" -FailureMessage "OpenNext build failed"
+    $needsAwsPrismaClient = $webRuntimeEnabled -or (-not $SkipMigrate)
+    if ($needsAwsPrismaClient) {
+        Use-AwsPrismaClient
+        $restoreDefaultClient = $true
     } else {
-        Write-Host "  Skipping build (using existing .open-next/)"
-        if (-not (Test-Path $openNextDir)) {
-            throw ".open-next/ not found. Run without -SkipBuild."
-        }
+        Write-Host "  Skipping AWS Prisma client generation (no web runtime and migrations skipped)."
     }
 
-    Remove-WindowsPrismaArtifacts -TargetDir $prismaClientDir
+    if ($webRuntimeEnabled) {
+        if (-not $SkipBuild) {
+            Invoke-Checked -Command "npx @opennextjs/aws build" -FailureMessage "OpenNext build failed"
+        } else {
+            Write-Host "  Skipping build (using existing .open-next/)"
+            if (-not (Test-Path $openNextDir)) {
+                throw ".open-next/ not found. Run without -SkipBuild."
+            }
+        }
+
+        Remove-WindowsPrismaArtifacts -TargetDir $prismaClientDir
+    } else {
+        Write-Host "  Web runtime disabled; skipping OpenNext build and bundle pruning."
+    }
 
     $stackExists = Test-StackExists -CurrentStackName $resolvedStackName
     $outputsBeforeDeploy = @{}
@@ -620,7 +656,11 @@ try {
     Invoke-CdkDeploy -WorkingDirectory $cdkDir -CurrentEnvironment $Environment
 
     $outputsAfterDeploy = Get-StackOutputsMap -CurrentStackName $resolvedStackName
-    Assert-RequiredOutputs -OutputsMap $outputsAfterDeploy -Keys @("CloudFrontUrl", "DbSecretArn", "RdsEndpoint", "RdsPort", "NextAuthSecretArn")
+    if ($webRuntimeEnabled) {
+        Assert-RequiredOutputs -OutputsMap $outputsAfterDeploy -Keys @("CloudFrontUrl", "DbSecretArn", "RdsEndpoint", "RdsPort", "NextAuthSecretArn")
+    } else {
+        Assert-RequiredOutputs -OutputsMap $outputsAfterDeploy -Keys @("DbSecretArn", "RdsEndpoint", "RdsPort", "NextAuthSecretArn")
+    }
 
     if (-not $SkipMigrate -and -not $stackExists) {
         Write-Phase "3b" "Applying DB migrations after bootstrap deploy..."
@@ -628,31 +668,42 @@ try {
         Invoke-Migrations -DatabaseUrl $databaseUrl -SchemaPath $awsPrismaSchemaPath
     }
 
-    Write-Phase "5" "Reconciling Lambda environment variables..."
-    $cloudFrontUrl = $outputsAfterDeploy["CloudFrontUrl"]
-    Write-Host "  CloudFront URL: $cloudFrontUrl"
-    Update-LambdaEnvironment `
-        -CurrentLambdaFunctionName $resolvedLambdaFunctionName `
-        -CloudFrontUrl $cloudFrontUrl `
-        -OutputsMap $outputsAfterDeploy
+    if ($webRuntimeEnabled) {
+        Write-Phase "5" "Reconciling Lambda environment variables..."
+        $cloudFrontUrl = $outputsAfterDeploy["CloudFrontUrl"]
+        Write-Host "  CloudFront URL: $cloudFrontUrl"
+        Update-LambdaEnvironment `
+            -CurrentLambdaFunctionName $resolvedLambdaFunctionName `
+            -CloudFrontUrl $cloudFrontUrl `
+            -OutputsMap $outputsAfterDeploy
 
-    Write-Phase "6" "Running smoke checks..."
-    Write-Host "  Expected prod protections: deletionProtection=$([bool]($config.environment -eq 'prod'))"
-    Write-Host "  Expected DB secret resolved: $($outputsAfterDeploy['DbSecretArn'])"
+        Write-Phase "6" "Running smoke checks..."
+        Write-Host "  Expected prod protections: deletionProtection=$([bool]($config.environment -eq 'prod'))"
+        Write-Host "  Expected DB secret resolved: $($outputsAfterDeploy['DbSecretArn'])"
 
-    try {
-        $response = Invoke-WebRequest -Uri "$cloudFrontUrl/api/health" -UseBasicParsing
-        $health = $response.Content | ConvertFrom-Json
-        Write-Host "  Health: ok=$($health.ok) | db=$($health.db)"
-    } catch {
-        Write-Warning "Health check failed for $cloudFrontUrl/api/health. Cold start or runtime issue may need review."
+        try {
+            $response = Invoke-WebRequest -Uri "$cloudFrontUrl/api/health" -UseBasicParsing
+            $health = $response.Content | ConvertFrom-Json
+            Write-Host "  Health: ok=$($health.ok) | db=$($health.db)"
+        } catch {
+            Write-Warning "Health check failed for $cloudFrontUrl/api/health. Cold start or runtime issue may need review."
+        }
+
+        Invoke-AuthSmokeCheck -BaseUrl $cloudFrontUrl -Email $SmokeAuthEmail -Password $SmokeAuthPassword
+    } else {
+        Write-Phase "5" "Web runtime disabled; skipping Lambda env reconciliation..."
+        Write-Host "  Runtime web deshabilitado para este ambiente."
+        Write-Phase "6" "Web runtime disabled; skipping web/auth smoke..."
+        Write-Host "  Expected DB secret resolved: $($outputsAfterDeploy['DbSecretArn'])"
     }
-
-    Invoke-AuthSmokeCheck -BaseUrl $cloudFrontUrl -Email $SmokeAuthEmail -Password $SmokeAuthPassword
 
     Write-Host "`n=== Deploy complete ===" -ForegroundColor Green
     Write-Host "  Environment: $Environment" -ForegroundColor Green
-    Write-Host "  URL: $cloudFrontUrl" -ForegroundColor Green
+    if ($webRuntimeEnabled) {
+        Write-Host "  URL: $($outputsAfterDeploy['CloudFrontUrl'])" -ForegroundColor Green
+    } else {
+        Write-Host "  URL: N/A (web runtime disabled)" -ForegroundColor Green
+    }
 } finally {
     if ($restoreDefaultClient) {
         Write-Host "`n[cleanup] Restoring default SQLite Prisma client..." -ForegroundColor Yellow

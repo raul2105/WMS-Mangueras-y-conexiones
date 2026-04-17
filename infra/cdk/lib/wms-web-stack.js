@@ -34,6 +34,8 @@ class WmsWebStack extends Stack {
 
     const config = props.webConfig;
     const prefix = config.namePrefix;
+    const enableWebRuntime = config.enableWebRuntime !== false;
+    const serverInVpc = config.serverInVpc !== false;
 
     // ─── VPC ──────────────────────────────────────────────────────────
     // Public-only subnets (no NAT Gateway = $0).
@@ -59,12 +61,15 @@ class WmsWebStack extends Stack {
       allowAllOutbound: false,
     });
 
-    const lambdaSecurityGroup = new ec2.SecurityGroup(this, "LambdaSecurityGroup", {
-      vpc,
-      securityGroupName: `${prefix}-lambda-sg`,
-      description: "Allow WMS Lambdas to reach PostgreSQL and VPC endpoints",
-      allowAllOutbound: true,
-    });
+    const lambdaSecurityGroup =
+      enableWebRuntime && serverInVpc
+        ? new ec2.SecurityGroup(this, "LambdaSecurityGroup", {
+            vpc,
+            securityGroupName: `${prefix}-lambda-sg`,
+            description: "Allow WMS Lambdas to reach PostgreSQL and VPC endpoints",
+            allowAllOutbound: true,
+          })
+        : undefined;
 
     // Allow from office IP
     if (config.officeIpCidr && config.officeIpCidr !== "0.0.0.0/0") {
@@ -82,11 +87,13 @@ class WmsWebStack extends Stack {
       );
     }
 
-    dbSecurityGroup.addIngressRule(
-      lambdaSecurityGroup,
-      ec2.Port.tcp(5432),
-      "PostgreSQL from WMS Lambda security group"
-    );
+    if (lambdaSecurityGroup) {
+      dbSecurityGroup.addIngressRule(
+        lambdaSecurityGroup,
+        ec2.Port.tcp(5432),
+        "PostgreSQL from WMS Lambda security group"
+      );
+    }
 
     vpc.addGatewayEndpoint("S3Endpoint", {
       service: ec2.GatewayVpcEndpointAwsService.S3,
@@ -240,6 +247,15 @@ class WmsWebStack extends Stack {
     });
 
     // ─── OpenNext / Lambda / CloudFront ───────────────────────────────
+    if (!enableWebRuntime) {
+      console.log("INFO: Web runtime disabled by config (enableWebRuntime=false).");
+      this.dbSecurityGroup = dbSecurityGroup;
+      this.vpc = vpc;
+      this.dbInstance = dbInstance;
+      this.dbCredentials = dbCredentials;
+      return;
+    }
+
     // Only deploy if the .open-next build output exists
     // projectRoot = repo root (infra/cdk/lib/../../..)
     const projectRoot = path.join(__dirname, "..", "..", "..");
@@ -304,6 +320,14 @@ class WmsWebStack extends Stack {
       Number(config.serverReservedConcurrency) > 0
         ? Number(config.serverReservedConcurrency)
         : undefined;
+    const webLambdaNetworkProps = serverInVpc
+      ? {
+          vpc,
+          vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+          allowPublicSubnet: true,
+          securityGroups: lambdaSecurityGroup ? [lambdaSecurityGroup] : undefined,
+        }
+      : {};
 
     // ─── Server Lambda ────────────────────────────────────────────────
     const serverFn = new lambda.Function(this, "ServerFunction", {
@@ -319,10 +343,7 @@ class WmsWebStack extends Stack {
         : {}),
       timeout: Duration.seconds(30),
       tracing: lambda.Tracing.ACTIVE,
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      allowPublicSubnet: true,
-      securityGroups: [lambdaSecurityGroup],
+      ...webLambdaNetworkProps,
       environment: {
         NODE_ENV: "production",
         APP_VERSION: packageJson.version || "unknown",
@@ -362,10 +383,7 @@ class WmsWebStack extends Stack {
       code: lambda.Code.fromAsset(path.join(projectRoot, imageOriginMeta.bundle)),
       memorySize: 512,
       timeout: Duration.seconds(25),
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      allowPublicSubnet: true,
-      securityGroups: [lambdaSecurityGroup],
+      ...webLambdaNetworkProps,
       environment: {
         BUCKET_NAME: assetsBucket.bucketName,
         BUCKET_KEY_PREFIX: "_assets",

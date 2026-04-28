@@ -1,3 +1,9 @@
+## Ticket Jira
+
+- KAN-__
+
+> Obligatorio. Todo PR debe referenciar al menos un ticket Jira `KAN-##` en titulo, rama o descripcion.
+
 ## Resumen
 
 Describe claramente que cambia y por que.
@@ -17,14 +23,21 @@ Modulos o rutas impactadas:
 
 - 
 
+## Base de datos
+
+- [ ] No aplica
+- [ ] Usa PostgreSQL canonico (`prisma/postgresql/schema.prisma`)
+- [ ] Incluye migracion PostgreSQL en `prisma/postgresql/migrations`
+- [ ] Verifique impacto de datos y rollback
+
 ## Checklist de calidad
 
 - [ ] Ejecute npm run lint
-- [ ] Ejecute npx tsc --noEmit
+- [ ] Ejecute npm run typecheck
 - [ ] Ejecute npm run build
-- [ ] Ejecute npx prisma validate
-- [ ] Revise impactos en migraciones o datos (si aplica)
-- [ ] Actualice documentacion (si aplica)
+- [ ] Ejecute npm run prisma:validate
+- [ ] Ejecute npm run test
+- [ ] Actualice documentacion afectada
 
 ## Evidencia de validacion
 

@@ -12,12 +12,12 @@
     "start": "next start -p 3002",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "node scripts/db/run-vitest-sqlite.cjs run",
+    "test": "node scripts/db/run-vitest-postgresql.cjs run",
     "smoke:published": "node scripts/smoke/published-links.cjs",
     "smoke:mobile-auth": "node scripts/smoke/validate-mobile-auth.cjs",
-    "test:rbac": "vitest run tests/rbac",
-    "test:rbac:unit": "vitest run tests/rbac/permissions.test.ts tests/rbac/require-permission.test.ts",
-    "test:rbac:integration": "vitest run tests/rbac/route-access.integration.test.ts tests/rbac/server-actions-guards.integration.test.ts tests/rbac/fixtures.integration.test.ts",
+    "test:rbac": "node scripts/db/run-vitest-postgresql.cjs run tests/rbac",
+    "test:rbac:unit": "node scripts/db/run-vitest-postgresql.cjs run tests/rbac/permissions.test.ts tests/rbac/require-permission.test.ts",
+    "test:rbac:integration": "node scripts/db/run-vitest-postgresql.cjs run tests/rbac/route-access.integration.test.ts tests/rbac/server-actions-guards.integration.test.ts tests/rbac/fixtures.integration.test.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
@@ -29,12 +29,12 @@
     "prisma:generate:aws": "node scripts/db/generate-aws-prisma-client.cjs",
     "verify:release": "npm run prisma:validate && npm run prisma:generate && npm run typecheck && npm run test && npm run build",
     "build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\release\\build-release.ps1",
-    "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push --accept-data-loss",
+    "db:migrate": "prisma migrate dev --schema prisma/postgresql/schema.prisma",
+    "db:push": "prisma db push --schema prisma/postgresql/schema.prisma --accept-data-loss",
     "db:setup": "npm run db:push && npm run db:seed",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset --force",
+    "db:studio": "prisma studio --schema prisma/postgresql/schema.prisma",
+    "db:reset": "prisma migrate reset --schema prisma/postgresql/schema.prisma --force",
     "import:products": "node scripts/data/import-products-from-csv.cjs",
     "link:product-images": "node scripts/data/link-product-images-from-folder.cjs",
     "populate:subcategories": "node scripts/data/populate-product-subcategories.cjs",
@@ -85,3 +85,5 @@
     "vitest": "^3.2.4"
   }
 }
+
+

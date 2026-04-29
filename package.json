@@ -33,7 +33,8 @@
     "db:push": "prisma db push --schema prisma/postgresql/schema.prisma --accept-data-loss",
     "db:setup": "npm run db:push && npm run db:seed",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio --schema prisma/postgresql/schema.prisma",`r`n    "db:reset": "prisma migrate reset --schema prisma/postgresql/schema.prisma --force",
+    "db:studio": "prisma studio --schema prisma/postgresql/schema.prisma",
+    "db:reset": "prisma migrate reset --schema prisma/postgresql/schema.prisma --force",
     "import:products": "node scripts/data/import-products-from-csv.cjs",
     "link:product-images": "node scripts/data/link-product-images-from-folder.cjs",
     "populate:subcategories": "node scripts/data/populate-product-subcategories.cjs",
@@ -84,4 +85,5 @@
     "vitest": "^3.2.4"
   }
 }
+
 

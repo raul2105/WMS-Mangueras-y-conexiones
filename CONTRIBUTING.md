@@ -7,56 +7,53 @@ Este repositorio usa un flujo basado en ramas cortas, Pull Request obligatoria y
 - Mantener main siempre desplegable.
 - Reducir ruido de historial con un commit por PR en main.
 - Estandarizar la limpieza manual de ramas sin perder trabajo activo.
-- Mantener trazabilidad obligatoria entre Jira, GitHub y cambios productivos.
-
-## Base tecnica obligatoria
-
-PostgreSQL es la base de datos canonica del proyecto.
-
-- Schema canonico: `prisma/postgresql/schema.prisma`.
-- Migraciones canonicas: `prisma/postgresql/migrations`.
-- Todo comando operativo debe usar `DATABASE_URL` PostgreSQL.
-- SQLite queda como legado/offline y no debe usarse como runtime, pruebas integradas ni fuente de verdad.
 
 ## Ramas
 
 - main: rama estable.
 - develop: integracion continua opcional.
-- feature/KAN-##-descripcion: trabajo funcional.
-- fix/KAN-##-descripcion: correccion o estabilizacion.
-- hotfix/KAN-##-descripcion: correcciones urgentes.
-- docs/KAN-##-descripcion: cambios de documentacion.
+- feature/KAN-[id]-descripcion-corta: trabajo funcional ligado a Jira.
+- hotfix/[descripcion]: correcciones urgentes.
+- docs/[descripcion]: cambios de documentacion.
 
 ## Politica para Pull Request a main
 
 1. Crear rama desde main actualizada.
-2. Usar ticket Jira obligatorio en la rama, titulo o descripcion (`KAN-##`).
-3. Implementar cambios y mantener commits pequenos y claros en la rama.
-4. Verificar localmente antes de abrir PR:
+2. Implementar cambios y mantener commits pequenos y claros en la rama.
+3. Verificar localmente antes de abrir PR:
    - npm run lint
-   - npm run typecheck
+   - npx tsc --noEmit
    - npm run build
-   - npm run prisma:validate
-   - npm run test
-5. Confirmar que `DATABASE_URL` apunta a PostgreSQL.
-6. Abrir PR hacia main usando la plantilla oficial.
-7. Esperar checks de CI en verde (Code Quality Checks y Security Audit).
-8. Resolver comentarios de revision cuando aplique.
-9. Hacer merge unicamente con Squash merge.
+   - npx prisma validate
+4. Abrir PR hacia main usando la plantilla oficial.
+5. Publicar en Jira el comentario de hito "revision" con URL del PR.
+6. Esperar checks de CI en verde (Code Quality Checks y Security Audit).
+7. Resolver comentarios de revision cuando aplique.
+8. Hacer merge unicamente con Squash merge.
+9. Publicar en Jira el comentario de cierre con SHA final y evidencia.
 10. Confirmar eliminacion automatica de la rama remota despues del merge.
-11. Actualizar el ticket Jira relacionado con evidencia, PR y estado real.
+
+## Convencion Jira-GitHub obligatoria
+
+- Rama: `feature/KAN-<id>-<slug-corto>`.
+- Commit: `KAN-xx: <mensaje>`.
+- Titulo PR: `KAN-xx | <resumen>`.
+- Estado Jira esperado:
+  - `En curso` al iniciar rama.
+  - `En revision` al abrir PR.
+  - `Hecho` solo tras merge + checks verdes + evidencia publicada.
 
 ## Convencion de titulos
 
-Formato recomendado:
+Se recomienda este formato para mejorar el mensaje de squash commit:
 
-- tipo(KAN-##): resumen corto
+- tipo(scope): resumen corto
 
 Ejemplos:
 
-- feat(KAN-48): integrar clientes formales en pedidos
-- fix(KAN-29): consolidar PostgreSQL como runtime canonico
-- docs(KAN-8): sincronizar estado real WMS
+- feat(inventory): agregar ajuste por lote
+- fix(catalog): corregir filtro por referencia
+- docs(runbook): actualizar pasos de recuperacion
 
 ## Reglas de proteccion recomendadas para main
 
@@ -79,11 +76,10 @@ Configurar en GitHub Branch Protection:
 
 1. git checkout main
 2. git pull
-3. git checkout -b feature/KAN-48-clientes-pedidos
+3. git checkout -b feature/KAN-123-ajuste-kardex
 4. Desarrollar y validar quality gates.
 5. Abrir PR a main.
 6. Merge por squash.
-7. Actualizar Jira con evidencia.
 
 ### Hotfix
 
@@ -92,20 +88,19 @@ Configurar en GitHub Branch Protection:
 3. Abrir PR con etiqueta hotfix.
 4. Merge por squash.
 5. Si se usa develop, sincronizar el cambio tambien hacia develop.
-6. Actualizar Jira con causa, impacto y rollback.
 
 ### Documentacion
 
-1. Usar docs/KAN-##-descripcion.
+1. Usar docs/[descripcion].
 2. Actualizar docs afectadas en el mismo PR del cambio funcional o en PR dedicado.
 3. Merge por squash.
-4. Actualizar Jira si la documentacion cierra deuda o cambia criterios operativos.
 
 ## Limpieza manual de ramas
 
 La limpieza de ramas stale es manual. Procedimiento detallado:
 
 - Ver docs/runbooks/git-branch-cleanup.md
+- Para cierre diario y trazabilidad operativa, ver docs/runbooks/git-jira-sync-daily.md
 
 ## Buenas practicas
 
@@ -113,5 +108,3 @@ La limpieza de ramas stale es manual. Procedimiento detallado:
 - Rebasar o actualizar la rama frecuentemente con main para reducir conflictos.
 - No mezclar refactors amplios con cambios funcionales no relacionados.
 - Incluir contexto de impacto tecnico y operativo en la descripcion del PR.
-- No abrir PR sin ticket Jira.
-- No introducir comandos nuevos que usen SQLite como default operativo.

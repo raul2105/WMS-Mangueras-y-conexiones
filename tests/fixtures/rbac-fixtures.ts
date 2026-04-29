@@ -29,6 +29,8 @@ const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
     "purchasing.manage",
     "sales.view",
     "sales.create_order",
+    "customers.view",
+    "customers.manage",
     "audit.view",
     "labels.manage",
   ],
@@ -50,6 +52,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
     "inventory.view",
     "sales.view",
     "sales.create_order",
+    "customers.view",
   ],
 };
 

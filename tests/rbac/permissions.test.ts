@@ -17,6 +17,8 @@ describe("rbac permissions helpers", () => {
     expect(RBAC_PERMISSIONS).toContain("inventory.pick");
     expect(RBAC_PERMISSIONS).toContain("users.manage");
     expect(RBAC_PERMISSIONS).toContain("audit.view");
+    expect(RBAC_PERMISSIONS).toContain("customers.view");
+    expect(RBAC_PERMISSIONS).toContain("customers.manage");
   });
 
   it("isSystemAdmin returns true only when SYSTEM_ADMIN role is present", () => {

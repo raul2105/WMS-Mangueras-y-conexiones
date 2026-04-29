@@ -1,53 +1,47 @@
-## Ticket Jira
+## Contexto
 
-- KAN-__
-
-> Obligatorio. Todo PR debe referenciar al menos un ticket Jira `KAN-##` en titulo, rama o descripcion.
-
-## Resumen
-
-Describe claramente que cambia y por que.
-
-## Tipo de cambio
-
-- [ ] feat
-- [ ] fix
-- [ ] hotfix
-- [ ] docs
-- [ ] refactor
-- [ ] chore
+- Ticket Jira: KAN-xx
+- Objetivo de negocio:
+- Problema que resuelve:
 
 ## Alcance
 
-Modulos o rutas impactadas:
+- Cambios incluidos:
+- Cambios explicitamente fuera de alcance:
+- Modulos/rutas impactadas:
 
-- 
+## Validaciones
 
-## Base de datos
+- [ ] `npm run lint`
+- [ ] `npm run typecheck`
+- [ ] `npm run test`
+- [ ] `npm run build`
+- [ ] `npm run prisma:validate`
+- [ ] Validacion funcional manual (describir abajo)
 
-- [ ] No aplica
-- [ ] Usa PostgreSQL canonico (`prisma/postgresql/schema.prisma`)
-- [ ] Incluye migracion PostgreSQL en `prisma/postgresql/migrations`
-- [ ] Verifique impacto de datos y rollback
+Resultados breves:
 
-## Checklist de calidad
-
-- [ ] Ejecute npm run lint
-- [ ] Ejecute npm run typecheck
-- [ ] Ejecute npm run build
-- [ ] Ejecute npm run prisma:validate
-- [ ] Ejecute npm run test
-- [ ] Actualice documentacion afectada
-
-## Evidencia de validacion
-
-Incluye resultados breves (logs, capturas o notas de prueba manual).
-
-## Riesgos y rollback
+## Riesgos
 
 - Riesgo principal:
-- Plan de rollback:
+- Riesgos secundarios:
+- Senales de alerta post-merge:
 
-## Notas para review
+## Rollback
 
-Puntos especificos que quieres que se revisen con mas detalle.
+- Estrategia de reversa:
+- Datos/migraciones afectadas (si aplica):
+- Comando(s) o pasos para rollback:
+
+## Jira
+
+- Enlace ticket: https://rigentec.atlassian.net/browse/KAN-xx
+- Estado Jira esperado al abrir PR: `En revision`
+- Evidencia a publicar al cerrar ticket: SHA merge + checks + validacion
+
+## Checklist de gobernanza
+
+- [ ] Rama sigue formato `feature/KAN-<id>-<slug-corto>`
+- [ ] Commits incluyen prefijo `KAN-xx:`
+- [ ] Titulo PR sigue formato `KAN-xx | <resumen>`
+- [ ] Se documento desviacion de alcance en Jira (si hubo)

@@ -151,6 +151,70 @@ export const supplierCreateSchema = z.object({
   address: z.string().trim().max(500).optional(),
 });
 
+export const customerCreateSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(2, "Código mínimo 2 caracteres")
+    .max(20, "Código máximo 20 caracteres")
+    .regex(/^[A-Z0-9\-]+$/, "Solo mayúsculas, números y guiones")
+    .optional(),
+  name: requiredText("Nombre"),
+  legalName: z.string().trim().max(200).optional(),
+  businessName: z.string().trim().max(200).optional(),
+  taxId: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(10, "RFC mínimo 10 caracteres")
+    .max(20, "RFC máximo 20 caracteres")
+    .regex(/^[A-Z0-9\-]+$/, "RFC inválido (solo mayúsculas, números y guiones)")
+    .optional(),
+  email: z.union([z.string().trim().email("Email inválido"), z.literal("")]).optional(),
+  phone: z.string().trim().max(20).optional(),
+  address: z.string().trim().max(500).optional(),
+});
+
+export const customerUpdateSchema = z.object({
+  name: requiredText("Nombre"),
+  legalName: z.string().trim().max(200).optional(),
+  businessName: z.string().trim().max(200).optional(),
+  taxId: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(10, "RFC mínimo 10 caracteres")
+    .max(20, "RFC máximo 20 caracteres")
+    .regex(/^[A-Z0-9\-]+$/, "RFC inválido (solo mayúsculas, números y guiones)")
+    .optional(),
+  email: z.union([z.string().trim().email("Email inválido"), z.literal("")]).optional(),
+  phone: z.string().trim().max(20).optional(),
+  address: z.string().trim().max(500).optional(),
+  isActive: z.boolean(),
+});
+
+export const customerQuickCreateInlineSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(2, "Código mínimo 2 caracteres")
+    .max(20, "Código máximo 20 caracteres")
+    .regex(/^[A-Z0-9\-]+$/, "Solo mayúsculas, números y guiones")
+    .optional(),
+  name: requiredText("Nombre"),
+  taxId: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(10, "RFC mínimo 10 caracteres")
+    .max(20, "RFC máximo 20 caracteres")
+    .regex(/^[A-Z0-9\-]+$/, "RFC inválido (solo mayúsculas, números y guiones)")
+    .optional(),
+  email: z.union([z.string().trim().email("Email inválido"), z.literal("")]).optional(),
+});
+
 export const supplierBrandSchema = z.object({
   name: z.string().trim().min(1, "La marca es obligatoria").max(100, "Máximo 100 caracteres"),
 });
@@ -185,7 +249,8 @@ export const purchaseReceiptOperationSchema = z.object({
 // ─── Pedidos de surtido / captura comercial ─────────────────────────────────
 
 export const salesInternalOrderCreateSchema = z.object({
-  customerName: requiredText("Cliente"),
+  customerId: z.string().trim().optional(),
+  customerName: z.string().trim().optional(),
   warehouseId: requiredText("Almacen"),
   dueDateRaw: requiredText("Fecha compromiso"),
   notes: z.string().trim().max(1000).optional(),

@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
+import CustomerSearchField from "@/components/CustomerSearchField";
 import { createSalesRequestDraftHeader } from "@/lib/sales/request-service";
 import { requireSalesWriteAccess } from "@/lib/rbac/sales";
 import { firstErrorMessage, parseDueDate, salesInternalOrderCreateSchema } from "@/lib/schemas/wms";
@@ -31,19 +32,30 @@ async function createSalesRequest(formData: FormData) {
   const sessionPerf = startPerf("action.production.requests.new.create.session");
   const ctx = await getSessionContext();
   sessionPerf.end();
+  const canViewCustomers = ctx.isSystemAdmin || ctx.permissions.includes("customers.view");
+  const customerId = String(formData.get("customerId") ?? "").trim() || null;
   const customerName = String(formData.get("customerName") ?? "").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
 
   const parsed = salesInternalOrderCreateSchema.safeParse({
-    customerName,
+    customerId: customerId ?? undefined,
+    customerName: customerName || undefined,
     warehouseId,
     dueDateRaw,
     notes: notes || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/requests/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+
+  if (canViewCustomers && !customerId) {
+    redirect(`/production/requests/new?error=${encodeURIComponent("Selecciona un cliente del catálogo")}`);
+  }
+
+  if (!canViewCustomers && !customerName) {
+    redirect(`/production/requests/new?error=${encodeURIComponent("Cliente es obligatorio")}`);
   }
 
   const dueDate = parseDueDate(dueDateRaw);
@@ -54,7 +66,8 @@ async function createSalesRequest(formData: FormData) {
   try {
     const createPerf = startPerf("action.production.requests.new.create.service");
     const created = await createSalesRequestDraftHeader(prisma, {
-      customerName,
+      customerId: canViewCustomers ? customerId : null,
+      customerName: canViewCustomers ? null : customerName,
       warehouseId,
       dueDate,
       notes: notes || null,
@@ -63,13 +76,25 @@ async function createSalesRequest(formData: FormData) {
     });
     createPerf.end({ orderId: created.id });
 
+    const persistedOrder = await prisma.salesInternalOrder.findUnique({
+      where: { id: created.id },
+      select: { customerName: true },
+    });
+
     const syncPerf = startPerf("action.production.requests.new.create.sync_event");
     const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
     await emitSyncEventSafe({
       entityType: "ORDER",
       entityId: created.id,
       action: "CREATE",
-      payload: { orderId: created.id, code: created.code, customerName, warehouseId, status: "BORRADOR" },
+      payload: {
+        orderId: created.id,
+        code: created.code,
+        customerId: canViewCustomers ? customerId : null,
+        customerName: persistedOrder?.customerName ?? null,
+        warehouseId,
+        status: "BORRADOR",
+      },
     });
     syncPerf.end();
     perf.end({ orderId: created.id, ok: true });
@@ -89,23 +114,14 @@ export default async function NewProductionRequestPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   await pageGuard("sales.view");
-  const sp = await searchParams;
+  const [sp, ctx] = await Promise.all([searchParams, getSessionContext()]);
+  const canViewCustomers = ctx.isSystemAdmin || ctx.permissions.includes("customers.view");
 
-  const [warehouses, recentCustomers] = await Promise.all([
-    prisma.warehouse.findMany({
-      where: { isActive: true },
-      orderBy: { code: "asc" },
-      select: { id: true, code: true, name: true },
-    }),
-    prisma.salesInternalOrder.findMany({
-      where: { customerName: { not: null } },
-      orderBy: { updatedAt: "desc" },
-      take: 100,
-      select: { customerName: true },
-    }),
-  ]);
-
-  const customerSuggestions = Array.from(new Set(recentCustomers.map((row) => row.customerName?.trim() ?? "").filter(Boolean)));
+  const warehouses = await prisma.warehouse.findMany({
+    where: { isActive: true },
+    orderBy: { code: "asc" },
+    select: { id: true, code: true, name: true },
+  });
 
   return (
     <div className="space-y-6">
@@ -125,23 +141,28 @@ export default async function NewProductionRequestPage({
 
       <form action={createSalesRequest} className="space-y-6">
         <section className="glass-card grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">Cliente</span>
-            <input
-              name="customerName"
-              list={customerSuggestions.length > 0 ? "request-customer-options" : undefined}
-              required
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-              placeholder="Cliente / cuenta"
-            />
-            {customerSuggestions.length > 0 ? (
-              <datalist id="request-customer-options">
-                {customerSuggestions.map((customer) => (
-                  <option key={customer} value={customer} />
-                ))}
-              </datalist>
-            ) : null}
-          </label>
+          {canViewCustomers ? (
+            <div className="md:col-span-2">
+              <CustomerSearchField
+                name="customerId"
+                label="Cliente"
+                required
+              />
+            </div>
+          ) : (
+            <label className="space-y-1 md:col-span-2">
+              <span className="text-sm text-slate-400">Cliente / snapshot comercial</span>
+              <input
+                name="customerName"
+                required
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                placeholder="Cliente / cuenta"
+              />
+              <p className="text-xs text-slate-500">
+                No tienes acceso al catálogo de clientes. Captura el nombre comercial para el snapshot del pedido.
+              </p>
+            </label>
+          )}
 
           <label className="space-y-1">
             <span className="text-sm text-slate-400">Almacén</span>

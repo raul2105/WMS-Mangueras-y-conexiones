@@ -2,6 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 
+const databaseUrl = process.env.DATABASE_URL;
+const usesSqliteUrl = databaseUrl?.startsWith("file:") ?? false;
+
+if (usesSqliteUrl) {
+  throw new Error(
+    "[prisma] DATABASE_URL points to SQLite (file:...). This repository now requires PostgreSQL/RDS as the single local runtime source."
+  );
+}
+
 function resolveSqliteDbPath(databaseUrl: string | undefined): string | null {
   if (!databaseUrl?.startsWith("file:")) {
     return null;

@@ -14,7 +14,7 @@ const TEST_EMAILS = [
 describe("rbac fixtures seed by role", () => {
   beforeAll(async () => {
     await ensureRbacFixtures(prisma);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await prisma.userRole.deleteMany({ where: { user: { email: { in: TEST_EMAILS } } } });
@@ -58,9 +58,20 @@ describe("rbac fixtures seed by role", () => {
 
     expect(managerCodes).toEqual(expect.arrayContaining(getRolePermissions("MANAGER")));
     expect(salesCodes).toEqual(expect.arrayContaining(getRolePermissions("SALES_EXECUTIVE")));
+    expect(managerCodes).toEqual(expect.arrayContaining(["customers.view", "customers.manage"]));
+    expect(salesCodes).toContain("customers.view");
+    expect(salesCodes).not.toContain("customers.manage");
     expect(salesCodes).not.toContain("inventory.adjust");
     expect(salesCodes).not.toContain("inventory.transfer");
     expect(salesCodes).not.toContain("inventory.pick");
     expect(salesCodes).not.toContain("audit.view");
+
+    const warehouse = await prisma.role.findUnique({
+      where: { code: "WAREHOUSE_OPERATOR" },
+      select: { rolePermissions: { select: { permission: { select: { code: true } } } } },
+    });
+    const warehouseCodes = (warehouse?.rolePermissions ?? []).map((rp) => rp.permission.code);
+    expect(warehouseCodes).not.toContain("customers.view");
+    expect(warehouseCodes).not.toContain("customers.manage");
   });
 });

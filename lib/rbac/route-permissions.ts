@@ -35,6 +35,10 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
   { prefix: "/production/orders/", permission: "production.view" },
   { prefix: "/production", permission: "production.view" },
 
+  { prefix: "/sales/customers/new", permission: "customers.manage" },
+  { prefix: "/sales/customers/", permission: "customers.view" },
+  { prefix: "/sales/customers", permission: "customers.view" },
+
   { prefix: "/sales/orders/new", permission: "sales.view" },
   { prefix: "/sales/orders/", permission: "sales.view" },
   { prefix: "/sales/orders", permission: "sales.view" },
@@ -60,6 +64,10 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
 ];
 
 export function getRequiredPermissionForPath(pathname: string): PermissionCode | null {
+  if (pathname.startsWith("/sales/customers/") && pathname.endsWith("/edit")) {
+    return "customers.manage";
+  }
+
   const match = ROUTE_PERMISSION_RULES.find((rule) => pathname === rule.prefix || pathname.startsWith(rule.prefix));
   return match?.permission ?? null;
 }

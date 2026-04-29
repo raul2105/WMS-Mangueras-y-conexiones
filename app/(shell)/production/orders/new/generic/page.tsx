@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { firstErrorMessage, parseDueDate, parsePriority, productionOrderCreateSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
+import { getCustomerById, resolveCustomerSnapshot, searchCustomers } from "@/lib/customers/customer-service";
 import { pageGuard } from "@/components/rbac/PageGuard";
 
 export const dynamic = "force-dynamic";
@@ -14,10 +15,23 @@ async function createOrder(formData: FormData) {
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const status = String(formData.get("status") ?? "BORRADOR").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
-  const customerName = String(formData.get("customerName") ?? "").trim() || null;
+  const customerId = String(formData.get("customerId") ?? "").trim() || null;
+  const customerNameRaw = String(formData.get("customerName") ?? "").trim() || null;
   const priorityRaw = String(formData.get("priority") ?? "").trim();
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  let customerName = customerNameRaw;
+  if (customerId) {
+    try {
+      const customer = await getCustomerById(prisma, customerId);
+      const snapshot = resolveCustomerSnapshot(customer);
+      customerName = snapshot.customerName;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cliente inválido";
+      redirect(`/production/orders/new/generic?error=${encodeURIComponent(message)}`);
+    }
+  }
 
   const parsed = productionOrderCreateSchema.safeParse({
     code,
@@ -100,15 +114,14 @@ export default async function NewGenericProductionOrderPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true, code: true },
     }),
-    prisma.productionOrder.findMany({
-      where: { customerName: { not: null } },
-      orderBy: { updatedAt: "desc" },
-      take: 200,
-      select: { customerName: true },
+    searchCustomers(prisma, {
+      isActive: true,
+      page: 1,
+      pageSize: 200,
     }),
   ]);
   const customerSuggestions = Array.from(
-    new Set(customers.map((row) => row.customerName?.trim() ?? "").filter(Boolean))
+    new Set(customers.items.map((row) => row.name.trim()).filter(Boolean))
   );
 
   return (
@@ -159,6 +172,18 @@ export default async function NewGenericProductionOrderPage({
               {warehouses.map((warehouse) => (
                 <option key={warehouse.id} value={warehouse.id}>
                   {warehouse.name} ({warehouse.code})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Cliente registrado (opcional)</span>
+            <select name="customerId" className="w-full px-4 py-3 glass rounded-lg">
+              <option value="">Sin cliente formal</option>
+              {customers.items.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.code} - {customer.name}
                 </option>
               ))}
             </select>

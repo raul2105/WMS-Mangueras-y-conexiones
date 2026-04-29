@@ -23,6 +23,7 @@ Este directorio concentra la documentación vigente de la rama de estabilizació
 - [Guía de importación CSV](./reference/import-products-csv.md)
 - [Matriz de runtimes](./runbooks/runtime-support-matrix.md)
 - [Runbook de limpieza manual de ramas Git](./runbooks/git-branch-cleanup.md)
+- [Runbook de sincronización Local-GitHub-Jira](./runbooks/git-jira-sync-daily.md)
 - [Guía de contribución y flujo PR](../CONTRIBUTING.md)
 
 ## Regla de mantenimiento

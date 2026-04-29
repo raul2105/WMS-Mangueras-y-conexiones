@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Prisma, SalesInternalOrderStatus } from "@prisma/client";

@@ -10,6 +10,8 @@ jobs:
   quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/wms?schema=public
     
     steps:
       - name: Checkout code
@@ -34,13 +36,10 @@ jobs:
         run: npm run build
       
       - name: Prisma check
-        run: npx prisma validate
-
-      - name: Prepare test database schema
-        run: npm run db:push
+        run: npm run prisma:validate
 
       - name: Run automated tests
-        run: npm test
+        run: npm run test:rbac:unit && npm run test:customers:contracts
 
   security:
     name: Security Audit

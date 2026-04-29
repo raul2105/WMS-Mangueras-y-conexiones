@@ -5,19 +5,16 @@ const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const prismaCli = path.join(repoRoot, "node_modules", "prisma", "build", "index.js");
-const databaseUrl = process.env.DATABASE_URL || "postgresql://local:local@127.0.0.1:5432/wms?schema=public";
+const env = { ...process.env };
 
-if (!/^postgres(?:ql)?:\/\//i.test(databaseUrl)) {
-  console.error("[prisma] DATABASE_URL debe apuntar a PostgreSQL. SQLite no es un runtime valido para este proyecto.");
-  process.exit(1);
+// CI may run `npm ci` without DATABASE_URL; Prisma config still requires it.
+if (!env.DATABASE_URL) {
+  env.DATABASE_URL = "postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public";
 }
 
 const result = spawnSync(process.execPath, [prismaCli, "generate", "--schema", "prisma/postgresql/schema.prisma"], {
   cwd: repoRoot,
-  env: {
-    ...process.env,
-    DATABASE_URL: databaseUrl,
-  },
+  env,
   stdio: "inherit",
 });
 

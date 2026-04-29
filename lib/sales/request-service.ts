@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
+import { getCustomerById, resolveCustomerSnapshot } from "@/lib/customers/customer-service";
 import { cancelAssemblyWorkOrder, configureAssemblyOrderExact, createAssemblyOrderDraftHeader } from "@/lib/assembly/work-order-service";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import { startPerf } from "@/lib/perf";
@@ -435,7 +436,8 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
 export async function createSalesRequestDraftHeader(
   prisma: PrismaClient,
   args: {
-    customerName: string;
+    customerId?: string | null;
+    customerName?: string | null;
     warehouseId: string;
     dueDate: Date;
     notes?: string | null;
@@ -445,6 +447,24 @@ export async function createSalesRequestDraftHeader(
 ) {
   const perf = startPerf("sales.create_request_draft_header");
   return prisma.$transaction(async (tx) => {
+    let snapshot = resolveCustomerSnapshot(null);
+    if (args.customerId) {
+      const selectedCustomer = await getCustomerById(tx, args.customerId);
+      if (!selectedCustomer.isActive) {
+        throw new InventoryServiceError("CUSTOMER_INACTIVE", "El cliente seleccionado está inactivo");
+      }
+      snapshot = resolveCustomerSnapshot(selectedCustomer);
+    } else {
+      snapshot = {
+        customerId: null,
+        customerName: String(args.customerName ?? "").trim() || null,
+      };
+    }
+
+    if (!snapshot.customerName) {
+      throw new InventoryServiceError("CUSTOMER_REQUIRED", "El pedido requiere un cliente");
+    }
+
     const codePerf = startPerf("sales.create_request_draft_header.next_code");
     const code = await getNextSalesInternalOrderCode(tx);
     codePerf.end({ code });
@@ -455,17 +475,23 @@ export async function createSalesRequestDraftHeader(
       && !args.requestedByRoles?.includes("MANAGER")
       && !args.requestedByRoles?.includes("SYSTEM_ADMIN")
     );
-    const created = await tx.salesInternalOrder.create({
-      data: {
+    const createData: Record<string, unknown> = {
         code,
-        customerName: args.customerName,
+        customerName: snapshot.customerName,
         warehouseId: args.warehouseId,
         dueDate: args.dueDate,
         notes: args.notes ?? null,
         requestedByUserId: args.requestedByUserId ?? null,
         assignedToUserId: shouldAutoAssignToRequester ? args.requestedByUserId : null,
         assignedAt: shouldAutoAssignToRequester ? new Date() : null,
-      },
+    };
+
+    if (snapshot.customerId) {
+      createData.customerId = snapshot.customerId;
+    }
+
+    const created = await tx.salesInternalOrder.create({
+      data: createData as Prisma.SalesInternalOrderCreateInput,
       select: { id: true, code: true },
     });
     createPerf.end({ orderId: created.id });
@@ -479,7 +505,8 @@ export async function createSalesRequestDraftHeader(
       source: "sales/request-service",
       after: {
         code: created.code,
-        customerName: args.customerName,
+        customerId: snapshot.customerId,
+        customerName: snapshot.customerName,
         warehouseId: args.warehouseId,
         dueDate: args.dueDate.toISOString(),
         assignedToUserId: shouldAutoAssignToRequester ? args.requestedByUserId : null,

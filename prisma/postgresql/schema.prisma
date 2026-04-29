@@ -189,6 +189,28 @@ model Category {
   updatedAt DateTime @updatedAt
 }
 
+model Customer {
+  id           String @id @default(uuid())
+  code         String @unique
+  name         String
+  legalName    String?
+  businessName String?
+  taxId        String?
+  email        String?
+  phone        String?
+  address      String?
+  isActive     Boolean @default(true)
+
+  salesInternalOrders SalesInternalOrder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([name])
+  @@index([taxId])
+}
+
 // Warehouse entity for multi-location support
 model Warehouse {
   id          String     @id @default(uuid())
@@ -506,6 +528,7 @@ model SalesInternalOrder {
   id String @id @default(uuid())
   code String @unique
   status SalesInternalOrderStatus @default(BORRADOR)
+  customerId String?
   customerName String?
   warehouseId String?
   dueDate DateTime?
@@ -525,6 +548,7 @@ model SalesInternalOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   requestedByUser User? @relation("SalesInternalOrderRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
   confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
@@ -538,6 +562,7 @@ model SalesInternalOrder {
   @@index([requestedByUserId])
   @@index([assignedToUserId])
   @@index([deliveredToCustomerAt])
+  @@index([customerId])
   @@index([warehouseId])
 }
 

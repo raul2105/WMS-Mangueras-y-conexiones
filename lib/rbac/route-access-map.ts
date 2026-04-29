@@ -248,6 +248,30 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
   },
   {
+    route: "/sales/customers",
+    description: "Listado comercial de clientes para consulta y seleccion en pedidos",
+    permission: "customers.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/sales/customers/new",
+    description: "Formulario para registrar un nuevo cliente comercial",
+    permission: "customers.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
+  },
+  {
+    route: "/sales/customers/[id]",
+    description: "Detalle del cliente comercial con informacion fiscal y de contacto",
+    permission: "customers.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/sales/customers/[id]/edit",
+    description: "Formulario para editar un cliente comercial existente",
+    permission: "customers.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
+  },
+  {
     route: "/sales/orders",
     description: "Listado de pedidos internos comerciales",
     permission: "sales.view",

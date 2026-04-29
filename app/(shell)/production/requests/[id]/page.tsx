@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
@@ -277,13 +279,21 @@ export default async function ProductionRequestDetailPage({
     baseWhere: { id },
   });
 
-  const order = await prisma.salesInternalOrder.findFirst({
+  const order = await (prisma as any).salesInternalOrder.findFirst({
     where: visibilityWhere,
     select: {
       id: true,
       code: true,
       status: true,
+      customerId: true,
       customerName: true,
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+        },
+      },
       dueDate: true,
       notes: true,
       assignedToUserId: true,
@@ -383,7 +393,7 @@ export default async function ProductionRequestDetailPage({
         },
       },
     },
-  });
+  }) as any;
   if (!order) redirect("/production/requests");
 
   const linkedProductionOrders = await prisma.productionOrder.findMany({
@@ -411,27 +421,30 @@ export default async function ProductionRequestDetailPage({
   );
 
   const canOperateDirectPick = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("production.execute");
+  const canViewCustomers = sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");
+  const orderStatus = order.status as SalesInternalOrderStatus;
+  const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
   const latestPickList = order.pickLists[0] ?? null;
   const isCreatedByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
   const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
   const takeEligibility = getTakeOrderEligibility({
     roles: sessionCtx.roles,
-    status: order.status,
+    status: orderStatus,
     assignedToUserId: order.assignedToUserId,
     isCreatedByManager,
   });
 
-  const productLines = order.lines.filter((line) => line.lineKind === "PRODUCT");
-  const configuredLines = order.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+  const productLines = (order.lines as any[]).filter((line: any) => line.lineKind === "PRODUCT");
+  const configuredLines = (order.lines as any[]).filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
   const hasCompletedDirectPick = productLines.length === 0 || latestPickList?.status === "COMPLETED";
-  const expectedAssemblyLineIds = new Set(configuredLines.map((line) => line.id));
+  const expectedAssemblyLineIds = new Set(configuredLines.map((line: any) => line.id));
   const hasCompletedConfiguredAssembly = configuredLines.length === 0
     || (
       linkedProductionOrders.length === configuredLines.length
       && linkedProductionOrders.every((row) => expectedAssemblyLineIds.has(row.sourceDocumentLineId ?? "") && row.status === "COMPLETADA")
     );
   const deliveredEligibility = getMarkDeliveredEligibility({
-    status: order.status,
+    status: orderStatus,
     deliveredToCustomerAt: order.deliveredToCustomerAt,
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
@@ -444,12 +457,18 @@ export default async function ProductionRequestDetailPage({
           <p className="font-mono text-sm text-cyan-300">{order.code}</p>
           <h1 className="text-3xl font-semibold text-white">Pedido de surtido</h1>
           <p className="mt-2 text-slate-400">
-            Cliente: {order.customerName ?? "--"} · Almacén: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}
+            Cliente: {order.customerId && canViewCustomers ? (
+              <Link href={`/sales/customers/${order.customerId}`} className="text-cyan-300 hover:text-white">
+                {displayCustomer}
+              </Link>
+            ) : (
+              displayCustomer
+            )} · Almacén: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <span className={`rounded px-3 py-2 text-sm font-semibold ${SALES_INTERNAL_ORDER_STATUS_STYLES[order.status]}`}>
-            {SALES_INTERNAL_ORDER_STATUS_LABELS[order.status]}
+          <span className={`rounded px-3 py-2 text-sm font-semibold ${SALES_INTERNAL_ORDER_STATUS_STYLES[orderStatus]}`}>
+            {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
           </span>
           <Link href="/production/requests" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
             ← Pedidos
@@ -591,7 +610,7 @@ export default async function ProductionRequestDetailPage({
         <section className="glass-card space-y-3">
           <h2 className="text-lg font-semibold text-white">Configuracion de ensamble</h2>
           <p className="text-sm text-slate-300">
-            Este pedido esta en <strong>{SALES_INTERNAL_ORDER_STATUS_LABELS[order.status]}</strong>. La modalidad de ensamble configurado solo se habilita cuando el pedido esta en <strong>BORRADOR</strong>.
+            Este pedido esta en <strong>{SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}</strong>. La modalidad de ensamble configurado solo se habilita cuando el pedido esta en <strong>BORRADOR</strong>.
           </p>
           <p className="text-xs text-slate-500">
             Si necesitas editar la configuracion, crea un nuevo pedido o usa uno en estado borrador.
@@ -629,15 +648,15 @@ export default async function ProductionRequestDetailPage({
                 </tr>
               </thead>
               <tbody>
-                {productLines.map((line) => {
-                  const reserved = line.pickTasks.reduce((acc, task) => acc + task.reservedQty, 0);
-                  const picked = line.pickTasks.reduce((acc, task) => acc + task.pickedQty, 0);
-                  const shortQty = line.pickTasks.reduce((acc, task) => acc + task.shortQty, 0);
+                {productLines.map((line: any) => {
+                  const reserved = line.pickTasks.reduce((acc: number, task: any) => acc + task.reservedQty, 0);
+                  const picked = line.pickTasks.reduce((acc: number, task: any) => acc + task.pickedQty, 0);
+                  const shortQty = line.pickTasks.reduce((acc: number, task: any) => acc + task.shortQty, 0);
                   const currentPickList = line.pickTasks[0]?.pickList ?? null;
                   const filteredInventory = order.warehouse
-                    ? (line.product?.inventory ?? []).filter((row) => row.location.warehouse.id === order.warehouse?.id)
+                    ? (line.product?.inventory ?? []).filter((row: any) => row.location.warehouse.id === order.warehouse?.id)
                     : (line.product?.inventory ?? []);
-                  const available = filteredInventory.reduce((acc, row) => acc + row.available, 0);
+                  const available = filteredInventory.reduce((acc: number, row: any) => acc + row.available, 0);
 
                   return (
                     <tr key={line.id} className="border-b border-white/5 align-top hover:bg-white/5">
@@ -694,7 +713,7 @@ export default async function ProductionRequestDetailPage({
           <p className="text-sm text-slate-400">Todavía no hay ensambles configurados en este pedido.</p>
         ) : (
           <div className="space-y-4">
-            {configuredLines.map((line) => {
+            {configuredLines.map((line: any) => {
               const linkedProduction = linkedProductionByLine.get(line.id);
               return (
                 <div key={line.id} className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">

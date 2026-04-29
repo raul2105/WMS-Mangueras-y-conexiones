@@ -85,4 +85,24 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(productionOrderDetail).toContain("releaseAssemblyPickList(prisma, orderId)");
     expect(productionOrderDetail).not.toContain("Operador de almacén no puede liberar surtido de ensamble");
   });
+
+  it("customer pages enforce customers.view/customers.manage split", () => {
+    const listContent = readWorkspaceFile("app/(shell)/sales/customers/page.tsx");
+    const newContent = readWorkspaceFile("app/(shell)/sales/customers/new/page.tsx");
+    const detailContent = readWorkspaceFile("app/(shell)/sales/customers/[id]/page.tsx");
+    const editContent = readWorkspaceFile("app/(shell)/sales/customers/[id]/edit/page.tsx");
+
+    expect(listContent).toContain('pageGuard("customers.view")');
+    expect(detailContent).toContain('pageGuard("customers.view")');
+    expect(newContent).toContain('pageGuard("customers.manage")');
+    expect(editContent).toContain('pageGuard("customers.manage")');
+  });
+
+  it("customer server actions enforce customers.manage", () => {
+    const newContent = readWorkspaceFile("app/(shell)/sales/customers/new/page.tsx");
+    const editContent = readWorkspaceFile("app/(shell)/sales/customers/[id]/edit/page.tsx");
+
+    expect(newContent).toContain('requirePermission("customers.manage")');
+    expect(editContent).toContain('requirePermission("customers.manage")');
+  });
 });

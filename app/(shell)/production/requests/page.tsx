@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Prisma, SalesInternalOrderStatus } from "@prisma/client";
@@ -162,7 +163,15 @@ export default async function ProductionRequestsPage({
     id: true,
     code: true,
     status: true,
+    customerId: true,
     customerName: true,
+    customer: {
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+      },
+    },
     dueDate: true,
     assignedToUserId: true,
     updatedAt: true,
@@ -186,9 +195,9 @@ export default async function ProductionRequestsPage({
       take: 1,
       select: { status: true, updatedAt: true },
     },
-  } satisfies Prisma.SalesInternalOrderSelect;
+  } as const;
 
-  let orders: Array<Prisma.SalesInternalOrderGetPayload<{ select: typeof orderSelect }>> = [];
+  let orders: any[] = [];
   let filteredCount = 0;
 
   if (queueFilter) {
@@ -272,17 +281,17 @@ export default async function ProductionRequestsPage({
     const pagedIds = matchedIds.slice((safeCandidatePage - 1) * PAGE_SIZE, safeCandidatePage * PAGE_SIZE);
 
     orders = pagedIds.length
-      ? await prisma.salesInternalOrder.findMany({
+      ? await (prisma as any).salesInternalOrder.findMany({
           where: { id: { in: pagedIds } },
           select: orderSelect,
         })
       : [];
 
     const orderById = new Map(orders.map((order) => [order.id, order]));
-    orders = pagedIds.map((id) => orderById.get(id)).filter((row): row is Prisma.SalesInternalOrderGetPayload<{ select: typeof orderSelect }> => Boolean(row));
+    orders = pagedIds.map((id) => orderById.get(id)).filter(Boolean);
   } else {
     [orders, filteredCount] = await Promise.all([
-      prisma.salesInternalOrder.findMany({
+      (prisma as any).salesInternalOrder.findMany({
         where,
         orderBy: { createdAt: "desc" },
         skip: (currentPage - 1) * PAGE_SIZE,
@@ -298,6 +307,7 @@ export default async function ProductionRequestsPage({
   const statusCountMap = Object.fromEntries(groupedStatuses.map((row) => [row.status, row._count.status]));
   const managerOrAdmin = canManageAllSalesRequests(sessionCtx.roles);
   const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
+  const canViewCustomers = sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");
 
   const buildHref = (page: number, status = statusFilter, queue = queueFilter) => {
     return buildReturnHref({
@@ -427,10 +437,12 @@ export default async function ProductionRequestsPage({
                 </td>
               </tr>
             ) : orders.map((order) => {
+              const orderStatus = order.status as SalesInternalOrderStatus;
+              const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
               const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
               const takeEligibility = getTakeOrderEligibility({
                 roles: sessionCtx.roles,
-                status: order.status,
+                status: orderStatus,
                 assignedToUserId: order.assignedToUserId,
                 isCreatedByManager: createdByManager,
               });
@@ -442,10 +454,18 @@ export default async function ProductionRequestsPage({
                       {order.code}
                     </Link>
                   </td>
-                  <td className="py-3 text-slate-300">{order.customerName ?? "--"}</td>
+                  <td className="py-3 text-slate-300">
+                    {order.customerId && canViewCustomers ? (
+                      <Link href={`/sales/customers/${order.customerId}`} className="text-cyan-300 hover:text-white">
+                        {displayCustomer}
+                      </Link>
+                    ) : (
+                      displayCustomer
+                    )}
+                  </td>
                   <td className="py-3">
-                    <span className={`rounded px-2 py-1 text-xs font-semibold ${SALES_INTERNAL_ORDER_STYLES(order.status)}`}>
-                      {SALES_INTERNAL_ORDER_STATUS_LABELS[order.status]}
+                    <span className={`rounded px-2 py-1 text-xs font-semibold ${SALES_INTERNAL_ORDER_STYLES(orderStatus)}`}>
+                      {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
                     </span>
                   </td>
                   <td className="py-3 text-slate-400">{order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</td>

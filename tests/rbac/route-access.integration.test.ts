@@ -24,6 +24,10 @@ describe("rbac role-route access matrix", () => {
     "/production/requests/new",
     "/production/availability",
     "/production/equivalences",
+    "/sales/customers",
+    "/sales/customers/new",
+    "/sales/customers/abc",
+    "/sales/customers/abc/edit",
   ] as const;
 
   it("maps critical routes to expected permissions", () => {
@@ -39,6 +43,10 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/sales/orders")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/sales/customers")).toBe("customers.view");
+    expect(getRequiredPermissionForPath("/sales/customers/new")).toBe("customers.manage");
+    expect(getRequiredPermissionForPath("/sales/customers/abc")).toBe("customers.view");
+    expect(getRequiredPermissionForPath("/sales/customers/abc/edit")).toBe("customers.manage");
   });
 
   it("SYSTEM_ADMIN can access all critical routes", () => {
@@ -78,6 +86,23 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("SALES_EXECUTIVE", "/production/requests/new")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/availability")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/equivalences")).toBe(true);
+  });
+
+  it("customer routes respect view/manage split", () => {
+    expect(canAccess("MANAGER", "/sales/customers")).toBe(true);
+    expect(canAccess("MANAGER", "/sales/customers/new")).toBe(true);
+    expect(canAccess("MANAGER", "/sales/customers/abc")).toBe(true);
+    expect(canAccess("MANAGER", "/sales/customers/abc/edit")).toBe(true);
+
+    expect(canAccess("SALES_EXECUTIVE", "/sales/customers")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/sales/customers/abc")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/sales/customers/new")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/sales/customers/abc/edit")).toBe(false);
+
+    expect(canAccess("WAREHOUSE_OPERATOR", "/sales/customers")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/sales/customers/new")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/sales/customers/abc")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/sales/customers/abc/edit")).toBe(false);
   });
 
   it("legacy sales redirects still require sales.view", () => {

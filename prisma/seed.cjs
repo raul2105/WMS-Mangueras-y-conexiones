@@ -25,6 +25,8 @@ const RBAC_PERMISSIONS = [
   'purchasing.manage',
   'sales.view',
   'sales.create_order',
+  'customers.view',
+  'customers.manage',
   'audit.view',
   'labels.manage',
 ];
@@ -57,6 +59,8 @@ const RBAC_ROLES = [
       'purchasing.manage',
       'sales.view',
       'sales.create_order',
+      'customers.view',
+      'customers.manage',
       'audit.view',
       'labels.manage',
     ],
@@ -88,6 +92,7 @@ const RBAC_ROLES = [
       'inventory.view',
       'sales.view',
       'sales.create_order',
+      'customers.view',
     ],
   },
 ];

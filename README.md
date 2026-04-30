@@ -1,212 +1,188 @@
 # WMS-SCMayher
 
-Sistema WMS para mangueras y conexiones industriales sobre Next.js, TypeScript y Prisma.
+Sistema WMS para mangueras y conexiones industriales sobre Next.js, TypeScript, Prisma y PostgreSQL.
 
 ## Estado operativo
 
 ### Prerrequisitos
-- Node.js 22+ y npm
-- Git
+
+- Node.js 22+ y npm.
+- Git.
+- PostgreSQL como base canonica del proyecto.
 - AWS web: runtime remoto activo para la experiencia web; infraestructura en `infra/cdk` y despliegue en `scripts/deploy/aws-web.ps1`.
-- Windows portable: runtime local soportado para operación en sitio; release en `scripts/release/build-release.ps1` y wrapper compatible en `build-release.cmd`.
+- Windows portable: runtime local soportado para operacion en sitio; release en `scripts/release/build-release.ps1` y wrapper compatible en `build-release.cmd`.
 - Mobile edge/PWA: artefactos en `mobile/` y `mobile-web/`; despliegue de staging en `scripts/deploy/mobile-staging.ps1`.
-- PM2 legacy: scripts históricos archivados en `archive/legacy/windows-pm2/`; no se usan para instalaciones nuevas.
+- PM2 legacy: scripts historicos archivados en `archive/legacy/windows-pm2/`; no se usan para instalaciones nuevas.
+
+## Decision tecnica base
+
+PostgreSQL es la base de datos canonica del WMS.
+
+- Schema canonico: `prisma/postgresql/schema.prisma`.
+- Migraciones canonicas: `prisma/postgresql/migrations`.
+- `DATABASE_URL` debe iniciar con `postgres://` o `postgresql://`.
+- SQLite queda como legado/offline y no debe usarse como runtime operativo, pruebas integradas, CI, release ni fuente de verdad.
+
+## Fuente de verdad
+
+| Tema | Fuente oficial |
+|---|---|
+| Backlog, prioridad y alcance | Jira `KAN` |
+| Codigo, configuracion y migraciones | GitHub `main` |
+| Estado funcional consolidado | `docs/WMS_CAPABILITIES_STATUS.md` |
+| Proceso GitHub-Jira | `docs/process/atlassian-github-operating-guide.md` |
+| Cierre diario | `docs/runbooks/git-jira-sync-daily.md` |
 
 ## Comandos principales
 
 ```bash
 npm install
 npm run prisma:validate
+npm run prisma:generate
 npm run lint
+npm run typecheck
+npm run test
 npm run build
 npm run dev
 ```
 
-Flujo local con base AWS en tiempo real:
+Todos los comandos de Prisma y pruebas integradas deben ejecutarse con `DATABASE_URL` PostgreSQL.
+
+## Flujo local con base AWS en tiempo real
 
 ```bash
 dev-local-launcher.cmd
 ```
 
 Notas del launcher AWS local:
+
 - Acepta `DATABASE_URL` en `.env` con o sin comillas.
-- Si la URL falta o es invalida, ejecuta automaticamente `maintenance\setup-aws.cmd`, reintenta `.env` y luego `DATABASE_URL` de entorno de maquina.
+- Si la URL falta o es invalida, ejecuta `maintenance\setup-aws.cmd`, reintenta `.env` y luego `DATABASE_URL` de entorno de maquina.
 
-Comandos operativos relevantes:
+## Estructura del Proyecto
 
-## 📁 Estructura del Proyecto
-
-```
-/app                    → Next.js App Router
-  /catalog              → Gestión de productos y categorías
-  /inventory            → Control de existencias y movimientos
-  /page.tsx             → Dashboard principal
-/components             → Componentes reutilizables
-/lib                    → Utilidades y cliente Prisma
+```text
+/app                    -> Next.js App Router
+/components             -> Componentes reutilizables
+/lib                    -> Servicios, RBAC, Prisma y dominio
 /prisma
-  /schema.prisma        → Modelo de datos
-  /migrations           → Historial de migraciones
-  /seed.cjs             → Datos iniciales
+  /postgresql/schema.prisma     -> Modelo canonico PostgreSQL
+  /postgresql/migrations        -> Migraciones canonicas PostgreSQL
+  /seed.cjs                     -> Datos iniciales
 /docs
-  /ADR                  → Architecture Decision Records
-/scripts                → Scripts de automatización
-/.github/workflows      → CI/CD con GitHub Actions
+  /ADR                  -> Architecture Decision Records
+  /process              -> Guias operativas de proceso
+  /runbooks             -> Operacion, cierre diario y soporte
+/scripts                -> Scripts de automatizacion
+/.github/workflows      -> CI/CD con GitHub Actions
 ```
 
-## 🛠️ Scripts Disponibles
+## Scripts disponibles
 
 ### Desarrollo
+
 ```bash
-npm run dev              # Servidor de desarrollo (puerto 3002)
-npm run dev:webpack      # Fallback para diagnóstico con webpack
-npm run build            # Build de producción
-npm run start            # Servidor de producción
-npm run lint             # Linter (ESLint)
-npm run mobile:infra:synth  # Sintetiza IaC móvil (sin deploy)
-npm run mobile:infra:diff   # Diff IaC móvil (sin deploy)
-npm run mobile:infra:deploy # Despliega IaC móvil en AWS
-npm run mobile:infra:destroy # Elimina stack móvil en AWS (usar con cuidado)
+npm run dev              # Servidor de desarrollo puerto 3002
+npm run dev:webpack      # Fallback de diagnostico con webpack
+npm run build            # Build de produccion
+npm run start            # Servidor de produccion
+npm run lint             # Linter ESLint
+npm run typecheck        # Next typegen + TypeScript check
+npm run test             # Pruebas con PostgreSQL obligatorio
 ```
 
-### Base de Datos
+### Base de datos y release
+
 ```bash
-npm run build:release
+npm run prisma:validate
+npm run prisma:generate
+npm run db:migrate
+npm run db:push
+npm run db:studio
 npm run verify:release
+npm run build:release
 npm run infra:synth
 npm run infra:diff
 npm run mobile:infra:synth
 npm run mobile:staging:deploy
 ```
 
-## Estructura
+### Sincronizacion GitHub-Jira
 
-- `app/`, `components/`, `lib/`: aplicación principal Next.js.
-- `prisma/`: modelo de datos, migraciones y seed.
-- `infra/cdk/`: stack AWS para la app web.
-- `mobile/` y `mobile-web/`: runtime edge/API y cliente PWA.
-- `scripts/release/`, `scripts/deploy/`, `scripts/data/`, `scripts/db/`, `scripts/smoke/`: scripts canónicos.
-- `scripts/*.ps1|*.cjs|*.py`: wrappers de compatibilidad para rutas antiguas.
-- `docs/`: documentación viva.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ops\sync-jira-views.ps1 -JiraProject KAN
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ops\daily-sync-report.ps1 -JiraProject KAN
+```
 
-## Documentación
+Variables esperadas:
 
+- `JIRA_EMAIL`
+- `JIRA_API_TOKEN`
+- `JIRA_SHARE_GROUP` opcional
+
+## Documentacion
+
+- [Guia operativa Atlassian - GitHub](./docs/process/atlassian-github-operating-guide.md)
+- [Guia de contribucion y flujo PR](./CONTRIBUTING.md)
+- [Cierre diario GitHub-Jira](./docs/runbooks/git-jira-sync-daily.md)
 - [Matriz de soporte de runtimes](./docs/runbooks/runtime-support-matrix.md)
-- [Guía de contraste y tokens](./docs/reference/theme-contrast-guide.md)
-- [Operación Windows portable](./docs/runbooks/windows-portable-install.md)
-- [Operación local Windows](./docs/runbooks/windows-local-operations.md)
+- [Operacion Windows portable](./docs/runbooks/windows-portable-install.md)
+- [Operacion local Windows](./docs/runbooks/windows-local-operations.md)
 - [Deploy AWS web prod-ready](./docs/runbooks/aws-web-prod-deploy.md)
-- [Runbook de limpieza manual de ramas Git](./docs/runbooks/git-branch-cleanup.md)
 - [Base de datos y Prisma](./docs/reference/database-setup.md)
-- [Importación de productos CSV](./docs/reference/import-products-csv.md)
-- [Deploy AWS móvil](./docs/mobile/aws-deploy.md)
-- [Contratos mobile v1](./docs/mobile/v1-contracts.md)
+- [Importacion de productos CSV](./docs/reference/import-products-csv.md)
 - [Estado real de capacidades WMS](./docs/WMS_CAPABILITIES_STATUS.md)
 - [Architecture Decision Records](./docs/ADR/README.md)
-  - [ADR-001: Arquitectura Base](./docs/ADR/001-arquitectura-base.md)
-  - [ADR-002: Capa móvil AWS híbrida](./docs/ADR/002-mobile-aws-hibrido.md)
-- [Mobile API v1 Contracts](./docs/mobile/v1-contracts.md)
-- [AWS Mobile Deploy Guide](./docs/mobile/aws-deploy.md)
 
-## ☁️ Capa móvil AWS (Fase 0+1+2 parcial)
+## Capa movil AWS
 
-Implementada como extensión desacoplada, sin tocar la operación crítica local.
+Implementada como extension desacoplada, sin tocar la operacion critica local.
 
-- `mobile-web/`: PWA shell mínima (estática).
-- `mobile/functions/`: handlers Lambda (`health`, `version`, `me/permissions`, `inventory/search`, `assembly-requests`, `product-drafts`).
-- `mobile/infra/cdk/`: infraestructura AWS (S3, CloudFront, Cognito, HTTP API, Lambda, DynamoDB, SQS, CloudWatch).
-- `lib/mobile/`: contratos, feature flags y RBAC móvil.
+- `mobile-web/`: PWA shell minima.
+- `mobile/functions/`: handlers Lambda.
+- `mobile/infra/cdk/`: infraestructura AWS.
+- `lib/mobile/`: contratos, feature flags y RBAC movil.
 
-### Principio operativo
+## Quality Gates
 
-- El WMS local sigue siendo `source of truth`.
-- La nube soporta consulta de inventario, solicitudes de ensamble y borradores de productos nuevos.
-- El sistema local sigue siendo el `source of truth`; cloud publica eventos de intake por SQS para integración controlada.
-- Runtime objetivo del repositorio y de la capa móvil AWS: `Node 22.x`.
+Todo cambio debe pasar:
 
-### Evolución prevista
+1. `npm run prisma:validate`
+2. `npm run prisma:generate`
+3. `npm run lint`
+4. `npm run typecheck`
+5. `npm run test`
+6. `npm run build`
+7. Code review obligatorio en PRs
 
-- La PWA actual es una base mínima.
-- La dirección objetivo es llevar la experiencia AWS móvil hacia paridad visual y funcional con los flujos comerciales del WMS local.
-- La propuesta ideal de reestructura quedó documentada en [docs/mobile/mobile-edge-restructure.md](./docs/mobile/mobile-edge-restructure.md).
+CI/CD automatizado en `.github/workflows/ci.yml`.
 
-### Variables de entorno móviles (Lambda)
+## Contribuir
 
-- `MOBILE_ENABLED`
-- `INVENTORY_SEARCH_ENABLED`
-- `ASSEMBLY_REQUESTS_ENABLED`
-- `PRODUCT_DRAFTS_ENABLED`
-- `MOBILE_BUILD`
-- `MOBILE_RELEASE_DATE`
-- `MOBILE_SERVICE_NAME`
-- `MOBILE_AUTH_MODE` (`cognito` o `mock`)
-- `MOBILE_DDB_INVENTORY_TABLE`
-- `MOBILE_DDB_ASSEMBLY_REQUESTS_TABLE`
-- `MOBILE_DDB_PRODUCT_DRAFTS_TABLE`
-- `MOBILE_INTEGRATION_QUEUE_URL`
-- `MOBILE_CORS_ALLOWED_ORIGIN`
+1. Crea o selecciona un ticket Jira `KAN-##`.
+2. Crea branch desde `main`: `feature/KAN-##-descripcion`.
+3. Haz commits con alcance cerrado.
+4. Ejecuta los quality gates.
+5. Abre PR con titulo `tipo(KAN-##): resumen corto`.
+6. Actualiza Jira con PR, evidencia y estado real.
 
-## 🔒 Quality Gates
+Consulta la [Guia operativa Atlassian - GitHub](./docs/process/atlassian-github-operating-guide.md) antes de iniciar trabajo nuevo.
 
-Todo código debe pasar:
-1. ✅ Linter (ESLint)
-2. ✅ TypeScript check (`tsc --noEmit`)
-3. ✅ Build exitoso (`npm run build`)
-4. ✅ Prisma validate
-5. ✅ Code review obligatorio en PRs
+## Convenciones
 
-CI/CD automatizado en `.github/workflows/ci.yml`
+- Archivos: kebab-case (`product-list.tsx`).
+- Componentes: PascalCase (`ProductCard`).
+- Variables: camelCase (`productId`).
+- Constantes: UPPER_SNAKE_CASE (`MAX_ITEMS`).
+- Branches: `feature|fix|hotfix|docs|test/KAN-##-slug-corto`.
+- PR/commits: `tipo(KAN-##): resumen corto`.
 
-## 🤝 Contribuir
-
-1. Crea un branch desde `main`: `git checkout -b feature/mi-funcionalidad`
-2. Haz tus cambios y commits con mensajes descriptivos
-3. Ejecuta `npm run lint` y `npm run build` para validar
-4. Crea un Pull Request con descripción clara
-5. Espera code review y aprobación
-
-## 📝 Convenciones
-
-- **Archivos:** kebab-case (`product-list.tsx`)
-- **Componentes:** PascalCase (`ProductCard`)
-- **Variables:** camelCase (`productId`)
-- **Constantes:** UPPER_SNAKE_CASE (`MAX_ITEMS`)
-- **Commits:** Mensajes claros en español/inglés
-
-## 🐛 Troubleshooting
-
-### Build Error: "Cannot apply unknown utility class `glass`"
-✅ **Solucionado** en último commit. Si persiste, ejecuta:
-```bash
-npm install
-npm run build
-```
-
-### Error de Prisma Client
-```bash
-npx prisma generate
-```
-
-### Puerto 3002 ya en uso
-```bash
-# Windows
-npx kill-port 3002
-
-# Linux/Mac
-lsof -ti:3002 | xargs kill
-```
-
-## 📄 Licencia
-
-Privado - SCMayher © 2026
-
-## 🙋 Soporte
+## Soporte
 
 Para dudas o problemas, contactar al Tech Lead o abrir un issue en el repositorio.
-- [ADR](./docs/ADR/README.md)
-- [Guía de contribución y flujo PR](./CONTRIBUTING.md)
 
 ## Notas
 
-- `release/` y los respaldos locales se preservan fuera del flujo normal de limpieza del repo.
+- `release/` y respaldos locales se preservan fuera del flujo normal de limpieza del repo.
 - Los entrypoints operativos siguen siendo `launcher.cmd`, `stop.cmd`, `uninstall.cmd`, `maintenance/*.cmd` y `build-release.cmd`.
-- Si se reorganiza un script interno, se mantiene un wrapper temporal en la ruta anterior hasta cerrar la transición.
+- Si se reorganiza un script interno, se mantiene wrapper temporal en la ruta anterior hasta cerrar la transicion.

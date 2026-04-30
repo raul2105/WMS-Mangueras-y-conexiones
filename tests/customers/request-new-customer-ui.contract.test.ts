@@ -11,19 +11,24 @@ describe("new request customer selector UI contract", () => {
     const content = readWorkspaceFile("app/(shell)/production/requests/new/page.tsx");
     expect(content).toContain("CustomerSearchField");
     expect(content).toContain("canViewCustomers ? (");
+    expect(content).toContain("canManageCustomers");
     expect(content).toContain('name="customerId"');
     expect(content).toContain('name="customerName"');
+    expect(content).toContain("allowQuickCreate={canManageCustomers}");
     expect(content).not.toContain("<datalist");
   });
 
-  it("does not include inline quick-create CTA in this simple flow", () => {
-    const pageContent = readWorkspaceFile("app/(shell)/production/requests/new/page.tsx");
+  it("includes inline quick-create behavior in selector component", () => {
     const selectorContent = readWorkspaceFile("components/CustomerSearchField.tsx");
+    expect(selectorContent).toContain('fetch("/api/customers"');
+    expect(selectorContent).toContain("allowQuickCreate = false");
+    expect(selectorContent).toContain("quickCreateLabel = \"Crear cliente rápido\"");
+  });
 
-    expect(pageContent).not.toContain("customerQuickCreateInlineSchema");
-    expect(pageContent).not.toContain("Crear cliente");
-    expect(selectorContent).not.toContain("Crear cliente");
-    expect(selectorContent).not.toContain("useActionState");
+  it("quick-create api uses customerQuickCreateInlineSchema", () => {
+    const apiContent = readWorkspaceFile("app/api/customers/route.ts");
+    expect(apiContent).toContain("customerQuickCreateInlineSchema");
+    expect(apiContent).toContain('requirePermission("customers.manage")');
   });
 });
 

@@ -25,6 +25,8 @@ type Props = {
   disabled?: boolean;
   placeholder?: string;
   minChars?: number;
+  allowQuickCreate?: boolean;
+  quickCreateLabel?: string;
 };
 
 function customerLabel(customer: CustomerSearchMatch) {
@@ -38,6 +40,8 @@ export default function CustomerSearchField({
   disabled = false,
   placeholder = "Busca cliente por código, nombre o RFC",
   minChars = 2,
+  allowQuickCreate = false,
+  quickCreateLabel = "Crear cliente rápido",
 }: Props) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -48,6 +52,13 @@ export default function CustomerSearchField({
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
+  const [isQuickCreateSaving, setIsQuickCreateSaving] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+  const [quickCreateName, setQuickCreateName] = useState("");
+  const [quickCreateCode, setQuickCreateCode] = useState("");
+  const [quickCreateTaxId, setQuickCreateTaxId] = useState("");
+  const [quickCreateEmail, setQuickCreateEmail] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const requestRef = useRef(0);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -133,6 +144,75 @@ export default function CustomerSearchField({
 
   const showList = isOpen && results.length > 0;
   const showRequiredHint = required && !selectedId;
+  const canShowQuickCreate =
+    allowQuickCreate &&
+    !disabled &&
+    !isLoading &&
+    (isOpen || isQuickCreateOpen) &&
+    trimmedQuery.length >= minChars &&
+    results.length === 0;
+  const canSubmitQuickCreate = quickCreateName.trim().length > 0 && !isQuickCreateSaving;
+
+  const resetQuickCreate = () => {
+    setIsQuickCreateOpen(false);
+    setIsQuickCreateSaving(false);
+    setQuickCreateError(null);
+    setQuickCreateName("");
+    setQuickCreateCode("");
+    setQuickCreateTaxId("");
+    setQuickCreateEmail("");
+  };
+
+  async function submitQuickCreate() {
+    if (isLoading) {
+      setQuickCreateError("Espera a que termine la búsqueda para crear un cliente.");
+      return;
+    }
+
+    const nameValue = quickCreateName.trim();
+    if (!nameValue) {
+      setQuickCreateError("Nombre es obligatorio");
+      return;
+    }
+
+    setIsQuickCreateSaving(true);
+    setQuickCreateError(null);
+
+    try {
+      const response = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: nameValue,
+          code: quickCreateCode.trim().toUpperCase() || undefined,
+          taxId: quickCreateTaxId.trim().toUpperCase() || undefined,
+          email: quickCreateEmail.trim().toLowerCase() || undefined,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as CustomerSearchMatch | { error?: string } | null;
+      if (!response.ok) {
+        const message = payload && typeof payload === "object" && "error" in payload ? String(payload.error ?? "") : "";
+        throw new Error(message || "No se pudo crear el cliente");
+      }
+
+      const created = payload as CustomerSearchMatch;
+      setSelected(created);
+      setSelectedId(created.id);
+      setQuery(customerLabel(created));
+      setResults([]);
+      setCursor(null);
+      setNextCursor(null);
+      setSearchError(null);
+      setIsOpen(false);
+      resetQuickCreate();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo crear el cliente";
+      setQuickCreateError(message);
+    } finally {
+      setIsQuickCreateSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -159,7 +239,11 @@ export default function CustomerSearchField({
             if (!disabled) setIsOpen(true);
           }}
           onBlur={() => {
-            blurTimerRef.current = setTimeout(() => setIsOpen(false), 140);
+            blurTimerRef.current = setTimeout(() => {
+              if (!isQuickCreateOpen) {
+                setIsOpen(false);
+              }
+            }, 140);
           }}
           className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white disabled:opacity-60 disabled:cursor-not-allowed"
           placeholder={placeholder}
@@ -206,6 +290,85 @@ export default function CustomerSearchField({
               {isLoading ? "Cargando..." : "Mostrar más coincidencias"}
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {canShowQuickCreate ? (
+        <div className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
+          {!isQuickCreateOpen ? (
+            <button
+              type="button"
+              onClick={() => {
+                abortRef.current?.abort();
+                setIsLoading(false);
+                setIsQuickCreateOpen(true);
+                setIsOpen(true);
+                setQuickCreateError(null);
+                setQuickCreateName(trimmedQuery);
+              }}
+              className="rounded border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:border-cyan-400 hover:text-cyan-200"
+            >
+              {quickCreateLabel}
+            </button>
+          ) : (
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="space-y-1 md:col-span-2">
+                <span className="text-xs text-slate-400">Nombre</span>
+                <input
+                  value={quickCreateName}
+                  onChange={(event) => setQuickCreateName(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  placeholder="Cliente"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-slate-400">Código (opcional)</span>
+                <input
+                  value={quickCreateCode}
+                  onChange={(event) => setQuickCreateCode(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  placeholder="CLI-2026-0001"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-slate-400">RFC (opcional)</span>
+                <input
+                  value={quickCreateTaxId}
+                  onChange={(event) => setQuickCreateTaxId(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  placeholder="RFC"
+                />
+              </label>
+              <label className="space-y-1 md:col-span-2">
+                <span className="text-xs text-slate-400">Email (opcional)</span>
+                <input
+                  value={quickCreateEmail}
+                  onChange={(event) => setQuickCreateEmail(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  placeholder="contacto@cliente.com"
+                />
+              </label>
+              {quickCreateError ? <p className="text-xs text-amber-300 md:col-span-2">{quickCreateError}</p> : null}
+              <div className="flex gap-2 md:col-span-2">
+                <button
+                  type="button"
+                  onClick={submitQuickCreate}
+                  disabled={!canSubmitQuickCreate}
+                  className="rounded border border-cyan-500/40 px-3 py-2 text-xs text-cyan-300 hover:border-cyan-400 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isQuickCreateSaving ? "Guardando..." : "Guardar y seleccionar"}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetQuickCreate}
+                  disabled={isQuickCreateSaving}
+                  className="rounded border border-white/10 px-3 py-2 text-xs text-slate-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 

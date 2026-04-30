@@ -68,6 +68,7 @@ async function createSalesRequest(formData: FormData) {
     const created = await createSalesRequestDraftHeader(prisma, {
       customerId: canViewCustomers ? customerId : null,
       customerName: canViewCustomers ? null : customerName,
+      requireFormalCustomer: canViewCustomers,
       warehouseId,
       dueDate,
       notes: notes || null,
@@ -116,6 +117,7 @@ export default async function NewProductionRequestPage({
   await pageGuard("sales.view");
   const [sp, ctx] = await Promise.all([searchParams, getSessionContext()]);
   const canViewCustomers = ctx.isSystemAdmin || ctx.permissions.includes("customers.view");
+  const canManageCustomers = ctx.isSystemAdmin || ctx.permissions.includes("customers.manage");
 
   const warehouses = await prisma.warehouse.findMany({
     where: { isActive: true },
@@ -147,6 +149,7 @@ export default async function NewProductionRequestPage({
                 name="customerId"
                 label="Cliente"
                 required
+                allowQuickCreate={canManageCustomers}
               />
             </div>
           ) : (

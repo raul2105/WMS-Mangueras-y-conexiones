@@ -131,5 +131,18 @@ describePostgres("postgres customer-order integration", () => {
       code: "CUSTOMER_INACTIVE",
     });
   });
+
+  it("requires formal customer when requireFormalCustomer is true", async () => {
+    await expect(
+      createSalesRequestDraftHeader(prisma, {
+        requireFormalCustomer: true,
+        customerName: "Cliente sin catalogo",
+        warehouseId,
+        dueDate: new Date("2026-05-14T00:00:00.000Z"),
+      }),
+    ).rejects.toMatchObject({
+      code: "CUSTOMER_ID_REQUIRED",
+    });
+  });
 });
 

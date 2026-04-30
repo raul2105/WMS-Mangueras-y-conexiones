@@ -19,6 +19,8 @@ import {
 import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   getMarkDeliveredEligibility,
+  getSalesOrderFlowStage,
+  SALES_ORDER_FLOW_STAGE_LABELS,
   getTakeOrderEligibility,
   SALES_INTERNAL_ORDER_STATUS_LABELS,
   SALES_INTERNAL_ORDER_STATUS_STYLES,
@@ -262,6 +264,13 @@ function formatDate(value: Date | string | null | undefined) {
   return date.toLocaleDateString("es-MX");
 }
 
+function formatDateTime(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString("es-MX");
+}
+
 export default async function ProductionRequestDetailPage({
   params,
   searchParams,
@@ -414,6 +423,32 @@ export default async function ProductionRequestDetailPage({
     },
   });
 
+  const recentAudit = await prisma.auditLog.findMany({
+    where: {
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: {
+        in: [
+          "CREATE_REQUEST_DRAFT",
+          "CONFIRM_REQUEST",
+          "PULL_REQUEST",
+          "RELEASE_DIRECT_PICKLIST",
+          "CONFIRM_DIRECT_PICK",
+          "MARK_DELIVERED_TO_CUSTOMER",
+          "CANCEL_REQUEST",
+        ],
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 8,
+    select: {
+      action: true,
+      actor: true,
+      createdAt: true,
+      actorUser: { select: { name: true, email: true } },
+    },
+  });
+
   const linkedProductionByLine = new Map(
     linkedProductionOrders
       .filter((row) => row.sourceDocumentLineId)
@@ -449,6 +484,22 @@ export default async function ProductionRequestDetailPage({
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
   });
+  const flowStage = getSalesOrderFlowStage({
+    status: orderStatus,
+    assignedToUserId: order.assignedToUserId,
+    deliveredToCustomerAt: order.deliveredToCustomerAt,
+    latestPickStatus: latestPickList?.status ?? null,
+    hasProductLines: productLines.length > 0,
+    hasAssemblyLines: configuredLines.length > 0,
+    hasCompletedConfiguredAssembly,
+  });
+  const timeline = [
+    { label: "Captura", at: order.createdAt },
+    { label: "Confirmación", at: order.confirmedAt },
+    { label: "Asignación", at: order.assignedAt ?? order.pulledAt },
+    { label: "Surtido directo", at: latestPickList?.status === "COMPLETED" || latestPickList?.status === "PARTIAL" ? latestPickList?.code : null },
+    { label: "Entrega cliente", at: order.deliveredToCustomerAt },
+  ] as const;
 
   return (
     <div className="space-y-6">
@@ -482,6 +533,7 @@ export default async function ProductionRequestDetailPage({
       <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="glass-card space-y-3 text-sm text-slate-300">
           <h2 className="text-lg font-semibold text-white">Resumen</h2>
+          <p>Etapa actual: <span className="text-cyan-300">{SALES_ORDER_FLOW_STAGE_LABELS[flowStage]}</span></p>
           <p>Solicitado por: {order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}</p>
           <p>Asignado a: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "--"}</p>
           <p>Asignado el: {order.assignedAt ? new Date(order.assignedAt).toLocaleString("es-MX") : "--"}</p>
@@ -573,6 +625,38 @@ export default async function ProductionRequestDetailPage({
               </p>
             </div>
           ) : null}
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="glass-card space-y-3">
+          <h2 className="text-lg font-semibold text-white">Timeline operativo</h2>
+          <ul className="space-y-2 text-sm text-slate-300">
+            {timeline.map((item) => (
+              <li key={item.label} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <p className="text-white">{item.label}</p>
+                <p className="text-xs text-slate-400">{typeof item.at === "string" && item.label === "Surtido directo" ? item.at : formatDateTime(item.at as Date | string | null)}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="glass-card space-y-3">
+          <h2 className="text-lg font-semibold text-white">Auditoría reciente</h2>
+          {recentAudit.length === 0 ? (
+            <p className="text-sm text-slate-400">Sin eventos de auditoría para este pedido.</p>
+          ) : (
+            <ul className="space-y-2 text-sm text-slate-300">
+              {recentAudit.map((entry, idx) => (
+                <li key={`${entry.action}-${entry.createdAt.toISOString()}-${idx}`} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                  <p className="text-white">{entry.action}</p>
+                  <p className="text-xs text-slate-400">
+                    {entry.actorUser?.name ?? entry.actorUser?.email ?? entry.actor ?? "system"} · {formatDateTime(entry.createdAt)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
 

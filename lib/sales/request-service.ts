@@ -438,6 +438,7 @@ export async function createSalesRequestDraftHeader(
   args: {
     customerId?: string | null;
     customerName?: string | null;
+    requireFormalCustomer?: boolean;
     warehouseId: string;
     dueDate: Date;
     notes?: string | null;
@@ -447,6 +448,10 @@ export async function createSalesRequestDraftHeader(
 ) {
   const perf = startPerf("sales.create_request_draft_header");
   return prisma.$transaction(async (tx) => {
+    if (args.requireFormalCustomer && !args.customerId) {
+      throw new InventoryServiceError("CUSTOMER_ID_REQUIRED", "Selecciona un cliente formal del catálogo");
+    }
+
     let snapshot = resolveCustomerSnapshot(null);
     if (args.customerId) {
       const selectedCustomer = await getCustomerById(tx, args.customerId);
@@ -951,6 +956,7 @@ export async function confirmSalesRequestOrder(
       entityId: order.id,
       action: "CONFIRM_REQUEST",
       actor: "system",
+      actorUserId: args.confirmedByUserId ?? null,
       source: "sales/request-service",
       after: { status: "CONFIRMADA", code: order.code },
     }, tx);
@@ -1068,6 +1074,7 @@ export async function cancelSalesRequestOrder(
       entityId: order.id,
       action: "CANCEL_REQUEST",
       actor: "system",
+      actorUserId: args.cancelledByUserId ?? null,
       source: "sales/request-service",
       after: { status: "CANCELADA", code: order.code },
     }, tx);

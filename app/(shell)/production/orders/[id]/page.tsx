@@ -11,6 +11,14 @@ import { isSystemAdmin } from "@/lib/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
+async function requireAssemblyExecutePermission(orderId: string) {
+  try {
+    await (await import("@/lib/rbac")).requirePermission("production.execute");
+  } catch {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("No tienes permisos para operar ensamble")}`);
+  }
+}
+
 function formatDateLabel(value: Date | string | null | undefined) {
   if (!value) return "--";
   const date = value instanceof Date ? value : new Date(value);
@@ -22,6 +30,7 @@ async function releaseAssemblyPick(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
+  await requireAssemblyExecutePermission(orderId);
 
   try {
     await releaseAssemblyPickList(prisma, orderId);
@@ -38,6 +47,9 @@ async function releaseAssemblyPick(formData: FormData) {
 async function confirmAssemblyBatch(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
+  if (!orderId) redirect("/production");
+  await requireAssemblyExecutePermission(orderId);
+
   const operatorName = String(formData.get("operatorName") ?? "").trim();
   const taskIds = formData
     .getAll("taskIds")
@@ -127,6 +139,7 @@ async function cancelAssemblyOrder(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
+  await requireAssemblyExecutePermission(orderId);
   try {
     await cancelAssemblyWorkOrder(prisma, orderId);
   } catch (error) {

@@ -1,9 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { InventoryService } from "@/lib/inventory-service";
-import { releaseAssemblyPickList } from "@/lib/assembly/picking-service";
+import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
+import { closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   addSalesRequestProductLine,
@@ -15,15 +14,11 @@ import {
   releaseSalesRequestPickList,
 } from "@/lib/sales/request-service";
 
-const TEST_DB_FILE = path.join(process.cwd(), "prisma", "sales-request-service.test.db");
-const TEST_DB_SHM = `${TEST_DB_FILE}-shm`;
-const TEST_DB_WAL = `${TEST_DB_FILE}-wal`;
-const TEST_DB_URL = `file:${TEST_DB_FILE.replace(/\\/g, "/")}`;
-const SOURCE_DB_FILE = path.join(process.cwd(), "prisma", "dev.db");
-
 let prisma: PrismaClient;
 
 async function resetDb() {
+  await prisma.$executeRawUnsafe('DELETE FROM "SalesInternalOrderDeliveryLine"');
+  await prisma.$executeRawUnsafe('DELETE FROM "SalesInternalOrderDelivery"');
   await prisma.purchaseReceiptLine.deleteMany();
   await prisma.purchaseReceipt.deleteMany();
   await prisma.purchaseOrderLine.deleteMany();
@@ -157,21 +152,7 @@ async function createUserWithRole(args: { email: string; name: string; roleCode:
 }
 
 beforeAll(async () => {
-  for (const file of [TEST_DB_FILE, TEST_DB_SHM, TEST_DB_WAL]) {
-    if (fs.existsSync(file)) {
-      fs.unlinkSync(file);
-    }
-  }
-
-  fs.copyFileSync(SOURCE_DB_FILE, TEST_DB_FILE);
-
-  prisma = new PrismaClient({
-    datasources: {
-      db: {
-        url: TEST_DB_URL,
-      },
-    },
-  });
+  prisma = new PrismaClient();
 });
 
 beforeEach(async () => {
@@ -181,11 +162,6 @@ beforeEach(async () => {
 afterAll(async () => {
   await resetDb();
   await prisma.$disconnect();
-  for (const file of [TEST_DB_FILE, TEST_DB_SHM, TEST_DB_WAL]) {
-    if (fs.existsSync(file)) {
-      fs.unlinkSync(file);
-    }
-  }
 });
 
 describe("sales request service", () => {
@@ -385,6 +361,20 @@ describe("sales request service", () => {
     expect(pulled?.assignedToUserId).toBe(sales.id);
     expect(pulled?.assignedAt).toBeTruthy();
     expect(pulled?.pulledAt).toBeTruthy();
+
+    const pullAudit = await prisma.auditLog.findFirst({
+      where: {
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: order.id,
+        action: "PULL_REQUEST",
+      },
+      orderBy: { createdAt: "desc" },
+      select: { actorUserId: true, after: true },
+    });
+
+    expect(pullAudit?.actorUserId).toBe(sales.id);
+    const afterPayload = pullAudit?.after ? JSON.parse(String(pullAudit.after)) : null;
+    expect(afterPayload?.assignedToUserId).toBe(sales.id);
   });
 
   it("hides orders assigned to another sales executive", async () => {
@@ -430,6 +420,41 @@ describe("sales request service", () => {
     });
 
     expect(visibleForSalesB).toHaveLength(0);
+  });
+
+  it("does not expose unassigned orders created by non-manager to sales executive", async () => {
+    const warehouseOperator = await createUserWithRole({
+      email: "sales-source-no-manager@scmayher.com",
+      name: "Sales Source No Manager",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const sales = await createUserWithRole({
+      email: "sales-visibility-no-manager@scmayher.com",
+      name: "Sales Visibility No Manager",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    const { warehouse } = await createRequestFixture();
+    const hiddenOrder = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente No Manager",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-02T00:00:00.000Z"),
+      requestedByUserId: warehouseOperator.id,
+      requestedByRoles: ["SALES_EXECUTIVE"],
+    });
+
+    const visibleWhere = buildSalesRequestVisibilityWhere({
+      roles: ["SALES_EXECUTIVE"],
+      userId: sales.id,
+      baseWhere: { id: hiddenOrder.id },
+    });
+
+    const visibleForSales = await prisma.salesInternalOrder.findMany({
+      where: visibleWhere,
+      select: { id: true },
+    });
+
+    expect(visibleForSales).toHaveLength(0);
   });
 
   it("allows releasing assembly pick list when source sales order is confirmed", async () => {
@@ -554,5 +579,213 @@ describe("sales request service", () => {
 
     expect(delivered?.deliveredToCustomerAt).toBeTruthy();
     expect(delivered?.deliveredByUserId).toBe(sales.id);
+
+    const deliveredAudit = await prisma.auditLog.findFirst({
+      where: {
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: order.id,
+        action: "MARK_DELIVERED_TO_CUSTOMER",
+      },
+      orderBy: { createdAt: "desc" },
+      select: { actorUserId: true, after: true },
+    });
+
+    expect(deliveredAudit?.actorUserId).toBe(sales.id);
+    const afterPayload = deliveredAudit?.after ? JSON.parse(String(deliveredAudit.after)) : null;
+    expect(afterPayload?.deliveredByUserId).toBe(sales.id);
+    expect(afterPayload?.deliveredToCustomerAt).toBeTruthy();
+  });
+
+  it("runs full operational flow: manager request -> sales pull -> direct pick + assembly -> delivered", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-full-flow@scmayher.com",
+      name: "Manager Full Flow",
+      roleCode: "MANAGER",
+    });
+    const sales = await createUserWithRole({
+      email: "sales-full-flow@scmayher.com",
+      name: "Sales Full Flow",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    const { warehouse, storageA, staging, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Full Flow",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-06T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 1,
+    });
+
+    const assemblyLine = await prisma.salesInternalOrderLine.create({
+      data: {
+        orderId: order.id,
+        lineKind: "CONFIGURED_ASSEMBLY",
+        requestedQty: 1,
+        notes: "Línea ensamble full flow",
+      },
+      select: { id: true },
+    });
+
+    const assemblyProduct = await prisma.product.create({
+      data: {
+        sku: "SKU-ASM-FLOW-01",
+        name: "Componente Ensamble Full Flow",
+        type: "FITTING",
+      },
+      select: { id: true },
+    });
+
+    await prisma.inventory.create({
+      data: {
+        productId: assemblyProduct.id,
+        locationId: storageA.id,
+        quantity: 1,
+        reserved: 1,
+        available: 0,
+      },
+    });
+
+    const production = await prisma.productionOrder.create({
+      data: {
+        code: "SOE-FULL-FLOW-01",
+        kind: "ASSEMBLY_3PIECE",
+        status: "ABIERTA",
+        warehouseId: warehouse.id,
+        sourceDocumentType: "SalesInternalOrder",
+        sourceDocumentId: order.id,
+        sourceDocumentLineId: assemblyLine.id,
+      },
+      select: { id: true },
+    });
+
+    const workOrder = await prisma.assemblyWorkOrder.create({
+      data: {
+        productionOrderId: production.id,
+        warehouseId: warehouse.id,
+        wipLocationId: staging.id,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+        hasShortage: false,
+      },
+      select: { id: true },
+    });
+
+    const workOrderLine = await prisma.assemblyWorkOrderLine.create({
+      data: {
+        assemblyWorkOrderId: workOrder.id,
+        componentRole: "ENTRY_FITTING",
+        productId: assemblyProduct.id,
+        unitLabel: "pieza",
+        perAssemblyQty: 1,
+        requiredQty: 1,
+        reservedQty: 1,
+        pickedQty: 0,
+        wipQty: 0,
+        consumedQty: 0,
+        shortQty: 0,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+      },
+      select: { id: true },
+    });
+
+    const assemblyPickList = await prisma.pickList.create({
+      data: {
+        code: "PK-ASM-FULL-FLOW-01",
+        assemblyWorkOrderId: workOrder.id,
+        status: "DRAFT",
+      },
+      select: { id: true },
+    });
+
+    await prisma.pickTask.create({
+      data: {
+        pickListId: assemblyPickList.id,
+        assemblyWorkOrderLineId: workOrderLine.id,
+        sourceLocationId: storageA.id,
+        targetWipLocationId: staging.id,
+        sequence: 1,
+        requestedQty: 1,
+        reservedQty: 1,
+        pickedQty: 0,
+        shortQty: 0,
+        status: "PENDING",
+      },
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
+    });
+    await confirmSalesRequestOrder(prisma, {
+      orderId: order.id,
+      confirmedByUserId: sales.id,
+    });
+    await releaseSalesRequestPickList(prisma, order.id);
+
+    const directPickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    expect(directPickList?.tasks.length).toBe(1);
+
+    await confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador Full Flow",
+      tasks: [{ taskId: directPickList!.tasks[0].id, pickedQty: 1 }],
+    });
+
+    await releaseAssemblyPickList(prisma, production.id);
+
+    const assemblyTasks = await prisma.pickTask.findMany({
+      where: { pickListId: assemblyPickList.id },
+      select: { id: true },
+    });
+    await confirmAssemblyPickTasksBatch(prisma, {
+      productionOrderId: production.id,
+      operatorName: "Operador Full Flow",
+      tasks: assemblyTasks.map((task) => ({ taskId: task.id, pickedQty: 1 })),
+    });
+    await closeAssemblyWorkOrderConsume(prisma, production.id, "Operador Full Flow");
+
+    await markSalesRequestDelivered(prisma, {
+      orderId: order.id,
+      deliveredByUserId: sales.id,
+    });
+
+    const [deliveredOrder, completedProduction, auditEntries] = await Promise.all([
+      prisma.salesInternalOrder.findUnique({
+        where: { id: order.id },
+        select: { deliveredToCustomerAt: true, deliveredByUserId: true },
+      }),
+      prisma.productionOrder.findUnique({
+        where: { id: production.id },
+        select: { status: true },
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: order.id,
+          action: { in: ["PULL_REQUEST", "MARK_DELIVERED_TO_CUSTOMER"] },
+        },
+        select: { action: true },
+      }),
+    ]);
+
+    expect(deliveredOrder?.deliveredToCustomerAt).toBeTruthy();
+    expect(deliveredOrder?.deliveredByUserId).toBe(sales.id);
+    expect(completedProduction?.status).toBe("COMPLETADA");
+    expect(auditEntries.map((row) => row.action)).toEqual(expect.arrayContaining(["PULL_REQUEST", "MARK_DELIVERED_TO_CUSTOMER"]));
   });
 });

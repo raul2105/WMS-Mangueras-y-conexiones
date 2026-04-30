@@ -2,21 +2,13 @@
 
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
+require("dotenv/config");
+const { assertPostgresEnv } = require("./assert-postgres-env.cjs");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const vitestCli = path.join(repoRoot, "node_modules", "vitest", "vitest.mjs");
 const args = process.argv.slice(2);
-const databaseUrl = String(process.env.DATABASE_URL ?? "").trim();
-
-if (!databaseUrl) {
-  console.error("DATABASE_URL es requerido para test Postgres.");
-  process.exit(1);
-}
-
-if (!/^postgres(ql)?:\/\//i.test(databaseUrl)) {
-  console.error("DATABASE_URL debe apuntar a PostgreSQL para test Postgres.");
-  process.exit(1);
-}
+assertPostgresEnv();
 
 const result = spawnSync(process.execPath, [vitestCli, ...args], {
   cwd: repoRoot,

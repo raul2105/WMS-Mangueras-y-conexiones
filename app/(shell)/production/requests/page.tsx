@@ -13,8 +13,11 @@ import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
 import {
   getTakeOrderEligibility,
+  getSalesOrderFlowStage,
+  SALES_ORDER_FLOW_STAGE_LABELS,
   SALES_INTERNAL_ORDER_STATUS_LABELS,
   SALES_INTERNAL_ORDER_STATUS_STYLES,
+  type SalesOrderFlowStage,
 } from "@/lib/sales/internal-orders";
 import { buildSalesRequestVisibilityWhere, canManageAllSalesRequests } from "@/lib/sales/visibility";
 import {
@@ -41,12 +44,22 @@ const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
 
 type SearchParams = {
   status?: string;
+  stage?: string;
   page?: string;
   customer?: string;
   queue?: string;
   ok?: string;
   error?: string;
 };
+
+const FLOW_STAGE_ORDER: SalesOrderFlowStage[] = [
+  "captura",
+  "por_asignar",
+  "en_surtido",
+  "listo_entrega",
+  "entregado",
+  "cancelado",
+];
 
 function parsePage(value: string | undefined) {
   const parsed = Number.parseInt(value ?? "1", 10);
@@ -120,6 +133,9 @@ export default async function ProductionRequestsPage({
   const currentPage = parsePage(sp.page);
   const statusFilter: SalesInternalOrderStatus | undefined =
     sp.status === "BORRADOR" || sp.status === "CONFIRMADA" || sp.status === "CANCELADA" ? sp.status : undefined;
+  const stageFilter: SalesOrderFlowStage | undefined = FLOW_STAGE_ORDER.includes(sp.stage as SalesOrderFlowStage)
+    ? (sp.stage as SalesOrderFlowStage)
+    : undefined;
   const queueFilter = isFulfillmentQueueFilter(sp.queue) ? sp.queue : undefined;
   const customerFilter = (sp.customer ?? "").trim();
 
@@ -174,6 +190,7 @@ export default async function ProductionRequestsPage({
     },
     dueDate: true,
     assignedToUserId: true,
+    deliveredToCustomerAt: true,
     updatedAt: true,
     warehouse: { select: { code: true, name: true } },
     requestedByUser: {
@@ -200,14 +217,16 @@ export default async function ProductionRequestsPage({
   let orders: any[] = [];
   let filteredCount = 0;
 
-  if (queueFilter) {
+  if (queueFilter || stageFilter) {
     const queueCandidates = await prisma.salesInternalOrder.findMany({
       where,
       select: {
         id: true,
+        status: true,
         dueDate: true,
         updatedAt: true,
         assignedToUserId: true,
+        deliveredToCustomerAt: true,
         lines: { select: { id: true, lineKind: true } },
         pickLists: {
           where: { status: { not: "CANCELLED" } },
@@ -271,7 +290,18 @@ export default async function ProductionRequestsPage({
           now,
           staleHours: STALE_HOURS,
         });
-        return matchQueueFilter(signals, queueFilter);
+        const flowStage = getSalesOrderFlowStage({
+          status: candidate.status as SalesInternalOrderStatus,
+          assignedToUserId: candidate.assignedToUserId,
+          deliveredToCustomerAt: candidate.deliveredToCustomerAt,
+          latestPickStatus: latestPick?.status ?? null,
+          hasProductLines: candidate.lines.some((line) => line.lineKind === "PRODUCT"),
+          hasAssemblyLines: candidate.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY"),
+          hasCompletedConfiguredAssembly: linkedForOrder.length > 0 && linkedAssemblyOpen === 0,
+        });
+        const queueMatch = queueFilter ? matchQueueFilter(signals, queueFilter) : true;
+        const stageMatch = stageFilter ? flowStage === stageFilter : true;
+        return queueMatch && stageMatch;
       })
       .map((row) => row.id);
 
@@ -309,13 +339,19 @@ export default async function ProductionRequestsPage({
   const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
   const canViewCustomers = sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");
 
-  const buildHref = (page: number, status = statusFilter, queue = queueFilter) => {
-    return buildReturnHref({
+  const buildHref = (page: number, status = statusFilter, queue = queueFilter, stage = stageFilter) => {
+    const base = buildReturnHref({
       status,
       customer: customerFilter || undefined,
       queue,
       page,
     });
+    if (!stage) return base;
+    const [path, query = ""] = base.split("?");
+    const params = new URLSearchParams(query);
+    params.set("stage", stage);
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
   };
 
   return (
@@ -323,7 +359,7 @@ export default async function ProductionRequestsPage({
       <PageHeader
         title="Pedidos de surtido"
         description="Captura mixta de productos y ensambles configurados dentro del modulo de ensamble."
-        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}`}
+        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
             <Link href="/production/availability" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
@@ -364,6 +400,7 @@ export default async function ProductionRequestsPage({
       <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">
         {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}
         {queueFilter ? <input type="hidden" name="queue" value={queueFilter} /> : null}
+        {stageFilter ? <input type="hidden" name="stage" value={stageFilter} /> : null}
         <label className="flex-1 space-y-1">
           <span className="text-sm text-slate-400">Filtrar por cliente</span>
           <input
@@ -385,16 +422,31 @@ export default async function ProductionRequestsPage({
       </form>
 
       <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, statusFilter, undefined)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!queueFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+        <Link href={buildHref(1, statusFilter, undefined, stageFilter)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!queueFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
           Todos por atender
         </Link>
         {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map((queue) => (
           <Link
             key={queue}
-            href={buildHref(1, statusFilter, queue)}
+            href={buildHref(1, statusFilter, queue, stageFilter)}
             className={`rounded-lg px-3 py-1.5 text-sm glass ${queueFilter === queue ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
           >
             {QUEUE_LABELS[queue]}
+          </Link>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Link href={buildHref(1, statusFilter, queueFilter, undefined)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!stageFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+          Todas etapas
+        </Link>
+        {FLOW_STAGE_ORDER.map((stage) => (
+          <Link
+            key={stage}
+            href={buildHref(1, statusFilter, queueFilter, stage)}
+            className={`rounded-lg px-3 py-1.5 text-sm glass ${stageFilter === stage ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+          >
+            {SALES_ORDER_FLOW_STAGE_LABELS[stage]}
           </Link>
         ))}
       </div>
@@ -440,6 +492,18 @@ export default async function ProductionRequestsPage({
               const orderStatus = order.status as SalesInternalOrderStatus;
               const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
               const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
+              const hasProductLines = order.lines.some((line: any) => line.lineKind === "PRODUCT");
+              const hasAssemblyLines = order.lines.some((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
+              const latestPickStatus = order.pickLists[0]?.status ?? null;
+              const flowStage = getSalesOrderFlowStage({
+                status: orderStatus,
+                assignedToUserId: order.assignedToUserId,
+                deliveredToCustomerAt: order.deliveredToCustomerAt,
+                latestPickStatus,
+                hasProductLines,
+                hasAssemblyLines,
+                hasCompletedConfiguredAssembly: !hasAssemblyLines,
+              });
               const takeEligibility = getTakeOrderEligibility({
                 roles: sessionCtx.roles,
                 status: orderStatus,
@@ -482,7 +546,10 @@ export default async function ProductionRequestsPage({
                       </span>
                     ) : null}
                   </td>
-                  <td className="py-3 text-slate-400">{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</td>
+                  <td className="py-3 text-slate-400">
+                    <p>{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
+                    <p className="mt-1 text-xs text-slate-500">{SALES_ORDER_FLOW_STAGE_LABELS[flowStage]}</p>
+                  </td>
                   <td className="py-3 text-right text-slate-300">{order._count.lines}</td>
                   <td className="py-3">
                     {canRenderWriteActions ? (

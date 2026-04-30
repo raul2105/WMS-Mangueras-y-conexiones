@@ -16,6 +16,23 @@ export const SALES_INTERNAL_ORDER_STATUS_STYLES: Record<SalesInternalOrderStatus
   CANCELADA: "text-red-300 bg-red-500/20",
 };
 
+export type SalesOrderFlowStage =
+  | "captura"
+  | "por_asignar"
+  | "en_surtido"
+  | "listo_entrega"
+  | "entregado"
+  | "cancelado";
+
+export const SALES_ORDER_FLOW_STAGE_LABELS: Record<SalesOrderFlowStage, string> = {
+  captura: "Captura",
+  por_asignar: "Por asignar",
+  en_surtido: "En surtido",
+  listo_entrega: "Listo para entrega",
+  entregado: "Entregado",
+  cancelado: "Cancelado",
+};
+
 type CodeDb = PrismaClient | Prisma.TransactionClient;
 
 export async function getNextSalesInternalOrderCode(db: CodeDb, now = new Date()) {
@@ -149,4 +166,29 @@ export function getMarkDeliveredEligibility(input: MarkDeliveredEligibilityInput
   }
 
   return { canMarkDelivered: true, deliveredBlockedReason: null };
+}
+
+type FlowStageInput = {
+  status: SalesInternalOrderStatus;
+  assignedToUserId?: string | null;
+  deliveredToCustomerAt?: Date | string | null;
+  latestPickStatus?: string | null;
+  hasProductLines?: boolean;
+  hasAssemblyLines?: boolean;
+  hasCompletedConfiguredAssembly?: boolean;
+};
+
+export function getSalesOrderFlowStage(input: FlowStageInput): SalesOrderFlowStage {
+  if (input.status === "CANCELADA") return "cancelado";
+  if (input.deliveredToCustomerAt) return "entregado";
+  if (input.status === "BORRADOR") return "captura";
+  if (!input.assignedToUserId) return "por_asignar";
+
+  const hasProductLines = input.hasProductLines ?? true;
+  const hasAssemblyLines = input.hasAssemblyLines ?? false;
+  const directPickCompleted = !hasProductLines || input.latestPickStatus === "COMPLETED";
+  const assemblyCompleted = !hasAssemblyLines || input.hasCompletedConfiguredAssembly === true;
+
+  if (directPickCompleted && assemblyCompleted) return "listo_entrega";
+  return "en_surtido";
 }

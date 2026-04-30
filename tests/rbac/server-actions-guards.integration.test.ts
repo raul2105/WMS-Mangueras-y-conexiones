@@ -83,6 +83,7 @@ describe("rbac guards in critical server actions/pages", () => {
     const productionOrderDetail = readWorkspaceFile("app/(shell)/production/orders/[id]/page.tsx");
 
     expect(productionOrderDetail).toContain("releaseAssemblyPickList(prisma, orderId)");
+    expect(productionOrderDetail).toContain('requirePermission("production.execute")');
     expect(productionOrderDetail).not.toContain("Operador de almacén no puede liberar surtido de ensamble");
   });
 

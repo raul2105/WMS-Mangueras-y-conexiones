@@ -1,59 +1,174 @@
-# Atlassian-GitHub Operating Guide
+# Guia operativa Atlassian - GitHub
 
-Fecha de actualización: 2026-04-30
+Fecha de corte: 2026-04-29
+Proyecto Jira: `KAN / WMS project`
+Repositorio: `raul2105/WMS-Mangueras-y-conexiones`
 
 ## Objetivo
 
-Estandarizar el flujo Jira↔GitHub para que el estado administrativo refleje el estado técnico real.
+Unificar el flujo de trabajo entre Atlassian y GitHub para que cada cambio tenga ticket, PR, validacion, evidencia y cierre operativo claro.
 
-## Jerarquía documental
+## Fuente de verdad
 
-- `README.md`: entrada rápida del repositorio.
-- `CONTRIBUTING.md`: reglas de contribución y calidad de PR (autoridad).
-- `docs/process/atlassian-github-operating-guide.md`: flujo Jira↔GitHub.
-- `docs/WMS_CAPABILITIES_STATUS.md`: estado funcional del producto.
+| Informacion | Fuente primaria | Regla |
+|---|---|---|
+| Backlog, prioridad y alcance funcional | Jira `KAN` | Todo trabajo debe tener ticket `KAN-##`. |
+| Codigo, configuracion y migraciones | GitHub `main` | `main` es la verdad tecnica desplegable. |
+| Estado funcional consolidado | `docs/WMS_CAPABILITIES_STATUS.md` | Se actualiza cuando cambian capacidades reales. |
+| Reconciliaciones repo-Jira | `docs/release/` | Se crea acta cuando haya cambio estructural. |
+| Politica de contribucion | `CONTRIBUTING.md` | Define ramas, PR, calidad y cierre. |
+| Cierre diario | `docs/runbooks/git-jira-sync-daily.md` | Define reporte y sincronizacion operativa. |
 
-## Convenciones oficiales
+## Decision tecnica base
 
-- Branch: `type/KAN-XX-short-description`
-- Commit: `KAN-XX: resumen imperativo`
-- PR: debe documentar explícitamente:
-  - problema,
-  - solución,
-  - pruebas ejecutadas,
-  - impacto en Jira.
+PostgreSQL es la base canonica del WMS.
 
-## Flujo Jira↔GitHub por ticket
+- Schema canonico: `prisma/postgresql/schema.prisma`.
+- Migraciones canonicas: `prisma/postgresql/migrations`.
+- `DATABASE_URL` debe iniciar con `postgres://` o `postgresql://`.
+- SQLite queda como legado/offline y no se acepta como runtime operativo, pruebas integradas, CI, release ni fuente de verdad.
 
-1. Crear branch ligado a ticket `KAN-XX`.
-2. Implementar alcance técnico acotado.
-3. Abrir PR y enlazar Jira.
-4. Registrar evidencia de pruebas y documentación.
-5. Merge por squash cuando el PR esté aprobado.
-6. Cerrar Jira solo cuando exista evidencia completa.
+## Convencion oficial
 
-## Regla de cierre Jira
+### Ramas
 
-Un issue Jira solo puede cerrarse con:
+```text
+feature/KAN-48-clientes-pedidos
+fix/KAN-29-postgresql-release-bootstrap
+docs/KAN-8-unificar-fuente-verdad
+test/KAN-53-regresion-clientes-pedidos
+hotfix/KAN-##-slug-corto
+```
 
-- evidencia de código (PR + SHA),
-- evidencia de prueba (checks/comandos),
-- evidencia documental (docs actualizadas cuando aplique).
+### PRs y commits
 
-## Estados operativos
+Formato oficial:
 
-- `Implemented`: funcionalidad presente en código con rutas/evidencia.
-- `Validated`: implementación con pruebas ejecutadas y evidencia registrada.
-- `Done`: mergeado a `main`, Jira actualizado y documentación alineada.
+```text
+tipo(KAN-##): resumen corto
+```
 
-## Checklist de PR (flujo)
+Ejemplos:
 
-- [ ] Ticket Jira vinculado en PR.
-- [ ] Problema/Solución/Pruebas/Impacto Jira documentados.
-- [ ] Evidencia de código y pruebas adjunta.
-- [ ] Documentación actualizada o justificación de no cambio.
-- [ ] Estado Jira sincronizado con etapa real.
+```text
+feat(KAN-48): integrar clientes formales en pedidos
+fix(KAN-29): eliminar dependencia SQLite del build release
+docs(KAN-8): unificar proceso Atlassian GitHub
+test(KAN-53): cubrir regresion de clientes y pedidos
+```
 
-## Nota de reconciliación PR #15
+El formato `KAN-xx | resumen` queda permitido solo como legado temporal por el PR #16, pero no debe usarse para trabajo nuevo.
 
-Decisión mantenedora: **reemplazo** del enfoque de PR #15 por esta guía consolidada para eliminar duplicidad y contradicciones con `CONTRIBUTING.md`.
+## Flujo obligatorio
+
+### 1. Preparar ticket Jira
+
+Antes de programar debe existir un ticket `KAN-##` con:
+
+- objetivo de negocio,
+- alcance tecnico,
+- criterios de aceptacion,
+- prioridad real,
+- dependencias,
+- riesgos o impacto de datos si aplica.
+
+### 2. Crear rama desde `main`
+
+- Actualizar `main`.
+- Crear rama con prefijo por tipo y ticket.
+- Mover Jira a `En curso`.
+
+### 3. Implementar con alcance cerrado
+
+No mezclar:
+
+- refactors amplios con features,
+- migraciones de base de datos con UI no relacionada,
+- cambios de proceso con cambios funcionales,
+- limpieza de release con features de negocio.
+
+### 4. Validar antes de abrir PR
+
+```bash
+npm run prisma:validate
+npm run prisma:generate
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
+Si toca Prisma, CI, release o migraciones, validar con `DATABASE_URL` PostgreSQL y documentar resultado en el PR.
+
+### 5. Abrir PR
+
+- Usar plantilla oficial.
+- Titulo `tipo(KAN-##): resumen corto`.
+- Publicar URL del PR en Jira.
+- Mover Jira a `En revision`.
+
+### 6. Review y CI
+
+No fusionar si:
+
+- falta ticket Jira,
+- no hay evidencia de validacion,
+- CI falla,
+- existe comentario P0/P1 abierto,
+- se introduce SQLite como default operativo,
+- el PR mezcla alcance no relacionado.
+
+### 7. Merge y cierre
+
+- Usar Squash merge hacia `main`.
+- Publicar en Jira:
+  - URL del PR,
+  - SHA merge,
+  - checks,
+  - validacion funcional,
+  - riesgos restantes.
+- Mover Jira a `Finalizada` solo si no hay bloqueadores.
+
+## Estados Jira estandarizados
+
+| Estado Jira | Uso correcto |
+|---|---|
+| Idea | Backlog bruto o concepto sin ejecucion inmediata. |
+| Tareas por hacer | Ticket listo para ejecutar. |
+| En curso | Trabajo activo en rama o investigacion tecnica. |
+| En revision | PR abierto, QA pendiente o evidencia pendiente. |
+| Finalizada | PR mergeado, evidencia registrada y sin bloqueadores. |
+
+## Reconciliacion periodica
+
+Ejecutar cuando haya cambios estructurales o antes de iniciar un bloque P0.
+
+Checklist:
+
+- Comparar `docs/WMS_CAPABILITIES_STATUS.md` contra Jira.
+- Revisar PRs mergeados recientes.
+- Revisar tickets `Idea` que ya tengan evidencia en codigo.
+- Marcar como parcial tickets con modelo implementado pero UI/QA pendiente.
+- Crear o actualizar deuda tecnica si hay bloqueante.
+- Documentar hallazgos en `docs/release/`.
+
+## Deuda tecnica
+
+Toda deuda tecnica debe tener:
+
+- ticket Jira,
+- impacto operativo,
+- riesgo si no se atiende,
+- condicion de cierre,
+- prioridad.
+
+Caso actual prioritario:
+
+`KAN-29`: cerrar PostgreSQL-only en release, CI, scripts legacy y pruebas con `DATABASE_URL` PostgreSQL.
+
+## Orden recomendado actual
+
+1. Cerrar `KAN-8` con esta guia y README estandarizados.
+2. Cerrar `KAN-29` para eliminar dependencias operativas SQLite restantes.
+3. Ejecutar `KAN-53` para cubrir regresion tras PR #16.
+4. Continuar con `KAN-49`, `KAN-51`, `KAN-50` y `KAN-52` segun prioridad operativa.

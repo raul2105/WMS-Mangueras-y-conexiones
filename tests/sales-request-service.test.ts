@@ -17,8 +17,6 @@ import {
 let prisma: PrismaClient;
 
 async function resetDb() {
-  await prisma.$executeRawUnsafe('DELETE FROM "SalesInternalOrderDeliveryLine"');
-  await prisma.$executeRawUnsafe('DELETE FROM "SalesInternalOrderDelivery"');
   await prisma.purchaseReceiptLine.deleteMany();
   await prisma.purchaseReceipt.deleteMany();
   await prisma.purchaseOrderLine.deleteMany();

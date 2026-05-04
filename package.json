@@ -16,15 +16,19 @@
     "test:sqlite": "node scripts/db/run-vitest-sqlite.cjs run",
     "test:postgres": "node scripts/db/run-vitest-postgres.cjs run",
     "smoke:published": "node scripts/smoke/published-links.cjs",
+    "smoke:web": "node scripts/smoke/web-runtime.cjs",
     "smoke:mobile-auth": "node scripts/smoke/validate-mobile-auth.cjs",
+    "env:postgres:check": "node scripts/db/assert-postgres-env.cjs",
+    "env:postgres:tcp": "node scripts/db/assert-postgres-env.cjs --check-connection",
     "sync:daily:report": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\ops\\daily-sync-report.ps1 -JiraProject KAN",
     "sync:jira:views": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\ops\\sync-jira-views.ps1 -JiraProject KAN",
     "test:rbac": "node scripts/db/run-vitest-postgres.cjs run tests/rbac",
     "test:rbac:unit": "node scripts/db/run-vitest-postgres.cjs run tests/rbac/permissions.test.ts tests/rbac/require-permission.test.ts",
     "test:rbac:integration": "node scripts/db/run-vitest-postgres.cjs run tests/rbac/route-access.integration.test.ts tests/rbac/server-actions-guards.integration.test.ts tests/rbac/fixtures.integration.test.ts",
-    "test:customers:contracts": "node scripts/db/run-vitest-postgres.cjs run tests/customers/postgresql-schema.contract.test.ts tests/customers/customer-search-api.contract.test.ts tests/customers/request-new-customer-ui.contract.test.ts tests/customers/sales-requests-customer-fallback.contract.test.ts",
+    "test:customers:contracts": "node scripts/db/run-vitest-postgres.cjs run tests/customers/postgresql-schema.contract.test.ts tests/customers/customer-search-api.contract.test.ts tests/customers/request-new-customer-ui.contract.test.ts tests/customers/request-new-customer-page.runtime.test.ts tests/customers/sales-requests-customer-fallback.contract.test.ts",
     "test:sales:service": "node scripts/db/run-vitest-postgres.cjs run tests/sales-request-service.test.ts",
     "test:customers:postgres": "node scripts/db/run-vitest-postgres.cjs run tests/customers/postgresql-customer-order.integration.test.ts",
+    "test:regression:postgres": "node scripts/db/run-vitest-postgres.cjs run --maxWorkers=1 tests/rbac/permissions.test.ts tests/rbac/require-permission.test.ts tests/rbac/route-access.integration.test.ts tests/rbac/server-actions-guards.integration.test.ts tests/rbac/fixtures.integration.test.ts tests/customers/customer-service.test.ts tests/customers/postgresql-schema.contract.test.ts tests/customers/customer-search-api.contract.test.ts tests/customers/customer-quick-create-api.contract.test.ts tests/customers/customer-quick-create-api.runtime.test.ts tests/customers/request-new-customer-ui.contract.test.ts tests/customers/request-new-customer-page.runtime.test.ts tests/customers/sales-requests-customer-fallback.contract.test.ts tests/customers/postgresql-customer-order.integration.test.ts tests/users/admin-service.integration.test.ts tests/users/auth-login.integration.test.ts tests/dashboard/fulfillment-signals.unit.test.ts tests/dashboard/fulfillment-dashboard.integration.test.ts tests/sales-internal-order-flow.test.ts tests/sales-request-service.test.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
@@ -94,3 +98,5 @@
     "vitest": "^3.2.4"
   }
 }
+
+

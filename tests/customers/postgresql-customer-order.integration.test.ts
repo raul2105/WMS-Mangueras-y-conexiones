@@ -71,13 +71,27 @@ describePostgres("postgres customer-order integration", () => {
     });
     createdOrderIds.push(created.id);
 
-    const saved = await client.salesInternalOrder.findUnique({
-      where: { id: created.id },
-      select: { customerId: true, customerName: true },
-    });
+    const [saved, audit] = await Promise.all([
+      client.salesInternalOrder.findUnique({
+        where: { id: created.id },
+        select: { customerId: true, customerName: true },
+      }),
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: created.id,
+          action: "CREATE_REQUEST_DRAFT",
+          source: "sales/request-service",
+        },
+      }),
+    ]);
 
     expect(saved?.customerId).toBe(customer.id);
     expect(saved?.customerName).toBe(customer.name);
+    expect(audit).toBeTruthy();
+    const afterPayload = typeof audit?.after === "string" ? JSON.parse(audit.after) : null;
+    expect(afterPayload?.customerId).toBe(customer.id);
+    expect(afterPayload?.customerName).toBe(customer.name);
   });
 
   it("supports historical fallback without customerId", async () => {

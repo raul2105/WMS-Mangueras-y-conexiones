@@ -1,7 +1,11 @@
 import { unstable_cache } from "next/cache";
 import type { PickListStatus, Prisma, ProductionOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
-import { summarizePickListStatus } from "@/lib/sales/internal-orders";
+import {
+  getSalesOrderFlowNarrative,
+  summarizePickListStatus,
+  type SalesOrderFlowBadgeVariant,
+} from "@/lib/sales/internal-orders";
 
 export type DashboardRole = "SYSTEM_ADMIN" | "MANAGER";
 
@@ -38,6 +42,8 @@ export type FulfillmentQueueRow = {
   orderStatus: string;
   pickStatus: string;
   requiresAssembly: boolean;
+  flowStageLabel: string;
+  flowBadgeVariant: SalesOrderFlowBadgeVariant;
   lastUpdatedAt: Date;
   riskLevel: FulfillmentRiskLevel;
   riskScore: number;
@@ -346,6 +352,21 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
 
       const activeDirectPick = latestPick?.status ? ACTIVE_PICK_STATUSES.includes(latestPick.status) : false;
       const firstOpenAssembly = linkedForAssemblyLines.find((row) => OPEN_ASSEMBLY_STATUSES.includes(row.status));
+      const hasCompletedConfiguredAssembly = assemblyLines.length === 0
+        || (
+          linkedForAssemblyLines.length === assemblyLines.length
+          && linkedForAssemblyLines.every((row) => row.status === "COMPLETADA")
+        );
+      const flowNarrative = getSalesOrderFlowNarrative({
+        orderId: order.id,
+        status: order.status,
+        assignedToUserId: order.assignedToUserId,
+        deliveredToCustomerAt: null,
+        latestPickStatus: latestPick?.status ?? null,
+        hasProductLines,
+        hasAssemblyLines: assemblyLines.length > 0,
+        hasCompletedConfiguredAssembly,
+      });
 
       const actionHref = activeDirectPick
         ? `/production/fulfillment/${order.id}`
@@ -368,6 +389,8 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         orderStatus: order.status,
         pickStatus: summarizePickListStatus(latestPick?.status),
         requiresAssembly: assemblyLines.length > 0,
+        flowStageLabel: flowNarrative.flowStageLabel,
+        flowBadgeVariant: flowNarrative.flowBadgeVariant,
         lastUpdatedAt: signals.lastUpdatedAt,
         riskLevel: signals.riskLevel,
         riskScore: signals.riskScore,

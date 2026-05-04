@@ -30,8 +30,8 @@ describe("new request page runtime customer branch", () => {
       roles: ["CUSTOM_ROLE"],
     });
 
-    const module = await import("@/app/(shell)/production/requests/new/page");
-    const element = await module.default({ searchParams: Promise.resolve({}) });
+    const pageModule = await import("@/app/(shell)/production/requests/new/page");
+    const element = await pageModule.default({ searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(element);
 
     expect(html).toContain('name="customerName"');
@@ -39,3 +39,4 @@ describe("new request page runtime customer branch", () => {
     expect(html).toContain("No tienes acceso al catálogo de clientes");
   });
 });
+

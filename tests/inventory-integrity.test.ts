@@ -5,6 +5,9 @@ import { PrismaClient } from "@prisma/client";
 import { InventoryService, InventoryServiceError } from "../lib/inventory-service";
 import { importProductsFromCsv } from "../scripts/data/import-products-from-csv.cjs";
 
+const shouldRunSqliteSuite = process.env.RUN_POSTGRES_TESTS !== "1";
+const describeSqlite = shouldRunSqliteSuite ? describe : describe.skip;
+
 const prisma = new PrismaClient();
 
 async function resetDb() {
@@ -74,7 +77,7 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("InventoryService integrity", () => {
+describeSqlite("InventoryService integrity", () => {
   it("receive increments quantity", async () => {
     const { product, location } = await createBaseData();
     const service = new InventoryService(prisma);

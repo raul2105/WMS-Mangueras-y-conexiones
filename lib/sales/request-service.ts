@@ -828,6 +828,8 @@ export async function markSalesRequestDelivered(
         id: true,
         code: true,
         status: true,
+        assignedToUserId: true,
+        pulledAt: true,
         deliveredToCustomerAt: true,
         lines: {
           select: {
@@ -858,6 +860,9 @@ export async function markSalesRequestDelivered(
     }
     if (order.deliveredToCustomerAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya está marcado como entregado");
+    }
+    if (!order.assignedToUserId || !order.pulledAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede marcar entregado sin tomar y asignar el pedido");
     }
 
     const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");

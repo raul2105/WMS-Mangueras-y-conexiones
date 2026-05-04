@@ -51,6 +51,9 @@ export function FulfillmentPriorityQueue({ rows }: Props) {
                     <Link href={`/production/requests/${row.orderId}`} className="font-mono text-[var(--accent)] hover:underline" prefetch={false}>
                       {row.orderCode}
                     </Link>
+                    <p className="mt-1">
+                      <Badge variant={row.flowBadgeVariant}>{row.flowStageLabel}</Badge>
+                    </p>
                   </Td>
                   <Td>{row.customerName}</Td>
                   <Td>{row.warehouseName}</Td>

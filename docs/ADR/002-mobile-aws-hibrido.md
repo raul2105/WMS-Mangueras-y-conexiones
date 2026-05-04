@@ -6,7 +6,8 @@
 
 ## Contexto
 
-El WMS actual opera localmente con Next.js 16, TypeScript, Prisma y SQLite.  
+El WMS actual opera con Next.js 16, TypeScript y Prisma, usando PostgreSQL como base canónica del runtime web/AWS.  
+SQLite se mantiene únicamente para compatibilidad de runtime portable/legado.  
 La operacion de piso (inventario maestro, recepcion, picking, ensamble y trazabilidad) no debe migrarse a cloud.
 
 Se requiere habilitar movilidad de bajo costo con AWS para:

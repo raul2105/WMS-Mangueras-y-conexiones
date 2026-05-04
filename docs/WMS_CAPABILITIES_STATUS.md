@@ -1,77 +1,72 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-04-28
+Fecha de corte: 2026-04-30
 
-## Decision base
+## Base canónica
 
-PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas, migraciones y generacion de Prisma Client.
+PostgreSQL es la base canónica para runtime web/AWS, pruebas integradas, migraciones y generación de Prisma Client.
 
-- Schema canonico: `prisma/postgresql/schema.prisma`.
-- Migraciones canonicas: `prisma/postgresql/migrations`.
-- `DATABASE_URL` debe iniciar con `postgres://` o `postgresql://`.
-- SQLite queda como legado historico/offline y no debe usarse como fuente de verdad operativa.
+- Schema canónico: `prisma/postgresql/schema.prisma`
+- Migraciones canónicas: `prisma/postgresql/migrations`
+- Config activa: `prisma.config.ts`
+- `DATABASE_URL` debe iniciar con `postgres://` o `postgresql://`
 
-## Implementado en codigo
+SQLite queda restringido a compatibilidad de runtime portable/legado y no es fuente de verdad operativa para la app web.
 
-- Catalogo maestro de productos, categorias, subcategorias, unidades y marcas por proveedor.
-- Proveedores con razon social, nombre comercial, marcas y relacion producto-proveedor.
-- Almacenes y ubicaciones por zona/bin/rack con tipos de uso.
-- Inventario por ubicacion con `quantity`, `reserved` y `available`.
-- Movimientos de inventario `IN`, `OUT`, `TRANSFER` y `ADJUSTMENT`.
-- Recepcion con referencia documental y adjuntos.
-- Picking validando inventario disponible.
-- Ajustes de inventario y transferencias internas.
-- Kardex por SKU/ubicacion con filtros.
-- Ordenes de produccion y ensamble 3 piezas con reservas, picklists, WIP y consumo.
-- Solicitudes/pedidos internos de venta con lineas de producto y ensamble configurado.
-- Picklists y tareas de picking para pedidos internos.
-- Compras: proveedores, ordenes de compra, lineas, recibos y lineas de recibo.
-- Auth/RBAC base: `User`, `Role`, `Permission`, `UserRole`, `RolePermission`.
-- Auditoria transversal base con `AuditLog`.
-- Trazabilidad, etiquetas, plantillas y trabajos de impresion.
-- Sync/outbox con `SyncEvent`.
-- Runtime AWS/local con PostgreSQL y scripts de despliegue AWS.
+## Implementado
 
-## Reconciliacion Jira vs repo
+- Administración de usuarios `SYSTEM_ADMIN` con RBAC y acciones protegidas.
+  Evidencia: `app/(shell)/users/page.tsx`, `app/(shell)/users/new/page.tsx`, `app/(shell)/users/[id]/edit/page.tsx`, `lib/users/admin-service.ts`, `tests/users/admin-service.integration.test.ts`, `tests/rbac/route-access.integration.test.ts`, `tests/rbac/server-actions-guards.integration.test.ts`.
+  Estado KAN-49: **Implemented + validation evidence** (incluye hash obligatorio, auditoría y bloqueo estricto para no dejar el sistema sin `SYSTEM_ADMIN` activo).
+- Registro y uso de clientes en flujo comercial y de pedidos internos.
+  Evidencia: `app/(shell)/sales/customers/page.tsx`, `app/(shell)/production/requests/new/page.tsx`, `lib/customers/customer-service.ts`, `tests/customers/postgresql-customer-order.integration.test.ts`, `tests/e2e/kan48-customer-quick-create.spec.ts`.
+- Dashboard operativo de fulfillment para perfiles administrativos.
+  Evidencia: `app/(shell)/page.tsx`, `lib/dashboard/fulfillment-dashboard.ts`, `components/dashboard/fulfillment-kpi-grid.tsx`, `components/dashboard/fulfillment-priority-queue.tsx`, `tests/dashboard/fulfillment-dashboard.integration.test.ts`, `tests/dashboard/fulfillment-signals.unit.test.ts`.
+- Flujo de pedidos internos con asignación/toma/etapa y trazabilidad.
+  Evidencia: `app/(shell)/production/requests/page.tsx`, `app/(shell)/production/requests/[id]/page.tsx`, `lib/sales/request-service.ts`, `lib/sales/internal-orders.ts`, `tests/sales-request-service.test.ts`, `tests/sales-internal-order-flow.test.ts`.
+  Estado KAN-51: **Done (backend validated)** con validaciones de transiciones, timestamps y auditoría (`PULL_REQUEST`, `MARK_DELIVERED_TO_CUSTOMER`) en pruebas PostgreSQL.
+- CI de calidad y contratos base.
+  Evidencia: `.github/workflows/ci.yml`, `package.json` (scripts `prisma:validate`, `test:rbac:unit`, `test:customers:contracts`).
 
-### Implementado o parcialmente implementado; requiere actualizar Jira
+## Parcial
 
-- `KAN-10`: alta de producto sin inventario invalido.
-- `KAN-9`: validaciones server-side con Zod en flujos criticos.
-- `KAN-11`: UI/servicio de ajustes de inventario.
-- `KAN-12`: transferencias internas atomicas.
-- `KAN-13`: vista de kardex.
-- `KAN-14`: politica/reconciliacion de reservas.
-- `KAN-22`: modelo de compras y recibos ya existe en Prisma.
-- `KAN-25`: Auth/RBAC base ya existe; falta validar cobertura UI/operativa.
-- `KAN-26`: `AuditLog` ya existe; falta validar cobertura por accion critica.
-- `KAN-51`: campos de asignacion y entrega ya existen; falta validar flujo UI, permisos y auditoria.
+- KAN-52 (UX avanzada de flujo comercial): existen filtros por etapa/cola y timeline, pero faltan validaciones end-to-end visuales de ciclo completo.
+  Evidencia: `app/(shell)/production/requests/page.tsx`, `app/(shell)/production/requests/[id]/page.tsx`.
 
-### Mantener como prioridad abierta
+## Pendiente
 
-- `KAN-48`: registro formal de clientes e integracion en pedidos.
-- `KAN-49`: UI de administracion de usuarios para `SYSTEM_ADMIN`.
-- `KAN-50`: dashboard admin/manager centrado en pedidos por surtir.
-- `KAN-52`: UX de flujo de pedidos, `flowStage`, timeline y filtros.
-- `KAN-53`: QA, RBAC y regresion de flujos criticos.
-- `KAN-29`: cerrar migracion productiva PostgreSQL y retirar dependencias operativas SQLite.
+- E2E visual dedicado para ciclo completo de KAN-51 (`captura -> asignación/toma -> surtido/ensamble -> entrega`) con asserts de UI final y auditoría visible.
+- E2E dedicado para CRUD completo de `/users` (alta/edición/reset/desactivación) en navegación real.
 
-## Pendiente tecnico inmediato
+## Requiere validación manual
 
-- Eliminar dependencias operativas restantes de SQLite en scripts legacy.
-- Confirmar que CI corre con `DATABASE_URL` PostgreSQL en secretos/variables.
-- Actualizar cualquier documentacion que aun mencione SQLite como flujo recomendado.
-- Ejecutar `npm run prisma:validate`, `npm run prisma:generate`, `npm run typecheck`, `npm run test` y `npm run build` con `DATABASE_URL` PostgreSQL.
+- Estado administrativo final en Jira de KAN-48, KAN-49, KAN-50 y KAN-51.
+- Estado administrativo de PR #15 en GitHub/Jira (abierto, merged o cerrado sin merge).
+- Verificación de comentarios de cierre Jira con SHA final y evidencia de checks.
 
-## Nota operativa
+## Jira/GitHub reconciliation status — April 30, 2026
 
-Para trabajo diario y pruebas integradas:
+- PR #16 aparece integrado en historial local (`Merge pull request #16 ...`, commit `7df38a9`).
+- KAN-48 y KAN-51 tienen evidencia explícita en release notes y commits de cierre técnico.
+  Evidencia: `docs/release/2026-04-30-kan48-kan51-closeout.md`, commits `16641ca`, `e745782`, `671c4fc`.
+- KAN-49, KAN-50 y KAN-51 cuentan con evidencia técnica y pruebas PostgreSQL de regresión; su estado administrativo Jira debe validarse manualmente.
+- PR #15 se menciona como frente de documentación/gobernanza y debe confirmarse manualmente fuera del repo.
+  Evidencia: `docs/release/2026-04-30-kan29-close-kan12-cut1.md`.
+
+## Comandos de referencia (operación diaria)
 
 ```bash
 npm run prisma:validate
 npm run prisma:generate
-npm run db:migrate
-npm run test
+npm run typecheck
+npm run test:postgres
+npm run build
 ```
 
-Todos los comandos anteriores requieren `DATABASE_URL` PostgreSQL. Si el valor apunta a SQLite, el proceso debe fallar.
+Para CI de PR, mínimo:
+
+```bash
+npm run lint
+npm run test:rbac:unit
+npm run test:customers:contracts
+```

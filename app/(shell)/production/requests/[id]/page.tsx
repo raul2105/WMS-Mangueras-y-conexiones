@@ -5,6 +5,7 @@ import type { SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { Badge } from "@/components/ui/badge";
 import RequestProductLineForm from "@/components/RequestProductLineForm";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
 import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
@@ -19,8 +20,7 @@ import {
 import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   getMarkDeliveredEligibility,
-  getSalesOrderFlowStage,
-  SALES_ORDER_FLOW_STAGE_LABELS,
+  getSalesOrderFlowNarrative,
   getTakeOrderEligibility,
   SALES_INTERNAL_ORDER_STATUS_LABELS,
   SALES_INTERNAL_ORDER_STATUS_STYLES,
@@ -481,17 +481,23 @@ export default async function ProductionRequestDetailPage({
   const deliveredEligibility = getMarkDeliveredEligibility({
     status: orderStatus,
     deliveredToCustomerAt: order.deliveredToCustomerAt,
+    assignedToUserId: order.assignedToUserId,
+    pulledAt: order.pulledAt,
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
   });
-  const flowStage = getSalesOrderFlowStage({
+  const flowNarrative = getSalesOrderFlowNarrative({
+    orderId: order.id,
     status: orderStatus,
     assignedToUserId: order.assignedToUserId,
     deliveredToCustomerAt: order.deliveredToCustomerAt,
+    pulledAt: order.pulledAt,
     latestPickStatus: latestPickList?.status ?? null,
     hasProductLines: productLines.length > 0,
     hasAssemblyLines: configuredLines.length > 0,
     hasCompletedConfiguredAssembly,
+    takeEligibility,
+    deliveredEligibility,
   });
   const timeline = [
     { label: "Captura", at: order.createdAt },
@@ -533,7 +539,19 @@ export default async function ProductionRequestDetailPage({
       <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="glass-card space-y-3 text-sm text-slate-300">
           <h2 className="text-lg font-semibold text-white">Resumen</h2>
-          <p>Etapa actual: <span className="text-cyan-300">{SALES_ORDER_FLOW_STAGE_LABELS[flowStage]}</span></p>
+          <p className="flex flex-wrap items-center gap-2">
+            Etapa actual:
+            <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
+          </p>
+          <p className="text-slate-200">
+            Siguiente acción:{" "}
+            <Link href={flowNarrative.nextRecommendedAction.href} className="text-cyan-300 hover:text-white">
+              {flowNarrative.nextRecommendedAction.label}
+            </Link>
+          </p>
+          {flowNarrative.nextRecommendedAction.blockedReason ? (
+            <p className="text-xs text-[var(--warning)]">{flowNarrative.nextRecommendedAction.blockedReason}</p>
+          ) : null}
           <p>Solicitado por: {order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}</p>
           <p>Asignado a: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "--"}</p>
           <p>Asignado el: {order.assignedAt ? new Date(order.assignedAt).toLocaleString("es-MX") : "--"}</p>

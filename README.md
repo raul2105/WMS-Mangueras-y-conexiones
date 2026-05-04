@@ -17,6 +17,9 @@ Sistema WMS para mangueras y conexiones industriales sobre Next.js, TypeScript y
 ```bash
 npm install
 npm run prisma:validate
+npm run prisma:generate
+npm run typecheck
+npm run test:postgres
 npm run lint
 npm run build
 npm run dev
@@ -44,8 +47,9 @@ Comandos operativos relevantes:
 /components             → Componentes reutilizables
 /lib                    → Utilidades y cliente Prisma
 /prisma
-  /schema.prisma        → Modelo de datos
-  /migrations           → Historial de migraciones
+  /postgresql/schema.prisma  → Modelo de datos canónico (runtime web/AWS)
+  /postgresql/migrations     → Migraciones canónicas
+  /schema.prisma             → Legado SQLite para runtime portable/histórico
   /seed.cjs             → Datos iniciales
 /docs
   /ADR                  → Architecture Decision Records
@@ -70,13 +74,20 @@ npm run mobile:infra:destroy # Elimina stack móvil en AWS (usar con cuidado)
 
 ### Base de Datos
 ```bash
-npm run build:release
-npm run verify:release
-npm run infra:synth
-npm run infra:diff
-npm run mobile:infra:synth
-npm run mobile:staging:deploy
+npm run prisma:validate
+npm run prisma:generate
+npm run db:migrate
+npm run test:postgres
+npm run build
 ```
+
+Fuente canónica de base de datos para runtime web/dev/AWS:
+
+- `prisma/postgresql/schema.prisma`
+- `prisma/postgresql/migrations`
+- `prisma.config.ts`
+
+SQLite permanece solo para compatibilidad del runtime portable/legado.
 
 ## Estructura
 
@@ -97,10 +108,12 @@ npm run mobile:staging:deploy
 - [Deploy AWS web prod-ready](./docs/runbooks/aws-web-prod-deploy.md)
 - [Runbook de limpieza manual de ramas Git](./docs/runbooks/git-branch-cleanup.md)
 - [Base de datos y Prisma](./docs/reference/database-setup.md)
+- [Guía de testing PostgreSQL](./docs/testing.md)
 - [Importación de productos CSV](./docs/reference/import-products-csv.md)
 - [Deploy AWS móvil](./docs/mobile/aws-deploy.md)
 - [Contratos mobile v1](./docs/mobile/v1-contracts.md)
 - [Estado real de capacidades WMS](./docs/WMS_CAPABILITIES_STATUS.md)
+- [Guía operativa Atlassian-GitHub](./docs/process/atlassian-github-operating-guide.md)
 - [Architecture Decision Records](./docs/ADR/README.md)
   - [ADR-001: Arquitectura Base](./docs/ADR/001-arquitectura-base.md)
   - [ADR-002: Capa móvil AWS híbrida](./docs/ADR/002-mobile-aws-hibrido.md)
@@ -149,20 +162,25 @@ Implementada como extensión desacoplada, sin tocar la operación crítica local
 
 Todo código debe pasar:
 1. ✅ Linter (ESLint)
-2. ✅ TypeScript check (`tsc --noEmit`)
+2. ✅ TypeScript check (`npm run typecheck`)
 3. ✅ Build exitoso (`npm run build`)
-4. ✅ Prisma validate
-5. ✅ Code review obligatorio en PRs
+4. ✅ Prisma validate (`npm run prisma:validate`)
+5. ✅ Contratos críticos (`npm run test:rbac:unit` y `npm run test:customers:contracts`)
+6. ✅ Code review obligatorio en PRs
 
 CI/CD automatizado en `.github/workflows/ci.yml`
 
 ## 🤝 Contribuir
 
-1. Crea un branch desde `main`: `git checkout -b feature/mi-funcionalidad`
-2. Haz tus cambios y commits con mensajes descriptivos
-3. Ejecuta `npm run lint` y `npm run build` para validar
-4. Crea un Pull Request con descripción clara
-5. Espera code review y aprobación
+Para contribuir, sigue la guía oficial:
+
+- Reglas de contribución/calidad: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Flujo Jira↔GitHub: [docs/process/atlassian-github-operating-guide.md](./docs/process/atlassian-github-operating-guide.md)
+
+Convención mínima visible en README:
+
+- Branch: `type/KAN-XX-short-description`
+- Commit: `KAN-XX: resumen imperativo`
 
 ## 📝 Convenciones
 
@@ -170,7 +188,7 @@ CI/CD automatizado en `.github/workflows/ci.yml`
 - **Componentes:** PascalCase (`ProductCard`)
 - **Variables:** camelCase (`productId`)
 - **Constantes:** UPPER_SNAKE_CASE (`MAX_ITEMS`)
-- **Commits:** Mensajes claros en español/inglés
+- **Contribución y PR:** ver `CONTRIBUTING.md` (fuente oficial)
 
 ## 🐛 Troubleshooting
 

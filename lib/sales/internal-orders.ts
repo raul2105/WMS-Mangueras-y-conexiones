@@ -33,6 +33,25 @@ export const SALES_ORDER_FLOW_STAGE_LABELS: Record<SalesOrderFlowStage, string> 
   cancelado: "Cancelado",
 };
 
+export type SalesOrderFlowBadgeVariant = "neutral" | "accent" | "warning" | "success" | "danger";
+
+export const SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS: Record<SalesOrderFlowStage, SalesOrderFlowBadgeVariant> = {
+  captura: "neutral",
+  por_asignar: "accent",
+  en_surtido: "warning",
+  listo_entrega: "success",
+  entregado: "success",
+  cancelado: "danger",
+};
+
+export type FlowRiskLevel = "ALTO" | "MEDIO" | "BAJO";
+
+export const FLOW_RISK_LEVEL_LABELS: Record<FlowRiskLevel, string> = {
+  ALTO: "Alto",
+  MEDIO: "Medio",
+  BAJO: "Bajo",
+};
+
 type CodeDb = PrismaClient | Prisma.TransactionClient;
 
 export async function getNextSalesInternalOrderCode(db: CodeDb, now = new Date()) {
@@ -144,6 +163,8 @@ export function getTakeOrderEligibility(input: TakeOrderEligibilityInput) {
 type MarkDeliveredEligibilityInput = {
   status: SalesInternalOrderStatus;
   deliveredToCustomerAt?: Date | string | null;
+  assignedToUserId?: string | null;
+  pulledAt?: Date | string | null;
   hasCompletedDirectPick: boolean;
   hasCompletedConfiguredAssembly: boolean;
 };
@@ -155,6 +176,10 @@ export function getMarkDeliveredEligibility(input: MarkDeliveredEligibilityInput
 
   if (input.status !== "CONFIRMADA") {
     return { canMarkDelivered: false, deliveredBlockedReason: "El pedido debe estar confirmado" };
+  }
+
+  if (!input.assignedToUserId || !input.pulledAt) {
+    return { canMarkDelivered: false, deliveredBlockedReason: "El pedido debe estar tomado y asignado" };
   }
 
   if (!input.hasCompletedDirectPick) {
@@ -191,4 +216,95 @@ export function getSalesOrderFlowStage(input: FlowStageInput): SalesOrderFlowSta
 
   if (directPickCompleted && assemblyCompleted) return "listo_entrega";
   return "en_surtido";
+}
+
+export type SalesOrderRecommendedAction = {
+  label: "Tomar pedido" | "Operar surtido" | "Completar ensamble" | "Marcar entrega" | "Revisar bloqueo";
+  href: string;
+  blockedReason?: string;
+};
+
+type SalesOrderFlowNarrativeInput = {
+  orderId: string;
+  status: SalesInternalOrderStatus;
+  assignedToUserId?: string | null;
+  deliveredToCustomerAt?: Date | string | null;
+  pulledAt?: Date | string | null;
+  latestPickStatus?: string | null;
+  hasProductLines?: boolean;
+  hasAssemblyLines?: boolean;
+  hasCompletedConfiguredAssembly?: boolean;
+  takeEligibility?: ReturnType<typeof getTakeOrderEligibility>;
+  deliveredEligibility?: ReturnType<typeof getMarkDeliveredEligibility>;
+};
+
+export type SalesOrderFlowNarrative = {
+  flowStage: SalesOrderFlowStage;
+  flowStageLabel: string;
+  flowBadgeVariant: SalesOrderFlowBadgeVariant;
+  riskLevel: FlowRiskLevel;
+  riskLabel: string;
+  nextRecommendedAction: SalesOrderRecommendedAction;
+};
+
+export function getSalesOrderFlowNarrative(input: SalesOrderFlowNarrativeInput): SalesOrderFlowNarrative {
+  const flowStage = getSalesOrderFlowStage({
+    status: input.status,
+    assignedToUserId: input.assignedToUserId,
+    deliveredToCustomerAt: input.deliveredToCustomerAt,
+    latestPickStatus: input.latestPickStatus,
+    hasProductLines: input.hasProductLines,
+    hasAssemblyLines: input.hasAssemblyLines,
+    hasCompletedConfiguredAssembly: input.hasCompletedConfiguredAssembly,
+  });
+
+  let riskLevel: FlowRiskLevel = "BAJO";
+  if (flowStage === "por_asignar") riskLevel = "MEDIO";
+  if (flowStage === "en_surtido") riskLevel = "ALTO";
+
+  let nextRecommendedAction: SalesOrderRecommendedAction = {
+    label: "Revisar bloqueo",
+    href: `/production/requests/${input.orderId}`,
+  };
+
+  if (flowStage === "por_asignar") {
+    if (input.takeEligibility?.canTakeOrder) {
+      nextRecommendedAction = { label: "Tomar pedido", href: `/production/requests/${input.orderId}` };
+    } else {
+      nextRecommendedAction = {
+        label: "Revisar bloqueo",
+        href: `/production/requests/${input.orderId}`,
+        blockedReason: input.takeEligibility?.takeBlockedReason ?? "Pedido pendiente de asignación",
+      };
+    }
+  } else if (flowStage === "en_surtido") {
+    const needsAssembly = Boolean(input.hasAssemblyLines && !input.hasCompletedConfiguredAssembly);
+    const needsDirectPick = Boolean(input.hasProductLines && input.latestPickStatus !== "COMPLETED");
+    if (needsAssembly) {
+      nextRecommendedAction = { label: "Completar ensamble", href: `/production/requests/${input.orderId}` };
+    } else if (needsDirectPick) {
+      nextRecommendedAction = { label: "Operar surtido", href: `/production/fulfillment/${input.orderId}` };
+    } else {
+      nextRecommendedAction = { label: "Revisar bloqueo", href: `/production/requests/${input.orderId}` };
+    }
+  } else if (flowStage === "listo_entrega") {
+    if (input.deliveredEligibility?.canMarkDelivered) {
+      nextRecommendedAction = { label: "Marcar entrega", href: `/production/requests/${input.orderId}` };
+    } else {
+      nextRecommendedAction = {
+        label: "Revisar bloqueo",
+        href: `/production/requests/${input.orderId}`,
+        blockedReason: input.deliveredEligibility?.deliveredBlockedReason ?? "Revisar estado operativo del pedido",
+      };
+    }
+  }
+
+  return {
+    flowStage,
+    flowStageLabel: SALES_ORDER_FLOW_STAGE_LABELS[flowStage],
+    flowBadgeVariant: SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS[flowStage],
+    riskLevel,
+    riskLabel: FLOW_RISK_LEVEL_LABELS[riskLevel],
+    nextRecommendedAction,
+  };
 }

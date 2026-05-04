@@ -49,11 +49,11 @@ export default async function Home() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={role === "SYSTEM_ADMIN" ? "Dashboard Fulfillment Ejecutivo" : "Dashboard Fulfillment Operativo"}
+        title="Dashboard de pedidos por surtir"
         description={
           role === "SYSTEM_ADMIN"
-            ? "Visión global de riesgo, backlog y bloqueos de surtido/ensamble para toma de decisiones."
-            : "Pedidos por atender priorizados para ejecución diaria de surtidos y ensambles ligados."
+            ? "Visión global de backlog, riesgo y bloqueos operativos para destrabar surtido y entrega."
+            : "Backlog operativo priorizado para ejecutar surtidos y resolver bloqueos en tiempo."
         }
         meta={`Actualizado ${generatedAt} · Umbral sin movimiento ${snapshot.staleHours}h`}
         actions={

@@ -278,6 +278,30 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
       }
     }
 
+    const existingHasSystemAdminRole = Boolean(
+      systemAdminRole && existingUser.userRoles.some((role) => role.roleId === systemAdminRole.id),
+    );
+    const nextHasSystemAdminRole = Boolean(systemAdminRole && roles.some((role) => role.id === systemAdminRole.id));
+    const isRemovingOrDeactivatingSystemAdmin = existingHasSystemAdminRole && (!input.isActive || !nextHasSystemAdminRole);
+
+    if (systemAdminRole && isRemovingOrDeactivatingSystemAdmin) {
+      const remainingActiveSystemAdmins = await tx.user.count({
+        where: {
+          id: { not: existingUser.id },
+          isActive: true,
+          userRoles: {
+            some: {
+              roleId: systemAdminRole.id,
+            },
+          },
+        },
+      });
+
+      if (remainingActiveSystemAdmins === 0) {
+        throw new UserAdminError("No puedes dejar al sistema sin un SYSTEM_ADMIN activo");
+      }
+    }
+
     await tx.user.update({
       where: { id: userId },
       data: {

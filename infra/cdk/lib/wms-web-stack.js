@@ -25,8 +25,20 @@ const cloudfront = require("aws-cdk-lib/aws-cloudfront");
 const origins = require("aws-cdk-lib/aws-cloudfront-origins");
 const events = require("aws-cdk-lib/aws-events");
 const targets = require("aws-cdk-lib/aws-events-targets");
+const cloudwatch = require("aws-cdk-lib/aws-cloudwatch");
+const iam = require("aws-cdk-lib/aws-iam");
+const scheduler = require("aws-cdk-lib/aws-scheduler");
 const path = require("node:path");
 const fs = require("node:fs");
+
+function parseHourMinute(timeText, label) {
+  const raw = typeof timeText === "string" ? timeText.trim() : "";
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(raw);
+  if (!match) {
+    throw new Error(`Invalid ${label} time "${timeText}". Expected HH:mm.`);
+  }
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
 
 class WmsWebStack extends Stack {
   constructor(scope, id, props) {
@@ -536,12 +548,223 @@ exports.handler = async () => {
       },
     });
 
+    const warmerRuleName = `${prefix}-warmer-every-5m`;
     new events.Rule(this, "ServerWarmerRule", {
       ruleName: `${prefix}-warmer-every-5m`,
       description: "Keep server lambda warm every 5 minutes",
       schedule: events.Schedule.rate(Duration.minutes(5)),
       targets: [new targets.LambdaFunction(warmerFn)],
     });
+
+    const scheduleControl = config.scheduleControl || {};
+    if (config.environment === "dev" && scheduleControl.enabled) {
+      const timezone = scheduleControl.timezone || "America/Mexico_City";
+      const weekdaysStart = parseHourMinute(scheduleControl.weekdaysStart || "08:00", "scheduleControl.weekdaysStart");
+      const weekdaysStop = parseHourMinute(scheduleControl.weekdaysStop || "20:00", "scheduleControl.weekdaysStop");
+      const saturdayStart = parseHourMinute(scheduleControl.saturdayStart || "08:00", "scheduleControl.saturdayStart");
+      const saturdayStop = parseHourMinute(scheduleControl.saturdayStop || "16:00", "scheduleControl.saturdayStop");
+      const manageRds = scheduleControl.manageRds !== false;
+      const manageLambdas = scheduleControl.manageLambdas !== false;
+      const manageWarmer = scheduleControl.manageWarmer !== false;
+
+      const schedulerControllerCode = `
+const { RDSClient, StartDBInstanceCommand, StopDBInstanceCommand } = require("@aws-sdk/client-rds");
+const { LambdaClient, PutFunctionConcurrencyCommand, DeleteFunctionConcurrencyCommand } = require("@aws-sdk/client-lambda");
+const { EventBridgeClient, EnableRuleCommand, DisableRuleCommand } = require("@aws-sdk/client-eventbridge");
+
+const rdsClient = new RDSClient({});
+const lambdaClient = new LambdaClient({});
+const eventBridgeClient = new EventBridgeClient({});
+
+function bool(v) { return String(v).toLowerCase() === "true"; }
+
+async function setLambdaConcurrency(functionName, reservedConcurrentExecutions) {
+  if (reservedConcurrentExecutions === null) {
+    await lambdaClient.send(new DeleteFunctionConcurrencyCommand({ FunctionName: functionName }));
+    return { functionName, action: "delete_concurrency_limit" };
+  }
+  await lambdaClient.send(new PutFunctionConcurrencyCommand({ FunctionName: functionName, ReservedConcurrentExecutions: reservedConcurrentExecutions }));
+  return { functionName, action: "set_concurrency_limit", reservedConcurrentExecutions };
+}
+
+exports.handler = async () => {
+  const mode = process.env.MODE;
+  const manageRds = bool(process.env.MANAGE_RDS);
+  const manageLambdas = bool(process.env.MANAGE_LAMBDAS);
+  const manageWarmer = bool(process.env.MANAGE_WARMER);
+  const summary = { mode, manageRds, manageLambdas, manageWarmer, steps: [] };
+
+  if (manageRds) {
+    const dbInstanceIdentifier = process.env.DB_INSTANCE_IDENTIFIER;
+    if (mode === "start") {
+      await rdsClient.send(new StartDBInstanceCommand({ DBInstanceIdentifier: dbInstanceIdentifier }));
+      summary.steps.push({ resource: "rds", action: "start", dbInstanceIdentifier });
+    } else {
+      await rdsClient.send(new StopDBInstanceCommand({ DBInstanceIdentifier: dbInstanceIdentifier }));
+      summary.steps.push({ resource: "rds", action: "stop", dbInstanceIdentifier });
+    }
+  }
+
+  if (manageLambdas) {
+    const serverFunctionName = process.env.SERVER_FUNCTION_NAME;
+    const imageFunctionName = process.env.IMAGE_FUNCTION_NAME;
+    if (mode === "start") {
+      summary.steps.push(await setLambdaConcurrency(serverFunctionName, null));
+      summary.steps.push(await setLambdaConcurrency(imageFunctionName, null));
+    } else {
+      summary.steps.push(await setLambdaConcurrency(serverFunctionName, 0));
+      summary.steps.push(await setLambdaConcurrency(imageFunctionName, 0));
+    }
+  }
+
+  if (manageWarmer) {
+    const warmerRuleName = process.env.WARMER_RULE_NAME;
+    if (mode === "start") {
+      await eventBridgeClient.send(new EnableRuleCommand({ Name: warmerRuleName }));
+      summary.steps.push({ resource: "eventbridge_rule", action: "enable", name: warmerRuleName });
+    } else {
+      await eventBridgeClient.send(new DisableRuleCommand({ Name: warmerRuleName }));
+      summary.steps.push({ resource: "eventbridge_rule", action: "disable", name: warmerRuleName });
+    }
+  }
+
+  console.log(JSON.stringify({ ok: true, ...summary }));
+  return { ok: true, ...summary };
+};
+      `;
+
+      const startDevServicesFn = new lambda.Function(this, "StartDevServicesFunction", {
+        functionName: "start-dev-services",
+        description: "Start DEV services on schedule (RDS, web runtime, warmer)",
+        runtime: lambda.Runtime.NODEJS_22_X,
+        architecture: lambda.Architecture.ARM_64,
+        handler: "index.handler",
+        code: lambda.Code.fromInline(schedulerControllerCode),
+        timeout: Duration.seconds(30),
+        memorySize: 256,
+        environment: {
+          MODE: "start",
+          DB_INSTANCE_IDENTIFIER: `${prefix}-pg`,
+          SERVER_FUNCTION_NAME: `${prefix}-server`,
+          IMAGE_FUNCTION_NAME: `${prefix}-image`,
+          WARMER_RULE_NAME: warmerRuleName,
+          MANAGE_RDS: String(manageRds),
+          MANAGE_LAMBDAS: String(manageLambdas),
+          MANAGE_WARMER: String(manageWarmer),
+        },
+      });
+
+      const stopDevServicesFn = new lambda.Function(this, "StopDevServicesFunction", {
+        functionName: "stop-dev-services",
+        description: "Stop DEV services on schedule (RDS, web runtime, warmer)",
+        runtime: lambda.Runtime.NODEJS_22_X,
+        architecture: lambda.Architecture.ARM_64,
+        handler: "index.handler",
+        code: lambda.Code.fromInline(schedulerControllerCode),
+        timeout: Duration.seconds(30),
+        memorySize: 256,
+        environment: {
+          MODE: "stop",
+          DB_INSTANCE_IDENTIFIER: `${prefix}-pg`,
+          SERVER_FUNCTION_NAME: `${prefix}-server`,
+          IMAGE_FUNCTION_NAME: `${prefix}-image`,
+          WARMER_RULE_NAME: warmerRuleName,
+          MANAGE_RDS: String(manageRds),
+          MANAGE_LAMBDAS: String(manageLambdas),
+          MANAGE_WARMER: String(manageWarmer),
+        },
+      });
+
+      const startPolicy = new iam.PolicyStatement({
+        actions: ["rds:StartDBInstance", "rds:StopDBInstance"],
+        resources: ["*"],
+      });
+      const lambdaPolicy = new iam.PolicyStatement({
+        actions: ["lambda:PutFunctionConcurrency", "lambda:DeleteFunctionConcurrency"],
+        resources: ["*"],
+      });
+      const warmerPolicy = new iam.PolicyStatement({
+        actions: ["events:EnableRule", "events:DisableRule"],
+        resources: ["*"],
+      });
+
+      startDevServicesFn.addToRolePolicy(startPolicy);
+      stopDevServicesFn.addToRolePolicy(startPolicy);
+      startDevServicesFn.addToRolePolicy(lambdaPolicy);
+      stopDevServicesFn.addToRolePolicy(lambdaPolicy);
+      startDevServicesFn.addToRolePolicy(warmerPolicy);
+      stopDevServicesFn.addToRolePolicy(warmerPolicy);
+
+      const schedulerInvokeRole = new iam.Role(this, "DevScheduleInvokeRole", {
+        assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
+        description: "Invoke start/stop DEV scheduler Lambdas",
+      });
+      schedulerInvokeRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["lambda:InvokeFunction"],
+          resources: [startDevServicesFn.functionArn, stopDevServicesFn.functionArn],
+        })
+      );
+
+      const mkRule = (id, name, cronExpr, targetFn) => {
+        new scheduler.CfnSchedule(this, id, {
+          name,
+          description: `Schedule control (${cronExpr})`,
+          groupName: "default",
+          state: "ENABLED",
+          flexibleTimeWindow: { mode: "OFF" },
+          scheduleExpression: cronExpr,
+          scheduleExpressionTimezone: timezone,
+          target: {
+            arn: targetFn.functionArn,
+            roleArn: schedulerInvokeRole.roleArn,
+          },
+        });
+      };
+
+      mkRule(
+        "DevWeekdaysStartRule",
+        `${prefix}-weekday-start`,
+        `cron(${weekdaysStart.minute} ${weekdaysStart.hour} ? * MON-FRI *)`,
+        startDevServicesFn
+      );
+      mkRule(
+        "DevWeekdaysStopRule",
+        `${prefix}-weekday-stop`,
+        `cron(${weekdaysStop.minute} ${weekdaysStop.hour} ? * MON-FRI *)`,
+        stopDevServicesFn
+      );
+      mkRule(
+        "DevSaturdayStartRule",
+        `${prefix}-saturday-start`,
+        `cron(${saturdayStart.minute} ${saturdayStart.hour} ? * SAT *)`,
+        startDevServicesFn
+      );
+      mkRule(
+        "DevSaturdayStopRule",
+        `${prefix}-saturday-stop`,
+        `cron(${saturdayStop.minute} ${saturdayStop.hour} ? * SAT *)`,
+        stopDevServicesFn
+      );
+
+      new cloudwatch.Alarm(this, "StartDevServicesErrorsAlarm", {
+        alarmDescription: "Alarm when start-dev-services Lambda returns errors",
+        metric: startDevServicesFn.metricErrors({ period: Duration.minutes(5) }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        datapointsToAlarm: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+
+      new cloudwatch.Alarm(this, "StopDevServicesErrorsAlarm", {
+        alarmDescription: "Alarm when stop-dev-services Lambda returns errors",
+        metric: stopDevServicesFn.metricErrors({ period: Duration.minutes(5) }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        datapointsToAlarm: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+    }
 
     // ─── Outputs (Lambda / CloudFront) ────────────────────────────────
     new CfnOutput(this, "CloudFrontUrl", {

@@ -8,8 +8,23 @@ on:
 
 jobs:
   quality:
-    name: Code Quality Checks
+    name: Quality Gate (required)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: wms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ci -d wms"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/wms?schema=public
     
@@ -30,19 +45,25 @@ jobs:
         run: npm run lint
       
       - name: TypeScript check
-        run: npx tsc --noEmit
-      
-      - name: Build application
-        run: npm run build
+        run: npm run typecheck
       
       - name: Prisma check
         run: npm run prisma:validate
 
-      - name: Run automated tests
-        run: npm run test:rbac:unit && npm run test:customers:contracts
+      - name: Prisma generate
+        run: npm run prisma:generate
+
+      - name: Sync test schema (PostgreSQL)
+        run: npm run db:push
+
+      - name: Run PostgreSQL regression suite
+        run: npm run test:regression:postgres
+
+      - name: Build application
+        run: npm run build
 
   security:
-    name: Security Audit
+    name: Security Audit (optional)
     runs-on: ubuntu-latest
     
     steps:
@@ -60,7 +81,7 @@ jobs:
         continue-on-error: true
 
   smoke-published:
-    name: Smoke Published Links
+    name: Smoke Published Links (optional, push only)
     runs-on: ubuntu-latest
     needs: quality
     if: github.event_name == 'push'

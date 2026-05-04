@@ -1,5 +1,9 @@
 # WMS-SCMayher - Resumen de Implementación
 
+> Estado: **Snapshot histórico (2026-02-03)**.  
+> Este documento no es fuente canónica de estado actual.  
+> Referencias vigentes: `docs/WMS_CAPABILITIES_STATUS.md`, `README.md`, `prisma/postgresql/schema.prisma`.
+
 ## 📋 Resumen Ejecutivo
 
 Este documento detalla las mejoras implementadas en el sistema WMS (Warehouse Management System) para SCMayher, transformando la de un prototipo básico a un sistema robusto con arquitectura profesional y módulos clave para operaciones de almacén.

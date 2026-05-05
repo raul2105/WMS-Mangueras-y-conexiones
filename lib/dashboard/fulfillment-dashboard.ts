@@ -42,6 +42,7 @@ export type FulfillmentQueueRow = {
   orderStatus: string;
   pickStatus: string;
   requiresAssembly: boolean;
+  assemblyStatusLabel: string;
   flowStageLabel: string;
   flowBadgeVariant: SalesOrderFlowBadgeVariant;
   lastUpdatedAt: Date;
@@ -374,11 +375,23 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
           ? `/production/orders/${firstOpenAssembly.id}`
           : `/production/requests/${order.id}`;
 
-      const actionLabel = activeDirectPick
-        ? "Operar surtido"
-        : firstOpenAssembly
-          ? "Operar ensamble"
-          : "Ver pedido";
+      const actionLabel = signals.blockingCause === "OVERDUE_UNRELEASED" || signals.blockingCause === "DUE_TODAY_UNRELEASED"
+        ? "Liberar surtido"
+        : signals.blockingCause === "STALE_PICK" || signals.blockingCause === "PICK_PARTIAL"
+          ? "Destrabar surtido"
+          : firstOpenAssembly
+            ? "Operar ensamble"
+            : activeDirectPick
+              ? "Operar surtido"
+              : "Ver pedido";
+
+      const assemblyStatusLabel = assemblyLines.length === 0
+        ? "No aplica"
+        : linkedForAssemblyLines.length === 0
+          ? "Sin orden ligada"
+          : linkedAssemblyOpen > 0
+            ? `Abierto (${linkedAssemblyOpen})`
+            : "Completado";
 
       return {
         orderId: order.id,
@@ -389,6 +402,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         orderStatus: order.status,
         pickStatus: summarizePickListStatus(latestPick?.status),
         requiresAssembly: assemblyLines.length > 0,
+        assemblyStatusLabel,
         flowStageLabel: flowNarrative.flowStageLabel,
         flowBadgeVariant: flowNarrative.flowBadgeVariant,
         lastUpdatedAt: signals.lastUpdatedAt,

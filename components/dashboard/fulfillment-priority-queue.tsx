@@ -32,18 +32,16 @@ export function FulfillmentPriorityQueue({ rows }: Props) {
               <Th>Pedido</Th>
               <Th>Cliente</Th>
               <Th>Almacén</Th>
-              <Th>Compromiso</Th>
-              <Th>Estado pedido</Th>
-              <Th>Estado pick</Th>
-              <Th>Req. ensamble</Th>
-              <Th>Últ. act.</Th>
+              <Th>Fecha compromiso</Th>
+              <Th>Pick</Th>
+              <Th>Ensamble</Th>
               <Th>Riesgo</Th>
-              <Th>Acción</Th>
+              <Th>Acción sugerida</Th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <TableEmptyRow colSpan={10}>No hay pedidos por atender.</TableEmptyRow>
+              <TableEmptyRow colSpan={8}>No hay pedidos por atender.</TableEmptyRow>
             ) : (
               rows.map((row) => (
                 <TableRow key={row.orderId}>
@@ -58,10 +56,8 @@ export function FulfillmentPriorityQueue({ rows }: Props) {
                   <Td>{row.customerName}</Td>
                   <Td>{row.warehouseName}</Td>
                   <Td>{row.dueDate ? row.dueDate.toLocaleDateString("es-MX") : "--"}</Td>
-                  <Td>{row.orderStatus}</Td>
                   <Td>{row.pickStatus}</Td>
-                  <Td>{row.requiresAssembly ? "Sí" : "No"}</Td>
-                  <Td>{row.lastUpdatedAt.toLocaleString("es-MX", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}</Td>
+                  <Td>{row.assemblyStatusLabel}</Td>
                   <Td>
                     <div className="space-y-1">
                       <Badge variant={riskVariant(row.riskLevel)}>{row.riskLevel}</Badge>

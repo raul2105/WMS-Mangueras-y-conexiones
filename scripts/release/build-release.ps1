@@ -1,7 +1,8 @@
 param(
   [string]$NodeZipPath = "",
   [ValidateSet("aws", "local")]
-  [string]$DbMode = "aws"
+  [string]$DbMode = "aws",
+  [switch]$AllowLegacyLocalBootstrap
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,7 +65,7 @@ function Assert-PrismaEngineUnlocked {
   }
 }
 
-function Build-BootstrapDatabase {
+function Build-LegacyBootstrapDatabase {
   param(
     [Parameter(Mandatory = $true)]
     [string]$RepoRoot,
@@ -86,7 +87,7 @@ function Build-BootstrapDatabase {
   $generated = $false
   try {
     $env:DATABASE_URL = $sqliteUrl
-    Invoke-Step "npx prisma db push --accept-data-loss --skip-generate"
+    Invoke-Step "npx prisma db push --schema prisma/schema.prisma --accept-data-loss --skip-generate"
     Invoke-Step "node prisma/seed.cjs"
     if (Test-Path $bootstrapDbPath) {
       Copy-Item -LiteralPath $bootstrapDbPath -Destination $OutputPath -Force
@@ -138,6 +139,9 @@ try {
 
   Assert-NoRepoNodeProcesses -RepoRoot $repoRoot
   Assert-PrismaEngineUnlocked -RepoRoot $repoRoot
+  if ($DbMode -eq "local" -and -not $AllowLegacyLocalBootstrap) {
+    throw "DbMode=local usa bootstrap SQLite legado y no es canonico para WMS PostgreSQL. Usa DbMode=aws o agrega -AllowLegacyLocalBootstrap de forma explicita."
+  }
   Invoke-Step "npm run verify:release"
 
   if ($DbMode -eq "aws") {
@@ -173,7 +177,7 @@ try {
 
   $nextStaticDir = Join-Path $repoRoot ".next\static"
   $publicDir = Join-Path $repoRoot "public"
-  $schemaPath = Join-Path $repoRoot "prisma\schema.prisma"
+  $schemaPath = Join-Path $repoRoot "prisma\postgresql\schema.prisma"
   $csvTemplatePath = Join-Path $repoRoot "data\products.sample.csv"
   $importScriptPath = Join-Path $repoRoot "scripts\data\import-products-from-csv.cjs"
   $csvParseModulePath = Join-Path $repoRoot "node_modules\csv-parse"
@@ -256,7 +260,7 @@ try {
   Copy-Item -LiteralPath $publicDir -Destination $releaseAppDir -Recurse -Force
   Copy-Item -LiteralPath $schemaPath -Destination $releaseAppPrismaDir -Force
   if ($DbMode -eq "local") {
-    Build-BootstrapDatabase -RepoRoot $repoRoot -OutputPath (Join-Path $releaseBootstrapDir "initial.db")
+    Build-LegacyBootstrapDatabase -RepoRoot $repoRoot -OutputPath (Join-Path $releaseBootstrapDir "initial.db")
   }
   Copy-Item -LiteralPath $csvTemplatePath -Destination $releaseAppDataDir -Force
   Copy-Item -LiteralPath $importScriptPath -Destination $releaseAppScriptsDir -Force
@@ -302,7 +306,7 @@ finally {
     try {
       Invoke-Step "node scripts/db/generate-default-prisma-client.cjs"
     } catch {
-      Write-Warning "No se pudo restaurar el Prisma client SQLite por defecto: $($_.Exception.Message)"
+      Write-Warning "No se pudo restaurar el Prisma client por defecto: $($_.Exception.Message)"
     }
   }
   Pop-Location

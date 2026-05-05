@@ -4,6 +4,17 @@
   "namePrefix": "wms-web-dev",
   "stackName": "WmsWebDevStack",
   "enableWebRuntime": true,
+  "scheduleControl": {
+    "enabled": true,
+    "timezone": "America/Mexico_City",
+    "weekdaysStart": "08:00",
+    "weekdaysStop": "20:00",
+    "saturdayStart": "08:00",
+    "saturdayStop": "16:00",
+    "manageRds": true,
+    "manageLambdas": true,
+    "manageWarmer": true
+  },
   "serverInVpc": false,
   "officeIpCidr": "0.0.0.0/0",
   "dbInstanceClass": "db.t4g.micro",

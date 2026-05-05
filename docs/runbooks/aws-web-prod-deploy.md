@@ -16,7 +16,11 @@ Validación previa:
 
 ```bash
 aws sts get-caller-identity --profile <tu-perfil>
+npm run env:postgres:check
+npm run env:postgres:tcp
 npm run prisma:validate
+npm run prisma:generate
+npm run test:regression:postgres
 npm run typecheck
 npm run build
 ```
@@ -25,6 +29,12 @@ Deploy `dev`:
 
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy\aws-web.ps1 -Environment dev -Profile wms-mobile-dev
+```
+
+Smoke web post-deploy (reproducible, fuera del script):
+
+```bash
+npm run smoke:web -- --base-url <cloudfront-dev-url>
 ```
 
 Deploy `prod`:
@@ -66,9 +76,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy\aws-web.ps1
 - Confirmar `CloudFrontUrl` en la salida del script.
 - Verificar `GET /api/health`.
 - Validar login, una ruta protegida y logout. Si el script no corrió auth smoke, hacerlo manualmente.
+- Ejecutar `npm run smoke:web -- --base-url <cloudfront-url>` y conservar salida como evidencia.
 - Confirmar que `NEXTAUTH_URL` y `NEXT_PUBLIC_APP_BASE_URL` en Lambda apuntan al dominio de CloudFront.
 - Confirmar que `AUTH_SECRET`/`NEXTAUTH_SECRET` estén presentes en Lambda.
 - Revisar que el stack `prod` conserve IP restringida y protección contra borrado.
+
+Si no hay credenciales de auth smoke (`WMS_SMOKE_AUTH_EMAIL/WMS_SMOKE_AUTH_PASSWORD`), registrar explícitamente `auth smoke SKIPPED`; no marcar como validación completa de login.
+
+## Ruta KAN-29 (entorno y migración confiable)
+
+Para KAN-29, la ruta recomendada de validación en DEV es:
+
+1. `env:postgres:check` y `env:postgres:tcp`
+2. `prisma:validate` + `prisma:generate`
+3. `test:regression:postgres` + `build`
+4. `deploy:aws:web`
+5. `smoke:web` sobre URL real de CloudFront
+
+Nota: `mobile staging` es un entorno intermedio móvil y no reemplaza esta validación web.
 
 ## Rollback operativo
 

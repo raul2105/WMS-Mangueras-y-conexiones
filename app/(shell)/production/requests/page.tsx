@@ -6,6 +6,7 @@ import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
+import { Badge } from "@/components/ui/badge";
 import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
 import { pullSalesRequestOrder } from "@/lib/sales/request-service";
 import { firstErrorMessage, salesInternalOrderTransitionSchema } from "@/lib/schemas/wms";
@@ -14,6 +15,7 @@ import { getRequestId } from "@/lib/request-meta";
 import {
   getTakeOrderEligibility,
   getSalesOrderFlowStage,
+  getSalesOrderFlowNarrative,
   SALES_ORDER_FLOW_STAGE_LABELS,
   SALES_INTERNAL_ORDER_STATUS_LABELS,
   SALES_INTERNAL_ORDER_STATUS_STYLES,
@@ -334,6 +336,31 @@ export default async function ProductionRequestsPage({
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
+  const currentOrderIds = orders.map((order) => order.id);
+  const currentLinkedProduction = currentOrderIds.length
+    ? await prisma.productionOrder.findMany({
+        where: {
+          sourceDocumentType: "SalesInternalOrder",
+          sourceDocumentId: { in: currentOrderIds },
+        },
+        select: {
+          sourceDocumentId: true,
+          sourceDocumentLineId: true,
+          status: true,
+        },
+      })
+    : [];
+  const currentLinkedByOrder = new Map<string, typeof currentLinkedProduction>();
+  for (const row of currentLinkedProduction) {
+    const orderId = row.sourceDocumentId ?? "";
+    if (!orderId) continue;
+    const bucket = currentLinkedByOrder.get(orderId);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      currentLinkedByOrder.set(orderId, [row]);
+    }
+  }
   const statusCountMap = Object.fromEntries(groupedStatuses.map((row) => [row.status, row._count.status]));
   const managerOrAdmin = canManageAllSalesRequests(sessionCtx.roles);
   const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
@@ -494,21 +521,32 @@ export default async function ProductionRequestsPage({
               const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
               const hasProductLines = order.lines.some((line: any) => line.lineKind === "PRODUCT");
               const hasAssemblyLines = order.lines.some((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
+              const assemblyLineIds = new Set(order.lines.filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line: any) => line.id));
+              const linkedForOrder = (currentLinkedByOrder.get(order.id) ?? []).filter((row) =>
+                row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false,
+              );
+              const hasCompletedConfiguredAssembly = !hasAssemblyLines
+                || (
+                  linkedForOrder.length === assemblyLineIds.size
+                  && linkedForOrder.every((row) => row.status === "COMPLETADA")
+                );
               const latestPickStatus = order.pickLists[0]?.status ?? null;
-              const flowStage = getSalesOrderFlowStage({
+              const takeEligibility = getTakeOrderEligibility({
+                roles: sessionCtx.roles,
+                status: orderStatus,
+                assignedToUserId: order.assignedToUserId,
+                isCreatedByManager: createdByManager,
+              });
+              const flowNarrative = getSalesOrderFlowNarrative({
+                orderId: order.id,
                 status: orderStatus,
                 assignedToUserId: order.assignedToUserId,
                 deliveredToCustomerAt: order.deliveredToCustomerAt,
                 latestPickStatus,
                 hasProductLines,
                 hasAssemblyLines,
-                hasCompletedConfiguredAssembly: !hasAssemblyLines,
-              });
-              const takeEligibility = getTakeOrderEligibility({
-                roles: sessionCtx.roles,
-                status: orderStatus,
-                assignedToUserId: order.assignedToUserId,
-                isCreatedByManager: createdByManager,
+                hasCompletedConfiguredAssembly,
+                takeEligibility,
               });
               const isAvailableForPull = !managerOrAdmin && takeEligibility.canTakeOrder;
               return (
@@ -548,7 +586,12 @@ export default async function ProductionRequestsPage({
                   </td>
                   <td className="py-3 text-slate-400">
                     <p>{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
-                    <p className="mt-1 text-xs text-slate-500">{SALES_ORDER_FLOW_STAGE_LABELS[flowStage]}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
+                      <Link href={flowNarrative.nextRecommendedAction.href} className="text-xs text-cyan-300 hover:text-white">
+                        {flowNarrative.nextRecommendedAction.label}
+                      </Link>
+                    </div>
                   </td>
                   <td className="py-3 text-right text-slate-300">{order._count.lines}</td>
                   <td className="py-3">

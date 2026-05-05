@@ -24,6 +24,7 @@ Este directorio concentra la documentación vigente de la rama de estabilizació
 - [Matriz de runtimes](./runbooks/runtime-support-matrix.md)
 - [Runbook de limpieza manual de ramas Git](./runbooks/git-branch-cleanup.md)
 - [Runbook de sincronización Local-GitHub-Jira](./runbooks/git-jira-sync-daily.md)
+- [Guía operativa Atlassian-GitHub](./process/atlassian-github-operating-guide.md)
 - [Guía de contribución y flujo PR](../CONTRIBUTING.md)
 
 ## Regla de mantenimiento
@@ -33,3 +34,5 @@ Cuando una funcionalidad cambie en código, primero se actualiza la rama de trab
 ## Alcance de esta carpeta
 
 La documentación aquí publicada describe únicamente lo que está soportado por la rama de estabilización. Los artefactos archivados o legados deben quedarse en `docs/archive/` o `archive/legacy/`.
+
+Documentos de snapshot histórico (por ejemplo `docs/IMPLEMENTATION_SUMMARY.md`) deben mantener etiqueta de corte y no reemplazan el estado canónico de `docs/WMS_CAPABILITIES_STATUS.md`.

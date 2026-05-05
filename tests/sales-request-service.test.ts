@@ -125,7 +125,7 @@ async function ensureRole(code: string) {
   });
 }
 
-async function createUserWithRole(args: { email: string; name: string; roleCode: "MANAGER" | "SALES_EXECUTIVE" }) {
+async function createUserWithRole(args: { email: string; name: string; roleCode: "MANAGER" | "SALES_EXECUTIVE" | "WAREHOUSE_OPERATOR" }) {
   const role = await ensureRole(args.roleCode);
   const user = await prisma.user.upsert({
     where: { email: args.email },
@@ -373,6 +373,109 @@ describe("sales request service", () => {
     expect(pullAudit?.actorUserId).toBe(sales.id);
     const afterPayload = pullAudit?.after ? JSON.parse(String(pullAudit.after)) : null;
     expect(afterPayload?.assignedToUserId).toBe(sales.id);
+    expect(afterPayload?.assignedAt).toBeTruthy();
+  });
+
+  it("rejects pull when assignee is not SALES_EXECUTIVE", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-no-sales-pull@scmayher.com",
+      name: "Manager No Sales Pull",
+      roleCode: "MANAGER",
+    });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-no-sales-pull@scmayher.com",
+      name: "Warehouse No Sales Pull",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
+    const { warehouse } = await createRequestFixture();
+
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Pull Invalido",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    await expect(
+      pullSalesRequestOrder(prisma, {
+        orderId: order.id,
+        assignedToUserId: warehouseOperator.id,
+      })
+    ).rejects.toMatchObject({ code: "INVALID_ASSIGNEE" });
+  });
+
+  it("rejects double assignment when a second sales user tries to pull", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-double-pull@scmayher.com",
+      name: "Manager Double Pull",
+      roleCode: "MANAGER",
+    });
+    const salesA = await createUserWithRole({
+      email: "sales-a-double-pull@scmayher.com",
+      name: "Sales A Double Pull",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const salesB = await createUserWithRole({
+      email: "sales-b-double-pull@scmayher.com",
+      name: "Sales B Double Pull",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const { warehouse } = await createRequestFixture();
+
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Doble Pull",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: salesA.id,
+    });
+
+    await expect(
+      pullSalesRequestOrder(prisma, {
+        orderId: order.id,
+        assignedToUserId: salesB.id,
+      })
+    ).rejects.toMatchObject({ code: "ORDER_ALREADY_ASSIGNED" });
+  });
+
+  it("rejects taking an already assigned order by the same actor", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-repeat-pull@scmayher.com",
+      name: "Manager Repeat Pull",
+      roleCode: "MANAGER",
+    });
+    const sales = await createUserWithRole({
+      email: "sales-repeat-pull@scmayher.com",
+      name: "Sales Repeat Pull",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const { warehouse } = await createRequestFixture();
+
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Repeat Pull",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
+    });
+
+    await expect(
+      pullSalesRequestOrder(prisma, {
+        orderId: order.id,
+        assignedToUserId: sales.id,
+      })
+    ).rejects.toMatchObject({ code: "ORDER_ALREADY_ASSIGNED" });
   });
 
   it("hides orders assigned to another sales executive", async () => {
@@ -535,8 +638,58 @@ describe("sales request service", () => {
     ).rejects.toMatchObject({ code: "INVALID_ORDER_STATE" });
   });
 
-  it("marks order delivered when direct fulfillment is completed", async () => {
+  it("rejects delivered mark when request was not pulled before fulfillment completion", async () => {
     const { order, productA } = await createRequestFixture();
+    const sales = await createUserWithRole({
+      email: "sales-deliver-no-pull@scmayher.com",
+      name: "Sales Deliver No Pull",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 2,
+      notes: "Entrega sin toma previa",
+    });
+
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+    await releaseSalesRequestPickList(prisma, order.id);
+
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    expect(pickList?.tasks.length).toBe(1);
+
+    await confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador sin toma previa",
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+    });
+
+    await expect(
+      markSalesRequestDelivered(prisma, {
+        orderId: order.id,
+        deliveredByUserId: sales.id,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_ORDER_STATE" });
+  });
+
+  it("marks order delivered when direct fulfillment is completed", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-deliver-ok@scmayher.com",
+      name: "Manager Deliver OK",
+      roleCode: "MANAGER",
+    });
+    const { warehouse, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Entrega OK",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-03T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
     const sales = await createUserWithRole({
       email: "sales-deliver-ok@scmayher.com",
       name: "Sales Deliver OK",
@@ -563,6 +716,11 @@ describe("sales request service", () => {
       orderId: order.id,
       operatorName: "Operador entrega",
       tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 4 }],
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
     });
 
     await markSalesRequestDelivered(prisma, {

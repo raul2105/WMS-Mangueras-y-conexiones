@@ -18,7 +18,7 @@ El proyecto WMS "Mangueras y Conexiones" requiere una arquitectura sólida que s
 ### 1. Stack Tecnológico
 - **Frontend:** Next.js 16 (App Router) + React 19 + TypeScript
 - **Styling:** Tailwind CSS v4 (utilidades + custom glassmorphism)
-- **Base de datos:** SQLite (desarrollo) → PostgreSQL (producción futura)
+- **Base de datos:** PostgreSQL canónico para runtime web/AWS (`prisma/postgresql/schema.prisma`); SQLite solo para compatibilidad portable/legado.
 - **ORM:** Prisma 6
 - **Validación:** Zod (server-side)
 - **Auth:** NextAuth.js (implementación futura)
@@ -89,7 +89,7 @@ El proyecto WMS "Mangueras y Conexiones" requiere una arquitectura sólida que s
 - CI/CD básico asegura calidad
 
 ### Negativas ⚠️
-- SQLite tiene limitaciones para producción multi-usuario (migrar a PostgreSQL)
+- Coexisten dos esquemas por compatibilidad (`postgresql` canónico y `sqlite` legado), lo que exige disciplina documental y de scripts.
 - Tailwind v4 es relativamente nuevo (puede tener breaking changes)
 - Sin tests aún (deuda técnica inicial)
 - Sin autenticación implementada (siguiente iteración)
@@ -113,17 +113,12 @@ El proyecto WMS "Mangueras y Conexiones" requiere una arquitectura sólida que s
 - [x] CI/CD básico (lint, typecheck, build)
 - [x] Fix build errors (Tailwind v4 compatibility)
 
-### Fase 2 (Próximo) 🚧
-- [ ] Módulo Warehouse (almacenes + ubicaciones)
-- [ ] Validación Zod server-side
-- [ ] Tests unitarios básicos (Vitest)
-- [ ] Migrar Inventory con FK a ubicaciones
-
-### Fase 3 (v1) 🔮
-- [ ] NextAuth.js + RBAC
-- [ ] Audit log completo
-- [ ] Dashboard KPIs
-- [ ] Export CSV
+### Estado vigente (actualización 2026-04-30)
+- [x] Módulo Warehouse y ubicaciones operativas.
+- [x] RBAC base y administración de usuarios.
+- [x] Dashboard de fulfillment operativo.
+- [x] Flujos comerciales con clientes y pedidos internos.
+- [~] Cobertura E2E integral y regresión completa aún en expansión.
 
 ## Referencias
 - [Next.js App Router](https://nextjs.org/docs/app)
@@ -133,5 +128,5 @@ El proyecto WMS "Mangueras y Conexiones" requiere una arquitectura sólida que s
 
 ---
 
-**Última actualización:** 2026-02-03  
-**Próxima revisión:** Después de implementar Fase 2
+**Última actualización:** 2026-04-30  
+**Próxima revisión:** Al cierre de hardening de pruebas E2E y CI ampliado

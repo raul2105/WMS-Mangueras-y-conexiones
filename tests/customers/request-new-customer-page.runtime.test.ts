@@ -39,3 +39,4 @@ describe("new request page runtime customer branch", () => {
     expect(html).toContain("No tienes acceso al catálogo de clientes");
   });
 });
+

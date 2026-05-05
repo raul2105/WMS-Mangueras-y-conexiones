@@ -1,6 +1,6 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-04-29
+Fecha de corte: 2026-05-05
 
 ## Decision base
 
@@ -10,6 +10,7 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 - Migraciones canonicas: `prisma/postgresql/migrations`.
 - `DATABASE_URL` debe iniciar con `postgres://` o `postgresql://`.
 - SQLite queda como legado historico/offline y no debe usarse como fuente de verdad operativa.
+- `build:release` y su cadena de ejecucion son PostgreSQL-only (sin fallback SQLite).
 
 ## Fuente de verdad operacional
 
@@ -65,9 +66,12 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 
 - `KAN-29`: cerrar PostgreSQL-only en release, CI, scripts legacy y pruebas con `DATABASE_URL` PostgreSQL.
 - `KAN-53`: QA, RBAC y regresion de flujos criticos, especialmente tras PR #16.
-- `KAN-49`: UI de administracion de usuarios para `SYSTEM_ADMIN`.
 - `KAN-50`: dashboard admin/manager centrado en pedidos por surtir.
 - `KAN-52`: UX de flujo de pedidos, `flowStage`, timeline y filtros.
+
+### Cerrado y reconciliado
+
+- `KAN-49`: administracion de usuarios para `SYSTEM_ADMIN` ya validada en `main` y cerrada en Jira el 2026-05-05. Evidencia base: PR mergeado `#19`, GitHub Actions CI run `#55` en `success`, cobertura PostgreSQL en `tests/users/admin-service.integration.test.ts` y `tests/users/auth-login.integration.test.ts`, y guardas RBAC de rutas `/users*`.
 
 ## Pendiente tecnico inmediato
 
@@ -75,7 +79,7 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 - Confirmar que CI corre con `DATABASE_URL` PostgreSQL en secretos/variables.
 - Resolver `KAN-29` / GitHub issue #14.
 - Ejecutar regresion `KAN-53` para clientes, pedidos y RBAC tras PR #16.
-- Actualizar Jira al cerrar este PR documental con SHA merge y evidencia.
+- Mantener este documento reconciliado con cierres funcionales ya confirmados en Jira, registrando evidencia verificable de GitHub (PR, SHA y CI).
 
 ## Nota operativa
 

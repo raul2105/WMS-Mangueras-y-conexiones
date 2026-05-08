@@ -1,6 +1,6 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-05-05
+Fecha de corte: 2026-05-08
 
 ## Decision base
 
@@ -47,6 +47,24 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 
 ## Reconciliacion Jira vs repo
 
+### Reconciliacion historica pre KAN-54+ (corte 2026-05-08)
+
+| Ticket | Estado Jira | Estado reconciliacion | Nota |
+|---|---|---|---|
+| `KAN-64` | Finalizada | Reconciliado/cerrado | Drift Prisma/AWS documentado y cerrado. |
+| `KAN-11` | Finalizada | Reconciliado/cerrado | Evidencia PostgreSQL y cierre tecnico registrado. |
+| `KAN-13` | Finalizada | Reconciliado/cerrado | Evidencia funcional kardex y cierre tecnico registrado. |
+| `KAN-15` | Finalizada | Reconciliado/cerrado | MaterialRequest separado y handoff a KAN-17 documentado. |
+| `KAN-2` | Idea | Abierto valido | Epic abierto por deuda operativa pendiente. |
+| `KAN-3` | Idea | Abierto valido | Epic abierto; faltan cierres funcionales hijos. |
+| `KAN-9` | Idea | Abierto valido | Requiere cierre funcional/evidencia final ticket-scoped. |
+| `KAN-14` | Idea | Abierto valido | Politica de reservas no cerrable por inferencia. |
+| `KAN-17` | Idea | Abierto valido | Conversion operativa desde MaterialRequest pendiente. |
+| `KAN-18` | Idea | Abierto valido | Cierre de entrega con impacto final de inventario pendiente. |
+
+Regla de gate pre `KAN-54+`:
+- Triple paridad obligatoria: Jira correcto + GitHub sin ruido historico abierto + documentacion canonica actualizada en la misma ventana.
+
 ### Implementado o parcialmente implementado; requiere actualizar Jira
 
 - `KAN-8`: guia, proceso y fuente de verdad quedan unificados en el PR documental actual.
@@ -68,6 +86,7 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 - `KAN-53`: QA, RBAC y regresion de flujos criticos, especialmente tras PR #16.
 - `KAN-50`: dashboard admin/manager centrado en pedidos por surtir.
 - `KAN-52`: UX de flujo de pedidos, `flowStage`, timeline y filtros.
+- `KAN-2`, `KAN-3`, `KAN-9`, `KAN-14`, `KAN-17`, `KAN-18`: se mantienen abiertos con motivo valido segun reconciliacion historica pre `KAN-54+` (2026-05-08).
 
 ### Cerrado y reconciliado
 

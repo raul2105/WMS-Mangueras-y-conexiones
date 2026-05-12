@@ -509,6 +509,8 @@ model SalesInternalOrder {
   warehouseId String?
   dueDate DateTime?
   notes String?
+  sourceMaterialRequestId String? @unique
+  sourceMaterialRequestCode String?
 
   requestedByUserId String?
   confirmedByUserId String?
@@ -538,6 +540,7 @@ model SalesInternalOrder {
   @@index([assignedToUserId])
   @@index([deliveredToCustomerAt])
   @@index([warehouseId])
+  @@index([sourceMaterialRequestCode])
 }
 
 model SalesInternalOrderLine {

@@ -7,10 +7,23 @@ import { PageHeader } from "@/components/ui/page-header";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList } from "@/lib/sales/request-service";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
+import { buildSalesOrderFlowSnapshot } from "@/lib/sales/flow-snapshot";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
+import {
+  firstErrorMessage,
+  salesOrderPickConfirmSchema,
+  salesOrderPickListTransitionSchema,
+} from "@/lib/schemas/wms";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const directPickTaskConfirmSchema = z.object({
+  taskId: z.string().trim().min(1, "Tarea es obligatoria"),
+  pickedQty: z.number().finite().min(0, "Cantidad surtida invalida").nullable(),
+  shortReason: z.string().trim().nullable(),
+});
 
 function isNextRedirectError(error: unknown) {
   return Boolean(
@@ -28,8 +41,11 @@ async function releaseDirectPick(formData: FormData) {
   const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
-  const orderId = String(formData.get("orderId") ?? "").trim();
-  if (!orderId) redirect("/production");
+  const parsed = salesOrderPickListTransitionSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+  });
+  if (!parsed.success) redirect("/production");
+  const { orderId } = parsed.data;
 
   try {
     const servicePerf = startPerf("action.production.fulfillment.release_direct_pick.service");
@@ -54,25 +70,38 @@ async function confirmDirectPick(formData: FormData) {
   const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
-  const orderId = String(formData.get("orderId") ?? "").trim();
-  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  const orderIdRaw = String(formData.get("orderId") ?? "").trim();
+  const operatorNameRaw = String(formData.get("operatorName") ?? "").trim();
+  const parsedHeader = salesOrderPickConfirmSchema.safeParse({
+    orderId: orderIdRaw,
+    operatorName: operatorNameRaw,
+  });
+  if (!parsedHeader.success) {
+    if (!orderIdRaw) redirect("/production");
+    redirect(`/production/fulfillment/${orderIdRaw}?error=${encodeURIComponent(firstErrorMessage(parsedHeader.error))}`);
+  }
+  const { orderId, operatorName } = parsedHeader.data;
+
   const taskIds = formData
     .getAll("taskIds")
     .map((value) => String(value).trim())
     .filter(Boolean);
 
-  if (!orderId || !operatorName || taskIds.length === 0) {
+  if (taskIds.length === 0) {
     redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Datos de surtido invalidos")}`);
   }
 
   const tasks = taskIds.map((taskId) => {
     const pickedRaw = String(formData.get(`pickedQty__${taskId}`) ?? "").trim();
-    const shortReason = String(formData.get(`shortReason__${taskId}`) ?? "").trim() || null;
-    const pickedQty = pickedRaw === "" ? null : Number(pickedRaw);
-    if (pickedQty !== null && (!Number.isFinite(pickedQty) || pickedQty < 0)) {
-      redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Cantidad surtida invalida")}`);
+    const parsedTask = directPickTaskConfirmSchema.safeParse({
+      taskId,
+      pickedQty: pickedRaw === "" ? null : Number(pickedRaw),
+      shortReason: String(formData.get(`shortReason__${taskId}`) ?? "").trim() || null,
+    });
+    if (!parsedTask.success) {
+      redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsedTask.error))}`);
     }
-    return { taskId, pickedQty, shortReason };
+    return parsedTask.data;
   });
 
   try {
@@ -112,8 +141,12 @@ export default async function ProductionFulfillmentPage({
       id: true,
       code: true,
       status: true,
+      assignedToUserId: true,
+      deliveredToCustomerAt: true,
       customerName: true,
       dueDate: true,
+      updatedAt: true,
+      lines: { select: { lineKind: true } },
       warehouse: { select: { code: true, name: true } },
       pickLists: {
         orderBy: { createdAt: "desc" },
@@ -121,6 +154,7 @@ export default async function ProductionFulfillmentPage({
           id: true,
           code: true,
           status: true,
+          updatedAt: true,
           releasedAt: true,
           completedAt: true,
           targetLocation: { select: { code: true, name: true } },
@@ -161,8 +195,43 @@ export default async function ProductionFulfillmentPage({
     redirect("/production");
   }
 
+  const linkedAssemblyOrders = await prisma.productionOrder.findMany({
+    where: {
+      sourceDocumentType: "SalesInternalOrder",
+      sourceDocumentId: order.id,
+    },
+    select: {
+      status: true,
+      sourceDocumentLineId: true,
+      updatedAt: true,
+    },
+  });
+
   const activePickList = order.pickLists.find((pickList) => pickList.status !== "CANCELLED") ?? null;
   const actionableTasks = activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
+  const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");
+  const hasAssemblyLines = order.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+  const linkedAssemblyOpen = linkedAssemblyOrders.filter((row) => row.status !== "COMPLETADA" && row.status !== "CANCELADA").length;
+  const linkedAssemblyUpdatedAt = linkedAssemblyOrders
+    .map((row) => row.updatedAt)
+    .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  const snapshot = buildSalesOrderFlowSnapshot({
+    orderId: order.id,
+    status: order.status,
+    assignedToUserId: order.assignedToUserId,
+    deliveredToCustomerAt: order.deliveredToCustomerAt,
+    dueDate: order.dueDate,
+    orderUpdatedAt: order.updatedAt,
+    latestPickStatus: activePickList?.status ?? null,
+    latestPickUpdatedAt: activePickList?.updatedAt ?? null,
+    hasProductLines,
+    hasAssemblyLines,
+    linkedAssemblyTotal: linkedAssemblyOrders.length,
+    linkedAssemblyOpen,
+    linkedAssemblyUpdatedAt,
+    hasCompletedConfiguredAssembly: !hasAssemblyLines || (linkedAssemblyOrders.length > 0 && linkedAssemblyOpen === 0),
+    assemblyStatus: linkedAssemblyOrders[0]?.status ?? null,
+  });
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -195,6 +264,12 @@ export default async function ProductionFulfillmentPage({
           <p>Almacen: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</p>
           <p>Fecha compromiso: {order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
           <p>Estado del pedido: {order.status}</p>
+          <p className="flex flex-wrap gap-2">
+            <span className={`rounded px-2 py-1 text-xs ${snapshot.orderStatusBadgeModel.className}`}>{snapshot.orderStatusBadgeModel.label}</span>
+            <span className="rounded px-2 py-1 text-xs border border-white/10">{snapshot.pickStatusBadgeModel.label}</span>
+            <span className="rounded px-2 py-1 text-xs border border-white/10">{snapshot.riskLevel}</span>
+          </p>
+          <p className="text-xs text-slate-400">Bloqueo: {snapshot.blockingCauseLabel}</p>
         </div>
         <div className="space-y-3">
           {!activePickList ? (

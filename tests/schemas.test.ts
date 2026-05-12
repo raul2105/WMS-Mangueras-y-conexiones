@@ -7,10 +7,22 @@ import {
   productionOrderCreateSchema,
   assemblyOrderHeaderSchema,
   assemblyConfigSchema,
+  assemblyOrderCancelSchema,
+  assemblyOrderConfirmHeaderSchema,
+  assemblyOrderConfirmTaskSchema,
+  assemblyOrderReleaseSchema,
   parsePriority,
   parseDueDate,
   firstErrorMessage,
+  productsLookupQuerySchema,
+  productsSearchQuerySchema,
+  salesInternalOrderAssemblyLineCreateSchema,
+  salesInternalOrderCreateSchema,
+  salesInternalOrderProductLineCreateSchema,
+  salesOrderPickConfirmSchema,
+  salesOrderPickListTransitionSchema,
 } from "../lib/schemas/wms";
+import { userCreateSchema, userResetPasswordSchema, userUpdateSchema } from "../lib/schemas/users";
 
 describe("receiveStockSchema", () => {
   const base = {
@@ -235,5 +247,198 @@ describe("firstErrorMessage", () => {
       expect(typeof msg).toBe("string");
       expect(msg.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("KAN-9 assembly order action schemas", () => {
+  it("validates release and cancel order id", () => {
+    expect(assemblyOrderReleaseSchema.safeParse({ orderId: "ord-1" }).success).toBe(true);
+    expect(assemblyOrderCancelSchema.safeParse({ orderId: "ord-1" }).success).toBe(true);
+    expect(assemblyOrderReleaseSchema.safeParse({ orderId: "" }).success).toBe(false);
+  });
+
+  it("requires operator and task ids for batch confirm", () => {
+    const ok = assemblyOrderConfirmHeaderSchema.safeParse({
+      orderId: "ord-1",
+      operatorName: "Operador",
+      taskIds: ["task-1"],
+    });
+    expect(ok.success).toBe(true);
+    expect(assemblyOrderConfirmHeaderSchema.safeParse({
+      orderId: "ord-1",
+      operatorName: "",
+      taskIds: ["task-1"],
+    }).success).toBe(false);
+  });
+
+  it("rejects negative picked quantity", () => {
+    expect(assemblyOrderConfirmTaskSchema.safeParse({
+      taskId: "task-1",
+      pickedQty: 0,
+      shortReason: null,
+    }).success).toBe(true);
+    expect(assemblyOrderConfirmTaskSchema.safeParse({
+      taskId: "task-1",
+      pickedQty: -1,
+      shortReason: null,
+    }).success).toBe(false);
+  });
+});
+
+describe("KAN-9 products query schemas", () => {
+  it("applies defaults for search query", () => {
+    const parsed = productsSearchQuerySchema.safeParse({});
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.take).toBe(6);
+      expect(parsed.data.cursor).toBe(0);
+      expect(parsed.data.q).toBe("");
+    }
+  });
+
+  it("rejects malformed numeric params", () => {
+    expect(productsSearchQuerySchema.safeParse({ take: "abc" }).success).toBe(false);
+    expect(productsSearchQuerySchema.safeParse({ cursor: "-2" }).success).toBe(false);
+    expect(productsSearchQuerySchema.safeParse({ requiredQty: "0" }).success).toBe(false);
+  });
+
+  it("normalizes lookup code", () => {
+    const parsed = productsLookupQuerySchema.safeParse({ code: "  abc  " });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.code).toBe("abc");
+  });
+});
+
+describe("sales internal order schemas", () => {
+  it("validates salesInternalOrderCreateSchema", () => {
+    expect(salesInternalOrderCreateSchema.safeParse({
+      warehouseId: "wh-1",
+      dueDateRaw: "2026-05-12",
+      customerName: "Cliente",
+    }).success).toBe(true);
+    expect(salesInternalOrderCreateSchema.safeParse({
+      warehouseId: "",
+      dueDateRaw: "2026-05-12",
+    }).success).toBe(false);
+    expect(salesInternalOrderCreateSchema.safeParse({
+      warehouseId: "wh-1",
+      dueDateRaw: "",
+    }).success).toBe(false);
+  });
+
+  it("validates salesInternalOrderProductLineCreateSchema", () => {
+    expect(salesInternalOrderProductLineCreateSchema.safeParse({
+      orderId: "ord-1",
+      productId: "prod-1",
+      requestedQtyRaw: "2",
+    }).success).toBe(true);
+    expect(salesInternalOrderProductLineCreateSchema.safeParse({
+      orderId: "ord-1",
+      productId: "prod-1",
+      requestedQtyRaw: "0",
+    }).success).toBe(false);
+    expect(salesInternalOrderProductLineCreateSchema.safeParse({
+      orderId: "ord-1",
+      productId: "",
+      requestedQtyRaw: "2",
+    }).success).toBe(false);
+  });
+
+  it("validates salesInternalOrderAssemblyLineCreateSchema", () => {
+    const base = {
+      orderId: "ord-1",
+      warehouseId: "wh-1",
+      entryFittingProductId: "entry-1",
+      hoseProductId: "hose-1",
+      exitFittingProductId: "exit-1",
+      hoseLengthRaw: "1",
+      assemblyQuantityRaw: "1",
+    };
+    expect(salesInternalOrderAssemblyLineCreateSchema.safeParse(base).success).toBe(true);
+    expect(salesInternalOrderAssemblyLineCreateSchema.safeParse({
+      ...base,
+      hoseLengthRaw: "0",
+    }).success).toBe(false);
+    expect(salesInternalOrderAssemblyLineCreateSchema.safeParse({
+      ...base,
+      assemblyQuantityRaw: "0",
+    }).success).toBe(false);
+  });
+});
+
+describe("sales pick schemas", () => {
+  it("validates salesOrderPickListTransitionSchema", () => {
+    expect(salesOrderPickListTransitionSchema.safeParse({ orderId: "ord-1" }).success).toBe(true);
+    expect(salesOrderPickListTransitionSchema.safeParse({ orderId: "" }).success).toBe(false);
+  });
+
+  it("validates salesOrderPickConfirmSchema", () => {
+    expect(salesOrderPickConfirmSchema.safeParse({
+      orderId: "ord-1",
+      operatorName: "Operador",
+    }).success).toBe(true);
+    expect(salesOrderPickConfirmSchema.safeParse({
+      orderId: "",
+      operatorName: "Operador",
+    }).success).toBe(false);
+    expect(salesOrderPickConfirmSchema.safeParse({
+      orderId: "ord-1",
+      operatorName: "",
+    }).success).toBe(false);
+  });
+});
+
+describe("user schemas", () => {
+  it("validates userCreateSchema", () => {
+    const base = {
+      name: "Usuario Demo",
+      email: "demo@wms.com",
+      password: "Segura123",
+      confirmPassword: "Segura123",
+      roleIds: ["role-1"],
+      isActive: true,
+    };
+    expect(userCreateSchema.safeParse(base).success).toBe(true);
+    expect(userCreateSchema.safeParse({
+      ...base,
+      confirmPassword: "Distinta123",
+    }).success).toBe(false);
+    expect(userCreateSchema.safeParse({
+      ...base,
+      roleIds: [],
+    }).success).toBe(false);
+  });
+
+  it("validates userUpdateSchema", () => {
+    const base = {
+      name: "Usuario Demo",
+      email: "demo@wms.com",
+      roleIds: ["role-1"],
+      isActive: true,
+    };
+    expect(userUpdateSchema.safeParse(base).success).toBe(true);
+    expect(userUpdateSchema.safeParse({
+      ...base,
+      roleIds: [],
+    }).success).toBe(false);
+    expect(userUpdateSchema.safeParse({
+      ...base,
+      email: "correo-invalido",
+    }).success).toBe(false);
+  });
+
+  it("validates userResetPasswordSchema", () => {
+    expect(userResetPasswordSchema.safeParse({
+      password: "Segura123",
+      confirmPassword: "Segura123",
+    }).success).toBe(true);
+    expect(userResetPasswordSchema.safeParse({
+      password: "123",
+      confirmPassword: "123",
+    }).success).toBe(false);
+    expect(userResetPasswordSchema.safeParse({
+      password: "Segura123",
+      confirmPassword: "NoCoincide123",
+    }).success).toBe(false);
   });
 });

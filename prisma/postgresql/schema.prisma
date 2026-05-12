@@ -532,6 +532,7 @@ model SalesInternalOrder {
   customerName String?
   warehouseId String?
   dueDate DateTime?
+  sourceMaterialRequestId String? @unique
   notes String?
 
   requestedByUserId String?

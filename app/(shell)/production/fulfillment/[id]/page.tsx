@@ -9,8 +9,20 @@ import { confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList } from "
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
+import {
+  firstErrorMessage,
+  salesOrderPickConfirmSchema,
+  salesOrderPickListTransitionSchema,
+} from "@/lib/schemas/wms";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const directPickTaskConfirmSchema = z.object({
+  taskId: z.string().trim().min(1, "Tarea es obligatoria"),
+  pickedQty: z.number().finite().min(0, "Cantidad surtida invalida").nullable(),
+  shortReason: z.string().trim().nullable(),
+});
 
 function isNextRedirectError(error: unknown) {
   return Boolean(
@@ -28,8 +40,11 @@ async function releaseDirectPick(formData: FormData) {
   const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
-  const orderId = String(formData.get("orderId") ?? "").trim();
-  if (!orderId) redirect("/production");
+  const parsed = salesOrderPickListTransitionSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+  });
+  if (!parsed.success) redirect("/production");
+  const { orderId } = parsed.data;
 
   try {
     const servicePerf = startPerf("action.production.fulfillment.release_direct_pick.service");
@@ -39,9 +54,10 @@ async function releaseDirectPick(formData: FormData) {
   } catch (error) {
     perf.end({ requestId, orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
-    const message = error instanceof InventoryServiceError
-      ? error.message
-      : "Ocurrio un error inesperado al liberar el surtido directo";
+    const message =
+      error instanceof InventoryServiceError
+        ? error.message
+        : "Ocurrio un error inesperado al liberar el surtido directo";
     redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -54,25 +70,38 @@ async function confirmDirectPick(formData: FormData) {
   const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
-  const orderId = String(formData.get("orderId") ?? "").trim();
-  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  const orderIdRaw = String(formData.get("orderId") ?? "").trim();
+  const operatorNameRaw = String(formData.get("operatorName") ?? "").trim();
+  const parsedHeader = salesOrderPickConfirmSchema.safeParse({
+    orderId: orderIdRaw,
+    operatorName: operatorNameRaw,
+  });
+  if (!parsedHeader.success) {
+    if (!orderIdRaw) redirect("/production");
+    redirect(`/production/fulfillment/${orderIdRaw}?error=${encodeURIComponent(firstErrorMessage(parsedHeader.error))}`);
+  }
+  const { orderId, operatorName } = parsedHeader.data;
+
   const taskIds = formData
     .getAll("taskIds")
     .map((value) => String(value).trim())
     .filter(Boolean);
 
-  if (!orderId || !operatorName || taskIds.length === 0) {
+  if (taskIds.length === 0) {
     redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Datos de surtido invalidos")}`);
   }
 
   const tasks = taskIds.map((taskId) => {
     const pickedRaw = String(formData.get(`pickedQty__${taskId}`) ?? "").trim();
-    const shortReason = String(formData.get(`shortReason__${taskId}`) ?? "").trim() || null;
-    const pickedQty = pickedRaw === "" ? null : Number(pickedRaw);
-    if (pickedQty !== null && (!Number.isFinite(pickedQty) || pickedQty < 0)) {
-      redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Cantidad surtida invalida")}`);
+    const parsedTask = directPickTaskConfirmSchema.safeParse({
+      taskId,
+      pickedQty: pickedRaw === "" ? null : Number(pickedRaw),
+      shortReason: String(formData.get(`shortReason__${taskId}`) ?? "").trim() || null,
+    });
+    if (!parsedTask.success) {
+      redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsedTask.error))}`);
     }
-    return { taskId, pickedQty, shortReason };
+    return parsedTask.data;
   });
 
   try {
@@ -88,9 +117,10 @@ async function confirmDirectPick(formData: FormData) {
   } catch (error) {
     perf.end({ requestId, orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
-    const message = error instanceof InventoryServiceError
-      ? error.message
-      : "Ocurrio un error inesperado al confirmar el surtido";
+    const message =
+      error instanceof InventoryServiceError
+        ? error.message
+        : "Ocurrio un error inesperado al confirmar el surtido";
     redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(message)}`);
   }
 }
@@ -162,7 +192,8 @@ export default async function ProductionFulfillmentPage({
   }
 
   const activePickList = order.pickLists.find((pickList) => pickList.status !== "CANCELLED") ?? null;
-  const actionableTasks = activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
+  const actionableTasks =
+    activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -252,7 +283,9 @@ export default async function ProductionFulfillmentPage({
                     </div>
                     <div>
                       <p className="text-xs text-slate-400">Origen</p>
-                      <p>{task.sequence}. {task.sourceLocation.code}</p>
+                      <p>
+                        {task.sequence}. {task.sourceLocation.code}
+                      </p>
                       <p className="text-xs text-slate-500">{task.sourceLocation.name}</p>
                     </div>
                     <div>
@@ -310,7 +343,9 @@ export default async function ProductionFulfillmentPage({
               </label>
               <button
                 type="submit"
-                className={buttonStyles({ className: actionableTasks.length === 0 || activePickList.status === "DRAFT" ? "opacity-50" : "" })}
+                className={buttonStyles({
+                  className: actionableTasks.length === 0 || activePickList.status === "DRAFT" ? "opacity-50" : "",
+                })}
                 disabled={actionableTasks.length === 0 || activePickList.status === "DRAFT"}
               >
                 Confirmar surtido

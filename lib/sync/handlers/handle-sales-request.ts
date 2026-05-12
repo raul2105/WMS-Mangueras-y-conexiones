@@ -1,22 +1,61 @@
-import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import type { HandleResult } from "../handle-types";
 
-function isUniqueConstraintError(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+const MOBILE_REQUEST_NOTE_PREFIX = "Creado desde solicitud móvil";
+
+function buildMobileRequestAuditNote(requestId: string) {
+  return `${MOBILE_REQUEST_NOTE_PREFIX} ${requestId}`;
 }
 
-async function findExistingSalesOrder(requestId: string, code: string) {
-  return prisma.salesInternalOrder.findFirst({
-    where: {
-      OR: [
-        { sourceMaterialRequestId: requestId },
-        { code },
-      ],
-    },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
+function hasMobileRequestAuditNote(notes: string | null | undefined, requestId: string) {
+  return typeof notes === "string" && notes.includes(buildMobileRequestAuditNote(requestId));
+}
+
+function mergeMobileRequestAuditNote(notes: string | null | undefined, requestId: string) {
+  if (hasMobileRequestAuditNote(notes, requestId)) {
+    return notes ?? null;
+  }
+
+  const auditNote = buildMobileRequestAuditNote(requestId);
+  const trimmedNotes = typeof notes === "string" ? notes.trim() : "";
+  return trimmedNotes ? `${trimmedNotes}\n${auditNote}` : auditNote;
+}
+
+function isUniqueConstraintViolation(error: unknown) {
+  return Boolean(
+    error
+      && typeof error === "object"
+      && "code" in error
+      && (error as { code?: unknown }).code === "P2002"
+  );
+}
+
+async function reuseExistingSalesRequestOrder(args: {
+  requestId: string;
+  existing: { id: string; sourceMaterialRequestId: string | null; notes: string | null };
+}): Promise<HandleResult> {
+  const { requestId, existing } = args;
+
+  if (existing.sourceMaterialRequestId && existing.sourceMaterialRequestId !== requestId) {
+    return {
+      ok: false,
+      error: `SalesInternalOrder ${existing.id} is already linked to a different material request`,
+    };
+  }
+
+  const nextNotes = mergeMobileRequestAuditNote(existing.notes, requestId);
+  if (!existing.sourceMaterialRequestId || nextNotes !== existing.notes) {
+    await prisma.salesInternalOrder.update({
+      where: { id: existing.id },
+      data: {
+        sourceMaterialRequestId: existing.sourceMaterialRequestId ?? requestId,
+        notes: nextNotes,
+      },
+      select: { id: true },
+    });
+  }
+
+  return { ok: true, localId: existing.id };
 }
 
 /**
@@ -35,9 +74,29 @@ export async function handleSalesRequest(
       return { ok: false, error: "Missing requestId or code" };
     }
 
-    const existing = await findExistingSalesOrder(requestId, code);
-    if (existing) {
-      return { ok: true, localId: existing.id };
+    const existingByRequest = await prisma.salesInternalOrder.findUnique({
+      where: { sourceMaterialRequestId: requestId },
+      select: { id: true },
+    });
+
+    if (existingByRequest) {
+      return { ok: true, localId: existingByRequest.id };
+    }
+
+    const existingByCode = await prisma.salesInternalOrder.findUnique({
+      where: { code },
+      select: {
+        id: true,
+        sourceMaterialRequestId: true,
+        notes: true,
+      },
+    });
+
+    if (existingByCode) {
+      return reuseExistingSalesRequestOrder({
+        requestId,
+        existing: existingByCode,
+      });
     }
 
     let warehouseId: string | undefined;
@@ -58,19 +117,38 @@ export async function handleSalesRequest(
           warehouseId: warehouseId ?? null,
           dueDate: body.dueDate ? new Date(body.dueDate as string) : null,
           sourceMaterialRequestId: requestId,
-          notes: `Creado desde solicitud móvil ${requestId}`,
+          notes: buildMobileRequestAuditNote(requestId),
         },
         select: { id: true },
       });
 
       return { ok: true, localId: order.id };
     } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        const existingAfterCollision = await findExistingSalesOrder(requestId, code);
-        if (existingAfterCollision) {
-          return { ok: true, localId: existingAfterCollision.id };
-        }
+      if (!isUniqueConstraintViolation(error)) {
+        throw error;
       }
+
+      const existingAfterCollision = await prisma.salesInternalOrder.findFirst({
+        where: {
+          OR: [
+            { sourceMaterialRequestId: requestId },
+            { code },
+          ],
+        },
+        select: {
+          id: true,
+          sourceMaterialRequestId: true,
+          notes: true,
+        },
+      });
+
+      if (existingAfterCollision) {
+        return reuseExistingSalesRequestOrder({
+          requestId,
+          existing: existingAfterCollision,
+        });
+      }
+
       throw error;
     }
   } catch (err) {

@@ -123,4 +123,15 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("WAREHOUSE_OPERATOR", "/users")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/users")).toBe(false);
   });
+
+  it("MANAGER, SALES_EXECUTIVE y WAREHOUSE_OPERATOR no acceden al modulo /users", () => {
+    const blockedRoles: RoleCode[] = ["MANAGER", "SALES_EXECUTIVE", "WAREHOUSE_OPERATOR"];
+    const userRoutes = ["/users", "/users/new", "/users/abc", "/users/abc/edit"] as const;
+
+    for (const role of blockedRoles) {
+      for (const route of userRoutes) {
+        expect(canAccess(role, route)).toBe(false);
+      }
+    }
+  });
 });

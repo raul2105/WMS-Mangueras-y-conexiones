@@ -86,8 +86,8 @@ jobs:
     needs: quality
     if: github.event_name == 'push'
     env:
-      MOBILE_PUBLISHED_URL: https://d2cqvl04yxlts4.cloudfront.net
-      MOBILE_API_BASE_URL: https://5o7r5ww532.execute-api.us-east-1.amazonaws.com
+      MOBILE_PUBLISHED_URL: https://d2b1ltxtvypxr4.cloudfront.net
+      MOBILE_API_BASE_URL: https://d2b1ltxtvypxr4.cloudfront.net
 
     steps:
       - name: Checkout code

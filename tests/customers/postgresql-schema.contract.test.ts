@@ -27,5 +27,10 @@ describe("postgresql schema contract for customers", () => {
     expect(schema).toContain("customer Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)");
     expect(schema).toContain("@@index([customerId])");
   });
-});
 
+  it("declares a structured sourceMaterialRequestId link on SalesInternalOrder", () => {
+    const schema = readWorkspaceFile("prisma/postgresql/schema.prisma");
+    expect(schema).toContain("model SalesInternalOrder {");
+    expect(schema).toContain("sourceMaterialRequestId String? @unique");
+  });
+});

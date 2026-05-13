@@ -44,6 +44,15 @@ type ReservationBatchItem = {
   qty: number;
 };
 
+function isPrismaUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  return "code" in error && (error as { code?: unknown }).code === "P2002";
+}
+
+export type MarkSalesRequestDeliveredResult =
+  | { delivered: true; alreadyDelivered: false; warning: null; movementIds: string[] }
+  | { delivered: true; alreadyDelivered: true; warning: string; movementIds: string[] };
+
 function getInventoryService(prisma: PrismaClient) {
   const scoped = prisma as PrismaClient & { [inventoryServiceSymbol]?: InventoryService };
   if (!scoped[inventoryServiceSymbol]) {
@@ -821,6 +830,9 @@ export async function markSalesRequestDelivered(
     deliveredByUserId: string;
   }
 ) {
+  const deliveryDocumentType = "SALES_INTERNAL_ORDER_DELIVERY";
+  const idempotentWarning = "Pedido ya entregado; operación idempotente";
+
   return prisma.$transaction(async (tx) => {
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
@@ -844,7 +856,7 @@ export async function markSalesRequestDelivered(
             { createdAt: "desc" },
           ],
           take: 1,
-          select: { id: true, status: true, code: true },
+          select: { id: true, status: true, code: true, targetLocationId: true },
         },
       },
     });
@@ -857,9 +869,6 @@ export async function markSalesRequestDelivered(
     }
     if (order.status !== "CONFIRMADA") {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se puede marcar entregado un pedido confirmado");
-    }
-    if (order.deliveredToCustomerAt) {
-      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya está marcado como entregado");
     }
     if (!order.assignedToUserId || !order.pulledAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede marcar entregado sin tomar y asignar el pedido");
@@ -899,14 +908,161 @@ export async function markSalesRequestDelivered(
       }
     }
 
+    const existingDeliveryMovements = await tx.inventoryMovement.findMany({
+      where: {
+        type: "OUT",
+        documentType: deliveryDocumentType,
+        documentId: order.id,
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (order.deliveredToCustomerAt) {
+      return {
+        delivered: true,
+        alreadyDelivered: true,
+        warning: idempotentWarning,
+        movementIds: existingDeliveryMovements.map((row) => row.id),
+      } satisfies MarkSalesRequestDeliveredResult;
+    }
+
     const now = new Date();
-    await tx.salesInternalOrder.update({
-      where: { id: order.id },
+    const claim = await tx.salesInternalOrder.updateMany({
+      where: {
+        id: order.id,
+        status: "CONFIRMADA",
+        assignedToUserId: { not: null },
+        pulledAt: { not: null },
+        deliveredToCustomerAt: null,
+      },
       data: {
         deliveredToCustomerAt: now,
         deliveredByUserId: args.deliveredByUserId,
       },
     });
+    if (claim.count !== 1) {
+      const concurrentOrder = await tx.salesInternalOrder.findUnique({
+        where: { id: order.id },
+        select: { deliveredToCustomerAt: true },
+      });
+      if (concurrentOrder?.deliveredToCustomerAt) {
+        const movements = await tx.inventoryMovement.findMany({
+          where: {
+            type: "OUT",
+            documentType: deliveryDocumentType,
+            documentId: order.id,
+          },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        return {
+          delivered: true,
+          alreadyDelivered: true,
+          warning: idempotentWarning,
+          movementIds: movements.map((row) => row.id),
+        } satisfies MarkSalesRequestDeliveredResult;
+      }
+      throw new InventoryServiceError("ORDER_DELIVERY_CONFLICT", "El pedido cambió de estado durante la entrega");
+    }
+
+    const productLines = await tx.salesInternalOrderLine.findMany({
+      where: {
+        orderId: order.id,
+        lineKind: "PRODUCT",
+        productId: { not: null },
+        requestedQty: { gt: 0 },
+      },
+      select: {
+        id: true,
+        requestedQty: true,
+        productId: true,
+      },
+    });
+    const directCompletedPickList = hasProductLines ? order.pickLists[0] : null;
+    const outByLine = new Map<string, { lineId: string; productId: string; locationId: string; qty: number }>();
+    if (directCompletedPickList?.status === "COMPLETED") {
+      for (const line of productLines) {
+        if (!line.productId) continue;
+        outByLine.set(line.id, {
+          lineId: line.id,
+          productId: line.productId,
+          locationId: directCompletedPickList.targetLocationId,
+          qty: line.requestedQty,
+        });
+      }
+    }
+
+    const movementIds: string[] = [];
+    try {
+      for (const item of outByLine.values()) {
+        const inventory = await tx.inventory.findUnique({
+          where: {
+            productId_locationId: {
+              productId: item.productId,
+              locationId: item.locationId,
+            },
+          },
+          select: { id: true, quantity: true, reserved: true, available: true },
+        });
+        if (!inventory || inventory.available < item.qty) {
+          throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "No hay stock disponible suficiente para entrega final");
+        }
+        const newQuantity = inventory.quantity - item.qty;
+        if (newQuantity < inventory.reserved) {
+          throw new InventoryServiceError("RESERVED_EXCEEDS_QUANTITY", "Reserva excede el inventario tras egreso final");
+        }
+        const newAvailable = newQuantity - inventory.reserved;
+        await tx.inventory.update({
+          where: { id: inventory.id },
+          data: {
+            quantity: newQuantity,
+            available: newAvailable,
+          },
+        });
+        const movement = await tx.inventoryMovement.create({
+          data: {
+            productId: item.productId,
+            locationId: item.locationId,
+            type: "OUT",
+            operatorName: "system",
+            quantity: item.qty,
+            reference: order.code,
+            notes: "Egreso final por entrega al cliente",
+            documentType: deliveryDocumentType,
+            documentId: order.id,
+            documentLineId: item.lineId,
+          },
+          select: { id: true },
+        });
+        movementIds.push(movement.id);
+      }
+    } catch (error) {
+      if (isPrismaUniqueViolation(error)) {
+        const concurrentOrder = await tx.salesInternalOrder.findUnique({
+          where: { id: order.id },
+          select: { deliveredToCustomerAt: true },
+        });
+        if (concurrentOrder?.deliveredToCustomerAt) {
+          const movements = await tx.inventoryMovement.findMany({
+            where: {
+              type: "OUT",
+              documentType: deliveryDocumentType,
+              documentId: order.id,
+            },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          return {
+            delivered: true,
+            alreadyDelivered: true,
+            warning: idempotentWarning,
+            movementIds: movements.map((row) => row.id),
+          } satisfies MarkSalesRequestDeliveredResult;
+        }
+        throw new InventoryServiceError("DELIVERY_INCONSISTENT", "Colisión de unicidad en egreso final sin estado entregado");
+      }
+      throw error;
+    }
 
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
@@ -919,8 +1075,16 @@ export async function markSalesRequestDelivered(
         orderCode: order.code,
         deliveredToCustomerAt: now.toISOString(),
         deliveredByUserId: args.deliveredByUserId,
+        movementIds,
       },
     }, tx);
+
+    return {
+      delivered: true,
+      alreadyDelivered: false,
+      warning: null,
+      movementIds,
+    } satisfies MarkSalesRequestDeliveredResult;
   });
 }
 

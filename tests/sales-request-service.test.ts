@@ -723,18 +723,38 @@ describe("sales request service", () => {
       assignedToUserId: sales.id,
     });
 
-    await markSalesRequestDelivered(prisma, {
+    const result = await markSalesRequestDelivered(prisma, {
       orderId: order.id,
       deliveredByUserId: sales.id,
     });
+    expect(result).toMatchObject({
+      delivered: true,
+      alreadyDelivered: false,
+      warning: null,
+    });
+    expect(result.movementIds.length).toBe(1);
 
-    const delivered = await prisma.salesInternalOrder.findUnique({
+    const [delivered, deliveryMovements] = await Promise.all([
+      prisma.salesInternalOrder.findUnique({
       where: { id: order.id },
       select: { deliveredToCustomerAt: true, deliveredByUserId: true },
-    });
+      }),
+      prisma.inventoryMovement.findMany({
+        where: {
+          type: "OUT",
+          documentType: "SALES_INTERNAL_ORDER_DELIVERY",
+          documentId: order.id,
+        },
+        select: { id: true, documentLineId: true, quantity: true },
+      }),
+    ]);
 
     expect(delivered?.deliveredToCustomerAt).toBeTruthy();
     expect(delivered?.deliveredByUserId).toBe(sales.id);
+    expect(deliveryMovements).toHaveLength(1);
+    expect(deliveryMovements[0]?.id).toBe(result.movementIds[0]);
+    expect(deliveryMovements[0]?.quantity).toBe(4);
+    expect(deliveryMovements[0]?.documentLineId).toBeTruthy();
 
     const deliveredAudit = await prisma.auditLog.findFirst({
       where: {
@@ -750,6 +770,245 @@ describe("sales request service", () => {
     const afterPayload = deliveredAudit?.after ? JSON.parse(String(deliveredAudit.after)) : null;
     expect(afterPayload?.deliveredByUserId).toBe(sales.id);
     expect(afterPayload?.deliveredToCustomerAt).toBeTruthy();
+    expect(afterPayload?.movementIds).toEqual(result.movementIds);
+  });
+
+  it("treats retry as idempotent success without duplicate OUT or audit", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-deliver-retry@scmayher.com",
+      name: "Manager Deliver Retry",
+      roleCode: "MANAGER",
+    });
+    const { warehouse, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Entrega Retry",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-03T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+    const sales = await createUserWithRole({
+      email: "sales-deliver-retry@scmayher.com",
+      name: "Sales Deliver Retry",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 2,
+    });
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+    await releaseSalesRequestPickList(prisma, order.id);
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    await confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador retry",
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+    });
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
+    });
+
+    const first = await markSalesRequestDelivered(prisma, {
+      orderId: order.id,
+      deliveredByUserId: sales.id,
+    });
+    const second = await markSalesRequestDelivered(prisma, {
+      orderId: order.id,
+      deliveredByUserId: sales.id,
+    });
+
+    expect(first.alreadyDelivered).toBe(false);
+    expect(second.alreadyDelivered).toBe(true);
+    expect(second.warning).toContain("idempotente");
+
+    const [movements, deliveryAudits] = await Promise.all([
+      prisma.inventoryMovement.findMany({
+        where: {
+          type: "OUT",
+          documentType: "SALES_INTERNAL_ORDER_DELIVERY",
+          documentId: order.id,
+        },
+        select: { id: true },
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: order.id,
+          action: "MARK_DELIVERED_TO_CUSTOMER",
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    expect(movements).toHaveLength(1);
+    expect(deliveryAudits).toHaveLength(1);
+    expect(second.movementIds).toEqual(movements.map((row) => row.id));
+  });
+
+  it("rolls back delivered state when final OUT fails", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-deliver-rollback@scmayher.com",
+      name: "Manager Deliver Rollback",
+      roleCode: "MANAGER",
+    });
+    const { warehouse, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Entrega Rollback",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-03T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+    const sales = await createUserWithRole({
+      email: "sales-deliver-rollback@scmayher.com",
+      name: "Sales Deliver Rollback",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 2,
+    });
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+    await releaseSalesRequestPickList(prisma, order.id);
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    await confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador rollback",
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+    });
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
+    });
+
+    await prisma.inventory.updateMany({
+      where: { locationId: pickList!.targetLocationId, productId: productA.id },
+      data: { quantity: 0, reserved: 0, available: 0 },
+    });
+
+    await expect(
+      markSalesRequestDelivered(prisma, {
+        orderId: order.id,
+        deliveredByUserId: sales.id,
+      }),
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_AVAILABLE" });
+
+    const [orderAfterFailure, movementsAfterFailure, auditAfterFailure] = await Promise.all([
+      prisma.salesInternalOrder.findUnique({
+        where: { id: order.id },
+        select: { deliveredToCustomerAt: true, deliveredByUserId: true },
+      }),
+      prisma.inventoryMovement.findMany({
+        where: {
+          type: "OUT",
+          documentType: "SALES_INTERNAL_ORDER_DELIVERY",
+          documentId: order.id,
+        },
+        select: { id: true },
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: order.id,
+          action: "MARK_DELIVERED_TO_CUSTOMER",
+        },
+        select: { id: true },
+      }),
+    ]);
+    expect(orderAfterFailure?.deliveredToCustomerAt).toBeNull();
+    expect(orderAfterFailure?.deliveredByUserId).toBeNull();
+    expect(movementsAfterFailure).toHaveLength(0);
+    expect(auditAfterFailure).toHaveLength(0);
+  });
+
+  it("handles concurrent delivery attempts with one effective and one idempotent", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-deliver-race@scmayher.com",
+      name: "Manager Deliver Race",
+      roleCode: "MANAGER",
+    });
+    const { warehouse, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Entrega Race",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-03T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+    const sales = await createUserWithRole({
+      email: "sales-deliver-race@scmayher.com",
+      name: "Sales Deliver Race",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 2,
+    });
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+    await releaseSalesRequestPickList(prisma, order.id);
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    await confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador race",
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+    });
+    await pullSalesRequestOrder(prisma, {
+      orderId: order.id,
+      assignedToUserId: sales.id,
+    });
+
+    const [first, second] = await Promise.all([
+      markSalesRequestDelivered(prisma, {
+        orderId: order.id,
+        deliveredByUserId: sales.id,
+      }),
+      markSalesRequestDelivered(prisma, {
+        orderId: order.id,
+        deliveredByUserId: sales.id,
+      }),
+    ]);
+    const results = [first, second];
+    const effectiveCount = results.filter((row) => !row.alreadyDelivered).length;
+    const idempotentCount = results.filter((row) => row.alreadyDelivered).length;
+    expect(effectiveCount).toBe(1);
+    expect(idempotentCount).toBe(1);
+
+    const [movements, deliveryAudits] = await Promise.all([
+      prisma.inventoryMovement.findMany({
+        where: {
+          type: "OUT",
+          documentType: "SALES_INTERNAL_ORDER_DELIVERY",
+          documentId: order.id,
+        },
+        select: { id: true },
+      }),
+      prisma.auditLog.findMany({
+        where: {
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: order.id,
+          action: "MARK_DELIVERED_TO_CUSTOMER",
+        },
+        select: { id: true },
+      }),
+    ]);
+    expect(movements).toHaveLength(1);
+    expect(deliveryAudits).toHaveLength(1);
   });
 
   it("runs full operational flow: manager request -> sales pull -> direct pick + assembly -> delivered", async () => {

@@ -23,7 +23,7 @@ export async function reconcileProductionReservations(tx: TxClient, scope?: Rese
     tx.productionOrderItem.groupBy({
       by: ["productId", "locationId"],
       where: {
-        order: { status: "EN_PROCESO" },
+        order: { status: { in: ["ABIERTA", "EN_PROCESO"] } },
         ...(scopedPairs.length > 0 ? { OR: scopedPairs } : {}),
       },
       _sum: { quantity: true },
@@ -72,7 +72,7 @@ export async function assertCanSetOrderInProcess(tx: TxClient, orderId: string) 
   const competing = await tx.productionOrderItem.groupBy({
     by: ["productId", "locationId"],
     where: {
-      order: { status: "EN_PROCESO" },
+      order: { status: { in: ["ABIERTA", "EN_PROCESO"] } },
       orderId: { not: orderId },
     },
     _sum: { quantity: true },

@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
+import { reconcileProductionReservations } from "@/lib/reservation-policy";
 import { buildAssemblyRequirements, previewAssemblyAvailability } from "@/lib/assembly/availability-service";
 import type { AssemblyConfigInput, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
 
@@ -16,6 +17,21 @@ function withDbTransaction<T>(db: Db, fn: (tx: Tx) => Promise<T>, timeout = 2000
 
 function nextYearSequenceCode(prefix: string, year: number, sequence: number) {
   return `${prefix}-${year}-${String(sequence).padStart(4, "0")}`;
+}
+
+function dedupeReservationScope(scope: Array<{ productId: string; locationId: string }>) {
+  const keys = new Set<string>();
+  const unique: Array<{ productId: string; locationId: string }> = [];
+
+  for (const row of scope) {
+    if (!row.productId || !row.locationId) continue;
+    const k = `${row.productId}:${row.locationId}`;
+    if (keys.has(k)) continue;
+    keys.add(k);
+    unique.push({ productId: row.productId, locationId: row.locationId });
+  }
+
+  return unique;
 }
 
 async function generateProductionOrderCode(tx: Tx) {
@@ -388,6 +404,12 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
         code: true,
         status: true,
         kind: true,
+        items: {
+          select: {
+            productId: true,
+            locationId: true,
+          },
+        },
         assemblyWorkOrder: {
           select: {
             id: true,
@@ -479,6 +501,16 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
       where: { id: order.id },
       data: { status: "CANCELADA" },
     });
+
+    const scopedFromItems = dedupeReservationScope(order.items);
+    // Fallback: some legacy flows can have reserved pick tasks without ProductionOrderItem rows.
+    const scopedFromTasks = dedupeReservationScope(
+      order.assemblyWorkOrder.lines.flatMap((line) =>
+        line.pickTasks.map((task) => ({ productId: line.productId, locationId: task.sourceLocationId }))
+      )
+    );
+
+    await reconcileProductionReservations(tx, scopedFromItems.length > 0 ? scopedFromItems : scopedFromTasks);
   });
 }
 
@@ -495,6 +527,12 @@ export async function closeAssemblyWorkOrderConsume(
         code: true,
         kind: true,
         status: true,
+        items: {
+          select: {
+            productId: true,
+            locationId: true,
+          },
+        },
         assemblyWorkOrder: {
           select: {
             id: true,
@@ -509,6 +547,11 @@ export async function closeAssemblyWorkOrderConsume(
                 requiredQty: true,
                 wipQty: true,
                 consumedQty: true,
+                pickTasks: {
+                  select: {
+                    sourceLocationId: true,
+                  },
+                },
               },
             },
           },
@@ -599,5 +642,15 @@ export async function closeAssemblyWorkOrderConsume(
       where: { id: order.id },
       data: { status: "COMPLETADA" },
     });
+
+    const scopedFromItems = dedupeReservationScope(order.items);
+    // Fallback: keep reconciliation scoped if items were not persisted in this flow.
+    const scopedFromTasks = dedupeReservationScope(
+      order.assemblyWorkOrder.lines.flatMap((line) =>
+        line.pickTasks.map((task) => ({ productId: line.productId, locationId: task.sourceLocationId }))
+      )
+    );
+
+    await reconcileProductionReservations(tx, scopedFromItems.length > 0 ? scopedFromItems : scopedFromTasks);
   });
 }

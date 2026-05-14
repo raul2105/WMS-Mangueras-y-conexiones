@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { InventoryService } from "@/lib/inventory-service";
 import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
-import { closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
+import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   addSalesRequestProductLine,
@@ -1011,6 +1011,124 @@ describe("sales request service", () => {
     expect(deliveryAudits).toHaveLength(1);
   });
 
+  it("prevents over-delivery when two different orders consume the same inventory row concurrently", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-deliver-shared@scmayher.com",
+      name: "Manager Deliver Shared",
+      roleCode: "MANAGER",
+    });
+    const salesA = await createUserWithRole({
+      email: "sales-deliver-shared-a@scmayher.com",
+      name: "Sales Deliver Shared A",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const salesB = await createUserWithRole({
+      email: "sales-deliver-shared-b@scmayher.com",
+      name: "Sales Deliver Shared B",
+      roleCode: "SALES_EXECUTIVE",
+    });
+
+    const { warehouse, productA } = await createRequestFixture();
+    const orderA = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Shared A",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-07T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+    const orderB = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Shared B",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-07T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+
+    for (const order of [orderA, orderB]) {
+      await addSalesRequestProductLine(prisma, {
+        orderId: order.id,
+        productId: productA.id,
+        requestedQty: 2,
+      });
+      await confirmSalesRequestOrder(prisma, { orderId: order.id });
+      await releaseSalesRequestPickList(prisma, order.id);
+      const pickList = await prisma.salesInternalOrderPickList.findFirst({
+        where: { orderId: order.id },
+        include: { tasks: true },
+      });
+      await confirmSalesRequestPickTasksBatch(prisma, {
+        orderId: order.id,
+        operatorName: `Operador ${order.code}`,
+        tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+      });
+    }
+
+    await prisma.inventory.updateMany({
+      where: {
+        productId: productA.id,
+        location: { code: "STAGING-SURT" },
+      },
+      data: {
+        quantity: 3,
+        reserved: 0,
+        available: 3,
+      },
+    });
+
+    await pullSalesRequestOrder(prisma, {
+      orderId: orderA.id,
+      assignedToUserId: salesA.id,
+    });
+    await pullSalesRequestOrder(prisma, {
+      orderId: orderB.id,
+      assignedToUserId: salesB.id,
+    });
+
+    const [resultA, resultB] = await Promise.allSettled([
+      markSalesRequestDelivered(prisma, {
+        orderId: orderA.id,
+        deliveredByUserId: salesA.id,
+      }),
+      markSalesRequestDelivered(prisma, {
+        orderId: orderB.id,
+        deliveredByUserId: salesB.id,
+      }),
+    ]);
+
+    const fulfilled = [resultA, resultB].filter((row): row is PromiseFulfilledResult<Awaited<ReturnType<typeof markSalesRequestDelivered>>> => row.status === "fulfilled");
+    const rejected = [resultA, resultB].filter((row): row is PromiseRejectedResult => row.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({ code: "INSUFFICIENT_AVAILABLE" });
+
+    const [ordersAfter, movementsAfter, sharedInventory] = await Promise.all([
+      prisma.salesInternalOrder.findMany({
+        where: { id: { in: [orderA.id, orderB.id] } },
+        select: { id: true, deliveredToCustomerAt: true },
+      }),
+      prisma.inventoryMovement.findMany({
+        where: {
+          type: "OUT",
+          documentType: "SALES_INTERNAL_ORDER_DELIVERY",
+          documentId: { in: [orderA.id, orderB.id] },
+        },
+        select: { id: true, documentId: true, quantity: true },
+      }),
+      prisma.inventory.findFirst({
+        where: { productId: productA.id, location: { code: "STAGING-SURT" } },
+        select: { quantity: true, reserved: true, available: true },
+      }),
+    ]);
+
+    const deliveredCount = ordersAfter.filter((row) => row.deliveredToCustomerAt).length;
+    expect(deliveredCount).toBe(1);
+    expect(movementsAfter).toHaveLength(1);
+    expect(movementsAfter[0]?.quantity).toBe(2);
+    expect(sharedInventory?.quantity).toBe(1);
+    expect(sharedInventory?.available).toBe(1);
+    expect(sharedInventory?.reserved).toBe(0);
+  });
+
   it("runs full operational flow: manager request -> sales pull -> direct pick + assembly -> delivered", async () => {
     const manager = await createUserWithRole({
       email: "manager-full-flow@scmayher.com",
@@ -1202,5 +1320,229 @@ describe("sales request service", () => {
     expect(deliveredOrder?.deliveredByUserId).toBe(sales.id);
     expect(completedProduction?.status).toBe("COMPLETADA");
     expect(auditEntries.map((row) => row.action)).toEqual(expect.arrayContaining(["PULL_REQUEST", "MARK_DELIVERED_TO_CUSTOMER"]));
+  });
+
+  it("KAN-68 cancel reconciles reserved for ABIERTA/EN_PROCESO and keeps unrelated scope unchanged", async () => {
+    const warehouse = await prisma.warehouse.create({
+      data: { code: "WH-K68-CAN", name: "WH K68 Cancel", isActive: true },
+    });
+    const [locationA, locationB, wip] = await Promise.all([
+      prisma.location.create({
+        data: { code: "LOC-K68-A", name: "Loc K68 A", zone: "A", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      }),
+      prisma.location.create({
+        data: { code: "LOC-K68-B", name: "Loc K68 B", zone: "B", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      }),
+      prisma.location.create({
+        data: { code: "WIP-K68-CAN", name: "WIP K68", zone: "WIP", usageType: "WIP", isActive: true, warehouseId: warehouse.id },
+      }),
+    ]);
+    const [productMain, productOther] = await Promise.all([
+      prisma.product.create({ data: { sku: "SKU-K68-CAN-MAIN", name: "Main", type: "FITTING" } }),
+      prisma.product.create({ data: { sku: "SKU-K68-CAN-OTHER", name: "Other", type: "FITTING" } }),
+    ]);
+
+    await prisma.inventory.createMany({
+      data: [
+        { productId: productMain.id, locationId: locationA.id, quantity: 20, reserved: 9, available: 11 },
+        { productId: productOther.id, locationId: locationB.id, quantity: 13, reserved: 2, available: 11 },
+      ],
+    });
+
+    const [toCancel, stillOpen] = await Promise.all([
+      prisma.productionOrder.create({
+        data: { code: "ENS-K68-CAN-01", kind: "ASSEMBLY_3PIECE", status: "ABIERTA", warehouseId: warehouse.id },
+      }),
+      prisma.productionOrder.create({
+        data: { code: "ENS-K68-CAN-02", kind: "ASSEMBLY_3PIECE", status: "ABIERTA", warehouseId: warehouse.id },
+      }),
+    ]);
+
+    await prisma.productionOrderItem.createMany({
+      data: [
+        { orderId: toCancel.id, productId: productMain.id, locationId: locationA.id, quantity: 3 },
+        { orderId: stillOpen.id, productId: productMain.id, locationId: locationA.id, quantity: 4 },
+      ],
+    });
+
+    const workOrder = await prisma.assemblyWorkOrder.create({
+      data: {
+        productionOrderId: toCancel.id,
+        warehouseId: warehouse.id,
+        wipLocationId: wip.id,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+        hasShortage: false,
+      },
+    });
+
+    const line = await prisma.assemblyWorkOrderLine.create({
+      data: {
+        assemblyWorkOrderId: workOrder.id,
+        componentRole: "ENTRY_FITTING",
+        productId: productMain.id,
+        unitLabel: "pieza",
+        perAssemblyQty: 1,
+        requiredQty: 3,
+        reservedQty: 3,
+        pickedQty: 0,
+        wipQty: 0,
+        consumedQty: 0,
+        shortQty: 0,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+      },
+    });
+
+    const pickList = await prisma.pickList.create({
+      data: {
+        code: "PK-K68-CAN-01",
+        assemblyWorkOrderId: workOrder.id,
+        status: "DRAFT",
+      },
+    });
+
+    await prisma.pickTask.create({
+      data: {
+        pickListId: pickList.id,
+        assemblyWorkOrderLineId: line.id,
+        sourceLocationId: locationA.id,
+        targetWipLocationId: wip.id,
+        sequence: 1,
+        requestedQty: 3,
+        reservedQty: 3,
+        pickedQty: 0,
+        shortQty: 0,
+        status: "PENDING",
+      },
+    });
+
+    await cancelAssemblyWorkOrder(prisma, toCancel.id);
+
+    const [mainInv, otherInv] = await Promise.all([
+      prisma.inventory.findUniqueOrThrow({
+        where: { productId_locationId: { productId: productMain.id, locationId: locationA.id } },
+      }),
+      prisma.inventory.findUniqueOrThrow({
+        where: { productId_locationId: { productId: productOther.id, locationId: locationB.id } },
+      }),
+    ]);
+
+    expect(mainInv.reserved).toBe(4);
+    expect(mainInv.available).toBe(16);
+    expect(otherInv.reserved).toBe(2);
+    expect(otherInv.available).toBe(11);
+  });
+
+  it("KAN-68 close consume reconciles reserved to zero when no active orders remain", async () => {
+    const warehouse = await prisma.warehouse.create({
+      data: { code: "WH-K68-CLOSE", name: "WH K68 Close", isActive: true },
+    });
+    const [locationA, locationB, wip] = await Promise.all([
+      prisma.location.create({
+        data: { code: "LOC-K68-CLOSE-A", name: "Loc K68 Close A", zone: "A", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      }),
+      prisma.location.create({
+        data: { code: "LOC-K68-CLOSE-B", name: "Loc K68 Close B", zone: "B", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      }),
+      prisma.location.create({
+        data: { code: "WIP-K68-CLOSE", name: "WIP K68 Close", zone: "WIP", usageType: "WIP", isActive: true, warehouseId: warehouse.id },
+      }),
+    ]);
+    const [productMain, productOther] = await Promise.all([
+      prisma.product.create({ data: { sku: "SKU-K68-CLOSE-MAIN", name: "Main Close", type: "FITTING" } }),
+      prisma.product.create({ data: { sku: "SKU-K68-CLOSE-OTHER", name: "Other Close", type: "FITTING" } }),
+    ]);
+
+    await prisma.inventory.createMany({
+      data: [
+        { productId: productMain.id, locationId: locationA.id, quantity: 20, reserved: 7, available: 13 },
+        { productId: productMain.id, locationId: wip.id, quantity: 1, reserved: 0, available: 1 },
+        { productId: productOther.id, locationId: locationB.id, quantity: 9, reserved: 1, available: 8 },
+      ],
+    });
+
+    const order = await prisma.productionOrder.create({
+      data: { code: "ENS-K68-CLOSE-01", kind: "ASSEMBLY_3PIECE", status: "EN_PROCESO", warehouseId: warehouse.id },
+    });
+    await prisma.productionOrderItem.create({
+      data: { orderId: order.id, productId: productMain.id, locationId: locationA.id, quantity: 1 },
+    });
+
+    const workOrder = await prisma.assemblyWorkOrder.create({
+      data: {
+        productionOrderId: order.id,
+        warehouseId: warehouse.id,
+        wipLocationId: wip.id,
+        reservationStatus: "RESERVED",
+        pickStatus: "COMPLETED",
+        wipStatus: "IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+        hasShortage: false,
+      },
+    });
+
+    const line = await prisma.assemblyWorkOrderLine.create({
+      data: {
+        assemblyWorkOrderId: workOrder.id,
+        componentRole: "ENTRY_FITTING",
+        productId: productMain.id,
+        unitLabel: "pieza",
+        perAssemblyQty: 1,
+        requiredQty: 1,
+        reservedQty: 1,
+        pickedQty: 1,
+        wipQty: 1,
+        consumedQty: 0,
+        shortQty: 0,
+        reservationStatus: "RESERVED",
+        pickStatus: "COMPLETED",
+        wipStatus: "IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+      },
+    });
+
+    const pickList = await prisma.pickList.create({
+      data: {
+        code: "PK-K68-CLOSE-01",
+        assemblyWorkOrderId: workOrder.id,
+        status: "COMPLETED",
+      },
+    });
+
+    await prisma.pickTask.create({
+      data: {
+        pickListId: pickList.id,
+        assemblyWorkOrderLineId: line.id,
+        sourceLocationId: locationA.id,
+        targetWipLocationId: wip.id,
+        sequence: 1,
+        requestedQty: 1,
+        reservedQty: 1,
+        pickedQty: 1,
+        shortQty: 0,
+        status: "COMPLETED",
+      },
+    });
+
+    await closeAssemblyWorkOrderConsume(prisma, order.id, "Operador K68");
+
+    const [mainInv, otherInv] = await Promise.all([
+      prisma.inventory.findUniqueOrThrow({
+        where: { productId_locationId: { productId: productMain.id, locationId: locationA.id } },
+      }),
+      prisma.inventory.findUniqueOrThrow({
+        where: { productId_locationId: { productId: productOther.id, locationId: locationB.id } },
+      }),
+    ]);
+
+    expect(mainInv.reserved).toBe(0);
+    expect(mainInv.available).toBe(20);
+    expect(otherInv.reserved).toBe(1);
+    expect(otherInv.available).toBe(8);
   });
 });

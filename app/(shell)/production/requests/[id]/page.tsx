@@ -176,13 +176,16 @@ async function markDelivered(formData: FormData) {
 
   try {
     const servicePerf = startPerf("action.production.requests.detail.delivered.service");
-    await markSalesRequestDelivered(prisma, {
+    const result = await markSalesRequestDelivered(prisma, {
       orderId: parsed.data.orderId,
       deliveredByUserId: sessionCtx.user.id,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
-    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido marcado como entregado al cliente")}`);
+    const message = result.alreadyDelivered
+      ? result.warning
+      : "Pedido marcado como entregado al cliente";
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent(message)}`);
   } catch (error) {
     perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
     if (isNextRedirectError(error)) throw error;

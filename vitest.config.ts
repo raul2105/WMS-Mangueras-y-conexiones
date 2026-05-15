@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.{ts,js,cjs}"],
     testTimeout: 30000,
+    setupFiles: ["tests/setup/postgres-worker-isolation.ts"],
   },
   resolve: {
     alias: {

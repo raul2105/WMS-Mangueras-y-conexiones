@@ -11,6 +11,74 @@ function key(productId: string, locationId: string) {
   return `${productId}:${locationId}`;
 }
 
+async function buildDesiredReservedByPair(
+  tx: TxClient,
+  opts?: { scope?: ReservationScope[]; excludeOrderId?: string }
+) {
+  const scopePairs = (opts?.scope ?? []).filter((row) => row.productId && row.locationId);
+  const uniqueScopeKeys = new Set(scopePairs.map((row) => key(row.productId, row.locationId)));
+  const scopeSet = uniqueScopeKeys.size > 0 ? uniqueScopeKeys : null;
+
+  const openOrders = await tx.productionOrder.findMany({
+    where: {
+      status: { in: ["ABIERTA", "EN_PROCESO"] },
+      ...(opts?.excludeOrderId ? { id: { not: opts.excludeOrderId } } : {}),
+    },
+    select: {
+      id: true,
+      items: {
+        select: {
+          productId: true,
+          locationId: true,
+          quantity: true,
+        },
+      },
+      assemblyWorkOrder: {
+        select: {
+          lines: {
+            select: {
+              productId: true,
+              pickTasks: {
+                select: {
+                  sourceLocationId: true,
+                  reservedQty: true,
+                  pickedQty: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const desiredByKey = new Map<string, number>();
+
+  for (const order of openOrders) {
+    if (order.items.length > 0) {
+      for (const item of order.items) {
+        const pairKey = key(item.productId, item.locationId);
+        if (scopeSet && !scopeSet.has(pairKey)) continue;
+        desiredByKey.set(pairKey, (desiredByKey.get(pairKey) ?? 0) + item.quantity);
+      }
+      continue;
+    }
+
+    const legacyLines = order.assemblyWorkOrder?.lines ?? [];
+    for (const line of legacyLines) {
+      for (const task of line.pickTasks) {
+        const pendingReserved = Math.max(0, task.reservedQty - task.pickedQty);
+        if (pendingReserved <= 0) continue;
+        const pairKey = key(line.productId, task.sourceLocationId);
+        if (scopeSet && !scopeSet.has(pairKey)) continue;
+        desiredByKey.set(pairKey, (desiredByKey.get(pairKey) ?? 0) + pendingReserved);
+      }
+    }
+  }
+
+  return desiredByKey;
+}
+
 export async function reconcileProductionReservations(tx: TxClient, scope?: ReservationScope[]) {
   const scopePairs = (scope ?? []).filter((row) => row.productId && row.locationId);
   const uniqueScopeKeys = new Set(scopePairs.map((row) => key(row.productId, row.locationId)));
@@ -19,26 +87,13 @@ export async function reconcileProductionReservations(tx: TxClient, scope?: Rese
     return { productId, locationId };
   });
 
-  const [openReservations, inventoryRows] = await Promise.all([
-    tx.productionOrderItem.groupBy({
-      by: ["productId", "locationId"],
-      where: {
-        order: { status: { in: ["ABIERTA", "EN_PROCESO"] } },
-        ...(scopedPairs.length > 0 ? { OR: scopedPairs } : {}),
-      },
-      _sum: { quantity: true },
-    }),
+  const [desiredByKey, inventoryRows] = await Promise.all([
+    buildDesiredReservedByPair(tx, { scope }),
     tx.inventory.findMany({
       where: scopedPairs.length > 0 ? { OR: scopedPairs } : undefined,
       select: { id: true, productId: true, locationId: true, quantity: true, reserved: true },
     }),
   ]);
-
-  const desiredByKey = new Map<string, number>();
-  for (const row of openReservations) {
-    const total = row._sum.quantity ?? 0;
-    desiredByKey.set(key(row.productId, row.locationId), total);
-  }
 
   for (const inv of inventoryRows) {
     const requested = desiredByKey.get(key(inv.productId, inv.locationId)) ?? 0;
@@ -69,19 +124,7 @@ export async function assertCanSetOrderInProcess(tx: TxClient, orderId: string) 
     return { ok: false, message: "Orden no encontrada" as const };
   }
 
-  const competing = await tx.productionOrderItem.groupBy({
-    by: ["productId", "locationId"],
-    where: {
-      order: { status: { in: ["ABIERTA", "EN_PROCESO"] } },
-      orderId: { not: orderId },
-    },
-    _sum: { quantity: true },
-  });
-
-  const competingMap = new Map<string, number>();
-  for (const row of competing) {
-    competingMap.set(key(row.productId, row.locationId), row._sum.quantity ?? 0);
-  }
+  const competingMap = await buildDesiredReservedByPair(tx, { excludeOrderId: orderId });
 
   const uniquePairs = Array.from(new Set(order.items.map((row) => key(row.productId, row.locationId)))).map((pair) => {
     const [productId, locationId] = pair.split(":");

@@ -1007,11 +1007,7 @@ export async function markSalesRequestDelivered(
         if (!inventory || inventory.available < item.qty) {
           throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "No hay stock disponible suficiente para entrega final");
         }
-        const newQuantity = inventory.quantity - item.qty;
-        if (newQuantity < inventory.reserved) {
-          throw new InventoryServiceError("RESERVED_EXCEEDS_QUANTITY", "Reserva excede el inventario tras egreso final");
-        }
-        const decremented = await tx.inventory.updateMany({
+        const guarded = await tx.inventory.updateMany({
           where: {
             id: inventory.id,
             quantity: inventory.quantity,
@@ -1023,7 +1019,7 @@ export async function markSalesRequestDelivered(
             available: { decrement: item.qty },
           },
         });
-        if (decremented.count !== 1) {
+        if (guarded.count !== 1) {
           const latestInventory = await tx.inventory.findUnique({
             where: { id: inventory.id },
             select: { quantity: true, reserved: true, available: true },
@@ -1031,9 +1027,12 @@ export async function markSalesRequestDelivered(
           if (!latestInventory || latestInventory.available < item.qty) {
             throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "No hay stock disponible suficiente para entrega final");
           }
+          if (latestInventory.quantity - item.qty < latestInventory.reserved) {
+            throw new InventoryServiceError("RESERVED_EXCEEDS_QUANTITY", "Reserva excede el inventario tras egreso final");
+          }
           throw new InventoryServiceError(
             "DELIVERY_INVENTORY_CONFLICT",
-            "Conflicto concurrente al descontar inventario final; reintenta la operación"
+            "Conflicto concurrente al aplicar egreso final; reintente la entrega"
           );
         }
         const movement = await tx.inventoryMovement.create({

@@ -1545,4 +1545,150 @@ describe("sales request service", () => {
     expect(otherInv.reserved).toBe(1);
     expect(otherInv.available).toBe(8);
   });
+
+  it("KAN-68 reconciliation keeps legacy active pick-task reservations when cancelling another order", async () => {
+    const warehouse = await prisma.warehouse.create({
+      data: { code: "WH-K68-LEGACY", name: "WH K68 Legacy", isActive: true },
+    });
+    const [locationA, wip] = await Promise.all([
+      prisma.location.create({
+        data: { code: "LOC-K68-LEGACY-A", name: "Loc K68 Legacy A", zone: "A", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      }),
+      prisma.location.create({
+        data: { code: "WIP-K68-LEGACY", name: "WIP K68 Legacy", zone: "WIP", usageType: "WIP", isActive: true, warehouseId: warehouse.id },
+      }),
+    ]);
+    const productMain = await prisma.product.create({
+      data: { sku: "SKU-K68-LEGACY-MAIN", name: "Main Legacy", type: "FITTING" },
+    });
+
+    const [legacyOrder, toCancel] = await Promise.all([
+      prisma.productionOrder.create({
+        data: { code: "ENS-K68-LEGACY-01", kind: "ASSEMBLY_3PIECE", status: "ABIERTA", warehouseId: warehouse.id },
+      }),
+      prisma.productionOrder.create({
+        data: { code: "ENS-K68-LEGACY-02", kind: "ASSEMBLY_3PIECE", status: "ABIERTA", warehouseId: warehouse.id },
+      }),
+    ]);
+
+    await prisma.productionOrderItem.create({
+      data: { orderId: toCancel.id, productId: productMain.id, locationId: locationA.id, quantity: 2 },
+    });
+
+    const legacyWorkOrder = await prisma.assemblyWorkOrder.create({
+      data: {
+        productionOrderId: legacyOrder.id,
+        warehouseId: warehouse.id,
+        wipLocationId: wip.id,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+        hasShortage: false,
+      },
+    });
+    const legacyLine = await prisma.assemblyWorkOrderLine.create({
+      data: {
+        assemblyWorkOrderId: legacyWorkOrder.id,
+        componentRole: "ENTRY_FITTING",
+        productId: productMain.id,
+        unitLabel: "pieza",
+        perAssemblyQty: 1,
+        requiredQty: 5,
+        reservedQty: 5,
+        pickedQty: 0,
+        wipQty: 0,
+        consumedQty: 0,
+        shortQty: 0,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+      },
+    });
+    const legacyPickList = await prisma.pickList.create({
+      data: { code: "PK-K68-LEGACY-01", assemblyWorkOrderId: legacyWorkOrder.id, status: "DRAFT" },
+    });
+    await prisma.pickTask.create({
+      data: {
+        pickListId: legacyPickList.id,
+        assemblyWorkOrderLineId: legacyLine.id,
+        sourceLocationId: locationA.id,
+        targetWipLocationId: wip.id,
+        sequence: 1,
+        requestedQty: 5,
+        reservedQty: 5,
+        pickedQty: 0,
+        shortQty: 0,
+        status: "PENDING",
+      },
+    });
+
+    const cancelWorkOrder = await prisma.assemblyWorkOrder.create({
+      data: {
+        productionOrderId: toCancel.id,
+        warehouseId: warehouse.id,
+        wipLocationId: wip.id,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+        hasShortage: false,
+      },
+    });
+    const cancelLine = await prisma.assemblyWorkOrderLine.create({
+      data: {
+        assemblyWorkOrderId: cancelWorkOrder.id,
+        componentRole: "HOSE",
+        productId: productMain.id,
+        unitLabel: "pieza",
+        perAssemblyQty: 1,
+        requiredQty: 2,
+        reservedQty: 2,
+        pickedQty: 0,
+        wipQty: 0,
+        consumedQty: 0,
+        shortQty: 0,
+        reservationStatus: "RESERVED",
+        pickStatus: "NOT_RELEASED",
+        wipStatus: "NOT_IN_WIP",
+        consumptionStatus: "NOT_CONSUMED",
+      },
+    });
+    const cancelPickList = await prisma.pickList.create({
+      data: { code: "PK-K68-LEGACY-02", assemblyWorkOrderId: cancelWorkOrder.id, status: "DRAFT" },
+    });
+    await prisma.pickTask.create({
+      data: {
+        pickListId: cancelPickList.id,
+        assemblyWorkOrderLineId: cancelLine.id,
+        sourceLocationId: locationA.id,
+        targetWipLocationId: wip.id,
+        sequence: 1,
+        requestedQty: 2,
+        reservedQty: 2,
+        pickedQty: 0,
+        shortQty: 0,
+        status: "PENDING",
+      },
+    });
+
+    await prisma.inventory.create({
+      data: {
+        productId: productMain.id,
+        locationId: locationA.id,
+        quantity: 30,
+        reserved: 7,
+        available: 23,
+      },
+    });
+
+    await cancelAssemblyWorkOrder(prisma, toCancel.id);
+
+    const invAfter = await prisma.inventory.findUniqueOrThrow({
+      where: { productId_locationId: { productId: productMain.id, locationId: locationA.id } },
+    });
+    expect(invAfter.reserved).toBe(5);
+    expect(invAfter.available).toBe(25);
+  });
 });

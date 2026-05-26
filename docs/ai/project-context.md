@@ -36,3 +36,6 @@ Sistema WMS para mangueras y conexiones con foco operativo en PostgreSQL y despl
 - Flujos de `production/requests`, `fulfillment` y `orders`.
 - RBAC y guards de rutas/acciones.
 - Cambios Prisma/schema y efectos en runtime/CI.
+
+## Operacion remota
+- Ver `docs/ai/remote-agents-jira-github-playbook.md` para ejecucion diaria con agentes sobre Jira/GitHub.

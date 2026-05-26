@@ -106,4 +106,10 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(newContent).toContain('requirePermission("customers.manage")');
     expect(editContent).toContain('requirePermission("customers.manage")');
   });
+
+  it("perf snapshot api enforces audit.view", () => {
+    const content = readWorkspaceFile("app/api/perf/snapshot/route.ts");
+
+    expect(content).toContain('requirePermission("audit.view")');
+  });
 });

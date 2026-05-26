@@ -5,6 +5,17 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   quality:
@@ -62,6 +73,9 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Build OpenNext artifact
+        run: npm run build:opennext
+
   security:
     name: Security Audit (optional)
     runs-on: ubuntu-latest
@@ -104,3 +118,57 @@ jobs:
 
       - name: Run published smoke tests
         run: npm run smoke:published
+
+  nightly-full-regression:
+    name: Nightly Full PostgreSQL Regression (scheduled/manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: wms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ci -d wms"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/wms?schema=public
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma check
+        run: npm run prisma:validate
+
+      - name: Prisma generate
+        run: npm run prisma:generate
+
+      - name: Sync test schema (PostgreSQL)
+        run: npm run db:push
+
+      - name: Run full PostgreSQL suite
+        run: npm run test:postgres
+
+      - name: Build Next.js runtime
+        run: npm run build
+
+      - name: Build OpenNext artifact
+        run: npm run build:opennext
+

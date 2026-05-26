@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import authConfig from "@/auth.config";
 import type { NextAuthRequest } from "next-auth";
+import { sanitizeCallbackUrl } from "@/lib/auth/callback-url";
 
 const { auth } = NextAuth(authConfig);
 
@@ -25,7 +26,7 @@ function unauthorizedResponse(pathname: string, requestUrl: string, requestId: s
   }
 
   const loginUrl = new URL("/login", requestUrl);
-  loginUrl.searchParams.set("callbackUrl", pathname);
+  loginUrl.searchParams.set("callbackUrl", sanitizeCallbackUrl(pathname));
   const response = NextResponse.redirect(loginUrl);
   response.headers.set("x-request-id", requestId);
   return response;

@@ -10,6 +10,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import ThemeToggle from "@/components/ThemeToggle";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
+import { sanitizeCallbackUrl } from "@/lib/auth/callback-url";
 
 const SESSION_COOKIE_NAMES = [
   "authjs.session-token",
@@ -29,7 +30,7 @@ async function loginAction(formData: FormData) {
 
   const perf = startPerf("auth.login_action");
   const requestId = await getRequestId();
-  const callbackUrl = String(formData.get("callbackUrl") ?? "/").trim() || "/";
+  const callbackUrl = sanitizeCallbackUrl(String(formData.get("callbackUrl") ?? "/"));
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
 
@@ -69,7 +70,7 @@ export default async function LoginPage({
   }
 
   const sp = await searchParams;
-  const callbackUrl = String(sp.callbackUrl ?? "/").trim() || "/";
+  const callbackUrl = sanitizeCallbackUrl(sp.callbackUrl);
   const error = String(sp.error ?? "").trim();
 
   return (

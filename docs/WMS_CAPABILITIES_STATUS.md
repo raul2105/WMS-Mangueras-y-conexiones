@@ -1,6 +1,6 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-05-25
+Fecha de corte: 2026-05-26
 
 ## Decision base
 
@@ -45,16 +45,25 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 - Flujo operativo GitHub/Jira incorporado con `daily-sync-report` y `sync-jira-views`.
 - Registro formal de clientes integrado parcialmente en ventas/produccion por PR #16.
 
-## Reconciliacion puntual 2026-05-25
+## Reconciliacion puntual 2026-05-26
 
 - `KAN-29`: reconciliado como cierre tecnico defendible. Evidencia principal:
   - `PR #20` mergeado (`fix(KAN-29): isolate canonical PostgreSQL release/bootstrap flow`).
   - `scripts/release/build-release.ps1` ya bloquea `DbMode=local` por default y solo permite bootstrap SQLite legado con opt-in explicito (`-AllowLegacyLocalBootstrap`).
   - `prisma.config.ts` mantiene schema y migraciones canonicas en `prisma/postgresql/*`.
-- `KAN-77`: se mantiene activo y no reconciliado. Evidencia principal:
-  - en `main` solo aparece el commit documental `dacf079` (`docs: add KAN-77 closed summary`);
-  - el documento anterior de cierre quedaba incompleto (`PR_NUMBER` pendiente y merge pendiente);
-  - la UI viva en `app/(shell)/production/orders/[id]/page.tsx` sigue describiendo la orden generica como ruta de mantenimiento temporal.
+- `KAN-77`: reconciliado como cierre tecnico-operativo defendible. Evidencia principal:
+  - `ProductionOrder.kind=GENERIC` operativo de punta a punta en `lib/production/generic-order-service.ts`.
+  - Semantica terminal `GENERIC -> COMPLETADA` implementada como consumo + liberacion de reservas + reconciliacion scoped (`productId`,`locationId`) en una transaccion con auditoria.
+  - UI minima operativa en detalle/alta generica:
+    - `app/(shell)/production/orders/[id]/page.tsx`
+    - `app/(shell)/production/orders/new/generic/page.tsx`
+  - Suite PostgreSQL especifica KAN-77 en verde:
+    - `npm run test:postgres -- tests/generic-order-service.test.ts --maxWorkers=1`
+  - Regresion PostgreSQL en verde:
+    - `npm run test:regression:postgres`
+  - Build en verde:
+    - `npm run build`
+  - Eliminado legacy `lib/inventory-service.js` para evitar riesgo transaccional por resolucion de modulo (lock en cierre).
 
 ## Reconciliacion Jira vs repo
 
@@ -93,7 +102,6 @@ Regla de gate pre `KAN-54+`:
 
 ### Mantener como prioridad abierta
 
-- `KAN-77`: orden generica con reservas. Sigue sin reconciliacion defendible entre Jira, GitHub, pruebas y estado funcional visible.
 - `KAN-53`: QA, RBAC y regresion de flujos criticos, especialmente tras PR #16.
 - `KAN-50`: dashboard admin/manager centrado en pedidos por surtir.
 - `KAN-52`: UX de flujo de pedidos, `flowStage`, timeline y filtros.
@@ -103,10 +111,10 @@ Regla de gate pre `KAN-54+`:
 
 - `KAN-29`: release/bootstrap PostgreSQL-only reconciliado. Evidencia base: `PR #20` mergeado, bloqueo explicito de SQLite por default en `scripts/release/build-release.ps1`, y `prisma.config.ts` alineado al schema canonico PostgreSQL.
 - `KAN-49`: administracion de usuarios para `SYSTEM_ADMIN` ya validada en `main` y cerrada en Jira el 2026-05-05. Evidencia base: PR mergeado `#19`, GitHub Actions CI run `#55` en `success`, cobertura PostgreSQL en `tests/users/admin-service.integration.test.ts` y `tests/users/auth-login.integration.test.ts`, y guardas RBAC de rutas `/users*`.
+- `KAN-77`: orden generica reconciliada como capacidad operativa real. Evidencia base: servicio generico operativo (`lib/production/generic-order-service.ts`), UI minima de alta/detalle generica, suite PostgreSQL KAN-77 en verde, `test:regression:postgres` en verde, `build` en verde y eliminacion de `lib/inventory-service.js` legacy por riesgo de lock transaccional.
 
 ## Pendiente tecnico inmediato
 
-- Reconciliar `KAN-77` con evidencia ejecutable real o mantenerlo explicitamente como activo sin narrativa de cierre.
 - Ejecutar regresion `KAN-53` para clientes, pedidos y RBAC tras PR #16.
 - Mantener este documento reconciliado con cierres funcionales ya confirmados en Jira, registrando evidencia verificable de GitHub (PR, SHA y CI).
 

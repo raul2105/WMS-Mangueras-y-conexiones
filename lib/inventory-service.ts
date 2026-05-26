@@ -520,10 +520,21 @@ export class InventoryService {
 
       const newReserved = existing.reserved + qty;
       const newAvailable = existing.quantity - newReserved;
-      await tx.inventory.update({
-        where: { id: existing.id },
+      const reserveUpdate = await tx.inventory.updateMany({
+        where: {
+          id: existing.id,
+          reserved: existing.reserved,
+          available: existing.available,
+          quantity: existing.quantity,
+        },
         data: { reserved: newReserved, available: newAvailable },
       });
+      if (reserveUpdate.count !== 1) {
+        throw new InventoryServiceError(
+          "CONCURRENT_MODIFICATION",
+          "Conflicto concurrente al reservar inventario; reintente la operacion"
+        );
+      }
 
       await tx.inventoryMovement.create({
         select: { id: true },
@@ -588,10 +599,21 @@ export class InventoryService {
 
       const newReserved = existing.reserved - qty;
       const newAvailable = existing.quantity - newReserved;
-      await tx.inventory.update({
-        where: { id: existing.id },
+      const releaseUpdate = await tx.inventory.updateMany({
+        where: {
+          id: existing.id,
+          reserved: existing.reserved,
+          available: existing.available,
+          quantity: existing.quantity,
+        },
         data: { reserved: newReserved, available: newAvailable },
       });
+      if (releaseUpdate.count !== 1) {
+        throw new InventoryServiceError(
+          "CONCURRENT_MODIFICATION",
+          "Conflicto concurrente al liberar reserva; reintente la operacion"
+        );
+      }
 
       await tx.inventoryMovement.create({
         select: { id: true },

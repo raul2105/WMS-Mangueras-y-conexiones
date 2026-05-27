@@ -2,10 +2,17 @@ import { unstable_cache } from "next/cache";
 import type { PickListStatus, Prisma, ProductionOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import {
+  getMarkDeliveredEligibility,
   getSalesOrderFlowNarrative,
   summarizePickListStatus,
   type SalesOrderFlowBadgeVariant,
 } from "@/lib/sales/internal-orders";
+import {
+  evaluateOperationalPresets,
+  type OperationalPresetFacts,
+  type OperationalPresetId,
+  type OperationalPresetReason,
+} from "@/lib/dashboard/fulfillment-operational-presets";
 
 export type DashboardRole = "SYSTEM_ADMIN" | "MANAGER";
 
@@ -50,6 +57,10 @@ export type FulfillmentQueueRow = {
   riskScore: number;
   blockingCause: FulfillmentBlockingCause;
   blockingCauseLabel: string;
+  primaryPreset: OperationalPresetId | null;
+  secondaryPresets: OperationalPresetId[];
+  presetReasons: OperationalPresetReason[];
+  presetFacts: OperationalPresetFacts;
   actionHref: string;
   actionLabel: string;
 };
@@ -110,6 +121,7 @@ export type QueueSignals = {
 
 const ACTIVE_PICK_STATUSES: PickListStatus[] = ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"];
 const OPEN_ASSEMBLY_STATUSES: ProductionOrderStatus[] = ["BORRADOR", "ABIERTA", "EN_PROCESO"];
+const BUSINESS_TIMEZONE = "America/Mexico_City";
 
 export function isFulfillmentQueueFilter(value: string | undefined): value is FulfillmentQueueFilter {
   return value === "overdue" || value === "today" || value === "partial" || value === "stale" || value === "unreleased" || value === "assembly_blocked";
@@ -272,6 +284,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
           dueDate: true,
           updatedAt: true,
           assignedToUserId: true,
+          pulledAt: true,
           warehouse: { select: { code: true, name: true } },
           lines: { select: { id: true, lineKind: true } },
           pickLists: {
@@ -368,6 +381,34 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         hasAssemblyLines: assemblyLines.length > 0,
         hasCompletedConfiguredAssembly,
       });
+      const hasCompletedDirectPick = !hasProductLines || latestPick?.status === "COMPLETED";
+      const deliveredEligibility = getMarkDeliveredEligibility({
+        status: order.status,
+        deliveredToCustomerAt: null,
+        assignedToUserId: order.assignedToUserId,
+        pulledAt: order.pulledAt,
+        hasCompletedDirectPick,
+        hasCompletedConfiguredAssembly,
+      });
+      const presetEvaluation = evaluateOperationalPresets(
+        {
+          dueDate: order.dueDate,
+          assignedToUserId: order.assignedToUserId,
+          flowStage: flowNarrative.flowStage,
+          isPartial: signals.isPartial,
+          isUnreleased: signals.isUnreleased,
+          assemblyBlocked: signals.assemblyBlocked,
+          canMarkDelivered: deliveredEligibility.canMarkDelivered,
+          isStale: signals.isStale,
+          lastOperationalUpdateAt: signals.lastUpdatedAt,
+          inActiveQueue: true,
+        },
+        {
+          now,
+          timezone: BUSINESS_TIMEZONE,
+          staleHours,
+        },
+      );
 
       const actionHref = activeDirectPick
         ? `/production/fulfillment/${order.id}`
@@ -410,6 +451,10 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         riskScore: signals.riskScore,
         blockingCause: signals.blockingCause,
         blockingCauseLabel: getBlockingCauseLabel(signals.blockingCause),
+        primaryPreset: presetEvaluation.primaryPreset,
+        secondaryPresets: presetEvaluation.secondaryPresets,
+        presetReasons: presetEvaluation.reasons,
+        presetFacts: presetEvaluation.facts,
         actionHref,
         actionLabel,
       };

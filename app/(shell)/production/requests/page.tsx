@@ -13,6 +13,7 @@ import { firstErrorMessage, salesInternalOrderTransitionSchema } from "@/lib/sch
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
 import {
+  getMarkDeliveredEligibility,
   getTakeOrderEligibility,
   getSalesOrderFlowStage,
   getSalesOrderFlowNarrative,
@@ -28,12 +29,20 @@ import {
   matchQueueFilter,
   type FulfillmentQueueFilter,
 } from "@/lib/dashboard/fulfillment-dashboard";
+import {
+  evaluateOperationalPresets,
+  getOperationalPresetLabel,
+  isOperationalPresetFilter,
+  matchOperationalPreset,
+  type OperationalPresetFilter,
+} from "@/lib/dashboard/fulfillment-operational-presets";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
 const STALE_HOURS = 4;
 const OPEN_ASSEMBLY_STATUSES = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO"]);
+const BUSINESS_TIMEZONE = "America/Mexico_City";
 
 const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
   overdue: "Vencidos",
@@ -43,6 +52,14 @@ const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
   unreleased: "Sin liberar",
   assembly_blocked: "Ensamble bloqueado",
 };
+const PRESET_LABELS: Record<OperationalPresetFilter, string> = {
+  urgentes: getOperationalPresetLabel("URGENTES"),
+  vencen_hoy: getOperationalPresetLabel("VENCEN_HOY"),
+  sin_asignar: getOperationalPresetLabel("SIN_ASIGNAR"),
+  sin_movimiento: getOperationalPresetLabel("SIN_MOVIMIENTO"),
+  bloqueados: getOperationalPresetLabel("BLOQUEADOS"),
+  listos_para_entrega: getOperationalPresetLabel("LISTOS_PARA_ENTREGA"),
+};
 
 type SearchParams = {
   status?: string;
@@ -50,6 +67,7 @@ type SearchParams = {
   page?: string;
   customer?: string;
   queue?: string;
+  preset?: string;
   ok?: string;
   error?: string;
 };
@@ -78,11 +96,18 @@ function isNextRedirectError(error: unknown) {
   );
 }
 
-function buildReturnHref(args: { status?: SalesInternalOrderStatus; customer?: string; queue?: FulfillmentQueueFilter; page: number }) {
+function buildReturnHref(args: {
+  status?: SalesInternalOrderStatus;
+  customer?: string;
+  queue?: FulfillmentQueueFilter;
+  preset?: OperationalPresetFilter;
+  page: number;
+}) {
   const params = new URLSearchParams();
   if (args.status) params.set("status", args.status);
   if (args.customer) params.set("customer", args.customer);
   if (args.queue) params.set("queue", args.queue);
+  if (args.preset) params.set("preset", args.preset);
   if (args.page > 1) params.set("page", String(args.page));
   const qs = params.toString();
   return qs ? `/production/requests?${qs}` : "/production/requests";
@@ -139,6 +164,7 @@ export default async function ProductionRequestsPage({
     ? (sp.stage as SalesOrderFlowStage)
     : undefined;
   const queueFilter = isFulfillmentQueueFilter(sp.queue) ? sp.queue : undefined;
+  const presetFilter = isOperationalPresetFilter(sp.preset) ? sp.preset : undefined;
   const customerFilter = (sp.customer ?? "").trim();
 
   const baseWhere: Prisma.SalesInternalOrderWhereInput = {
@@ -219,7 +245,7 @@ export default async function ProductionRequestsPage({
   let orders: any[] = [];
   let filteredCount = 0;
 
-  if (queueFilter || stageFilter) {
+  if (queueFilter || stageFilter || presetFilter) {
     const queueCandidates = await prisma.salesInternalOrder.findMany({
       where,
       select: {
@@ -228,6 +254,7 @@ export default async function ProductionRequestsPage({
         dueDate: true,
         updatedAt: true,
         assignedToUserId: true,
+        pulledAt: true,
         deliveredToCustomerAt: true,
         lines: { select: { id: true, lineKind: true } },
         pickLists: {
@@ -271,9 +298,12 @@ export default async function ProductionRequestsPage({
     const matchedIds = queueCandidates
       .filter((candidate) => {
         const latestPick = candidate.pickLists[0] ?? null;
+        const hasProductLines = candidate.lines.some((line) => line.lineKind === "PRODUCT");
+        const hasAssemblyLines = candidate.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
         const assemblyLineIds = new Set(candidate.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line) => line.id));
         const linkedForOrder = (linkedByOrder.get(candidate.id) ?? []).filter((row) => (row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false));
         const linkedAssemblyOpen = linkedForOrder.filter((row) => OPEN_ASSEMBLY_STATUSES.has(row.status)).length;
+        const hasCompletedConfiguredAssembly = !hasAssemblyLines || (linkedForOrder.length > 0 && linkedAssemblyOpen === 0);
         const latestAssemblyUpdatedAt = linkedForOrder
           .map((row) => row.updatedAt)
           .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
@@ -282,8 +312,8 @@ export default async function ProductionRequestsPage({
           dueDate: candidate.dueDate,
           orderUpdatedAt: candidate.updatedAt,
           assignedToUserId: candidate.assignedToUserId,
-          hasProductLines: candidate.lines.some((line) => line.lineKind === "PRODUCT"),
-          hasAssemblyLines: candidate.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY"),
+          hasProductLines,
+          hasAssemblyLines,
           latestPickStatus: latestPick?.status ?? null,
           latestPickUpdatedAt: latestPick?.updatedAt ?? null,
           linkedAssemblyTotal: linkedForOrder.length,
@@ -297,13 +327,42 @@ export default async function ProductionRequestsPage({
           assignedToUserId: candidate.assignedToUserId,
           deliveredToCustomerAt: candidate.deliveredToCustomerAt,
           latestPickStatus: latestPick?.status ?? null,
-          hasProductLines: candidate.lines.some((line) => line.lineKind === "PRODUCT"),
-          hasAssemblyLines: candidate.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY"),
-          hasCompletedConfiguredAssembly: linkedForOrder.length > 0 && linkedAssemblyOpen === 0,
+          hasProductLines,
+          hasAssemblyLines,
+          hasCompletedConfiguredAssembly,
         });
+        const hasCompletedDirectPick = !hasProductLines || latestPick?.status === "COMPLETED";
+        const deliveredEligibility = getMarkDeliveredEligibility({
+          status: candidate.status as SalesInternalOrderStatus,
+          deliveredToCustomerAt: candidate.deliveredToCustomerAt,
+          assignedToUserId: candidate.assignedToUserId,
+          pulledAt: candidate.pulledAt,
+          hasCompletedDirectPick,
+          hasCompletedConfiguredAssembly,
+        });
+        const presetEvaluation = evaluateOperationalPresets(
+          {
+            dueDate: candidate.dueDate,
+            assignedToUserId: candidate.assignedToUserId,
+            flowStage,
+            isPartial: signals.isPartial,
+            isUnreleased: signals.isUnreleased,
+            assemblyBlocked: signals.assemblyBlocked,
+            canMarkDelivered: deliveredEligibility.canMarkDelivered,
+            isStale: signals.isStale,
+            lastOperationalUpdateAt: signals.lastUpdatedAt,
+            inActiveQueue: true,
+          },
+          {
+            now,
+            timezone: BUSINESS_TIMEZONE,
+            staleHours: STALE_HOURS,
+          },
+        );
         const queueMatch = queueFilter ? matchQueueFilter(signals, queueFilter) : true;
+        const presetMatch = presetFilter ? matchOperationalPreset(presetEvaluation, presetFilter, "primary") : true;
         const stageMatch = stageFilter ? flowStage === stageFilter : true;
-        return queueMatch && stageMatch;
+        return queueMatch && stageMatch && presetMatch;
       })
       .map((row) => row.id);
 
@@ -366,11 +425,12 @@ export default async function ProductionRequestsPage({
   const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });
   const canViewCustomers = sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");
 
-  const buildHref = (page: number, status = statusFilter, queue = queueFilter, stage = stageFilter) => {
+  const buildHref = (page: number, status = statusFilter, queue = queueFilter, stage = stageFilter, preset = presetFilter) => {
     const base = buildReturnHref({
       status,
       customer: customerFilter || undefined,
       queue,
+      preset,
       page,
     });
     if (!stage) return base;
@@ -386,7 +446,7 @@ export default async function ProductionRequestsPage({
       <PageHeader
         title="Pedidos de surtido"
         description="Captura mixta de productos y ensambles configurados dentro del modulo de ensamble."
-        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
+        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Preset operativo: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
             <Link href="/production/availability" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
@@ -427,6 +487,7 @@ export default async function ProductionRequestsPage({
       <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">
         {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}
         {queueFilter ? <input type="hidden" name="queue" value={queueFilter} /> : null}
+        {presetFilter ? <input type="hidden" name="preset" value={presetFilter} /> : null}
         {stageFilter ? <input type="hidden" name="stage" value={stageFilter} /> : null}
         <label className="flex-1 space-y-1">
           <span className="text-sm text-slate-400">Filtrar por cliente</span>
@@ -442,7 +503,7 @@ export default async function ProductionRequestsPage({
           <button type="submit" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-200 hover:text-white">
             Filtrar
           </button>
-          <Link href={buildHref(1, undefined, undefined)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
+          <Link href={buildHref(1, undefined, undefined, undefined, undefined)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
             Limpiar
           </Link>
         </div>
@@ -459,6 +520,24 @@ export default async function ProductionRequestsPage({
             className={`rounded-lg px-3 py-1.5 text-sm glass ${queueFilter === queue ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
           >
             {QUEUE_LABELS[queue]}
+          </Link>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href={buildHref(1, statusFilter, queueFilter, stageFilter, undefined)}
+          className={`rounded-lg px-3 py-1.5 text-sm glass ${!presetFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+        >
+          Todos presets
+        </Link>
+        {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map((preset) => (
+          <Link
+            key={preset}
+            href={buildHref(1, statusFilter, queueFilter, stageFilter, preset)}
+            className={`rounded-lg px-3 py-1.5 text-sm glass ${presetFilter === preset ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+          >
+            {PRESET_LABELS[preset]}
           </Link>
         ))}
       </div>

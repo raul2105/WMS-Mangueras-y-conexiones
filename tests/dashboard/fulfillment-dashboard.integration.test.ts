@@ -123,6 +123,10 @@ describePostgres("fulfillment dashboard snapshot integration (postgres)", () => 
     expect(queueItem).toBeTruthy();
     expect(queueItem?.blockingCause).toBe("OVERDUE_UNRELEASED");
     expect(queueItem?.riskLevel).toBe("ALTO");
+    expect(queueItem?.primaryPreset).toBe("BLOQUEADOS");
+    expect(queueItem?.secondaryPresets).toContain("URGENTES");
+    expect(queueItem?.presetReasons.some((reason) => reason.code === "OVERDUE")).toBe(true);
+    expect(queueItem?.presetFacts.timezone).toBe("America/Mexico_City");
   });
 
   it("does not include delivered orders in open queue", async () => {

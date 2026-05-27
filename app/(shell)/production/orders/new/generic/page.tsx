@@ -13,7 +13,7 @@ async function createOrder(formData: FormData) {
   await (await import("@/lib/rbac")).requirePermission("production.execute");
 
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
-  const status = String(formData.get("status") ?? "BORRADOR").trim();
+  const status = "BORRADOR";
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const customerId = String(formData.get("customerId") ?? "").trim() || null;
   const customerNameRaw = String(formData.get("customerName") ?? "").trim() || null;
@@ -155,14 +155,8 @@ export default async function NewGenericProductionOrderPage({
           </label>
 
           <label className="space-y-1">
-            <span className="text-sm text-slate-400">Estado *</span>
-            <select name="status" className="w-full px-4 py-3 glass rounded-lg">
-              <option value="BORRADOR">BORRADOR</option>
-              <option value="ABIERTA">ABIERTA</option>
-              <option value="EN_PROCESO">EN PROCESO</option>
-              <option value="COMPLETADA">COMPLETADA</option>
-              <option value="CANCELADA">CANCELADA</option>
-            </select>
+            <span className="text-sm text-slate-400">Estado inicial</span>
+            <input value="BORRADOR" disabled className="w-full px-4 py-3 glass rounded-lg opacity-80" />
           </label>
 
           <label className="space-y-1 md:col-span-2">

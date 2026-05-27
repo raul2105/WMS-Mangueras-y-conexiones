@@ -5,6 +5,8 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
+import { addGenericOrderItem, removeGenericOrderItem, transitionGenericOrderStatus, updateGenericOrderItemQty } from "@/lib/production/generic-order-service";
+import { productionOrderItemSchema } from "@/lib/schemas/wms";
 import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 import { buttonStyles } from "@/components/ui/button";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
@@ -16,6 +18,14 @@ async function requireAssemblyExecutePermission(orderId: string) {
     await (await import("@/lib/rbac")).requirePermission("production.execute");
   } catch {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent("No tienes permisos para operar ensamble")}`);
+  }
+}
+
+async function requireProductionExecutePermission(orderId: string) {
+  try {
+    await (await import("@/lib/rbac")).requirePermission("production.execute");
+  } catch {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("No tienes permisos para operar la orden")}`);
   }
 }
 
@@ -160,6 +170,125 @@ async function cancelAssemblyOrder(formData: FormData) {
   redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Orden cancelada y reservas liberadas")}`);
 }
 
+async function addGenericItem(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  if (!orderId) redirect("/production");
+  await requireProductionExecutePermission(orderId);
+
+  const parsed = productionOrderItemSchema.safeParse({
+    orderId,
+    productId: String(formData.get("productId") ?? "").trim(),
+    locationId: String(formData.get("locationId") ?? "").trim(),
+    quantityRaw: String(formData.get("quantityRaw") ?? "").trim(),
+  });
+
+  if (!parsed.success) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Datos inválidos")}`);
+  }
+
+  try {
+    await addGenericOrderItem(prisma, {
+      orderId: parsed.data.orderId,
+      productId: parsed.data.productId,
+      locationId: parsed.data.locationId,
+      quantity: parsed.data.quantityRaw,
+    });
+  } catch (error) {
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Error inesperado al agregar material";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Línea agregada/actualizada")}`);
+}
+
+async function updateGenericItem(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  if (!orderId) redirect("/production");
+  await requireProductionExecutePermission(orderId);
+
+  const itemId = String(formData.get("itemId") ?? "").trim();
+  const quantityRaw = String(formData.get("quantityRaw") ?? "").trim();
+  const quantity = Number(quantityRaw.replace(",", "."));
+  if (!itemId || !Number.isFinite(quantity) || quantity <= 0) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Cantidad inválida para edición")}`);
+  }
+
+  try {
+    await updateGenericOrderItemQty(prisma, { orderId, itemId, quantity });
+  } catch (error) {
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Error inesperado al editar línea";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Línea actualizada")}`);
+}
+
+async function removeGenericItem(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  if (!orderId) redirect("/production");
+  await requireProductionExecutePermission(orderId);
+
+  const itemId = String(formData.get("itemId") ?? "").trim();
+  if (!itemId) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Línea inválida")}`);
+  }
+
+  try {
+    await removeGenericOrderItem(prisma, { orderId, itemId });
+  } catch (error) {
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Error inesperado al eliminar línea";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent("Línea eliminada")}`);
+}
+
+async function transitionGenericStatus(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const targetStatus = String(formData.get("targetStatus") ?? "").trim();
+  if (!orderId) redirect("/production");
+  await requireProductionExecutePermission(orderId);
+
+  const validTargets = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO", "COMPLETADA", "CANCELADA"]);
+  if (!validTargets.has(targetStatus)) {
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Estado destino inválido")}`);
+  }
+
+  try {
+    const result = await transitionGenericOrderStatus(prisma, {
+      orderId,
+      targetStatus: targetStatus as "BORRADOR" | "ABIERTA" | "EN_PROCESO" | "COMPLETADA" | "CANCELADA",
+    });
+
+    if (result.changed) {
+      const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
+      await emitSyncEventSafe({
+        entityType: "ORDER",
+        entityId: orderId,
+        action: "UPDATE",
+        payload: { orderId, type: "PRODUCTION_ORDER", status: result.status },
+      });
+    }
+  } catch (error) {
+    const message = error instanceof InventoryServiceError
+      ? error.message
+      : "Error inesperado al cambiar estado";
+    redirect(`/production/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/production/orders/${orderId}?ok=${encodeURIComponent(`Estado actualizado a ${targetStatus}`)}`);
+}
+
 export default async function ProductionOrderDetailPage({
   params,
   searchParams,
@@ -185,7 +314,7 @@ export default async function ProductionOrderDetailPage({
       sourceDocumentType: true,
       sourceDocumentId: true,
       sourceDocumentLineId: true,
-      warehouse: { select: { name: true, code: true } },
+      warehouse: { select: { id: true, name: true, code: true } },
       items: {
         select: {
           id: true,
@@ -281,7 +410,26 @@ export default async function ProductionOrderDetailPage({
     select: { operatorName: true },
   });
 
+  let genericProducts: Array<{ id: string; sku: string; name: string }> = [];
+  let genericLocations: Array<{ id: string; code: string; name: string }> = [];
   if (order.kind !== "ASSEMBLY_3PIECE") {
+    [genericProducts, genericLocations] = await Promise.all([
+      prisma.product.findMany({
+        orderBy: [{ sku: "asc" }],
+        take: 400,
+        select: { id: true, sku: true, name: true },
+      }),
+      prisma.location.findMany({
+        where: { warehouseId: order.warehouse.id, isActive: true },
+        orderBy: [{ code: "asc" }],
+        select: { id: true, code: true, name: true },
+      }),
+    ]);
+  }
+
+  if (order.kind !== "ASSEMBLY_3PIECE") {
+    const canEditGeneric = order.status !== "CANCELADA" && order.status !== "COMPLETADA";
+    const canCompleteGeneric = order.status === "ABIERTA" || order.status === "EN_PROCESO";
     return (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4">
@@ -291,9 +439,42 @@ export default async function ProductionOrderDetailPage({
           </div>
           <Link href="/production" className={buttonStyles({ variant: "secondary" })}>Ensamble</Link>
         </div>
-        <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--warning) 35%,var(--border-default))] bg-[var(--warning-soft)] px-4 py-3 text-sm text-[var(--warning)]">
-          Orden genérica: la edición manual permanece en ruta de mantenimiento temporal.
+        {sp.error && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">{sp.error}</div>}
+        {sp.ok && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">{sp.ok}</div>}
+
+        <div className="panel space-y-3 p-5">
+          <h2 className="text-xl font-semibold">Estado operativo genérico</h2>
+          <p className="text-sm text-slate-400">Estado actual: <span className="text-slate-200">{order.status}</span></p>
+          <div className="flex flex-wrap gap-2">
+            <form action={transitionGenericStatus}>
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="targetStatus" value="ABIERTA" />
+              <button type="submit" className={buttonStyles({ variant: "secondary", className: order.status === "BORRADOR" ? "" : "opacity-50" })} disabled={order.status !== "BORRADOR"}>Pasar a ABIERTA</button>
+            </form>
+            <form action={transitionGenericStatus}>
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="targetStatus" value="EN_PROCESO" />
+              <button type="submit" className={buttonStyles({ variant: "secondary", className: order.status === "BORRADOR" || order.status === "ABIERTA" ? "" : "opacity-50" })} disabled={!(order.status === "BORRADOR" || order.status === "ABIERTA")}>Pasar a EN_PROCESO</button>
+            </form>
+            <form action={transitionGenericStatus}>
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="targetStatus" value="ABIERTA" />
+              <button type="submit" className={buttonStyles({ variant: "secondary", className: order.status === "EN_PROCESO" ? "" : "opacity-50" })} disabled={order.status !== "EN_PROCESO"}>Regresar a ABIERTA</button>
+            </form>
+            <form action={transitionGenericStatus}>
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="targetStatus" value="CANCELADA" />
+              <button type="submit" className={buttonStyles({ variant: "danger", className: canEditGeneric ? "" : "opacity-50" })} disabled={!canEditGeneric}>Cancelar</button>
+            </form>
+            <form action={transitionGenericStatus}>
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="targetStatus" value="COMPLETADA" />
+              <button type="submit" className={buttonStyles({ variant: "secondary", className: canCompleteGeneric ? "" : "opacity-50" })} disabled={!canCompleteGeneric}>Cerrar COMPLETADA</button>
+            </form>
+          </div>
+          <p className="text-xs text-slate-500">Al cerrar COMPLETADA: se libera reserva y se consume inventario de cada línea en la misma transacción.</p>
         </div>
+
         {order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId ? (
           <div className="rounded-[var(--radius-lg)] border border-cyan-500/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
             Origen pedido: {canViewSalesOrigin ? (
@@ -305,6 +486,45 @@ export default async function ProductionOrderDetailPage({
             )}
           </div>
         ) : null}
+
+        <div className="panel space-y-3 p-5">
+          <h2 className="text-xl font-semibold">Agregar material</h2>
+          <form action={addGenericItem} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+            <input type="hidden" name="orderId" value={order.id} />
+            <label className="space-y-1 md:col-span-2">
+              <span className="text-xs text-slate-400">Producto</span>
+              <select name="productId" className="w-full px-3 py-2 glass rounded-lg" required disabled={!canEditGeneric}>
+                <option value="">Selecciona producto</option>
+                {genericProducts.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.sku} - {product.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-slate-400">Ubicación</span>
+              <select name="locationId" className="w-full px-3 py-2 glass rounded-lg" required disabled={!canEditGeneric}>
+                <option value="">Selecciona ubicación</option>
+                {genericLocations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.code} - {location.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-slate-400">Cantidad</span>
+              <input name="quantityRaw" type="number" min="0.0001" step="0.0001" className="w-full px-3 py-2 glass rounded-lg" required disabled={!canEditGeneric} />
+            </label>
+            <div className="md:col-span-4">
+              <button type="submit" className={buttonStyles({ className: canEditGeneric ? "" : "opacity-50" })} disabled={!canEditGeneric}>
+                Agregar / acumular línea
+              </button>
+            </div>
+          </form>
+        </div>
+
         <table className="w-full text-sm glass-card">
           <thead>
             <tr className="text-slate-400 border-b border-white/10">
@@ -312,6 +532,7 @@ export default async function ProductionOrderDetailPage({
               <th className="text-left py-2">Producto</th>
               <th className="text-left py-2">Ubicación</th>
               <th className="text-right py-2">Cantidad</th>
+              <th className="text-right py-2">Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -320,9 +541,42 @@ export default async function ProductionOrderDetailPage({
                 <td className="py-2">{item.product.sku}</td>
                 <td className="py-2">{item.product.name}</td>
                 <td className="py-2">{item.location.code} - {item.location.name}</td>
-                <td className="py-2 text-right">{item.quantity}</td>
+                <td className="py-2 text-right">
+                  <form action={updateGenericItem} className="flex items-center justify-end gap-2">
+                    <input type="hidden" name="orderId" value={order.id} />
+                    <input type="hidden" name="itemId" value={item.id} />
+                    <input
+                      name="quantityRaw"
+                      type="number"
+                      min="0.0001"
+                      step="0.0001"
+                      defaultValue={item.quantity}
+                      className="w-28 px-2 py-1 glass rounded-lg text-right"
+                      disabled={!canEditGeneric}
+                    />
+                    <button type="submit" className={buttonStyles({ variant: "secondary", className: canEditGeneric ? "" : "opacity-50" })} disabled={!canEditGeneric}>
+                      Guardar
+                    </button>
+                  </form>
+                </td>
+                <td className="py-2 text-right">
+                  <form action={removeGenericItem}>
+                    <input type="hidden" name="orderId" value={order.id} />
+                    <input type="hidden" name="itemId" value={item.id} />
+                    <button type="submit" className={buttonStyles({ variant: "danger", className: canEditGeneric ? "" : "opacity-50" })} disabled={!canEditGeneric}>
+                      Eliminar
+                    </button>
+                  </form>
+                </td>
               </tr>
             ))}
+            {order.items.length === 0 && (
+              <tr>
+                <td colSpan={5} className="py-6 text-center text-slate-500">
+                  Sin líneas de material.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

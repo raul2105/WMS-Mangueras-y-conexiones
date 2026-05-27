@@ -18,11 +18,48 @@ async function buildDesiredReservedByPair(
   const scopePairs = (opts?.scope ?? []).filter((row) => row.productId && row.locationId);
   const uniqueScopeKeys = new Set(scopePairs.map((row) => key(row.productId, row.locationId)));
   const scopeSet = uniqueScopeKeys.size > 0 ? uniqueScopeKeys : null;
+  const uniqueScopePairs = Array.from(uniqueScopeKeys).map((pairKey) => {
+    const [productId, locationId] = pairKey.split(":");
+    return { productId, locationId };
+  });
+
+  const scopedWhere =
+    uniqueScopePairs.length > 0
+      ? {
+          OR: [
+            {
+              items: {
+                some: {
+                  OR: uniqueScopePairs.map((pair) => ({
+                    productId: pair.productId,
+                    locationId: pair.locationId,
+                  })),
+                },
+              },
+            },
+            {
+              assemblyWorkOrder: {
+                is: {
+                  lines: {
+                    some: {
+                      OR: uniqueScopePairs.map((pair) => ({
+                        productId: pair.productId,
+                        pickTasks: { some: { sourceLocationId: pair.locationId } },
+                      })),
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        }
+      : {};
 
   const openOrders = await tx.productionOrder.findMany({
     where: {
       status: { in: ["ABIERTA", "EN_PROCESO"] },
       ...(opts?.excludeOrderId ? { id: { not: opts.excludeOrderId } } : {}),
+      ...scopedWhere,
     },
     select: {
       id: true,

@@ -1,39 +1,50 @@
-# KAN-77 – Orden genérica (GENERIC) – Estado no reconciliado
+# KAN-77 - Cierre tecnico-operativo reconciliado
+
+Fecha de cierre tecnico: 2026-05-27
+Fuente de verdad tecnica: `origin/main`
 
 ## Veredicto
 
-Este archivo **no debe usarse como evidencia de cierre técnico** de `KAN-77`.
+`KAN-77` queda cerrable tecnicamente con paridad completa entre alcance, implementacion en codigo, pruebas y evidencia ejecutable real sobre PostgreSQL AWS.
 
-Al corte del `2026-05-25`, la reconciliación entre Jira, GitHub y el estado visible del producto no sostiene un cierre defendible de punta a punta.
+## Evidencia en codigo
 
-## Hechos observables
+- Servicio de dominio para orden generica:
+  - `lib/production/generic-order-service.ts`
+  - Operaciones: `addGenericOrderItem`, `updateGenericOrderItemQty`, `removeGenericOrderItem`, `transitionGenericOrderStatus`.
+- Semantica operativa implementada:
+  - Reserva al activar `BORRADOR -> ABIERTA/EN_PROCESO`.
+  - Ajuste por delta al editar cantidades.
+  - Liberacion de reserva en eliminacion de linea.
+  - Liberacion de reserva en cancelacion.
+  - `COMPLETADA`: liberacion + consumo (`OUT`) + reconciliacion scoped por `productId/locationId`.
+  - Auditoria por operacion.
+- Wiring UI/acciones para `GENERIC`:
+  - `app/(shell)/production/orders/[id]/page.tsx`
+  - `app/(shell)/production/orders/new/generic/page.tsx`
+- Guardrail tecnico aplicado:
+  - Eliminado `lib/inventory-service.js` legacy para evitar resolucion de modulo no canonica y riesgo transaccional.
 
-- La única señal nueva visible en `main` asociada a `KAN-77` es el commit documental `dacf079` (`docs: add KAN-77 closed summary`) del `2026-05-20`.
-- El propio documento anterior dejaba `Pull Request #<PR_NUMBER>` sin completar y todavía pedía hacer merge del PR en `main`.
-- No apareció en la evidencia pública del repositorio un PR, commit o archivo de implementación verificable que respalde las rutas citadas por el documento anterior.
-- El archivo vivo `app/(shell)/production/orders/[id]/page.tsx` todavía muestra para órdenes genéricas: `la edición manual permanece en ruta de mantenimiento temporal`.
-- Jira mantiene `KAN-77` en estado `En curso`.
+## Evidencia de pruebas
 
-## Interpretación operativa
+- Suite especifica KAN-77:
+  - `npm run test:postgres -- tests/generic-order-service.test.ts --maxWorkers=1`
+  - Resultado: OK (1 archivo, 6 tests).
+- Gate de regresion PostgreSQL:
+  - `npm run test:regression:postgres`
+  - Resultado: OK (25 archivos, 113 tests).
+- Build:
+  - `npm run build`
+  - Resultado: OK.
 
-La mejor lectura sustentada es que existió una intención de cierre o un borrador de cierre documental, pero **no una reconciliación técnica completa**.
+## Evidencia de entorno PostgreSQL AWS
 
-Hoy no hay paridad suficiente entre:
+- `npm run env:postgres:check` -> OK
+- `npm run env:postgres:tcp` -> OK
+- `npm run prisma:validate` -> OK
+- `npm run prisma:generate` -> OK
+- `npm run db:push` -> OK
 
-- ticket operativo,
-- evidencia ejecutable en GitHub,
-- pruebas o checks verificables,
-- y estado funcional consolidado.
+## Conclusion operativa
 
-## Condición mínima para volver a cerrarlo
-
-`KAN-77` solo debería tratarse como cerrado cuando exista, en la misma ventana de trabajo:
-
-1. PR o commit verificable en `main` con implementación real.
-2. Evidencia explícita de pruebas o checks.
-3. Actualización del documento canónico `docs/WMS_CAPABILITIES_STATUS.md`.
-4. Transición consistente del ticket en Jira.
-
-## Nota
-
-Este archivo se conserva solo como registro de que hubo una narrativa de cierre no reconciliada y para evitar que la corrida siguiente vuelva a asumir ese cierre por error.
+Se corrige la brecha previa entre estado documental y estado tecnico real. Con la integracion en `main` y la corrida completa en AWS PostgreSQL, `KAN-77` deja de ser cierre administrativo y pasa a cierre tecnico defendible.

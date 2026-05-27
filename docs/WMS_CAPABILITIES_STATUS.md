@@ -1,6 +1,6 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-05-26
+Fecha de corte: 2026-05-27
 
 ## Decision base
 
@@ -45,7 +45,7 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
 - Flujo operativo GitHub/Jira incorporado con `daily-sync-report` y `sync-jira-views`.
 - Registro formal de clientes integrado parcialmente en ventas/produccion por PR #16.
 
-## Reconciliacion puntual 2026-05-26
+## Reconciliacion puntual 2026-05-27
 
 - `KAN-29`: reconciliado como cierre tecnico defendible. Evidencia principal:
   - `PR #20` mergeado (`fix(KAN-29): isolate canonical PostgreSQL release/bootstrap flow`).
@@ -63,6 +63,15 @@ PostgreSQL es la base de datos canonica y unica para runtime, pruebas integradas
     - `npm run test:regression:postgres`
   - Build en verde:
     - `npm run build`
+  - Corrida operativa AWS PostgreSQL real (2026-05-27):
+    - `npm run env:postgres:check` -> OK
+    - `npm run env:postgres:tcp` -> OK
+    - `npm run prisma:validate` -> OK
+    - `npm run prisma:generate` -> OK
+    - `npm run db:push` -> OK
+    - `npm run test:postgres -- tests/generic-order-service.test.ts --maxWorkers=1` -> OK (1 archivo, 6 tests)
+    - `npm run test:regression:postgres` -> OK (25 archivos, 113 tests)
+    - `npm run build` -> OK
   - Eliminado legacy `lib/inventory-service.js` para evitar riesgo transaccional por resolucion de modulo (lock en cierre).
 
 ## Reconciliacion Jira vs repo

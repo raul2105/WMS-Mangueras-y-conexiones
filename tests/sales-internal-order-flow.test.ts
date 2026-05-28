@@ -84,6 +84,8 @@ describe("sales internal order flow stage", () => {
     });
 
     expect(narrative.flowStage).toBe("listo_entrega");
+    expect(narrative.primaryCta.code).toBe("MARK_DELIVERED");
+    expect(narrative.primaryCta.isAllowed).toBe(true);
     expect(narrative.nextRecommendedAction.label).toBe("Marcar entrega");
   });
 

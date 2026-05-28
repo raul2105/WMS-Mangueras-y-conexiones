@@ -616,17 +616,28 @@ export default async function ProductionRequestsPage({
                 assignedToUserId: order.assignedToUserId,
                 isCreatedByManager: createdByManager,
               });
+              const hasCompletedDirectPick = !hasProductLines || latestPickStatus === "COMPLETED";
+              const deliveredEligibility = getMarkDeliveredEligibility({
+                status: orderStatus,
+                deliveredToCustomerAt: order.deliveredToCustomerAt,
+                assignedToUserId: order.assignedToUserId,
+                pulledAt: order.pulledAt,
+                hasCompletedDirectPick,
+                hasCompletedConfiguredAssembly,
+              });
               const flowNarrative = getSalesOrderFlowNarrative({
                 orderId: order.id,
                 roles: sessionCtx.roles,
                 status: orderStatus,
                 assignedToUserId: order.assignedToUserId,
                 deliveredToCustomerAt: order.deliveredToCustomerAt,
+                pulledAt: order.pulledAt,
                 latestPickStatus,
                 hasProductLines,
                 hasAssemblyLines,
                 hasCompletedConfiguredAssembly,
                 takeEligibility,
+                deliveredEligibility,
               });
               const isAvailableForPull = !managerOrAdmin && takeEligibility.canTakeOrder;
               return (

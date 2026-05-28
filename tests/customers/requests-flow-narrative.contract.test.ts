@@ -24,4 +24,20 @@ describe("KAN-52 flow narrative contract", () => {
     expect(snapshotContent).toContain("flowStageLabel");
     expect(snapshotContent).toContain("flowBadgeVariant");
   });
+
+  it("keeps list/detail CTA wiring complete for delivery eligibility", () => {
+    const listContent = readWorkspaceFile("app/(shell)/production/requests/page.tsx");
+    const detailContent = readWorkspaceFile("app/(shell)/production/requests/[id]/page.tsx");
+
+    expect(listContent).toContain("pulledAt: true");
+    expect(listContent).toContain("roles: sessionCtx.roles");
+    expect(listContent).toContain("const hasCompletedDirectPick");
+    expect(listContent).toContain("getMarkDeliveredEligibility");
+    expect(listContent).toContain("deliveredEligibility");
+
+    expect(detailContent).toContain("roles: sessionCtx.roles");
+    expect(detailContent).toContain("getMarkDeliveredEligibility");
+    expect(detailContent).toContain("pulledAt: order.pulledAt");
+    expect(detailContent).toContain("Siguiente acción");
+  });
 });

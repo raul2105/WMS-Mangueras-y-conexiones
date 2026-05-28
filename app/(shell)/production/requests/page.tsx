@@ -218,6 +218,7 @@ export default async function ProductionRequestsPage({
     },
     dueDate: true,
     assignedToUserId: true,
+    pulledAt: true,
     deliveredToCustomerAt: true,
     updatedAt: true,
     warehouse: { select: { code: true, name: true } },

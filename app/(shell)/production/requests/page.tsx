@@ -218,6 +218,7 @@ export default async function ProductionRequestsPage({
     },
     dueDate: true,
     assignedToUserId: true,
+    pulledAt: true,
     deliveredToCustomerAt: true,
     updatedAt: true,
     warehouse: { select: { code: true, name: true } },
@@ -616,16 +617,28 @@ export default async function ProductionRequestsPage({
                 assignedToUserId: order.assignedToUserId,
                 isCreatedByManager: createdByManager,
               });
+              const hasCompletedDirectPick = !hasProductLines || latestPickStatus === "COMPLETED";
+              const deliveredEligibility = getMarkDeliveredEligibility({
+                status: orderStatus,
+                deliveredToCustomerAt: order.deliveredToCustomerAt,
+                assignedToUserId: order.assignedToUserId,
+                pulledAt: order.pulledAt,
+                hasCompletedDirectPick,
+                hasCompletedConfiguredAssembly,
+              });
               const flowNarrative = getSalesOrderFlowNarrative({
                 orderId: order.id,
+                roles: sessionCtx.roles,
                 status: orderStatus,
                 assignedToUserId: order.assignedToUserId,
                 deliveredToCustomerAt: order.deliveredToCustomerAt,
+                pulledAt: order.pulledAt,
                 latestPickStatus,
                 hasProductLines,
                 hasAssemblyLines,
                 hasCompletedConfiguredAssembly,
                 takeEligibility,
+                deliveredEligibility,
               });
               const isAvailableForPull = !managerOrAdmin && takeEligibility.canTakeOrder;
               return (
@@ -670,6 +683,9 @@ export default async function ProductionRequestsPage({
                       <Link href={flowNarrative.nextRecommendedAction.href} className="text-xs text-cyan-300 hover:text-white">
                         {flowNarrative.nextRecommendedAction.label}
                       </Link>
+                      {!flowNarrative.primaryCta.isAllowed && flowNarrative.primaryCta.blockedReason ? (
+                        <span className="text-xs text-[var(--warning)]">{flowNarrative.primaryCta.blockedReason}</span>
+                      ) : null}
                     </div>
                   </td>
                   <td className="py-3 text-right text-slate-300">{order._count.lines}</td>

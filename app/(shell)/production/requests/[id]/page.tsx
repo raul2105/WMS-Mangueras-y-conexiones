@@ -491,6 +491,7 @@ export default async function ProductionRequestDetailPage({
   });
   const flowNarrative = getSalesOrderFlowNarrative({
     orderId: order.id,
+    roles: sessionCtx.roles,
     status: orderStatus,
     assignedToUserId: order.assignedToUserId,
     deliveredToCustomerAt: order.deliveredToCustomerAt,

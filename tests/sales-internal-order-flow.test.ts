@@ -104,18 +104,33 @@ describe("sales internal order flow stage", () => {
     expect(cta.action.label).toBe("Operar surtido");
   });
 
-  it("blocks contradictory CTA when sales executive sees assembly pending", () => {
+  it("blocks assembly CTA for sales executive when assembly is pending", () => {
     const cta = resolveSalesOrderPrimaryCta({
       orderId: "ord-4",
       roles: ["SALES_EXECUTIVE"],
       flowStage: "en_surtido",
-      hasProductLines: true,
-      latestPickStatus: "IN_PROGRESS",
+      hasProductLines: false,
+      latestPickStatus: "COMPLETED",
+      hasAssemblyLines: true,
+      hasCompletedConfiguredAssembly: false,
+    });
+    expect(cta.code).toBe("REVIEW_BLOCK");
+    expect(cta.isAllowed).toBe(false);
+    expect(cta.action.label).toBe("Revisar bloqueo");
+  });
+
+  it("allows assembly CTA for warehouse operator when assembly is pending", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-5",
+      roles: ["WAREHOUSE_OPERATOR"],
+      flowStage: "en_surtido",
+      hasProductLines: false,
+      latestPickStatus: "COMPLETED",
       hasAssemblyLines: true,
       hasCompletedConfiguredAssembly: false,
     });
     expect(cta.code).toBe("COMPLETE_ASSEMBLY");
+    expect(cta.isAllowed).toBe(true);
     expect(cta.action.label).toBe("Completar ensamble");
-    expect(cta.action.label).not.toBe("Operar surtido");
   });
 });

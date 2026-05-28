@@ -287,7 +287,7 @@ export function resolveSalesOrderPrimaryCta(input: SalesOrderPrimaryCtaResolutio
   if (input.flowStage === "en_surtido") {
     const needsAssembly = Boolean(input.hasAssemblyLines && !input.hasCompletedConfiguredAssembly);
     const needsDirectPick = Boolean(input.hasProductLines && input.latestPickStatus !== "COMPLETED");
-    if (needsAssembly && (isManager || isAdmin || isSales)) {
+    if (needsAssembly && (isWarehouse || isManager || isAdmin)) {
       return {
         code: "COMPLETE_ASSEMBLY",
         action: { label: "Completar ensamble", href: orderHref },

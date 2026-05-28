@@ -618,6 +618,7 @@ export default async function ProductionRequestsPage({
               });
               const flowNarrative = getSalesOrderFlowNarrative({
                 orderId: order.id,
+                roles: sessionCtx.roles,
                 status: orderStatus,
                 assignedToUserId: order.assignedToUserId,
                 deliveredToCustomerAt: order.deliveredToCustomerAt,
@@ -670,6 +671,9 @@ export default async function ProductionRequestsPage({
                       <Link href={flowNarrative.nextRecommendedAction.href} className="text-xs text-cyan-300 hover:text-white">
                         {flowNarrative.nextRecommendedAction.label}
                       </Link>
+                      {!flowNarrative.primaryCta.isAllowed && flowNarrative.primaryCta.blockedReason ? (
+                        <span className="text-xs text-[var(--warning)]">{flowNarrative.primaryCta.blockedReason}</span>
+                      ) : null}
                     </div>
                   </td>
                   <td className="py-3 text-right text-slate-300">{order._count.lines}</td>

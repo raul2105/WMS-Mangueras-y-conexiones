@@ -224,8 +224,136 @@ export type SalesOrderRecommendedAction = {
   blockedReason?: string;
 };
 
+export type SalesOrderPrimaryCtaCode =
+  | "TAKE_ORDER"
+  | "OPERATE_PICK"
+  | "COMPLETE_ASSEMBLY"
+  | "MARK_DELIVERED"
+  | "REVIEW_BLOCK";
+
+export type SalesOrderPrimaryCtaResolutionInput = {
+  orderId: string;
+  roles: string[];
+  flowStage: SalesOrderFlowStage;
+  hasProductLines?: boolean;
+  hasAssemblyLines?: boolean;
+  hasCompletedConfiguredAssembly?: boolean;
+  latestPickStatus?: string | null;
+  takeEligibility?: ReturnType<typeof getTakeOrderEligibility>;
+  deliveredEligibility?: ReturnType<typeof getMarkDeliveredEligibility>;
+};
+
+export type SalesOrderPrimaryCtaResolution = {
+  code: SalesOrderPrimaryCtaCode;
+  action: SalesOrderRecommendedAction;
+  actorRole: "SALES_EXECUTIVE" | "WAREHOUSE_OPERATOR" | "MANAGER" | "SYSTEM_ADMIN";
+  isPrimary: boolean;
+  isAllowed: boolean;
+  reason: string;
+  blockedReason?: string;
+};
+
+export function resolveSalesOrderPrimaryCta(input: SalesOrderPrimaryCtaResolutionInput): SalesOrderPrimaryCtaResolution {
+  const orderHref = `/production/requests/${input.orderId}`;
+  const fulfillmentHref = `/production/fulfillment/${input.orderId}`;
+  const isManager = input.roles.includes("MANAGER");
+  const isAdmin = input.roles.includes("SYSTEM_ADMIN");
+  const isSales = input.roles.includes("SALES_EXECUTIVE");
+  const isWarehouse = input.roles.includes("WAREHOUSE_OPERATOR");
+  const actorRole: SalesOrderPrimaryCtaResolution["actorRole"] = isAdmin ? "SYSTEM_ADMIN" : isManager ? "MANAGER" : isWarehouse ? "WAREHOUSE_OPERATOR" : "SALES_EXECUTIVE";
+
+  if (input.flowStage === "por_asignar") {
+    if (isSales && input.takeEligibility?.canTakeOrder) {
+      return {
+        code: "TAKE_ORDER",
+        action: { label: "Tomar pedido", href: orderHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "Pedido confirmado sin asignación; ejecutivo visible puede tomarlo.",
+      };
+    }
+    return {
+      code: "REVIEW_BLOCK",
+      action: { label: "Revisar bloqueo", href: orderHref, blockedReason: input.takeEligibility?.takeBlockedReason ?? "Pedido pendiente de asignación" },
+      actorRole,
+      isPrimary: true,
+      isAllowed: false,
+      reason: "Etapa por asignar sin elegibilidad de toma para el rol actual.",
+      blockedReason: input.takeEligibility?.takeBlockedReason ?? "Pedido pendiente de asignación",
+    };
+  }
+
+  if (input.flowStage === "en_surtido") {
+    const needsAssembly = Boolean(input.hasAssemblyLines && !input.hasCompletedConfiguredAssembly);
+    const needsDirectPick = Boolean(input.hasProductLines && input.latestPickStatus !== "COMPLETED");
+    if (needsAssembly && (isManager || isAdmin || isSales)) {
+      return {
+        code: "COMPLETE_ASSEMBLY",
+        action: { label: "Completar ensamble", href: orderHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "Pedido en surtido con líneas configuradas pendientes de ensamble.",
+      };
+    }
+    if (needsDirectPick && (isWarehouse || isManager || isAdmin)) {
+      return {
+        code: "OPERATE_PICK",
+        action: { label: "Operar surtido", href: fulfillmentHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "Pedido en surtido con surtido directo pendiente.",
+      };
+    }
+    return {
+      code: "REVIEW_BLOCK",
+      action: { label: "Revisar bloqueo", href: orderHref, blockedReason: "No hay acción operativa habilitada para el rol actual" },
+      actorRole,
+      isPrimary: true,
+      isAllowed: false,
+      reason: "Etapa en surtido sin acción permitida por RBAC para este rol.",
+      blockedReason: "No hay acción operativa habilitada para el rol actual",
+    };
+  }
+
+  if (input.flowStage === "listo_entrega") {
+    if ((isSales || isManager || isAdmin) && input.deliveredEligibility?.canMarkDelivered) {
+      return {
+        code: "MARK_DELIVERED",
+        action: { label: "Marcar entrega", href: orderHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "Pedido listo para entrega y elegible para confirmar entrega.",
+      };
+    }
+    return {
+      code: "REVIEW_BLOCK",
+      action: { label: "Revisar bloqueo", href: orderHref, blockedReason: input.deliveredEligibility?.deliveredBlockedReason ?? "Revisar estado operativo del pedido" },
+      actorRole,
+      isPrimary: true,
+      isAllowed: false,
+      reason: "Pedido listo para entrega pero bloqueado por precondición o rol.",
+      blockedReason: input.deliveredEligibility?.deliveredBlockedReason ?? "Revisar estado operativo del pedido",
+    };
+  }
+
+  return {
+    code: "REVIEW_BLOCK",
+    action: { label: "Revisar bloqueo", href: orderHref, blockedReason: "Etapa informativa sin acción operativa directa" },
+    actorRole,
+    isPrimary: true,
+    isAllowed: false,
+    reason: "Etapa no operativa (captura, entregado o cancelado).",
+    blockedReason: "Etapa informativa sin acción operativa directa",
+  };
+}
+
 type SalesOrderFlowNarrativeInput = {
   orderId: string;
+  roles?: string[];
   status: SalesInternalOrderStatus;
   assignedToUserId?: string | null;
   deliveredToCustomerAt?: Date | string | null;
@@ -245,6 +373,7 @@ export type SalesOrderFlowNarrative = {
   riskLevel: FlowRiskLevel;
   riskLabel: string;
   nextRecommendedAction: SalesOrderRecommendedAction;
+  primaryCta: SalesOrderPrimaryCtaResolution;
 };
 
 export function getSalesOrderFlowNarrative(input: SalesOrderFlowNarrativeInput): SalesOrderFlowNarrative {
@@ -299,12 +428,25 @@ export function getSalesOrderFlowNarrative(input: SalesOrderFlowNarrativeInput):
     }
   }
 
+  const primaryCta = resolveSalesOrderPrimaryCta({
+    orderId: input.orderId,
+    roles: (input as SalesOrderFlowNarrativeInput & { roles?: string[] }).roles ?? [],
+    flowStage,
+    hasProductLines: input.hasProductLines,
+    hasAssemblyLines: input.hasAssemblyLines,
+    hasCompletedConfiguredAssembly: input.hasCompletedConfiguredAssembly,
+    latestPickStatus: input.latestPickStatus,
+    takeEligibility: input.takeEligibility,
+    deliveredEligibility: input.deliveredEligibility,
+  });
+
   return {
     flowStage,
     flowStageLabel: SALES_ORDER_FLOW_STAGE_LABELS[flowStage],
     flowBadgeVariant: SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS[flowStage],
     riskLevel,
     riskLabel: FLOW_RISK_LEVEL_LABELS[riskLevel],
-    nextRecommendedAction,
+    nextRecommendedAction: primaryCta.action,
+    primaryCta,
   };
 }

@@ -34,24 +34,6 @@ call :is_valid_postgres_url
 if "%VALID_DATABASE_URL%"=="1" goto :database_ready
 
 echo [WARN] DATABASE_URL no encontrada o invalida en .env.
-echo [INFO] Ejecutando configuracion AWS automatica...
-if not exist "maintenance\setup-aws.cmd" (
-  echo [ERROR] No se encontro maintenance\setup-aws.cmd.
-  popd
-  exit /b 1
-)
-
-call maintenance\setup-aws.cmd
-if errorlevel 1 (
-  echo [WARN] setup-aws.cmd termino con error. Se reintentara validar DATABASE_URL.
-)
-
-echo [INFO] Reintentando deteccion de DATABASE_URL en .env...
-set "ENV_DATABASE_URL="
-call :resolve_database_url_from_env_file
-call :is_valid_postgres_url
-if "%VALID_DATABASE_URL%"=="1" goto :database_ready
-
 echo [INFO] Intentando DATABASE_URL de entorno de maquina...
 set "ENV_DATABASE_URL="
 call :resolve_database_url_from_machine_env
@@ -59,7 +41,9 @@ call :is_valid_postgres_url
 if "%VALID_DATABASE_URL%"=="1" goto :database_ready
 
 echo [ERROR] DATABASE_URL no esta configurada con un valor PostgreSQL valido.
-echo [ERROR] Configura DATABASE_URL con maintenance\setup-aws.cmd y vuelve a intentar.
+echo [ERROR] Este launcher no ejecuta el asistente automatico de setup.
+echo [INFO] Ejecuta maintenance\setup-aws.cmd -Auto para cargar DATABASE_URL desde CloudFormation.
+echo [INFO] Luego vuelve a ejecutar dev-local-launcher.cmd.
 popd
 exit /b 1
 

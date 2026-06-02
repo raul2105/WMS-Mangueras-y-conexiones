@@ -56,8 +56,10 @@ dev-local-launcher.cmd
 
 Notas del launcher AWS local:
 
+- Requiere `DATABASE_URL` PostgreSQL valida ya configurada (en `.env` o entorno de maquina).
+- Si falta, ejecutar antes `maintenance\setup-aws.cmd -Auto` (o `maintenance\setup-aws-auto.cmd`) para cargar valores desde CloudFormation.
 - Acepta `DATABASE_URL` en `.env` con o sin comillas.
-- Si la URL falta o es invalida, ejecuta `maintenance\setup-aws.cmd`, reintenta `.env` y luego `DATABASE_URL` de entorno de maquina.
+- Si la URL de `.env` es invalida, intenta `DATABASE_URL` de entorno de maquina y falla con mensaje accionable.
 
 ## Estructura del Proyecto
 

@@ -68,6 +68,20 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(formContent).toContain("ProductSearchField");
   });
 
+  it("purchase order detail and receive flows are protected by purchasing.manage", () => {
+    const detailContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/page.tsx");
+    const receiveContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/receive/page.tsx");
+    const documentContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/document/page.tsx");
+    const pdfRouteContent = readWorkspaceFile("app/api/purchasing/orders/[id]/pdf/route.ts");
+
+    expect(detailContent).toContain('pageGuard("purchasing.manage")');
+    expect(detailContent).toContain('requirePermission("purchasing.manage")');
+    expect(receiveContent).toContain('pageGuard("purchasing.manage")');
+    expect(receiveContent).toContain('requirePermission("purchasing.manage")');
+    expect(documentContent).toContain('pageGuard("purchasing.manage")');
+    expect(pdfRouteContent).toContain('requirePermission("purchasing.manage")');
+  });
+
   it("product search wiring keeps direct request lines broad and assembly search typed", () => {
     const directFormContent = readWorkspaceFile("components/RequestProductLineForm.tsx");
     const assemblyFormContent = readWorkspaceFile("components/AssemblyConfiguratorForm.tsx");

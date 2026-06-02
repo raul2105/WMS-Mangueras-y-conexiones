@@ -20,6 +20,10 @@ describe("rbac role-route access matrix", () => {
     "/inventory/transfer",
     "/inventory/pick",
     "/audit",
+    "/purchasing/orders",
+    "/purchasing/orders/new",
+    "/purchasing/orders/abc",
+    "/purchasing/orders/abc/receive",
     "/production/requests",
     "/production/requests/new",
     "/production/availability",
@@ -43,6 +47,10 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/sales/orders")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/purchasing/orders")).toBe("purchasing.view");
+    expect(getRequiredPermissionForPath("/purchasing/orders/new")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/purchasing/orders/abc")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/purchasing/orders/abc/receive")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/sales/customers")).toBe("customers.view");
     expect(getRequiredPermissionForPath("/sales/customers/new")).toBe("customers.manage");
     expect(getRequiredPermissionForPath("/sales/customers/abc")).toBe("customers.view");
@@ -110,6 +118,18 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/sales/orders/new")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/sales/orders")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/sales/orders/new")).toBe(true);
+  });
+
+  it("purchasing routes respect view/manage split", () => {
+    expect(canAccess("MANAGER", "/purchasing/orders")).toBe(true);
+    expect(canAccess("MANAGER", "/purchasing/orders/new")).toBe(true);
+    expect(canAccess("MANAGER", "/purchasing/orders/abc")).toBe(true);
+    expect(canAccess("MANAGER", "/purchasing/orders/abc/receive")).toBe(true);
+
+    expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders/new")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders/abc")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders/abc/receive")).toBe(false);
   });
 
   it("users.manage remains restricted to SYSTEM_ADMIN", () => {

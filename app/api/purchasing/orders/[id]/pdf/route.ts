@@ -26,7 +26,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   }
 
   const snapshot = parsePurchaseOrderDocumentSnapshot(documentRecord.snapshotJson);
-  const pdfBuffer = await renderToBuffer(React.createElement(PurchaseOrderPdfDocument, { snapshot }) as any);
+  const pdfBuffer = await renderToBuffer(
+    React.createElement(PurchaseOrderPdfDocument, { snapshot }) as unknown as Parameters<typeof renderToBuffer>[0],
+  );
   const filename = `OC-${snapshot.purchaseOrder.folio}.pdf`;
 
   return new NextResponse(new Uint8Array(pdfBuffer), {

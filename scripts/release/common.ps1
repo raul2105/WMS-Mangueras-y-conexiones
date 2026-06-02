@@ -599,8 +599,14 @@ function Invoke-AwsDatabaseSetup {
     [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $url, "Machine")
     [System.Environment]::SetEnvironmentVariable("WMS_DB_MODE", "aws", "Machine")
   } catch {
-    Write-Host "  ADVERTENCIA: no se pudo guardar en variables de sistema (requiere Administrador)."
-    Write-Host "  La configuracion aplica solo para esta sesion. Ejecuta maintenance\setup-aws.cmd como Administrador para hacerla permanente."
+    try {
+      [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $url, "User")
+      [System.Environment]::SetEnvironmentVariable("WMS_DB_MODE", "aws", "User")
+      Write-Host "  ADVERTENCIA: no se pudo guardar en Machine. Se guardo en User (persistente para este usuario)."
+    } catch {
+      Write-Host "  ADVERTENCIA: no se pudo guardar en variables de sistema (Machine/User)."
+      Write-Host "  La configuracion aplica solo para esta sesion."
+    }
   }
 
   $env:DATABASE_URL = $url
@@ -722,8 +728,15 @@ function Invoke-SyncSetup {
         Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
         $persisted++
       } catch {
-        Write-Host "  ADVERTENCIA: no se pudo guardar $($entry.Key) en variables de sistema (requiere Administrador)."
-        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+        try {
+          [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "User")
+          Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+          $persisted++
+          Write-Host "  ADVERTENCIA: $($entry.Key) guardada en User (Machine requiere Administrador)."
+        } catch {
+          Write-Host "  ADVERTENCIA: no se pudo guardar $($entry.Key) en Machine/User."
+          Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+        }
       }
     }
   }
@@ -884,6 +897,7 @@ function Invoke-AutoSetup {
 
   $persisted = 0
   $failed    = 0
+  $userScope = 0
   foreach ($entry in $allVars.GetEnumerator()) {
     if ($entry.Value) {
       try {
@@ -891,15 +905,25 @@ function Invoke-AutoSetup {
         Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
         $persisted++
       } catch {
-        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
-        $failed++
+        try {
+          [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "User")
+          Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+          $persisted++
+          $userScope++
+        } catch {
+          Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+          $failed++
+        }
       }
     }
   }
 
   if ($failed -gt 0) {
-    Write-Host "  ADVERTENCIA: $failed variables no se pudieron guardar permanentemente (requiere Administrador)."
-    Write-Host "  Esta sesion queda configurada. Ejecuta como Administrador para hacerlo permanente."
+    Write-Host "  ADVERTENCIA: $failed variables no se pudieron guardar permanentemente."
+    Write-Host "  Esta sesion queda configurada."
+  }
+  if ($userScope -gt 0) {
+    Write-Host "  INFO: $userScope variables quedaron en scope User (persistente para este usuario)."
   }
 
   Write-Host ""

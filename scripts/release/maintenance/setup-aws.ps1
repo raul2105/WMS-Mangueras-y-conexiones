@@ -1,5 +1,23 @@
+param(
+  [switch]$Auto,
+  [string]$Profile = "wms-mobile-dev",
+  [string]$WebStackName = "WmsWebDevStack",
+  [string]$MobileStackName = "RigentecWmsMobileDevStack"
+)
+
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\common.ps1")
+
+function Read-TrimmedInput {
+  param([string]$Prompt)
+
+  $raw = Read-Host $Prompt
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return ""
+  }
+
+  return $raw.Trim()
+}
 
 Write-Host ""
 Write-Host "=== Configuracion de WMS para AWS ==="
@@ -8,20 +26,30 @@ Write-Host "  [1] Automatico - Lee todo desde los stacks de CloudFormation (reco
 Write-Host "  [2] Manual     - Ingresar DATABASE_URL y sync manualmente"
 Write-Host ""
 
-$mode = (Read-Host "Selecciona modo (1/2)").Trim()
+if ($Auto) {
+  $mode = "1"
+} else {
+  $mode = Read-TrimmedInput "Selecciona modo (1/2)"
+  if (-not $mode) {
+    $mode = "1"
+    Write-Host "[INFO] Sin seleccion. Usando modo automatico (1)."
+  }
+}
 
 if ($mode -eq "1") {
   Write-Host ""
-  $profile = (Read-Host "Perfil AWS CLI (default: wms-mobile-dev)").Trim()
-  if (-not $profile) { $profile = "wms-mobile-dev" }
+  if (-not $Auto) {
+    $profileInput = Read-TrimmedInput "Perfil AWS CLI (default: $Profile)"
+    if ($profileInput) { $Profile = $profileInput }
 
-  $webStack = (Read-Host "Nombre del stack web (default: WmsWebDevStack)").Trim()
-  if (-not $webStack) { $webStack = "WmsWebDevStack" }
+    $webStackInput = Read-TrimmedInput "Nombre del stack web (default: $WebStackName)"
+    if ($webStackInput) { $WebStackName = $webStackInput }
 
-  $mobileStack = (Read-Host "Nombre del stack mobile (default: RigentecWmsMobileDevStack)").Trim()
-  if (-not $mobileStack) { $mobileStack = "RigentecWmsMobileDevStack" }
+    $mobileStackInput = Read-TrimmedInput "Nombre del stack mobile (default: $MobileStackName)"
+    if ($mobileStackInput) { $MobileStackName = $mobileStackInput }
+  }
 
-  $ok = Invoke-AutoSetup -Profile $profile -WebStackName $webStack -MobileStackName $mobileStack
+  $ok = Invoke-AutoSetup -Profile $Profile -WebStackName $WebStackName -MobileStackName $MobileStackName
   if (-not $ok) {
     Write-Host ""
     Write-Host "Configuracion automatica fallo. Intenta con la opcion manual (2)."
@@ -44,7 +72,7 @@ if ($mode -eq "1") {
   Write-Host "Base de datos configurada."
   Write-Host ""
 
-  $setupSync = (Read-Host "Deseas configurar sincronizacion movil? (S/N)").Trim()
+  $setupSync = Read-TrimmedInput "Deseas configurar sincronizacion movil? (S/N)"
   if ($setupSync -match "^[SsYy]") {
     Invoke-SyncSetup
   }

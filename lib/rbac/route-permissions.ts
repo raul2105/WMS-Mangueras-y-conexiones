@@ -58,6 +58,7 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
 
   { prefix: "/api/export/kardex", permission: "kardex.view" },
   { prefix: "/api/export/audit", permission: "audit.view" },
+  { prefix: "/api/purchasing/orders/", permission: "purchasing.manage" },
   { prefix: "/api/products/lookup", permission: "catalog.view" },
   { prefix: "/api/products/search", permission: "catalog.view" },
   { prefix: "/api/labels/jobs/", permission: "labels.manage" },

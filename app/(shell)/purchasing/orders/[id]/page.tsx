@@ -2,7 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { purchaseOrderLineSchema, firstErrorMessage } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { pageGuard } from "@/components/rbac/PageGuard";
+import {
+  loadLatestPurchaseOrderDocument,
+  parsePurchaseOrderDocumentSnapshot,
+  updatePurchaseOrderStatusWithDocument,
+} from "@/lib/purchasing/purchase-order-document-service";
 
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
@@ -34,44 +39,18 @@ const TRANSITIONS: Record<string, string[]> = {
 
 async function updateStatus(orderId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const newStatus = String(formData.get("status") ?? "").trim();
-
-  const order = await prisma.purchaseOrder.findUnique({
-    where: { id: orderId },
-    select: {
-      status: true,
-      lines: { select: { qtyOrdered: true, qtyReceived: true } },
-    },
+  const result = await updatePurchaseOrderStatusWithDocument({
+    purchaseOrderId: orderId,
+    newStatus,
+    prismaClient: prisma,
   });
-  if (!order) redirect(`/purchasing/orders/${orderId}?error=Orden no encontrada`);
 
-  const allowed = TRANSITIONS[order.status] ?? [];
-  if (!allowed.includes(newStatus)) {
-    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(`Transición ${order.status} → ${newStatus} no permitida`)}`);
+  if ("error" in result) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(result.error)}`);
   }
-
-  if (newStatus === "CONFIRMADA" && order.lines.length === 0) {
-    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Agrega al menos una línea antes de confirmar")}`);
-  }
-
-  if (newStatus === "RECIBIDA") {
-    const allComplete = order.lines.every((l) => l.qtyReceived >= l.qtyOrdered);
-    if (!allComplete) {
-      redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Hay líneas con pendiente de recibir — usa Recepción Parcial")}`);
-    }
-  }
-
-  await prisma.purchaseOrder.update({ where: { id: orderId }, data: { status: newStatus as never } });
-
-  await createAuditLogSafe({
-    entityType: "PURCHASE_ORDER",
-    entityId: orderId,
-    action: "STATUS_CHANGE",
-    before: JSON.stringify({ status: order.status }),
-    after: JSON.stringify({ status: newStatus }),
-    source: "purchasing/orders",
-  });
 
   const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
   await emitSyncEventSafe({
@@ -86,6 +65,7 @@ async function updateStatus(orderId: string, formData: FormData) {
 
 async function addLine(orderId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const productId = String(formData.get("productId") ?? "").trim();
   const qtyOrderedRaw = String(formData.get("qtyOrderedRaw") ?? "").trim();
@@ -124,6 +104,7 @@ async function addLine(orderId: string, formData: FormData) {
 
 async function removeLine(orderId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const lineId = String(formData.get("lineId") ?? "").trim();
 
@@ -150,6 +131,7 @@ export default async function PurchaseOrderDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
+  await pageGuard("purchasing.manage");
   const { id } = await params;
   const sp = await searchParams;
 
@@ -202,6 +184,15 @@ export default async function PurchaseOrderDetailPage({
   const totalReceived = order.lines.reduce((s, l) => s + l.qtyReceived, 0);
   const pctReceived = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
   const totalValue = order.lines.reduce((s, l) => s + (l.unitPrice ?? 0) * l.qtyOrdered, 0);
+  const documentRecord = await loadLatestPurchaseOrderDocument({ purchaseOrderId: id, prismaClient: prisma });
+  let documentSnapshot = null;
+  if (documentRecord) {
+    try {
+      documentSnapshot = parsePurchaseOrderDocumentSnapshot(documentRecord.snapshotJson);
+    } catch {
+      documentSnapshot = null;
+    }
+  }
 
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
@@ -283,6 +274,40 @@ export default async function PurchaseOrderDetailPage({
           </div>
         </div>
       )}
+
+      <div className="glass-card space-y-3">
+        <h2 className="text-lg font-bold border-b border-white/10 pb-2">Documento oficial</h2>
+        {order.status === "BORRADOR" ? (
+          <p className="text-sm text-slate-400">Documento oficial disponible al confirmar.</p>
+        ) : documentSnapshot ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-sm">
+              <div className="glass p-3 rounded-lg">
+                <p className="text-xs uppercase text-slate-400">Versión</p>
+                <p className="text-white font-semibold">v{documentSnapshot.documentVersion}</p>
+              </div>
+              <div className="glass p-3 rounded-lg">
+                <p className="text-xs uppercase text-slate-400">Generado</p>
+                <p className="text-white font-semibold">{new Date(documentSnapshot.generatedAt).toLocaleString("es-MX")}</p>
+              </div>
+              <div className="glass p-3 rounded-lg">
+                <p className="text-xs uppercase text-slate-400">Estado congelado</p>
+                <p className="text-white font-semibold">{documentSnapshot.purchaseOrder.status}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href={`/purchasing/orders/${id}/document`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+                Ver documento oficial
+              </Link>
+              <a href={`/api/purchasing/orders/${id}/pdf`} className="btn-primary">
+                Descargar PDF
+              </a>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-amber-200">Documento oficial no generado para esta OC. Revisión requerida.</p>
+        )}
+      </div>
 
       {/* Líneas */}
       <div className="glass-card space-y-4">

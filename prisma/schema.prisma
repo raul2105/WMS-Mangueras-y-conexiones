@@ -944,6 +944,7 @@ model PurchaseOrder {
   supplier Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   lines    PurchaseOrderLine[]
   receipts PurchaseReceipt[]
+  documents PurchaseOrderDocument[]
 
   @@index([supplierId])
   @@index([status])
@@ -966,6 +967,21 @@ model PurchaseOrderLine {
   @@unique([purchaseOrderId, productId])
   @@index([purchaseOrderId])
   @@index([productId])
+}
+
+model PurchaseOrderDocument {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  versionNumber   Int
+  snapshotJson    String
+  snapshotHash    String?
+  createdForStatus String
+  createdAt       DateTime @default(now())
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseOrderId, versionNumber])
+  @@index([purchaseOrderId, createdAt])
 }
 
 model PurchaseReceipt {

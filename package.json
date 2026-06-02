@@ -71,6 +71,7 @@
     "@aws-sdk/client-dynamodb": "^3.1029.0",
     "@aws-sdk/client-sqs": "^3.1029.0",
     "@prisma/client": "6.19.2",
+    "@react-pdf/renderer": "^4.5.1",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "bcryptjs": "^3.0.3",

@@ -6,6 +6,7 @@ import {
   loadLatestPurchaseOrderDocument,
   parsePurchaseOrderDocumentSnapshot,
 } from "@/lib/purchasing/purchase-order-document-service";
+import { getSupplierDisplayLines } from "@/lib/purchasing/purchase-order-pdf";
 
 function money(value: number, currency: string) {
   return new Intl.NumberFormat("es-MX", {
@@ -75,13 +76,15 @@ export default async function PurchaseOrderDocumentPage({
     );
   }
 
+  const supplierLines = getSupplierDisplayLines(snapshot.supplier);
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 print:max-w-none print:space-y-4">
       <div className="flex items-start justify-between gap-4 print:hidden">
         <div>
-          <h1 className="text-2xl font-bold">Documento oficial de OC</h1>
+          <h1 className="text-2xl font-bold">Orden de Compra oficial</h1>
           <p className="text-sm text-slate-400">
-            Vista congelada de la orden {snapshot.purchaseOrder.folio} v{snapshot.documentVersion}
+            Vista congelada para revisión de la orden {snapshot.purchaseOrder.folio} v{snapshot.documentVersion}
           </p>
         </div>
         <div className="flex gap-3">
@@ -98,37 +101,67 @@ export default async function PurchaseOrderDocumentPage({
       <div className="glass-card print:shadow-none print:border print:border-black/20">
         <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Orden de compra oficial</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Orden de Compra</p>
             <h2 className="text-3xl font-bold font-mono mt-1">{snapshot.purchaseOrder.folio}</h2>
             <p className="text-sm text-slate-400 mt-1">
-              Versión v{snapshot.documentVersion} · Generado {new Date(snapshot.generatedAt).toLocaleString("es-MX")}
+              Fecha de emisión {new Date(snapshot.generatedAt).toLocaleString("es-MX")} · Versión v{snapshot.documentVersion}
             </p>
           </div>
           <div className="text-right text-sm text-slate-300">
-            <p className="font-semibold text-slate-200">{snapshot.supplier.businessName ?? snapshot.supplier.name}</p>
-            <p>{snapshot.supplier.legalName ?? "—"}</p>
-            <p className="text-xs text-slate-500">RFC: {snapshot.supplier.taxId ?? "—"}</p>
+            <p className="font-semibold text-slate-200">{supplierLines.primary}</p>
+            {supplierLines.secondary ? <p>{supplierLines.secondary}</p> : null}
+            <p className="text-xs text-slate-500">Código: {snapshot.supplier.code}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-4 mt-4">
+          <div className="space-y-1 text-sm">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Fecha esperada / entrega solicitada</p>
+            <p>{formatDate(snapshot.purchaseOrder.expectedDate)}</p>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Estado</p>
+            <p>{snapshot.purchaseOrder.status}</p>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Moneda</p>
+            <p>{snapshot.totals.currency}</p>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Creada</p>
+            <p>{new Date(snapshot.purchaseOrder.createdAt).toLocaleString("es-MX")}</p>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 mt-4">
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Datos de la OC</p>
-            <p>Estado: {snapshot.purchaseOrder.status}</p>
-            <p>Fecha esperada: {formatDate(snapshot.purchaseOrder.expectedDate)}</p>
-            <p>Creada: {new Date(snapshot.purchaseOrder.createdAt).toLocaleString("es-MX")}</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Comprador</p>
+            <p className="text-slate-200">WMS Mangueras y Conexiones</p>
+            <p className="text-slate-400">RFC: Por definir</p>
+            <p className="text-slate-400">Dirección: Por definir</p>
+            <p className="text-slate-400">Contacto: Por definir</p>
           </div>
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Contacto proveedor</p>
-            <p>Correo: {snapshot.supplier.email ?? "—"}</p>
-            <p>Teléfono: {snapshot.supplier.phone ?? "—"}</p>
-            <p>Dirección: {snapshot.supplier.address ?? "—"}</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Proveedor</p>
+            <p className="text-slate-200">{supplierLines.primary}</p>
+            {supplierLines.secondary ? <p className="text-slate-400">{supplierLines.secondary}</p> : null}
+            <p className="text-slate-400">RFC: {snapshot.supplier.taxId ?? "—"}</p>
+            <p className="text-slate-400">Correo: {snapshot.supplier.email ?? "—"}</p>
+            <p className="text-slate-400">Teléfono: {snapshot.supplier.phone ?? "—"}</p>
+            <p className="text-slate-400">Dirección: {snapshot.supplier.address ?? "—"}</p>
           </div>
         </div>
 
-        <div className="mt-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Notas</p>
-          <p className="text-sm text-slate-200 mt-1">{snapshot.purchaseOrder.notes ?? "—"}</p>
+        <div className="grid gap-4 md:grid-cols-2 mt-4">
+          <div className="space-y-1 text-sm">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Entrega y términos</p>
+            <p className="text-slate-200">Dirección de entrega: Por definir</p>
+            <p className="text-slate-200">Términos de pago: Por definir</p>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Notas</p>
+            <p className="text-slate-200 mt-1">{snapshot.purchaseOrder.notes ?? "—"}</p>
+          </div>
         </div>
 
         <div className="mt-5 overflow-x-auto">
@@ -137,12 +170,10 @@ export default async function PurchaseOrderDocumentPage({
               <tr className="border-b border-white/10 text-slate-400">
                 <th className="py-2 text-left">SKU</th>
                 <th className="py-2 text-left">Producto</th>
-                <th className="py-2 text-right">Pedido</th>
-                <th className="py-2 text-right">Recibido</th>
-                <th className="py-2 text-right">Pendiente</th>
+                <th className="py-2 text-right">Cantidad</th>
                 <th className="py-2 text-center">Unidad</th>
-                <th className="py-2 text-right">Precio</th>
-                <th className="py-2 text-right">Subtotal</th>
+                <th className="py-2 text-right">Precio unitario</th>
+                <th className="py-2 text-right">Importe</th>
               </tr>
             </thead>
             <tbody>
@@ -151,8 +182,6 @@ export default async function PurchaseOrderDocumentPage({
                   <td className="py-2 font-mono text-cyan-400 text-xs">{line.sku}</td>
                   <td className="py-2 text-slate-200">{line.name}</td>
                   <td className="py-2 text-right">{line.qtyOrdered}</td>
-                  <td className="py-2 text-right">{line.qtyReceived}</td>
-                  <td className="py-2 text-right">{line.pendingQty}</td>
                   <td className="py-2 text-center text-slate-400">{line.unitLabel}</td>
                   <td className="py-2 text-right">{money(line.unitPrice, line.currency)}</td>
                   <td className="py-2 text-right">{money(line.subtotal, line.currency)}</td>

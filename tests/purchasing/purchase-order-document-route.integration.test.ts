@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { updatePurchaseOrderStatusWithDocument } from "@/lib/purchasing/purchase-order-document-service";
+import { buildPurchaseOrderPdfFilename } from "@/lib/purchasing/purchase-order-pdf";
 
 vi.mock("@/lib/rbac", () => ({
   requirePermission: vi.fn(async () => undefined),
@@ -86,10 +87,16 @@ describePostgres("purchase order document pdf route integration", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/pdf");
-    expect(response.headers.get("content-disposition")).toBe(`attachment; filename="OC-${order.folio}.pdf"`);
+    expect(response.headers.get("content-disposition")).toBe(`attachment; filename="${buildPurchaseOrderPdfFilename(order.folio)}"`);
 
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(Buffer.from(bytes).subarray(0, 4).toString("utf8")).toBe("%PDF");
+  });
+
+  it("sanitizes unsafe file names without duplicating prefixes", () => {
+    expect(buildPurchaseOrderPdfFilename("OC-2026-0004")).toBe("OC-2026-0004.pdf");
+    expect(buildPurchaseOrderPdfFilename("2026-0004")).toBe("OC-2026-0004.pdf");
+    expect(buildPurchaseOrderPdfFilename("OC-2026/0004?*")).toBe("OC-2026-0004.pdf");
   });
 
   it("fails cleanly when no official document exists", async () => {

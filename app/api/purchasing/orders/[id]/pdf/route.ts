@@ -6,7 +6,7 @@ import {
   loadLatestPurchaseOrderDocument,
   parsePurchaseOrderDocumentSnapshot,
 } from "@/lib/purchasing/purchase-order-document-service";
-import { PurchaseOrderPdfDocument } from "@/lib/purchasing/purchase-order-pdf";
+import { buildPurchaseOrderPdfFilename, PurchaseOrderPdfDocument } from "@/lib/purchasing/purchase-order-pdf";
 import { renderToBuffer } from "@react-pdf/renderer";
 
 export const runtime = "nodejs";
@@ -29,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const pdfBuffer = await renderToBuffer(
     React.createElement(PurchaseOrderPdfDocument, { snapshot }) as unknown as Parameters<typeof renderToBuffer>[0],
   );
-  const filename = `OC-${snapshot.purchaseOrder.folio}.pdf`;
+  const filename = buildPurchaseOrderPdfFilename(snapshot.purchaseOrder.folio);
 
   return new NextResponse(new Uint8Array(pdfBuffer), {
     headers: {

@@ -58,8 +58,18 @@ npm run link:product-images -- --dir public/uploads/products
 
 - The file name without extension must match `sku` or `referenceCode`.
 
+## Strict Validation Summary
+
+The CSV importer now enforces strict validation with no permissive escape hatches:
+
+ - **Numeric Fields**: Empty values become `null` (for `base_cost`/`price`) or `0` (for `quantity`). Non-empty values must be plain non-negative numbers matching `/^[0-9]+(\.[0-9]+)?$/` (no currency symbols, commas, units, or letters)
+ - **Attributes**: Must be valid JSON if provided; `{ raw: ... }` fallback removed
+ - **Location**: Must reference an existing location code; no auto-creation or fallback to `STAGING-DEFAULT`
+ - **CLI Flags Removed**: `--allow-raw-attributes` and `--allow-create-locations` are no longer supported
+ - **Error Format**: All validation errors include line numbers (e.g., `Line 4: invalid quantity "10 pzas" (must be a finite non-negative number)`)
+
 ## Troubleshooting
 
-- If your CSV uses commas inside fields, ensure those fields are quoted.
-- If you get type errors, verify `type` matches exactly one of the allowed values.
-- If a SKU appears multiple times with conflicting `name/type/brand/category/subcategory`, the importer will fail validation.
+	- If your CSV uses commas inside fields, ensure those fields are quoted.
+	- If you get type errors, verify `type` matches exactly one of the allowed values.
+	- If a SKU appears multiple times with conflicting `name/type/brand/category/subcategory`, the importer will fail validation.

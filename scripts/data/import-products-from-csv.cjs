@@ -1,7 +1,7 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { parse } = require('csv-parse/sync');
-const { PrismaClient } = require('@prisma/client');
+const fs = require("node:fs");
+const path = require("node:path");
+const { parse } = require("csv-parse/sync");
+const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
@@ -9,49 +9,77 @@ function parseArgs(argv) {
   const args = { file: null, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--file' || a === '-f') args.file = argv[++i];
-    else if (a === '--dry-run') args.dryRun = true;
-    else if (a === '--help' || a === '-h') args.help = true;
+    if (a === "--file" || a === "-f") args.file = argv[++i];
+    else if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--help" || a === "-h") args.help = true;
   }
   return args;
 }
 
 function usage() {
   return [
-    'Import products from a CSV file into Prisma (SQLite by default).',
-    '',
-    'Usage:',
-    '  node scripts/data/import-products-from-csv.cjs --file data/products.csv',
-    '  node scripts/data/import-products-from-csv.cjs -f data/products.csv --dry-run',
-    '',
-    'Expected columns (header row required):',
-    '  sku,name,type,description,brand,unitLabel,base_cost,price,category,subcategory,quantity,location,attributes,referenceCode,imageUrl',
-    '',
-    'Notes:',
-    '  - type must be: HOSE | FITTING | ASSEMBLY | ACCESSORY',
-    '  - attributes may be JSON (e.g. {"pressure_psi":3263,"inner_diameter":"1/4\""})',
-    '  - referenceCode can be used for scanning/labeling (optional)',
-    '  - imageUrl stores a reference image URL (optional)',
-    '  - If the same sku appears multiple times, inventory is aggregated by location.',
-    '  - Import is idempotent: products upsert by sku; inventory is replaced per sku.',
-  ].join('\n');
+    "Import products from a CSV file into Prisma (strict validation).",
+    "",
+    "Usage:",
+    "  node scripts/data/import-products-from-csv.cjs --file data/products.csv",
+    "  node scripts/data/import-products-from-csv.cjs -f data/products.csv --dry-run",
+    "",
+    "Expected columns (header row required):",
+    "  sku,name,type,description,brand,unitLabel,base_cost,price,category,subcategory,quantity,location,attributes,referenceCode,imageUrl",
+    "",
+    "Notes:",
+    "  - type must be: HOSE | FITTING | ASSEMBLY | ACCESSORY",
+    "  - attributes must be a JSON object when provided (e.g. {\"pressure_psi\":3263,\"inner_diameter\":\"1/4\"})",
+    "  - referenceCode can be used for scanning/labeling (optional)",
+    "  - imageUrl stores a reference image URL (optional)",
+    "  - Import is idempotent: products upsert by sku; inventory is replaced per sku.",
+  ].join("\n");
 }
 
 function normalizeHeaderKey(key) {
-  const k = String(key ?? '').trim();
-  if (/^reference[_\s-]?code$/i.test(k)) return 'referencecode';
-  if (/^image[_\s-]?url$/i.test(k)) return 'imageurl';
+  const k = String(key ?? "").trim();
+  if (/^reference[_\s-]?code$/i.test(k)) return "referencecode";
+  if (/^image[_\s-]?url$/i.test(k)) return "imageurl";
   return k.toLowerCase();
 }
 
-function toNumberOrNull(v) {
-  if (v === undefined || v === null) return null;
-  const s = String(v).trim();
-  if (!s) return null;
-  // Allow commas as decimal separators (common in ES locale) if there is no dot.
-  const normalized = s.includes('.') ? s : s.replace(',', '.');
-  const n = Number(normalized);
-  return Number.isFinite(n) ? n : null;
+function parseNonNegativeNumber(value, line, field, { required = false } = {}) {
+  if (value === undefined || value === null) {
+    if (required) throw new Error(`Line ${line}: missing ${field}`);
+    return null;
+  }
+
+  const s = String(value).trim();
+  if (!s) {
+    if (required) throw new Error(`Line ${line}: missing ${field}`);
+    return null;
+  }
+
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(s)) {
+    throw new Error(`Line ${line}: invalid ${field} "${value}" (must be a finite non-negative number)`);
+  }
+
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`Line ${line}: invalid ${field} "${value}" (must be a finite non-negative number)`);
+  }
+
+  return n;
+}
+
+function parseNullableNonNegativeNumber(value, line, field) {
+  return parseNonNegativeNumber(value, line, field, { required: false });
+}
+
+function parseRequiredNonNegativeNumber(value, line, field) {
+  return parseNonNegativeNumber(value, line, field, { required: true });
+}
+
+function parseQuantityNumber(value, line) {
+  if (value === undefined || value === null) return 0;
+  const s = String(value).trim();
+  if (!s) return 0;
+  return parseRequiredNonNegativeNumber(value, line, "quantity");
 }
 
 function toStringOrNull(v) {
@@ -60,32 +88,38 @@ function toStringOrNull(v) {
   return s ? s : null;
 }
 
-function parseAttributes(attributesValue) {
+function parseAttributes(attributesValue, line) {
   const s = toStringOrNull(attributesValue);
   if (!s) return null;
+
+  let parsed;
   try {
-    const parsed = JSON.parse(s);
-    return JSON.stringify(parsed);
+    parsed = JSON.parse(s);
   } catch {
-    // If it isn't valid JSON, store as a raw string JSON.
-    return JSON.stringify({ raw: s });
+    throw new Error(`Line ${line}: invalid attributes JSON`);
   }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Line ${line}: attributes must be a JSON object`);
+  }
+
+  return JSON.stringify(parsed);
 }
 
 function normalizeTechnicalText(input) {
-  return String(input ?? '')
+  return String(input ?? "")
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
 
 function toAttributeValues(input) {
   if (input === null || input === undefined) return [];
   if (Array.isArray(input)) {
-    return input.map((item) => String(item ?? '').trim()).filter(Boolean);
+    return input.map((item) => String(item ?? "").trim()).filter(Boolean);
   }
-  if (typeof input === 'object') return [];
+  if (typeof input === "object") return [];
   const normalized = String(input).trim();
   return normalized ? [normalized] : [];
 }
@@ -100,7 +134,7 @@ function extractProductTechnicalAttributes(attributesRaw) {
     return [];
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
 
   const rows = [];
   const dedupe = new Set();
@@ -144,7 +178,7 @@ async function syncProductTechnicalAttributes(prismaToUse, productId, attributes
       });
     }
   } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'P2021') {
+    if (error && typeof error === "object" && error.code === "P2021") {
       return;
     }
     throw error;
@@ -152,9 +186,9 @@ async function syncProductTechnicalAttributes(prismaToUse, productId, attributes
 }
 
 function asProductType(typeValue) {
-  const t = String(typeValue ?? '').trim().toUpperCase();
+  const t = String(typeValue ?? "").trim().toUpperCase();
   if (!t) return null;
-  const allowed = new Set(['HOSE', 'FITTING', 'ASSEMBLY', 'ACCESSORY']);
+  const allowed = new Set(["HOSE", "FITTING", "ASSEMBLY", "ACCESSORY"]);
   return allowed.has(t) ? t : null;
 }
 
@@ -203,21 +237,21 @@ async function adjustInventoryWithMovement(prismaToUse, { productId, locationId,
       data: {
         productId,
         locationId,
-        type: 'ADJUSTMENT',
-        operatorName: 'csv-import',
+        type: "ADJUSTMENT",
+        operatorName: "csv-import",
         quantity: delta,
-        reference: 'CSV_IMPORT',
+        reference: "CSV_IMPORT",
         notes: reason,
-        documentType: 'CSV_IMPORT',
+        documentType: "CSV_IMPORT",
       },
     });
 
     try {
       await tx.auditLog.create({
         data: {
-          entityType: 'INVENTORY',
+          entityType: "INVENTORY",
           entityId: `${productId}:${locationId}`,
-          action: 'IMPORT_CSV_ADJUST',
+          action: "IMPORT_CSV_ADJUST",
           before: JSON.stringify({
             quantity: currentQty,
             reserved,
@@ -228,8 +262,8 @@ async function adjustInventoryWithMovement(prismaToUse, { productId, locationId,
             reserved,
             available: nextAvailable,
           }),
-          actor: 'csv-import',
-          source: 'scripts/data/import-products-from-csv.cjs',
+          actor: "csv-import",
+          source: "scripts/data/import-products-from-csv.cjs",
         },
       });
     } catch {
@@ -239,15 +273,14 @@ async function adjustInventoryWithMovement(prismaToUse, { productId, locationId,
 }
 
 async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
+  const prismaToUse = prismaClient ?? prisma;
   const csvPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
   if (!fs.existsSync(csvPath)) {
     throw new Error(`CSV file not found: ${csvPath}`);
   }
 
   const raw = fs.readFileSync(csvPath);
-  // Strip UTF-8 BOM if present
-  const text = raw.toString('utf8').replace(/^\uFEFF/, '');
-
+  const text = raw.toString("utf8").replace(/^\uFEFF/, "");
   const records = parse(text, {
     columns: true,
     skip_empty_lines: true,
@@ -257,11 +290,10 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
   });
 
   if (!Array.isArray(records) || records.length === 0) {
-    console.log('No records found in CSV.');
+    console.log("No records found in CSV.");
     return;
   }
 
-  // Normalize keys (support different casing)
   const normalizedRows = records.map((row) => {
     const out = {};
     for (const [k, v] of Object.entries(row)) out[normalizeHeaderKey(k)] = v;
@@ -271,11 +303,32 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
   const errors = [];
   const bySku = new Map();
   const referenceCodeToSku = new Map();
-  const duplicatedReferenceCodesInCsv = new Set();
+  const locationIdCache = new Map();
+
+  async function resolveLocationId(locationCode, line) {
+    if (!locationCode) return null;
+
+    if (locationIdCache.has(locationCode)) {
+      return locationIdCache.get(locationCode);
+    }
+
+    const existing = await prismaToUse.location.findUnique({
+      where: { code: locationCode },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      errors.push(`Line ${line}: unknown location "${locationCode}"`);
+      return null;
+    }
+
+    locationIdCache.set(locationCode, existing.id);
+    return existing.id;
+  }
 
   for (let idx = 0; idx < normalizedRows.length; idx++) {
     const row = normalizedRows[idx];
-    const line = idx + 2; // header is line 1
+    const line = idx + 2;
 
     const sku = toStringOrNull(row.sku);
     const name = toStringOrNull(row.name);
@@ -286,9 +339,19 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
     if (!type) errors.push(`Line ${line}: invalid type (must be HOSE|FITTING|ASSEMBLY|ACCESSORY)`);
     if (!sku || !name || !type) continue;
 
-    const base_cost = toNumberOrNull(row.base_cost);
-    const price = toNumberOrNull(row.price);
-    const quantity = toNumberOrNull(row.quantity) ?? 0;
+    let base_cost;
+    let price;
+    let quantity;
+    let attributes;
+    try {
+      base_cost = parseNullableNonNegativeNumber(row.base_cost, line, "base_cost");
+      price = parseNullableNonNegativeNumber(row.price, line, "price");
+      quantity = parseQuantityNumber(row.quantity, line);
+      attributes = parseAttributes(row.attributes, line);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : `Line ${line}: invalid row`);
+      continue;
+    }
 
     const productData = {
       sku,
@@ -296,26 +359,32 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
       description: toStringOrNull(row.description),
       type,
       brand: toStringOrNull(row.brand),
-      unitLabel: toStringOrNull(row.unitlabel) ?? 'unidad',
+      unitLabel: toStringOrNull(row.unitlabel) ?? "unidad",
       referenceCode: toStringOrNull(row.referencecode),
       imageUrl: toStringOrNull(row.imageurl),
       base_cost,
       price,
       category: toStringOrNull(row.category),
       subcategory: toStringOrNull(row.subcategory),
-      attributes: parseAttributes(row.attributes),
+      attributes,
     };
 
     if (productData.referenceCode) {
       const previousSku = referenceCodeToSku.get(productData.referenceCode);
       if (previousSku && previousSku !== sku) {
-        duplicatedReferenceCodesInCsv.add(productData.referenceCode);
+        errors.push(`Line ${line}: referenceCode ${productData.referenceCode} already appears on sku ${previousSku}`);
       } else {
         referenceCodeToSku.set(productData.referenceCode, sku);
       }
     }
 
     const location = toStringOrNull(row.location);
+    let locationId = null;
+    if (location) {
+      locationId = await resolveLocationId(location, line);
+    } else if (quantity > 0) {
+      errors.push(`Line ${line}: missing location (required when quantity > 0)`);
+    }
 
     const existing = bySku.get(sku);
     if (!existing) {
@@ -324,90 +393,69 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
         inventoryByLocation: new Map(),
       });
     } else {
-      // If repeated sku, keep the first productData but sanity-check conflicts.
       const prev = existing.productData;
-      const fieldsToCheck = ['name', 'type', 'brand', 'category', 'subcategory'];
+      const fieldsToCheck = [
+        "name",
+        "type",
+        "description",
+        "brand",
+        "unitLabel",
+        "base_cost",
+        "price",
+        "category",
+        "subcategory",
+        "referenceCode",
+        "imageUrl",
+      ];
       for (const f of fieldsToCheck) {
-        if (productData[f] && prev[f] && productData[f] !== prev[f]) {
+        if (productData[f] !== null && productData[f] !== undefined && prev[f] !== null && prev[f] !== undefined && productData[f] !== prev[f]) {
           errors.push(`Line ${line}: sku ${sku} has conflicting ${f} (${prev[f]} vs ${productData[f]})`);
         }
       }
     }
 
-    const bucket = bySku.get(sku);
-    const locKey = location ?? '__NO_LOCATION__';
-    bucket.inventoryByLocation.set(locKey, (bucket.inventoryByLocation.get(locKey) ?? 0) + quantity);
+    if (locationId !== null) {
+      const bucket = bySku.get(sku);
+      bucket.inventoryByLocation.set(locationId, (bucket.inventoryByLocation.get(locationId) ?? 0) + quantity);
+    }
   }
 
   if (errors.length) {
-    console.error('CSV validation failed:');
+    console.error("CSV validation failed:");
     for (const e of errors.slice(0, 50)) console.error(`- ${e}`);
     if (errors.length > 50) console.error(`- ...and ${errors.length - 50} more`);
-    const preview = errors.slice(0, 5).join('; ');
-    const more = errors.length > 5 ? ` (+${errors.length - 5} más)` : '';
+    const preview = errors.slice(0, 5).join("; ");
+    const more = errors.length > 5 ? ` (+${errors.length - 5} más)` : "";
     throw new Error(`CSV validation failed: ${preview}${more}`);
+  }
+
+  for (const [referenceCode, sku] of referenceCodeToSku.entries()) {
+    const existingProduct = await prismaToUse.product.findUnique({
+      where: { referenceCode },
+      select: { sku: true },
+    });
+    if (existingProduct && existingProduct.sku !== sku) {
+      throw new Error(`referenceCode ${referenceCode} already belongs to sku ${existingProduct.sku}`);
+    }
   }
 
   const skus = Array.from(bySku.keys());
   console.log(`Parsed ${normalizedRows.length} CSV rows -> ${skus.length} unique SKUs.`);
 
   if (dryRun) {
-    console.log('Dry run enabled; no DB writes performed.');
-    return { rows: normalizedRows.length, skus: skus.length, upsertedProducts: 0, inventoryRowsUpdated: 0, dryRun: true };
+    console.log("Dry run enabled; no DB writes performed.");
+    return {
+      rows: normalizedRows.length,
+      skus: skus.length,
+      upsertedProducts: 0,
+      inventoryRowsUpdated: 0,
+      dryRun: true,
+    };
   }
 
-  const prismaToUse = prismaClient ?? prisma;
   let upsertedProducts = 0;
-  let createdCategories = 0;
   let inventoryRowsUpdated = 0;
   let referenceCodeConflicts = 0;
-
-  const defaultWarehouse = await prismaToUse.warehouse.upsert({
-    where: { code: 'DEFAULT' },
-    create: {
-      code: 'DEFAULT',
-      name: 'Default Warehouse',
-      description: 'Auto-created for CSV imports',
-      isActive: true,
-    },
-    update: {},
-  });
-
-  const stagingLocation = await prismaToUse.location.upsert({
-    where: { code: 'STAGING-DEFAULT' },
-    create: {
-      code: 'STAGING-DEFAULT',
-      name: 'Staging - DEFAULT',
-      zone: 'STAGING',
-      isActive: true,
-      warehouseId: defaultWarehouse.id,
-    },
-    update: {},
-  });
-
-  async function resolveLocationId(locationCode) {
-    if (!locationCode) return stagingLocation.id;
-
-    const existing = await prismaToUse.location.findUnique({
-      where: { code: locationCode },
-      select: { id: true },
-    });
-
-    if (existing) return existing.id;
-
-    const created = await prismaToUse.location.create({
-      data: {
-        code: locationCode,
-        name: `Ubicacion ${locationCode}`,
-        zone: 'DEFAULT',
-        isActive: true,
-        warehouseId: defaultWarehouse.id,
-      },
-      select: { id: true },
-    });
-
-    return created.id;
-  }
 
   for (const sku of skus) {
     const { productData, inventoryByLocation } = bySku.get(sku);
@@ -421,38 +469,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
         })
       : null;
 
-    if (category && category.createdAt.getTime() === category.updatedAt.getTime()) {
-      // Not a reliable signal of creation, but harmless; keep as a best-effort counter.
-      createdCategories++;
-    }
-
-    let safeReferenceCode = productData.referenceCode;
-    if (safeReferenceCode) {
-      if (duplicatedReferenceCodesInCsv.has(safeReferenceCode)) {
-        const ownerSkuInCsv = referenceCodeToSku.get(safeReferenceCode);
-        if (ownerSkuInCsv && ownerSkuInCsv !== productData.sku) {
-          referenceCodeConflicts++;
-          console.warn(
-            `[import] referenceCode ${safeReferenceCode} is duplicated in CSV; keeping it for sku ${ownerSkuInCsv} and setting it to null for sku ${productData.sku}`
-          );
-          safeReferenceCode = null;
-        }
-      }
-
-      if (safeReferenceCode) {
-        const ownerByReferenceCode = await prismaToUse.product.findUnique({
-          where: { referenceCode: safeReferenceCode },
-          select: { sku: true },
-        });
-        if (ownerByReferenceCode && ownerByReferenceCode.sku !== productData.sku) {
-          referenceCodeConflicts++;
-          console.warn(
-            `[import] referenceCode ${safeReferenceCode} already belongs to sku ${ownerByReferenceCode.sku}; setting it to null for sku ${productData.sku}`
-          );
-          safeReferenceCode = null;
-        }
-      }
-    }
+    const safeReferenceCode = productData.referenceCode;
 
     const product = await prismaToUse.product.upsert({
       where: { sku: productData.sku },
@@ -497,9 +514,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
     const existingByLocation = new Map(existingInventory.map((row) => [row.locationId, row]));
 
     const desiredByLocation = new Map();
-    for (const [locKey, qty] of inventoryByLocation.entries()) {
-      const locationCode = locKey === '__NO_LOCATION__' ? null : locKey;
-      const locationId = await resolveLocationId(locationCode);
+    for (const [locationId, qty] of inventoryByLocation.entries()) {
       desiredByLocation.set(locationId, (desiredByLocation.get(locationId) ?? 0) + qty);
     }
 
@@ -512,7 +527,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
           productId: product.id,
           locationId,
           delta,
-          reason: 'Import CSV',
+          reason: "Import CSV",
         });
         inventoryRowsUpdated++;
       }
@@ -525,7 +540,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
           productId: product.id,
           locationId: leftover.locationId,
           delta: -leftover.quantity,
-          reason: 'Import CSV cleanup',
+          reason: "Import CSV cleanup",
         });
         inventoryRowsUpdated++;
       }
@@ -535,7 +550,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
   }
 
   console.log(
-    `Imported: ${upsertedProducts} products; ${inventoryRowsUpdated} inventory adjustments; ${referenceCodeConflicts} referenceCode conflicts handled.`
+    `Imported: ${upsertedProducts} products; ${inventoryRowsUpdated} inventory adjustments; ${referenceCodeConflicts} referenceCode conflicts handled.`,
   );
   return {
     rows: normalizedRows.length,

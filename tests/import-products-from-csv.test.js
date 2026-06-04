@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { importProductsFromCsv } from "../scripts/data/import-products-from-csv.cjs";
@@ -119,7 +120,7 @@ afterAll(async () => {
 
 describeDb("KAN-95 import-products-from-csv", () => {
   it("succeeds in dry-run with the sample CSV", async () => {
-    await seedWarehouseWithLocations(["A-12-04", "B-01-01", "C-03-02"]);
+    await seedWarehouseWithLocations(["A-12-04", "B-01-01"]);
 
     const result = await importProductsFromCsv({
       filePath: path.join(process.cwd(), "data", "products.sample.csv"),
@@ -132,6 +133,18 @@ describeDb("KAN-95 import-products-from-csv", () => {
       skus: 3,
       dryRun: true,
     });
+  });
+
+  it("serves the official sample CSV route as text/csv", async () => {
+    const routePath = path.join(process.cwd(), "app", "(shell)", "catalog", "import", "sample", "route.ts");
+    const { GET } = await import(pathToFileURL(routePath).href);
+    const response = await GET();
+    const body = await response.text();
+    const sampleFile = fs.readFileSync(path.join(process.cwd(), "data", "products.sample.csv"), "utf8");
+
+    expect(response.headers.get("Content-Type")).toContain("text/csv");
+    expect(response.headers.get("Content-Disposition")).toBe('attachment; filename="products.sample.csv"');
+    expect(body).toBe(sampleFile);
   });
 
   it("accepts unitLabel", async () => {

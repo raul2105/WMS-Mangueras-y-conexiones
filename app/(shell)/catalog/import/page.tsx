@@ -124,6 +124,97 @@ export default async function CatalogImportPage({
         </div>
       )}
 
+      <section className="glass-card space-y-4 border border-white/10">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold text-white">Plantilla oficial única</h2>
+            <p className="text-sm text-slate-400">
+              Usa siempre el mismo CSV oficial para importar artículos de producto al catálogo.
+            </p>
+          </div>
+          <Link href="/catalog/import/sample" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+            Descargar plantilla oficial
+          </Link>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Campos requeridos</h3>
+            <p className="text-sm text-slate-400">
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">sku</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">name</code> y{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">type</code>.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Campos opcionales</h3>
+            <p className="text-sm text-slate-400">
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">description</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">brand</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">unitLabel</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">base_cost</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">price</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">category</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">subcategory</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">location</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attributes</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">referenceCode</code>,{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">imageUrl</code>.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Reglas clave</h3>
+            <ul className="space-y-1 text-sm text-slate-400">
+              <li>
+                Tipos permitidos: <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">HOSE</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">FITTING</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">ASSEMBLY</code>.
+              </li>
+              <li>
+                Ejemplos de <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">unitLabel</code>:{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">metro</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">pieza</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">kit</code>.
+              </li>
+              <li>
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">base_cost</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">price</code> y{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity</code> deben ser números
+                no negativos, sin moneda, comas ni unidades.
+              </li>
+              <li>
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">location</code> es obligatoria
+                cuando <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity</code> es mayor que
+                0 y la ubicación ya debe existir.
+              </li>
+            </ul>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Validación operativa</h3>
+            <ul className="space-y-1 text-sm text-slate-400">
+              <li>
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attributes</code> debe ser un
+                objeto JSON válido.
+              </li>
+              <li>
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">referenceCode</code> debe ser
+                único o quedar alineado al mismo <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">sku</code>.
+              </li>
+              <li>
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity = 0</code> puede dejar{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">location</code> vacío si el
+                importador se mantiene en el camino estricto actual.
+              </li>
+              <li>Ejecuta primero la validación o dry-run antes de importar cambios reales.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
       <form action={importCsv} className="glass-card space-y-6">
         <label className="space-y-1">
           <span className="text-sm text-slate-400">Archivo CSV *</span>
@@ -134,7 +225,10 @@ export default async function CatalogImportPage({
             required
             className="w-full px-4 py-3 glass rounded-lg"
           />
-          <p className="text-xs text-slate-500">Formato según `docs/reference/import-products-csv.md`. Máx. 25 MB.</p>
+          <p className="text-xs text-slate-500">
+            Usa la plantilla oficial única <code className="text-slate-300">data/products.sample.csv</code>. Máx.
+            25 MB.
+          </p>
         </label>
 
         <label className="flex items-center gap-3">

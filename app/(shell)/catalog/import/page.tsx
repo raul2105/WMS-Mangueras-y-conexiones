@@ -124,13 +124,12 @@ export default async function CatalogImportPage({
         </div>
       )}
 
-      <section className="glass-card space-y-4 border border-white/10">
+      <section className="glass-card space-y-5 border border-white/10">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">
-            <h2 className="text-lg font-bold text-white">Plantilla oficial única</h2>
+            <h2 className="text-lg font-bold text-white">Importación de artículos</h2>
             <p className="text-sm text-slate-400">
-              Usa siempre el mismo CSV oficial para importar artículos de producto al catálogo. No necesitas escribir JSON
-              manualmente para atributos técnicos.
+              Usa una sola plantilla oficial. Llénala, valida el archivo y después importa.
             </p>
           </div>
           <Link href="/catalog/import/sample" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
@@ -138,90 +137,48 @@ export default async function CatalogImportPage({
           </Link>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Campos requeridos</h3>
-            <p className="text-sm text-slate-400">
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">sku</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">name</code> y{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">type</code>.
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">1. Descarga la plantilla</div>
+            <p className="mt-2 text-sm text-slate-300">Usa siempre el archivo oficial.</p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">2. Llena la información</div>
+            <p className="mt-2 text-sm text-slate-300">
+              Captura SKU, nombre, tipo, costos, existencias y ubicación.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Campos opcionales</h3>
-            <p className="text-sm text-slate-400">
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">description</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">brand</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">unitLabel</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">base_cost</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">price</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">category</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">subcategory</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">location</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attributes</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">referenceCode</code>,{" "}
-              <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">imageUrl</code>.
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">3. Valida antes de importar</div>
+            <p className="mt-2 text-sm text-slate-300">
+              Corrige errores antes de guardar cambios reales.
             </p>
-          </div>
-
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Reglas clave</h3>
-            <ul className="space-y-1 text-sm text-slate-400">
-              <li>
-                Tipos permitidos: <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">HOSE</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">FITTING</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">ASSEMBLY</code>.
-              </li>
-              <li>
-                Ejemplos de <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">unitLabel</code>:{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">metro</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">pieza</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">kit</code>.
-              </li>
-              <li>
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">base_cost</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">price</code> y{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity</code> deben ser números
-                no negativos, sin moneda, comas ni unidades.
-              </li>
-              <li>
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">location</code> es obligatoria
-                cuando <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity</code> es mayor que
-                0 y la ubicación ya debe existir.
-              </li>
-            </ul>
-          </div>
-
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Validación operativa</h3>
-            <ul className="space-y-1 text-sm text-slate-400">
-              <li>
-                Captura atributos técnicos con columnas <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_*</code>.
-                Ejemplos: <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_pressure_psi</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_inner_diameter</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_thread</code>,{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_material</code>.
-              </li>
-              <li>El sistema convierte esas columnas en atributos técnicos internos.</li>
-              <li>
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attributes</code> JSON sigue
-                disponible como legado/avanzado, pero no debe mezclarse con <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_*</code>.
-              </li>
-              <li>
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">referenceCode</code> debe ser
-                único o quedar alineado al mismo <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">sku</code>.
-              </li>
-              <li>
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">quantity = 0</code> puede dejar{" "}
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">location</code> vacío si el
-                importador se mantiene en el camino estricto actual.
-              </li>
-              <li>Ejecuta primero la validación o dry-run antes de importar cambios reales.</li>
-            </ul>
           </div>
         </div>
+
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
+          Si <code className="rounded bg-black/20 px-1.5 py-0.5">quantity</code> es mayor que 0, la ubicación debe
+          existir. Para atributos técnicos usa columnas <code className="rounded bg-black/20 px-1.5 py-0.5">attr_*</code>;
+          no escribas JSON.
+        </div>
+
+        <details className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-200">
+            Ver reglas técnicas
+          </summary>
+
+          <ul className="mt-4 space-y-2 text-sm text-slate-400">
+            <li>Campos obligatorios: sku, name, type.</li>
+            <li>Tipos permitidos: HOSE, FITTING, ASSEMBLY.</li>
+            <li>Números: sin moneda, comas ni unidades.</li>
+            <li>location: requerida si quantity &gt; 0.</li>
+            <li>attr_*: columnas para atributos técnicos.</li>
+            <li>attributes JSON: solo legado/avanzado; no mezclar con attr_*.</li>
+            <li>referenceCode: único o alineado al mismo sku.</li>
+          </ul>
+        </details>
       </section>
 
       <form action={importCsv} className="glass-card space-y-6">

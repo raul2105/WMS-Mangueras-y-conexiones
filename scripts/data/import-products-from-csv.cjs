@@ -29,7 +29,8 @@ function usage() {
     "",
     "Notes:",
     "  - type must be: HOSE | FITTING | ASSEMBLY | ACCESSORY",
-    "  - attributes must be a JSON object when provided (e.g. {\"pressure_psi\":3263,\"inner_diameter\":\"1/4\"})",
+    "  - attr_* columns are mapped into the internal attributes object (e.g. attr_pressure_psi, attr_inner_diameter)",
+    "  - attributes must be a JSON object when provided, and cannot be mixed with attr_* columns",
     "  - referenceCode can be used for scanning/labeling (optional)",
     "  - imageUrl stores a reference image URL (optional)",
     "  - Import is idempotent: products upsert by sku; inventory is replaced per sku.",
@@ -104,6 +105,54 @@ function parseAttributes(attributesValue, line) {
   }
 
   return JSON.stringify(parsed);
+}
+
+function parseFlatAttributeValue(attrKey, value) {
+  const s = toStringOrNull(value);
+  if (!s) return null;
+
+  if (attrKey === "components") {
+    const parts = s
+      .split(/[|;]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (parts.length > 1) return parts;
+    return parts.length === 1 ? [parts[0]] : null;
+  }
+
+  if (/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)) {
+    return Number(s);
+  }
+
+  return s;
+}
+
+function buildAttributesPayload(row, line) {
+  const legacyRaw = toStringOrNull(row.attributes);
+  const flatAttributes = {};
+  let hasFlatAttributes = false;
+
+  for (const [key, value] of Object.entries(row)) {
+    if (!key.startsWith("attr_")) continue;
+    const attrKey = key.slice(5).trim();
+    if (!attrKey) continue;
+
+    const parsedValue = parseFlatAttributeValue(attrKey, value);
+    if (parsedValue === null || parsedValue === undefined) continue;
+
+    flatAttributes[attrKey] = parsedValue;
+    hasFlatAttributes = true;
+  }
+
+  if (legacyRaw && hasFlatAttributes) {
+    throw new Error(`Line ${line}: use either attributes JSON or attr_* columns, not both`);
+  }
+
+  if (hasFlatAttributes) {
+    return JSON.stringify(flatAttributes);
+  }
+
+  return parseAttributes(row.attributes, line);
 }
 
 function normalizeTechnicalText(input) {
@@ -347,7 +396,7 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
       base_cost = parseNullableNonNegativeNumber(row.base_cost, line, "base_cost");
       price = parseNullableNonNegativeNumber(row.price, line, "price");
       quantity = parseQuantityNumber(row.quantity, line);
-      attributes = parseAttributes(row.attributes, line);
+      attributes = buildAttributesPayload(row, line);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : `Line ${line}: invalid row`);
       continue;

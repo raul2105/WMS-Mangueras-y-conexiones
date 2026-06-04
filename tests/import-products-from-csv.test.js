@@ -13,6 +13,7 @@ const describeDb = shouldRunPostgresSuite ? describe : describe.skip;
 const prisma = new PrismaClient();
 
 const CSV_HEADER = "sku,name,type,description,brand,unitLabel,base_cost,price,category,subcategory,quantity,location,attributes,referenceCode,imageUrl";
+const FLAT_ATTRIBUTES_HEADER = "sku,name,type,description,brand,unitLabel,base_cost,price,category,subcategory,quantity,location,attributes,attr_norm,attr_pressure_psi,attr_working_pressure_bar,attr_inner_diameter,attr_outer_diameter,attr_thread,attr_angle,attr_material,attr_length_mm,attr_components,referenceCode,imageUrl";
 
 function csvEscape(value) {
   const text = value === undefined || value === null ? "" : String(value);
@@ -28,6 +29,72 @@ function csvRow(values) {
 
 function csv(...rows) {
   return [CSV_HEADER, ...rows].join("\n");
+}
+
+function csvWithHeader(header, ...rows) {
+  return [header, ...rows].join("\n");
+}
+
+function csvFromObject(columns, record) {
+  return csvRow(columns.map((column) => record[column] ?? ""));
+}
+
+function createMockPrisma(locationCodes = []) {
+  const locationMap = new Map(locationCodes.map((code, index) => [code, `loc-${index + 1}`]));
+  const state = {
+    productUpserts: [],
+    technicalAttributes: [],
+  };
+
+  const mock = {
+    location: {
+      findUnique: async ({ where }) => {
+        const id = locationMap.get(where.code);
+        return id ? { id } : null;
+      },
+    },
+    product: {
+      findUnique: async () => null,
+      upsert: async (args) => {
+        state.productUpserts.push(args);
+        return { id: `product-${state.productUpserts.length}` };
+      },
+    },
+    category: {
+      upsert: async () => ({ id: "category-1" }),
+    },
+    inventory: {
+      findMany: async () => [],
+    },
+    productTechnicalAttribute: {
+      deleteMany: async () => {},
+      createMany: async ({ data }) => {
+        state.technicalAttributes.push(...data);
+      },
+    },
+    importLog: {
+      create: async () => {},
+    },
+    auditLog: {
+      create: async () => {},
+    },
+    $transaction: async (callback) =>
+      callback({
+        inventory: {
+          findUnique: async () => null,
+          update: async () => null,
+          create: async () => null,
+        },
+        inventoryMovement: {
+          create: async () => null,
+        },
+        auditLog: {
+          create: async () => null,
+        },
+      }),
+  };
+
+  return { mock, state };
 }
 
 function writeTempCsv(content) {
@@ -109,13 +176,233 @@ async function seedWarehouseWithLocations(codes) {
   return warehouse;
 }
 
-beforeEach(async () => {
-  await resetDb();
-});
+if (shouldRunPostgresSuite) {
+  beforeEach(async () => {
+    await resetDb();
+  });
 
-afterAll(async () => {
-  await resetDb();
-  await prisma.$disconnect();
+  afterAll(async () => {
+    await resetDb();
+    await prisma.$disconnect();
+  });
+}
+
+describe("KAN-97 flat attr_* columns", () => {
+  const flatColumns = FLAT_ATTRIBUTES_HEADER.split(",");
+
+  function technicalRows(state) {
+    return state.technicalAttributes
+      .map((row) => [row.keyNormalized, row.valueNormalized])
+      .sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+  }
+
+  it("maps flat attr_* columns into attributes for a HOSE row", async () => {
+    const { mock, state } = createMockPrisma();
+    const result = await importProductsFromCsv({
+      filePath: writeTempCsv(
+        csvWithHeader(
+          FLAT_ATTRIBUTES_HEADER,
+          csvFromObject(flatColumns, {
+            sku: "SKU-HOSE-FLAT",
+            name: "Manguera Flat",
+            type: "HOSE",
+            description: "Desc",
+            brand: "Marca",
+            unitLabel: "metro",
+            base_cost: "10",
+            price: "20",
+            quantity: "0",
+            attributes: "",
+            attr_norm: "R2AT",
+            attr_pressure_psi: "5800",
+            attr_inner_diameter: '1/4 in',
+            attr_material: "Acero reforzado",
+            referenceCode: "REF-HOSE-FLAT",
+          }),
+        ),
+      ),
+      dryRun: false,
+      prismaClient: mock,
+    });
+
+    expect(result).toMatchObject({ rows: 1, skus: 1, dryRun: false });
+    expect(JSON.parse(state.productUpserts[0]?.create.attributes ?? "null")).toEqual({
+      norm: "R2AT",
+      pressure_psi: 5800,
+      inner_diameter: "1/4 in",
+      material: "Acero reforzado",
+    });
+    expect(technicalRows(state)).toEqual([
+      ["inner_diameter", "1/4 in"],
+      ["material", "acero reforzado"],
+      ["norm", "r2at"],
+      ["pressure_psi", "5800"],
+    ]);
+  });
+
+  it("maps flat attr_* columns into attributes for a FITTING row", async () => {
+    const { mock, state } = createMockPrisma();
+    const result = await importProductsFromCsv({
+      filePath: writeTempCsv(
+        csvWithHeader(
+          FLAT_ATTRIBUTES_HEADER,
+          csvFromObject(flatColumns, {
+            sku: "SKU-FIT-FLAT",
+            name: "Conexión Flat",
+            type: "FITTING",
+            description: "Desc",
+            brand: "Marca",
+            unitLabel: "pieza",
+            base_cost: "11",
+            price: "22",
+            quantity: "0",
+            attr_norm: "JIC-90",
+            attr_thread: "JIC 37°",
+            attr_angle: "90°",
+            attr_material: "Acero al carbón",
+            referenceCode: "REF-FIT-FLAT",
+          }),
+        ),
+      ),
+      dryRun: false,
+      prismaClient: mock,
+    });
+
+    expect(result).toMatchObject({ rows: 1, skus: 1, dryRun: false });
+    expect(JSON.parse(state.productUpserts[0]?.create.attributes ?? "null")).toEqual({
+      norm: "JIC-90",
+      thread: "JIC 37°",
+      angle: "90°",
+      material: "Acero al carbón",
+    });
+    expect(technicalRows(state)).toEqual([
+      ["angle", "90°"],
+      ["material", "acero al carbon"],
+      ["norm", "jic-90"],
+      ["thread", "jic 37°"],
+    ]);
+  });
+
+  it("maps flat attr_* columns into attributes for an ASSEMBLY row", async () => {
+    const { mock, state } = createMockPrisma();
+    const result = await importProductsFromCsv({
+      filePath: writeTempCsv(
+        csvWithHeader(
+          FLAT_ATTRIBUTES_HEADER,
+          csvFromObject(flatColumns, {
+            sku: "SKU-ASM-FLAT",
+            name: "Ensamble Flat",
+            type: "ASSEMBLY",
+            description: "Desc",
+            brand: "Marca",
+            unitLabel: "kit",
+            base_cost: "12",
+            price: "24",
+            quantity: "0",
+            attr_norm: "ENS-3P",
+            attr_length_mm: "1200",
+            attr_components: "CON-R2AT-04|FIT-JIC-12-90|FIT-JIC-12-12",
+            referenceCode: "REF-ASM-FLAT",
+          }),
+        ),
+      ),
+      dryRun: false,
+      prismaClient: mock,
+    });
+
+    expect(result).toMatchObject({ rows: 1, skus: 1, dryRun: false });
+    expect(JSON.parse(state.productUpserts[0]?.create.attributes ?? "null")).toEqual({
+      norm: "ENS-3P",
+      length_mm: 1200,
+      components: ["CON-R2AT-04", "FIT-JIC-12-90", "FIT-JIC-12-12"],
+    });
+    expect(technicalRows(state)).toEqual([
+      ["components", "con-r2at-04"],
+      ["components", "fit-jic-12-12"],
+      ["components", "fit-jic-12-90"],
+      ["length_mm", "1200"],
+      ["norm", "ens-3p"],
+    ]);
+  });
+
+  it("ignores empty attr_* values", async () => {
+    const { mock, state } = createMockPrisma();
+    const result = await importProductsFromCsv({
+      filePath: writeTempCsv(
+        csvWithHeader(
+          FLAT_ATTRIBUTES_HEADER,
+          csvFromObject(flatColumns, {
+            sku: "SKU-EMPTY-FLAT",
+            name: "Producto Flat Vacío",
+            type: "HOSE",
+            description: "Desc",
+            brand: "Marca",
+            unitLabel: "metro",
+            base_cost: "10",
+            price: "20",
+            quantity: "0",
+            attr_norm: "",
+            attr_pressure_psi: "5800",
+            attr_inner_diameter: "",
+            attr_material: "",
+            referenceCode: "REF-EMPTY-FLAT",
+          }),
+        ),
+      ),
+      dryRun: false,
+      prismaClient: mock,
+    });
+
+    expect(result).toMatchObject({ rows: 1, skus: 1, dryRun: false });
+    expect(JSON.parse(state.productUpserts[0]?.create.attributes ?? "null")).toEqual({ pressure_psi: 5800 });
+    expect(technicalRows(state)).toEqual([
+      ["pressure_psi", "5800"],
+    ]);
+  });
+
+  it("fails when legacy attributes JSON and attr_* columns are both populated", async () => {
+    const { mock } = createMockPrisma();
+    await expect(
+      importProductsFromCsv({
+        filePath: writeTempCsv(
+          csvWithHeader(
+            FLAT_ATTRIBUTES_HEADER,
+            csvFromObject(flatColumns, {
+              sku: "SKU-MIXED",
+              name: "Producto Mixto",
+              type: "HOSE",
+              description: "Desc",
+              brand: "Marca",
+              unitLabel: "metro",
+              base_cost: "10",
+              price: "20",
+              quantity: "0",
+              attributes: '{"pressure_psi":3263}',
+              attr_norm: "R2AT",
+              referenceCode: "REF-MIXED",
+            }),
+          ),
+        ),
+        dryRun: false,
+        prismaClient: mock,
+      }),
+    ).rejects.toThrow(/use either attributes JSON or attr_\* columns, not both/i);
+  });
+
+  it("validates the official sample CSV in dry-run with mocked locations", async () => {
+    const { mock } = createMockPrisma(["A-12-04", "B-01-01"]);
+    const result = await importProductsFromCsv({
+      filePath: path.join(process.cwd(), "data", "products.sample.csv"),
+      dryRun: true,
+      prismaClient: mock,
+    });
+
+    expect(result).toMatchObject({
+      rows: 3,
+      skus: 3,
+      dryRun: true,
+    });
+  });
 });
 
 describeDb("KAN-95 import-products-from-csv", () => {

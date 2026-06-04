@@ -129,7 +129,8 @@ export default async function CatalogImportPage({
           <div className="space-y-1">
             <h2 className="text-lg font-bold text-white">Plantilla oficial única</h2>
             <p className="text-sm text-slate-400">
-              Usa siempre el mismo CSV oficial para importar artículos de producto al catálogo.
+              Usa siempre el mismo CSV oficial para importar artículos de producto al catálogo. No necesitas escribir JSON
+              manualmente para atributos técnicos.
             </p>
           </div>
           <Link href="/catalog/import/sample" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
@@ -197,8 +198,16 @@ export default async function CatalogImportPage({
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Validación operativa</h3>
             <ul className="space-y-1 text-sm text-slate-400">
               <li>
-                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attributes</code> debe ser un
-                objeto JSON válido.
+                Captura atributos técnicos con columnas <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_*</code>.
+                Ejemplos: <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_pressure_psi</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_inner_diameter</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_thread</code>,{" "}
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_material</code>.
+              </li>
+              <li>El sistema convierte esas columnas en atributos técnicos internos.</li>
+              <li>
+                <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attributes</code> JSON sigue
+                disponible como legado/avanzado, pero no debe mezclarse con <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">attr_*</code>.
               </li>
               <li>
                 <code className="rounded bg-white/10 px-1.5 py-0.5 text-slate-200">referenceCode</code> debe ser

@@ -13,11 +13,188 @@
   box-shadow: var(--shadow-md);
 }
 
+/* Operational UX layout primitives */
+.op-layout {
+  display: grid;
+  gap: 1rem;
+}
+
+.op-layout-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .op-layout-split {
+    grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 0.7fr);
+  }
+}
+
+.op-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem;
+}
+
+.op-card,
+.op-panel,
+.op-sidebar {
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+}
+
+.op-card {
+  padding: 1rem;
+}
+
+.op-panel {
+  padding: 1.25rem;
+}
+
+.op-sidebar {
+  align-self: start;
+  padding: 1rem;
+  background: var(--ops-muted-panel);
+}
+
+.op-card-interactive {
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.op-card-interactive:hover,
+.op-card-interactive:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--ops-focus-shadow);
+  transform: translateY(-1px);
+}
+
+.op-step-list {
+  display: grid;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.op-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.op-step-marker {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--execution-active-bg);
+  color: var(--execution-active-text);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.op-step-active {
+  border-color: var(--execution-active-border);
+  background: var(--execution-active-bg);
+}
+
+.op-step-complete .op-step-marker {
+  background: var(--success-soft);
+  color: var(--status-success-text);
+}
+
+.op-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  padding: 0.28rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.op-state-critical {
+  color: var(--status-danger-text);
+  background: var(--risk-critical-bg);
+  border-color: var(--risk-critical-border);
+  box-shadow: 0 0 0 1px var(--risk-critical-glow);
+}
+
+.op-state-active {
+  color: var(--execution-active-text);
+  background: var(--execution-active-bg);
+  border-color: var(--execution-active-border);
+}
+
+.op-state-best {
+  color: var(--slot-best-text);
+  background: var(--slot-best-bg);
+  border-color: var(--slot-best-border);
+}
+
+.op-state-sales {
+  color: var(--sales-cta-text);
+  background: var(--sales-cta);
+  border-color: var(--sales-cta-hover);
+}
+
+.op-state-mobile {
+  color: var(--mobile-cta-text);
+  background: var(--mobile-cta);
+  border-color: var(--mobile-cta-hover);
+}
+
+.role-manager-accent {
+  color: var(--role-manager-accent);
+}
+
+.role-warehouse-accent {
+  color: var(--role-warehouse-accent);
+}
+
+.role-sales-accent {
+  color: var(--role-sales-accent);
+}
+
+.risk-critical {
+  background: var(--risk-critical-bg);
+  border-color: var(--risk-critical-border);
+  box-shadow: 0 0 24px var(--risk-critical-glow);
+}
+
+.execution-active {
+  background: var(--execution-active-bg);
+  border-color: var(--execution-active-border);
+  color: var(--execution-active-text);
+}
+
+.slot-best {
+  background: var(--slot-best-bg);
+  border-color: var(--slot-best-border);
+  color: var(--slot-best-text);
+}
+
 /* Buttons */
 .btn,
 .btn-primary,
 .btn-secondary,
-.btn-ghost {
+.btn-ghost,
+.btn-sales,
+.btn-mobile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -35,7 +212,9 @@
 .btn:focus-visible,
 .btn-primary:focus-visible,
 .btn-secondary:focus-visible,
-.btn-ghost:focus-visible {
+.btn-ghost:focus-visible,
+.btn-sales:focus-visible,
+.btn-mobile:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
@@ -47,7 +226,11 @@
 .btn-secondary:disabled,
 .btn-secondary[aria-disabled="true"],
 .btn-ghost:disabled,
-.btn-ghost[aria-disabled="true"] {
+.btn-ghost[aria-disabled="true"],
+.btn-sales:disabled,
+.btn-sales[aria-disabled="true"],
+.btn-mobile:disabled,
+.btn-mobile[aria-disabled="true"] {
   opacity: var(--disabled-opacity);
   pointer-events: none;
 }
@@ -82,6 +265,29 @@
 .btn-ghost:hover {
   background: var(--bg-subtle);
   color: var(--text-primary);
+}
+
+.btn-sales {
+  background: var(--sales-cta);
+  border-color: var(--sales-cta);
+  color: var(--sales-cta-text);
+}
+
+.btn-sales:hover {
+  background: var(--sales-cta-hover);
+  border-color: var(--sales-cta-hover);
+}
+
+.btn-mobile {
+  min-height: 2.75rem;
+  background: var(--mobile-cta);
+  border-color: var(--mobile-cta);
+  color: var(--mobile-cta-text);
+}
+
+.btn-mobile:hover {
+  background: var(--mobile-cta-hover);
+  border-color: var(--mobile-cta-hover);
 }
 
 /* Badges */
@@ -123,6 +329,18 @@
   color: var(--danger);
   border-color: color-mix(in oklab, var(--danger) 34%, var(--border-default));
   background: var(--danger-soft);
+}
+
+.badge-sales {
+  color: var(--sales-cta);
+  border-color: color-mix(in oklab, var(--sales-cta) 36%, var(--border-default));
+  background: var(--sales-cta-soft);
+}
+
+.badge-mobile {
+  color: var(--mobile-cta);
+  border-color: color-mix(in oklab, var(--mobile-cta) 36%, var(--border-default));
+  background: var(--mobile-cta-soft);
 }
 
 /* Form fields and dense controls */
@@ -301,8 +519,20 @@
   color: var(--text-accent) !important;
 }
 
+[data-theme="light"] .text-cyan-300,
+[data-theme="light"] .text-cyan-500,
+[data-theme="light"] .hover\:text-cyan-300:hover,
+[data-theme="light"] .hover\:text-cyan-400:hover {
+  color: var(--accent) !important;
+}
+
 [data-theme="light"] .bg-cyan-500\/10 {
   background: var(--status-info-bg) !important;
+}
+
+[data-theme="light"] .bg-cyan-500\/20,
+[data-theme="light"] .bg-cyan-500\/30 {
+  background: var(--accent-soft) !important;
 }
 
 [data-theme="light"] .border-cyan-500\/30,
@@ -310,24 +540,69 @@
   border-color: var(--status-info-border) !important;
 }
 
+[data-theme="light"] .border-cyan-500\/20 {
+  border-color: var(--accent) !important;
+}
+
+[data-theme="light"] .text-emerald-200,
+[data-theme="light"] .text-emerald-300,
 [data-theme="light"] .text-emerald-400 {
   color: var(--status-success-text) !important;
 }
 
+[data-theme="light"] .text-emerald-500 {
+  color: var(--success) !important;
+}
+
+[data-theme="light"] .bg-emerald-500\/10,
+[data-theme="light"] .bg-emerald-500\/20 {
+  background: var(--status-success-bg) !important;
+}
+
+[data-theme="light"] .border-emerald-500\/20,
+[data-theme="light"] .border-emerald-500\/30 {
+  border-color: var(--status-success-border) !important;
+}
+
+[data-theme="light"] .text-amber-200,
+[data-theme="light"] .text-amber-300,
 [data-theme="light"] .text-orange-400,
 [data-theme="light"] .text-amber-400 {
   color: var(--status-warning-text) !important;
 }
 
+[data-theme="light"] .bg-amber-400\/10,
+[data-theme="light"] .bg-amber-500\/10,
+[data-theme="light"] .bg-amber-500\/20,
+[data-theme="light"] .bg-orange-500\/20 {
+  background: var(--status-warning-bg) !important;
+}
+
+[data-theme="light"] .border-amber-400\/20,
+[data-theme="light"] .border-amber-500\/30,
+[data-theme="light"] .border-orange-400\/40 {
+  border-color: var(--status-warning-border) !important;
+}
+
 [data-theme="light"] .text-red-200,
+[data-theme="light"] .text-red-300,
 [data-theme="light"] .text-red-400 {
   color: var(--status-danger-text) !important;
+}
+
+[data-theme="light"] .text-red-500 {
+  color: var(--danger) !important;
 }
 
 [data-theme="light"] .bg-red-500\/10 {
   background: var(--status-danger-bg) !important;
 }
 
+[data-theme="light"] .bg-red-500\/20 {
+  background: color-mix(in oklab, var(--status-danger-bg) 80%, var(--bg-surface)) !important;
+}
+
+[data-theme="light"] .border-red-500\/20,
 [data-theme="light"] .border-red-500\/30,
 [data-theme="light"] .hover\:border-red-400\/40:hover {
   border-color: var(--status-danger-border) !important;

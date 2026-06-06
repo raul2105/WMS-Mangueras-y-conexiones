@@ -7,6 +7,8 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { StatCard } from "@/components/ui/stat-card";
 import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
 import { pullSalesRequestOrder } from "@/lib/sales/request-service";
 import { firstErrorMessage, salesInternalOrderTransitionSchema } from "@/lib/schemas/wms";
@@ -80,6 +82,12 @@ const FLOW_STAGE_ORDER: SalesOrderFlowStage[] = [
   "entregado",
   "cancelado",
 ];
+
+function getFilterPillClass(active: boolean) {
+  return active
+    ? "border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-semibold"
+    : "border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]";
+}
 
 function parsePage(value: string | undefined) {
   const parsed = Number.parseInt(value ?? "1", 10);
@@ -450,10 +458,10 @@ export default async function ProductionRequestsPage({
         meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Preset operativo: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
-            <Link href="/production/availability" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
+            <Link href="/production/availability" className={buttonStyles({ variant: "secondary" })}>
               Disponibilidad
             </Link>
-            <Link href="/production/equivalences" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
+            <Link href="/production/equivalences" className={buttonStyles({ variant: "secondary" })}>
               Equivalencias
             </Link>
             <Link href="/production/requests/new" className="btn-primary">
@@ -463,26 +471,14 @@ export default async function ProductionRequestsPage({
         }
       />
 
-      {sp.ok ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{sp.ok}</div> : null}
-      {sp.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{sp.error}</div> : null}
+      {sp.ok ? <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">{sp.ok}</div> : null}
+      {sp.error ? <div className="rounded-xl border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">{sp.error}</div> : null}
 
       <div className="grid gap-4 md:grid-cols-4">
-        <div className="glass-card">
-          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Pedidos</p>
-          <p className="mt-3 text-3xl font-semibold text-white">{totalCount}</p>
-        </div>
-        <div className="glass-card">
-          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Borrador</p>
-          <p className="mt-3 text-3xl font-semibold text-white">{statusCountMap.BORRADOR ?? 0}</p>
-        </div>
-        <div className="glass-card">
-          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Ensamble ligado</p>
-          <p className="mt-3 text-3xl font-semibold text-white">{linkedAssemblyCount}</p>
-        </div>
-        <div className="glass-card">
-          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Surtidos directos activos</p>
-          <p className="mt-3 text-3xl font-semibold text-white">{directPickCount}</p>
-        </div>
+        <StatCard label="Pedidos" value={totalCount.toString()} />
+        <StatCard label="Borrador" value={(statusCountMap.BORRADOR ?? 0).toString()} tone="accent" />
+        <StatCard label="Ensamble ligado" value={linkedAssemblyCount.toString()} tone="warning" />
+        <StatCard label="Surtidos directos activos" value={directPickCount.toString()} tone="success" />
       </div>
 
       <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">
@@ -497,28 +493,28 @@ export default async function ProductionRequestsPage({
             name="customer"
             defaultValue={customerFilter}
             placeholder="Nombre o cuenta del cliente"
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white"
+            className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2 text-sm text-[var(--text-primary)]"
           />
         </label>
         <div className="flex gap-2">
-          <button type="submit" className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-200 hover:text-white">
+          <button type="submit" className={buttonStyles({ variant: "secondary" })}>
             Filtrar
           </button>
-          <Link href={buildHref(1, undefined, undefined, undefined, undefined)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white">
+          <Link href={buildHref(1, undefined, undefined, undefined, undefined)} className={buttonStyles({ variant: "secondary" })}>
             Limpiar
           </Link>
         </div>
       </form>
 
       <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, statusFilter, undefined, stageFilter)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!queueFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+        <Link href={buildHref(1, statusFilter, undefined, stageFilter)} className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!queueFilter)}`}>
           Todos por atender
         </Link>
         {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map((queue) => (
           <Link
             key={queue}
             href={buildHref(1, statusFilter, queue, stageFilter)}
-            className={`rounded-lg px-3 py-1.5 text-sm glass ${queueFilter === queue ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(queueFilter === queue)}`}
           >
             {QUEUE_LABELS[queue]}
           </Link>
@@ -528,7 +524,7 @@ export default async function ProductionRequestsPage({
       <div className="flex flex-wrap gap-2">
         <Link
           href={buildHref(1, statusFilter, queueFilter, stageFilter, undefined)}
-          className={`rounded-lg px-3 py-1.5 text-sm glass ${!presetFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+          className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!presetFilter)}`}
         >
           Todos presets
         </Link>
@@ -536,7 +532,7 @@ export default async function ProductionRequestsPage({
           <Link
             key={preset}
             href={buildHref(1, statusFilter, queueFilter, stageFilter, preset)}
-            className={`rounded-lg px-3 py-1.5 text-sm glass ${presetFilter === preset ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(presetFilter === preset)}`}
           >
             {PRESET_LABELS[preset]}
           </Link>
@@ -544,14 +540,14 @@ export default async function ProductionRequestsPage({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, statusFilter, queueFilter, undefined)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!stageFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+        <Link href={buildHref(1, statusFilter, queueFilter, undefined)} className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!stageFilter)}`}>
           Todas etapas
         </Link>
         {FLOW_STAGE_ORDER.map((stage) => (
           <Link
             key={stage}
             href={buildHref(1, statusFilter, queueFilter, stage)}
-            className={`rounded-lg px-3 py-1.5 text-sm glass ${stageFilter === stage ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(stageFilter === stage)}`}
           >
             {SALES_ORDER_FLOW_STAGE_LABELS[stage]}
           </Link>
@@ -559,14 +555,14 @@ export default async function ProductionRequestsPage({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, undefined, queueFilter)} className={`rounded-lg px-3 py-1.5 text-sm glass ${!statusFilter ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}>
+        <Link href={buildHref(1, undefined, queueFilter)} className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!statusFilter)}`}>
           Todos ({totalCount})
         </Link>
         {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(([status, label]) => (
           <Link
             key={status}
             href={buildHref(1, status as SalesInternalOrderStatus, queueFilter)}
-            className={`rounded-lg px-3 py-1.5 text-sm glass ${statusFilter === status ? "bg-white/10 text-white font-semibold" : "text-slate-400 hover:text-white"}`}
+            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(statusFilter === status)}`}
           >
             {label} ({statusCountMap[status] ?? 0})
           </Link>
@@ -644,13 +640,13 @@ export default async function ProductionRequestsPage({
               return (
                 <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="py-3">
-                    <Link href={`/production/requests/${order.id}`} className="font-mono text-cyan-300 hover:text-white">
+                    <Link href={`/production/requests/${order.id}`} className="font-mono text-[var(--accent)] hover:text-[var(--text-primary)]">
                       {order.code}
                     </Link>
                   </td>
                   <td className="py-3 text-slate-300">
                     {order.customerId && canViewCustomers ? (
-                      <Link href={`/sales/customers/${order.customerId}`} className="text-cyan-300 hover:text-white">
+                      <Link href={`/sales/customers/${order.customerId}`} className="text-[var(--accent)] hover:text-[var(--text-primary)]">
                         {displayCustomer}
                       </Link>
                     ) : (
@@ -668,10 +664,10 @@ export default async function ProductionRequestsPage({
                     {order.assignedToUser ? (
                       order.assignedToUser.name ?? order.assignedToUser.email ?? "--"
                     ) : (
-                      <span className="text-slate-500">Sin asignar</span>
+                      <span className="text-[var(--text-muted)]">Sin asignar</span>
                     )}
                     {isAvailableForPull ? (
-                      <span className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-cyan-200 bg-cyan-500/20">
+                      <span className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-[var(--accent)] bg-[var(--accent-soft)]">
                         Disponible para pull
                       </span>
                     ) : null}
@@ -680,7 +676,7 @@ export default async function ProductionRequestsPage({
                     <p>{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
-                      <Link href={flowNarrative.nextRecommendedAction.href} className="text-xs text-cyan-300 hover:text-white">
+                      <Link href={flowNarrative.nextRecommendedAction.href} className="text-xs text-[var(--accent)] hover:text-[var(--text-primary)]">
                         {flowNarrative.nextRecommendedAction.label}
                       </Link>
                       {!flowNarrative.primaryCta.isAllowed && flowNarrative.primaryCta.blockedReason ? (
@@ -698,11 +694,13 @@ export default async function ProductionRequestsPage({
                           <button
                             type="submit"
                             disabled={!takeEligibility.canTakeOrder}
-                            className={`rounded-lg border px-3 py-1.5 text-xs ${
-                              takeEligibility.canTakeOrder
-                                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:border-cyan-400/40 hover:text-white"
-                                : "cursor-not-allowed border-white/10 bg-white/5 text-slate-500"
-                            }`}
+                            className={buttonStyles({
+                              variant: "secondary",
+                              size: "sm",
+                              className: takeEligibility.canTakeOrder
+                                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] hover:border-[var(--accent-hover)] hover:bg-[var(--accent-soft)]"
+                                : "cursor-not-allowed",
+                            })}
                           >
                             Tomar pedido
                           </button>
@@ -712,7 +710,7 @@ export default async function ProductionRequestsPage({
                         ) : null}
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-500">--</span>
+                      <span className="text-xs text-[var(--text-muted)]">--</span>
                     )}
                   </td>
                 </tr>
@@ -724,11 +722,11 @@ export default async function ProductionRequestsPage({
 
       {totalPages > 1 ? (
         <div className="flex items-center justify-between gap-3 text-sm">
-          <Link href={buildHref(Math.max(1, safePage - 1))} className={`rounded-lg border border-white/10 px-4 py-2 ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}>
+          <Link href={buildHref(Math.max(1, safePage - 1))} className={buttonStyles({ variant: "secondary", className: safePage <= 1 ? "pointer-events-none opacity-40" : "" })}>
             ← Anterior
           </Link>
-          <span className="text-slate-500">Pagina {safePage} de {totalPages}</span>
-          <Link href={buildHref(Math.min(totalPages, safePage + 1))} className={`rounded-lg border border-white/10 px-4 py-2 ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}>
+          <span className="text-[var(--text-muted)]">Pagina {safePage} de {totalPages}</span>
+          <Link href={buildHref(Math.min(totalPages, safePage + 1))} className={buttonStyles({ variant: "secondary", className: safePage >= totalPages ? "pointer-events-none opacity-40" : "" })}>
             Siguiente →
           </Link>
         </div>

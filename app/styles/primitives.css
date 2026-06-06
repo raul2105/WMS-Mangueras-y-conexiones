@@ -519,8 +519,20 @@
   color: var(--text-accent) !important;
 }
 
+[data-theme="light"] .text-cyan-300,
+[data-theme="light"] .text-cyan-500,
+[data-theme="light"] .hover\:text-cyan-300:hover,
+[data-theme="light"] .hover\:text-cyan-400:hover {
+  color: var(--accent) !important;
+}
+
 [data-theme="light"] .bg-cyan-500\/10 {
   background: var(--status-info-bg) !important;
+}
+
+[data-theme="light"] .bg-cyan-500\/20,
+[data-theme="light"] .bg-cyan-500\/30 {
+  background: var(--accent-soft) !important;
 }
 
 [data-theme="light"] .border-cyan-500\/30,
@@ -528,24 +540,69 @@
   border-color: var(--status-info-border) !important;
 }
 
+[data-theme="light"] .border-cyan-500\/20 {
+  border-color: var(--accent) !important;
+}
+
+[data-theme="light"] .text-emerald-200,
+[data-theme="light"] .text-emerald-300,
 [data-theme="light"] .text-emerald-400 {
   color: var(--status-success-text) !important;
 }
 
+[data-theme="light"] .text-emerald-500 {
+  color: var(--success) !important;
+}
+
+[data-theme="light"] .bg-emerald-500\/10,
+[data-theme="light"] .bg-emerald-500\/20 {
+  background: var(--status-success-bg) !important;
+}
+
+[data-theme="light"] .border-emerald-500\/20,
+[data-theme="light"] .border-emerald-500\/30 {
+  border-color: var(--status-success-border) !important;
+}
+
+[data-theme="light"] .text-amber-200,
+[data-theme="light"] .text-amber-300,
 [data-theme="light"] .text-orange-400,
 [data-theme="light"] .text-amber-400 {
   color: var(--status-warning-text) !important;
 }
 
+[data-theme="light"] .bg-amber-400\/10,
+[data-theme="light"] .bg-amber-500\/10,
+[data-theme="light"] .bg-amber-500\/20,
+[data-theme="light"] .bg-orange-500\/20 {
+  background: var(--status-warning-bg) !important;
+}
+
+[data-theme="light"] .border-amber-400\/20,
+[data-theme="light"] .border-amber-500\/30,
+[data-theme="light"] .border-orange-400\/40 {
+  border-color: var(--status-warning-border) !important;
+}
+
 [data-theme="light"] .text-red-200,
+[data-theme="light"] .text-red-300,
 [data-theme="light"] .text-red-400 {
   color: var(--status-danger-text) !important;
+}
+
+[data-theme="light"] .text-red-500 {
+  color: var(--danger) !important;
 }
 
 [data-theme="light"] .bg-red-500\/10 {
   background: var(--status-danger-bg) !important;
 }
 
+[data-theme="light"] .bg-red-500\/20 {
+  background: color-mix(in oklab, var(--status-danger-bg) 80%, var(--bg-surface)) !important;
+}
+
+[data-theme="light"] .border-red-500\/20,
 [data-theme="light"] .border-red-500\/30,
 [data-theme="light"] .hover\:border-red-400\/40:hover {
   border-color: var(--status-danger-border) !important;

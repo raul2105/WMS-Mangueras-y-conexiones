@@ -11,9 +11,9 @@ export const SALES_INTERNAL_ORDER_STATUS_LABELS: Record<SalesInternalOrderStatus
 };
 
 export const SALES_INTERNAL_ORDER_STATUS_STYLES: Record<SalesInternalOrderStatus, string> = {
-  BORRADOR: "text-slate-300 bg-slate-500/20",
-  CONFIRMADA: "text-emerald-300 bg-emerald-500/20",
-  CANCELADA: "text-red-300 bg-red-500/20",
+  BORRADOR: "border border-[var(--status-neutral-border)] text-[var(--status-neutral-text)] bg-[var(--status-neutral-bg)]",
+  CONFIRMADA: "border border-[var(--status-success-border)] text-[var(--status-success-text)] bg-[var(--status-success-bg)]",
+  CANCELADA: "border border-[var(--status-danger-border)] text-[var(--status-danger-text)] bg-[var(--status-danger-bg)]",
 };
 
 export type SalesOrderFlowStage =

@@ -352,7 +352,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                             </Td>
                             <Td>{product.brand ?? "--"}</Td>
                             <Td>{product.category?.name ?? product.subcategory ?? "--"}</Td>
-                            <Td className={`text-right font-semibold ${stock > 0 ? "text-emerald-500" : "text-red-500"}`}>{stock}</Td>
+                            <Td className={`text-right font-semibold ${stock > 0 ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>{stock}</Td>
                             <Td className="text-right font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</Td>
                             <Td className="text-right">
                               <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
@@ -383,7 +383,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                         <p className="text-[var(--text-muted)]">Marca: <span className="text-[var(--text-secondary)]">{product.brand ?? "--"}</span></p>
-                        <p className="text-[var(--text-muted)]">Stock: <span className={stock > 0 ? "text-emerald-500" : "text-red-500"}>{stock}</span></p>
+                        <p className="text-[var(--text-muted)]">Stock: <span className={stock > 0 ? "text-[var(--success)]" : "text-[var(--danger)]"}>{stock}</span></p>
                       </div>
                       <div className="mt-2 space-y-1">
                         {attributes && typeof attributes === "object" && Object.entries(attributes).slice(0, 2).map(([key, val]) => (

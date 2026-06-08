@@ -22,6 +22,8 @@ import {
   SALES_ORDER_FLOW_STAGE_LABELS,
   SALES_INTERNAL_ORDER_STATUS_LABELS,
   SALES_INTERNAL_ORDER_STATUS_STYLES,
+  summarizePickListStatus,
+  summarizeProductionStatus,
   type SalesOrderFlowStage,
 } from "@/lib/sales/internal-orders";
 import { buildSalesRequestVisibilityWhere, canManageAllSalesRequests } from "@/lib/sales/visibility";
@@ -85,13 +87,71 @@ const FLOW_STAGE_ORDER: SalesOrderFlowStage[] = [
 
 function getFilterPillClass(active: boolean) {
   return active
-    ? "border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-semibold"
+    ? "border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-semibold shadow-[var(--shadow-sm)]"
     : "border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]";
+}
+
+function getFlowStageCardClass(stage: SalesOrderFlowStage) {
+  if (stage === "en_surtido") return "border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]";
+  if (stage === "listo_entrega" || stage === "entregado") return "border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)]";
+  if (stage === "cancelado") return "border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]";
+  if (stage === "por_asignar") return "border-[var(--execution-active-border)] bg-[var(--execution-active-bg)] text-[var(--execution-active-text)]";
+  return "border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)]";
+}
+
+function getPrimaryCtaClass(isAllowed: boolean, code: string) {
+  if (!isAllowed) return buttonStyles({ variant: "secondary", size: "lg", fullWidth: true, className: "cursor-not-allowed opacity-60" });
+  if (code === "TAKE_ORDER") {
+    return "btn-mobile w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]";
+  }
+  if (code === "OPERATE_PICK" || code === "COMPLETE_ASSEMBLY") {
+    return "btn-primary w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]";
+  }
+  if (code === "MARK_DELIVERED") {
+    return "btn-sales w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]";
+  }
+  return buttonStyles({ variant: "secondary", size: "lg", fullWidth: true });
 }
 
 function parsePage(value: string | undefined) {
   const parsed = Number.parseInt(value ?? "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function formatDate(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleDateString("es-MX");
+}
+
+function formatDateTime(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString("es-MX");
+}
+
+function formatQty(value: unknown) {
+  const numeric = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return "0";
+  return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 2 }).format(numeric);
+}
+
+function getLineProductLabel(line: any) {
+  const product = line.product;
+  if (!product) return "Producto sin referencia";
+  return [product.sku ?? product.referenceCode, product.name].filter(Boolean).join(" - ") || "Producto sin referencia";
+}
+
+function getAssemblyComponentSummary(line: any) {
+  const config = line.assemblyConfiguration;
+  if (!config) return ["Configuracion pendiente"];
+  return [
+    config.entryFittingProduct ? `Entrada: ${config.entryFittingProduct.sku ?? "--"} ${config.entryFittingProduct.name ?? ""}`.trim() : null,
+    config.hoseProduct ? `Manguera: ${config.hoseProduct.sku ?? "--"} ${config.hoseProduct.name ?? ""}`.trim() : null,
+    config.exitFittingProduct ? `Salida: ${config.exitFittingProduct.sku ?? "--"} ${config.exitFittingProduct.name ?? ""}`.trim() : null,
+  ].filter(Boolean) as string[];
 }
 
 function isNextRedirectError(error: unknown) {
@@ -225,10 +285,13 @@ export default async function ProductionRequestsPage({
       },
     },
     dueDate: true,
+    notes: true,
     assignedToUserId: true,
+    assignedAt: true,
     pulledAt: true,
     deliveredToCustomerAt: true,
     updatedAt: true,
+    createdAt: true,
     warehouse: { select: { code: true, name: true } },
     requestedByUser: {
       select: {
@@ -242,12 +305,39 @@ export default async function ProductionRequestsPage({
     },
     assignedToUser: { select: { name: true, email: true } },
     _count: { select: { lines: true, pickLists: true } },
-    lines: { select: { id: true, lineKind: true } },
+    lines: {
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        lineKind: true,
+        requestedQty: true,
+        notes: true,
+        product: {
+          select: {
+            sku: true,
+            referenceCode: true,
+            name: true,
+            unitLabel: true,
+          },
+        },
+        assemblyConfiguration: {
+          select: {
+            hoseLength: true,
+            assemblyQuantity: true,
+            totalHoseRequired: true,
+            notes: true,
+            entryFittingProduct: { select: { sku: true, name: true } },
+            hoseProduct: { select: { sku: true, name: true } },
+            exitFittingProduct: { select: { sku: true, name: true } },
+          },
+        },
+      },
+    },
     pickLists: {
       where: { status: { not: "CANCELLED" } },
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       take: 1,
-      select: { status: true, updatedAt: true },
+      select: { status: true, updatedAt: true, code: true },
     },
   } as const;
 
@@ -415,6 +505,14 @@ export default async function ProductionRequestsPage({
           sourceDocumentId: true,
           sourceDocumentLineId: true,
           status: true,
+          code: true,
+          assemblyWorkOrder: {
+            select: {
+              availabilityStatus: true,
+              pickStatus: true,
+              hasShortage: true,
+            },
+          },
         },
       })
     : [];
@@ -453,8 +551,8 @@ export default async function ProductionRequestsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Pedidos de surtido"
-        description="Captura mixta de productos y ensambles configurados dentro del modulo de ensamble."
+        title="Warehouse Execution Cockpit"
+        description="Cola operativa para pedidos, surtido directo y ensambles configurados."
         meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Preset operativo: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
@@ -465,269 +563,436 @@ export default async function ProductionRequestsPage({
               Equivalencias
             </Link>
             <Link href="/production/requests/new" className="btn-primary">
-              + Nuevo pedido
+              Nuevo pedido
             </Link>
           </>
         }
       />
 
-      {sp.ok ? <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">{sp.ok}</div> : null}
-      {sp.error ? <div className="rounded-xl border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">{sp.error}</div> : null}
+      {sp.ok ? <div className="rounded-[var(--radius-lg)] border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">{sp.ok}</div> : null}
+      {sp.error ? <div className="rounded-[var(--radius-lg)] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">{sp.error}</div> : null}
 
       <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Pedidos" value={totalCount.toString()} />
+        <StatCard label="Pedidos visibles" value={totalCount.toString()} />
         <StatCard label="Borrador" value={(statusCountMap.BORRADOR ?? 0).toString()} tone="accent" />
-        <StatCard label="Ensamble ligado" value={linkedAssemblyCount.toString()} tone="warning" />
-        <StatCard label="Surtidos directos activos" value={directPickCount.toString()} tone="success" />
+        <StatCard label="Con ensamble" value={linkedAssemblyCount.toString()} tone="warning" />
+        <StatCard label="Surtidos activos" value={directPickCount.toString()} tone="success" />
       </div>
 
-      <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">
-        {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}
-        {queueFilter ? <input type="hidden" name="queue" value={queueFilter} /> : null}
-        {presetFilter ? <input type="hidden" name="preset" value={presetFilter} /> : null}
-        {stageFilter ? <input type="hidden" name="stage" value={stageFilter} /> : null}
-        <label className="flex-1 space-y-1">
-          <span className="text-sm text-slate-400">Filtrar por cliente</span>
-          <input
-            type="text"
-            name="customer"
-            defaultValue={customerFilter}
-            placeholder="Nombre o cuenta del cliente"
-            className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2 text-sm text-[var(--text-primary)]"
-          />
-        </label>
-        <div className="flex gap-2">
-          <button type="submit" className={buttonStyles({ variant: "secondary" })}>
-            Filtrar
-          </button>
-          <Link href={buildHref(1, undefined, undefined, undefined, undefined)} className={buttonStyles({ variant: "secondary" })}>
-            Limpiar
-          </Link>
+      <section className="op-panel space-y-4" aria-label="Filtros del cockpit">
+        <form method="get" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}
+          {queueFilter ? <input type="hidden" name="queue" value={queueFilter} /> : null}
+          {presetFilter ? <input type="hidden" name="preset" value={presetFilter} /> : null}
+          {stageFilter ? <input type="hidden" name="stage" value={stageFilter} /> : null}
+          <label className="space-y-1">
+            <span className="text-sm font-medium text-[var(--text-secondary)]">Cliente</span>
+            <input
+              type="text"
+              name="customer"
+              defaultValue={customerFilter}
+              placeholder="Nombre o cuenta del cliente"
+              className="field"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <button type="submit" className={buttonStyles({ variant: "secondary", fullWidth: true })}>
+              Filtrar
+            </button>
+            <Link href={buildHref(1, undefined, undefined, undefined, undefined)} className={buttonStyles({ variant: "secondary", fullWidth: true })}>
+              Limpiar
+            </Link>
+          </div>
+        </form>
+
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2" aria-label="Filtros por cola">
+            <Link href={buildHref(1, statusFilter, undefined, stageFilter)} className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(!queueFilter)}`}>
+              Todos por atender
+            </Link>
+            {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map((queue) => (
+              <Link
+                key={queue}
+                href={buildHref(1, statusFilter, queue, stageFilter)}
+                className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(queueFilter === queue)}`}
+              >
+                {QUEUE_LABELS[queue]}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2" aria-label="Presets operativos">
+            <Link
+              href={buildHref(1, statusFilter, queueFilter, stageFilter, undefined)}
+              className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(!presetFilter)}`}
+            >
+              Todos presets
+            </Link>
+            {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map((preset) => (
+              <Link
+                key={preset}
+                href={buildHref(1, statusFilter, queueFilter, stageFilter, preset)}
+                className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(presetFilter === preset)}`}
+              >
+                {PRESET_LABELS[preset]}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2" aria-label="Etapas de flujo">
+            <Link href={buildHref(1, statusFilter, queueFilter, undefined)} className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(!stageFilter)}`}>
+              Todas etapas
+            </Link>
+            {FLOW_STAGE_ORDER.map((stage) => (
+              <Link
+                key={stage}
+                href={buildHref(1, statusFilter, queueFilter, stage)}
+                className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(stageFilter === stage)}`}
+              >
+                {SALES_ORDER_FLOW_STAGE_LABELS[stage]}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2" aria-label="Estado administrativo">
+            <Link href={buildHref(1, undefined, queueFilter)} className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(!statusFilter)}`}>
+              Todos ({totalCount})
+            </Link>
+            {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(([status, label]) => (
+              <Link
+                key={status}
+                href={buildHref(1, status as SalesInternalOrderStatus, queueFilter)}
+                className={`rounded-[var(--radius-md)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${getFilterPillClass(statusFilter === status)}`}
+              >
+                {label} ({statusCountMap[status] ?? 0})
+              </Link>
+            ))}
+          </div>
         </div>
-      </form>
+      </section>
 
-      <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, statusFilter, undefined, stageFilter)} className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!queueFilter)}`}>
-          Todos por atender
-        </Link>
-        {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map((queue) => (
-          <Link
-            key={queue}
-            href={buildHref(1, statusFilter, queue, stageFilter)}
-            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(queueFilter === queue)}`}
-          >
-            {QUEUE_LABELS[queue]}
-          </Link>
-        ))}
-      </div>
+      <section className="op-layout" aria-label="Cola operativa de pedidos">
+        {orders.length === 0 ? (
+          <div className="op-panel text-center">
+            <p className="text-sm font-medium text-[var(--text-primary)]">No hay pedidos para el filtro seleccionado.</p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Ajusta etapa, preset o cliente para regresar a la cola operativa.</p>
+          </div>
+        ) : orders.map((order) => {
+          const orderStatus = order.status as SalesInternalOrderStatus;
+          const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
+          const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
+          const productLines = order.lines.filter((line: any) => line.lineKind === "PRODUCT");
+          const assemblyLines = order.lines.filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
+          const hasProductLines = productLines.length > 0;
+          const hasAssemblyLines = assemblyLines.length > 0;
+          const assemblyLineIds = new Set(assemblyLines.map((line: any) => line.id));
+          const linkedForOrder = (currentLinkedByOrder.get(order.id) ?? []).filter((row) =>
+            row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false,
+          );
+          const linkedByLine = new Map(linkedForOrder.map((row) => [row.sourceDocumentLineId, row]));
+          const hasCompletedConfiguredAssembly = !hasAssemblyLines
+            || (
+              linkedForOrder.length === assemblyLineIds.size
+              && linkedForOrder.every((row) => row.status === "COMPLETADA")
+            );
+          const latestPickStatus = order.pickLists[0]?.status ?? null;
+          const takeEligibility = getTakeOrderEligibility({
+            roles: sessionCtx.roles,
+            status: orderStatus,
+            assignedToUserId: order.assignedToUserId,
+            isCreatedByManager: createdByManager,
+          });
+          const hasCompletedDirectPick = !hasProductLines || latestPickStatus === "COMPLETED";
+          const deliveredEligibility = getMarkDeliveredEligibility({
+            status: orderStatus,
+            deliveredToCustomerAt: order.deliveredToCustomerAt,
+            assignedToUserId: order.assignedToUserId,
+            pulledAt: order.pulledAt,
+            hasCompletedDirectPick,
+            hasCompletedConfiguredAssembly,
+          });
+          const flowNarrative = getSalesOrderFlowNarrative({
+            orderId: order.id,
+            roles: sessionCtx.roles,
+            status: orderStatus,
+            assignedToUserId: order.assignedToUserId,
+            deliveredToCustomerAt: order.deliveredToCustomerAt,
+            pulledAt: order.pulledAt,
+            latestPickStatus,
+            hasProductLines,
+            hasAssemblyLines,
+            hasCompletedConfiguredAssembly,
+            takeEligibility,
+            deliveredEligibility,
+          });
+          const isAvailableForPull = !managerOrAdmin && takeEligibility.canTakeOrder;
+          const primaryCta = flowNarrative.primaryCta;
+          const primaryCtaBlockedReason = primaryCta.blockedReason ?? primaryCta.action.blockedReason;
+          const primaryCtaClass = getPrimaryCtaClass(primaryCta.isAllowed, primaryCta.code);
+          const activeFlowIndex = FLOW_STAGE_ORDER.indexOf(flowNarrative.flowStage);
+          const linePreview = [...productLines.slice(0, 2), ...assemblyLines.slice(0, 2)].slice(0, 3);
+          const hiddenLineCount = Math.max(0, order.lines.length - linePreview.length);
 
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={buildHref(1, statusFilter, queueFilter, stageFilter, undefined)}
-          className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!presetFilter)}`}
-        >
-          Todos presets
-        </Link>
-        {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map((preset) => (
-          <Link
-            key={preset}
-            href={buildHref(1, statusFilter, queueFilter, stageFilter, preset)}
-            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(presetFilter === preset)}`}
-          >
-            {PRESET_LABELS[preset]}
-          </Link>
-        ))}
-      </div>
+          return (
+            <article key={order.id} className="op-card space-y-4" aria-labelledby={`order-${order.id}-title`}>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <Link
+                        id={`order-${order.id}-title`}
+                        href={`/production/requests/${order.id}`}
+                        className="block truncate font-mono text-sm font-semibold text-[var(--accent)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                      >
+                        {order.code}
+                      </Link>
+                      <h2 className="text-xl font-semibold text-[var(--text-primary)]">{displayCustomer}</h2>
+                      <p className="text-sm text-[var(--text-secondary)]">
+                        {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "Sin almacen"} · Entrega {formatDate(order.dueDate)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <span className={`rounded-[var(--radius-sm)] px-2.5 py-1 text-xs font-semibold ${SALES_INTERNAL_ORDER_STYLES(orderStatus)}`}>
+                        {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
+                      </span>
+                      <span className={`rounded-[var(--radius-sm)] border px-2.5 py-1 text-xs font-semibold ${getFlowStageCardClass(flowNarrative.flowStage)}`}>
+                        {flowNarrative.flowStageLabel}
+                      </span>
+                      {isAvailableForPull ? <span className="op-state op-state-mobile">Disponible para pull</span> : null}
+                    </div>
+                  </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, statusFilter, queueFilter, undefined)} className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!stageFilter)}`}>
-          Todas etapas
-        </Link>
-        {FLOW_STAGE_ORDER.map((stage) => (
-          <Link
-            key={stage}
-            href={buildHref(1, statusFilter, queueFilter, stage)}
-            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(stageFilter === stage)}`}
-          >
-            {SALES_ORDER_FLOW_STAGE_LABELS[stage]}
-          </Link>
-        ))}
-      </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="surface p-3">
+                      <p className="text-xs uppercase text-[var(--text-muted)]">Lineas producto</p>
+                      <p className="mt-1 text-2xl font-semibold text-[var(--text-primary)]">{productLines.length}</p>
+                    </div>
+                    <div className="surface p-3">
+                      <p className="text-xs uppercase text-[var(--text-muted)]">Ensambles</p>
+                      <p className="mt-1 text-2xl font-semibold text-[var(--role-warehouse-accent)]">{assemblyLines.length}</p>
+                    </div>
+                    <div className="surface p-3">
+                      <p className="text-xs uppercase text-[var(--text-muted)]">Surtido directo</p>
+                      <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{summarizePickListStatus(latestPickStatus)}</p>
+                    </div>
+                  </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Link href={buildHref(1, undefined, queueFilter)} className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(!statusFilter)}`}>
-          Todos ({totalCount})
-        </Link>
-        {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(([status, label]) => (
-          <Link
-            key={status}
-            href={buildHref(1, status as SalesInternalOrderStatus, queueFilter)}
-            className={`rounded-lg px-3 py-1.5 text-sm ${getFilterPillClass(statusFilter === status)}`}
-          >
-            {label} ({statusCountMap[status] ?? 0})
-          </Link>
-        ))}
-      </div>
+                  <ol className="grid gap-2 md:grid-cols-3 xl:grid-cols-6" aria-label="Etapas del pedido">
+                    {FLOW_STAGE_ORDER.map((stage, index) => {
+                      const isActive = flowNarrative.flowStage === stage;
+                      const isComplete = activeFlowIndex > index && activeFlowIndex >= 0;
+                      return (
+                        <li key={stage} className={`op-step ${isActive ? "op-step-active" : ""} ${isComplete ? "op-step-complete" : ""}`}>
+                          <span className="op-step-marker">{index + 1}</span>
+                          <span className="text-xs font-semibold text-[var(--text-primary)]">{SALES_ORDER_FLOW_STAGE_LABELS[stage]}</span>
+                        </li>
+                      );
+                    })}
+                  </ol>
 
-      <div className="glass-card overflow-x-auto">
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="surface p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Lineas agregadas</h3>
+                        <Badge variant={hasProductLines ? "success" : "neutral"}>{hasProductLines ? "Producto" : "Sin producto"}</Badge>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {productLines.length === 0 ? (
+                          <p className="text-sm text-[var(--text-muted)]">No hay lineas independientes.</p>
+                        ) : productLines.slice(0, 3).map((line: any) => (
+                          <div key={line.id} className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+                            <p className="text-sm font-semibold text-[var(--text-primary)]">{getLineProductLabel(line)}</p>
+                            <p className="mt-1 text-xs text-[var(--text-secondary)]">Cantidad: {formatQty(line.requestedQty)} {line.product?.unitLabel ?? ""}</p>
+                            {line.notes ? <p className="mt-1 text-xs text-[var(--text-muted)]">{line.notes}</p> : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="surface p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Ensambles configurados</h3>
+                        <Badge variant={hasCompletedConfiguredAssembly ? "success" : hasAssemblyLines ? "warning" : "neutral"}>
+                          {hasAssemblyLines ? (hasCompletedConfiguredAssembly ? "Listos" : "Pendientes") : "Sin ensamble"}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {assemblyLines.length === 0 ? (
+                          <p className="text-sm text-[var(--text-muted)]">No hay ensambles configurados.</p>
+                        ) : assemblyLines.slice(0, 3).map((line: any) => {
+                          const production = linkedByLine.get(line.id);
+                          const config = line.assemblyConfiguration;
+                          return (
+                            <details key={line.id} className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 open:border-[var(--execution-active-border)]">
+                              <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                                {getLineProductLabel(line)}
+                              </summary>
+                              <div className="mt-2 space-y-2 text-xs text-[var(--text-secondary)]">
+                                <p>Cantidad: {formatQty(config?.assemblyQuantity ?? line.requestedQty)} · Manguera: {formatQty(config?.totalHoseRequired)} · Longitud: {formatQty(config?.hoseLength)}</p>
+                                <p>Estado: {summarizeProductionStatus(production?.status)} · Disponibilidad: {production?.assemblyWorkOrder?.availabilityStatus ?? "Sin validar"}</p>
+                                {production?.assemblyWorkOrder?.hasShortage ? <p className="text-[var(--status-danger-text)]">Faltante detectado en componentes.</p> : null}
+                                <ul className="space-y-1">
+                                  {getAssemblyComponentSummary(line).map((component) => <li key={component}>{component}</li>)}
+                                </ul>
+                                {config?.notes || line.notes ? <p>Notas: {config?.notes ?? line.notes}</p> : null}
+                              </div>
+                            </details>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {hiddenLineCount > 0 ? (
+                    <p className="text-xs text-[var(--text-muted)]">{hiddenLineCount} lineas adicionales disponibles en el detalle del pedido.</p>
+                  ) : null}
+                </div>
+
+                <aside className="op-sidebar space-y-4" aria-label="Resumen persistente del pedido">
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase text-[var(--text-muted)]">Siguiente accion</p>
+                    <h3 className="text-xl font-semibold text-[var(--text-primary)]">{primaryCta.action.label}</h3>
+                    <p className="text-sm text-[var(--text-secondary)]">{primaryCta.reason}</p>
+                    {primaryCtaBlockedReason ? <p className="text-sm text-[var(--warning)]">{primaryCtaBlockedReason}</p> : null}
+                  </div>
+
+                  <div className="grid gap-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[var(--text-muted)]">Asignado a</span>
+                      <span className="text-right font-medium text-[var(--text-primary)]">{order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[var(--text-muted)]">Promesa</span>
+                      <span className="font-medium text-[var(--text-primary)]">{formatDate(order.dueDate)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[var(--text-muted)]">Ultimo movimiento</span>
+                      <span className="font-medium text-[var(--text-primary)]">{formatDateTime(order.updatedAt)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[var(--text-muted)]">Validaciones</span>
+                      <span className="font-medium text-[var(--text-primary)]">
+                        {hasCompletedDirectPick && hasCompletedConfiguredAssembly ? "Completas" : "Pendientes"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={hasCompletedDirectPick ? "success" : hasProductLines ? "warning" : "neutral"}>Surtido directo</Badge>
+                    <Badge variant={hasCompletedConfiguredAssembly ? "success" : hasAssemblyLines ? "warning" : "neutral"}>Ensambles</Badge>
+                    <Badge variant={deliveredEligibility.canMarkDelivered ? "success" : "neutral"}>Entrega</Badge>
+                  </div>
+
+                  {canRenderWriteActions && primaryCta.code === "TAKE_ORDER" ? (
+                    <form action={takeRequestFromList}>
+                      <input type="hidden" name="orderId" value={order.id} />
+                      <input type="hidden" name="returnTo" value={buildHref(safePage)} />
+                      <button type="submit" disabled={!takeEligibility.canTakeOrder} className={primaryCtaClass}>
+                        {primaryCta.action.label}
+                      </button>
+                    </form>
+                  ) : (
+                    <Link
+                      href={primaryCta.action.href}
+                      aria-disabled={!primaryCta.isAllowed}
+                      className={primaryCtaClass}
+                    >
+                      {primaryCta.action.label}
+                    </Link>
+                  )}
+
+                  <Link href={`/production/requests/${order.id}`} className={buttonStyles({ variant: "secondary", fullWidth: true })}>
+                    Ver detalle completo
+                  </Link>
+                </aside>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="table-shell overflow-x-auto" aria-label="Tabla administrativa secundaria">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-white/10 text-slate-400">
-              <th className="py-3 text-left">Codigo</th>
-              <th className="py-3 text-left">Cliente</th>
-              <th className="py-3 text-left">Estado</th>
-              <th className="py-3 text-left">Almacen</th>
-              <th className="py-3 text-left">Solicitado por</th>
-              <th className="py-3 text-left">Asignado a</th>
-              <th className="py-3 text-left">Entrega</th>
-              <th className="py-3 text-right">Lineas</th>
-              <th className="py-3 text-left">Acciones</th>
+          <thead className="table-head">
+            <tr>
+              <th className="px-3 py-3 text-left">Codigo</th>
+              <th className="px-3 py-3 text-left">Cliente</th>
+              <th className="px-3 py-3 text-left">Estado</th>
+              <th className="px-3 py-3 text-left">Etapa</th>
+              <th className="px-3 py-3 text-left">Almacen</th>
+              <th className="px-3 py-3 text-left">Asignado a</th>
+              <th className="px-3 py-3 text-left">Entrega</th>
+              <th className="px-3 py-3 text-right">Lineas</th>
             </tr>
           </thead>
           <tbody>
             {orders.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-10 text-center text-slate-500">
+                <td colSpan={8} className="px-3 py-10 text-center text-[var(--text-muted)]">
                   No hay pedidos para el filtro seleccionado.
                 </td>
               </tr>
             ) : orders.map((order) => {
               const orderStatus = order.status as SalesInternalOrderStatus;
               const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
-              const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;
-              const hasProductLines = order.lines.some((line: any) => line.lineKind === "PRODUCT");
-              const hasAssemblyLines = order.lines.some((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
-              const assemblyLineIds = new Set(order.lines.filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line: any) => line.id));
+              const productLines = order.lines.filter((line: any) => line.lineKind === "PRODUCT");
+              const assemblyLines = order.lines.filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
+              const assemblyLineIds = new Set(assemblyLines.map((line: any) => line.id));
               const linkedForOrder = (currentLinkedByOrder.get(order.id) ?? []).filter((row) =>
                 row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false,
               );
-              const hasCompletedConfiguredAssembly = !hasAssemblyLines
-                || (
-                  linkedForOrder.length === assemblyLineIds.size
-                  && linkedForOrder.every((row) => row.status === "COMPLETADA")
-                );
-              const latestPickStatus = order.pickLists[0]?.status ?? null;
-              const takeEligibility = getTakeOrderEligibility({
-                roles: sessionCtx.roles,
-                status: orderStatus,
-                assignedToUserId: order.assignedToUserId,
-                isCreatedByManager: createdByManager,
-              });
-              const hasCompletedDirectPick = !hasProductLines || latestPickStatus === "COMPLETED";
-              const deliveredEligibility = getMarkDeliveredEligibility({
-                status: orderStatus,
-                deliveredToCustomerAt: order.deliveredToCustomerAt,
-                assignedToUserId: order.assignedToUserId,
-                pulledAt: order.pulledAt,
-                hasCompletedDirectPick,
-                hasCompletedConfiguredAssembly,
-              });
-              const flowNarrative = getSalesOrderFlowNarrative({
-                orderId: order.id,
-                roles: sessionCtx.roles,
+              const hasCompletedConfiguredAssembly = assemblyLines.length === 0
+                || (linkedForOrder.length === assemblyLineIds.size && linkedForOrder.every((row) => row.status === "COMPLETADA"));
+              const flowStage = getSalesOrderFlowStage({
                 status: orderStatus,
                 assignedToUserId: order.assignedToUserId,
                 deliveredToCustomerAt: order.deliveredToCustomerAt,
-                pulledAt: order.pulledAt,
-                latestPickStatus,
-                hasProductLines,
-                hasAssemblyLines,
+                latestPickStatus: order.pickLists[0]?.status ?? null,
+                hasProductLines: productLines.length > 0,
+                hasAssemblyLines: assemblyLines.length > 0,
                 hasCompletedConfiguredAssembly,
-                takeEligibility,
-                deliveredEligibility,
               });
-              const isAvailableForPull = !managerOrAdmin && takeEligibility.canTakeOrder;
               return (
-                <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3">
-                    <Link href={`/production/requests/${order.id}`} className="font-mono text-[var(--accent)] hover:text-[var(--text-primary)]">
+                <tr key={order.id} className="table-row">
+                  <td className="px-3 py-3">
+                    <Link href={`/production/requests/${order.id}`} className="font-mono text-[var(--accent)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
                       {order.code}
                     </Link>
                   </td>
-                  <td className="py-3 text-slate-300">
+                  <td className="px-3 py-3 text-[var(--text-primary)]">
                     {order.customerId && canViewCustomers ? (
-                      <Link href={`/sales/customers/${order.customerId}`} className="text-[var(--accent)] hover:text-[var(--text-primary)]">
+                      <Link href={`/sales/customers/${order.customerId}`} className="text-[var(--accent)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
                         {displayCustomer}
                       </Link>
                     ) : (
                       displayCustomer
                     )}
                   </td>
-                  <td className="py-3">
-                    <span className={`rounded px-2 py-1 text-xs font-semibold ${SALES_INTERNAL_ORDER_STYLES(orderStatus)}`}>
+                  <td className="px-3 py-3">
+                    <span className={`rounded-[var(--radius-sm)] px-2 py-1 text-xs font-semibold ${SALES_INTERNAL_ORDER_STYLES(orderStatus)}`}>
                       {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
                     </span>
                   </td>
-                  <td className="py-3 text-slate-400">{order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</td>
-                  <td className="py-3 text-slate-400">{order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}</td>
-                  <td className="py-3 text-slate-300">
-                    {order.assignedToUser ? (
-                      order.assignedToUser.name ?? order.assignedToUser.email ?? "--"
-                    ) : (
-                      <span className="text-[var(--text-muted)]">Sin asignar</span>
-                    )}
-                    {isAvailableForPull ? (
-                      <span className="ml-2 rounded px-2 py-0.5 text-xs font-semibold text-[var(--accent)] bg-[var(--accent-soft)]">
-                        Disponible para pull
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="py-3 text-slate-400">
-                    <p>{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
-                      <Link href={flowNarrative.nextRecommendedAction.href} className="text-xs text-[var(--accent)] hover:text-[var(--text-primary)]">
-                        {flowNarrative.nextRecommendedAction.label}
-                      </Link>
-                      {!flowNarrative.primaryCta.isAllowed && flowNarrative.primaryCta.blockedReason ? (
-                        <span className="text-xs text-[var(--warning)]">{flowNarrative.primaryCta.blockedReason}</span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="py-3 text-right text-slate-300">{order._count.lines}</td>
-                  <td className="py-3">
-                    {canRenderWriteActions ? (
-                      <div className="space-y-1">
-                        <form action={takeRequestFromList}>
-                          <input type="hidden" name="orderId" value={order.id} />
-                          <input type="hidden" name="returnTo" value={buildHref(safePage)} />
-                          <button
-                            type="submit"
-                            disabled={!takeEligibility.canTakeOrder}
-                            className={buttonStyles({
-                              variant: "secondary",
-                              size: "sm",
-                              className: takeEligibility.canTakeOrder
-                                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] hover:border-[var(--accent-hover)] hover:bg-[var(--accent-soft)]"
-                                : "cursor-not-allowed",
-                            })}
-                          >
-                            Tomar pedido
-                          </button>
-                        </form>
-                        {!takeEligibility.canTakeOrder ? (
-                          <p className="text-xs text-[var(--warning)]">{takeEligibility.takeBlockedReason}</p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-[var(--text-muted)]">--</span>
-                    )}
-                  </td>
+                  <td className="px-3 py-3"><Badge variant={flowStage === "en_surtido" ? "warning" : flowStage === "listo_entrega" || flowStage === "entregado" ? "success" : flowStage === "cancelado" ? "danger" : "accent"}>{SALES_ORDER_FLOW_STAGE_LABELS[flowStage]}</Badge></td>
+                  <td className="px-3 py-3 text-[var(--text-secondary)]">{order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</td>
+                  <td className="px-3 py-3 text-[var(--text-primary)]">{order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</td>
+                  <td className="px-3 py-3 text-[var(--text-secondary)]">{formatDate(order.dueDate)}</td>
+                  <td className="px-3 py-3 text-right text-[var(--text-primary)]">{order._count.lines}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-      </div>
+      </section>
 
       {totalPages > 1 ? (
         <div className="flex items-center justify-between gap-3 text-sm">
           <Link href={buildHref(Math.max(1, safePage - 1))} className={buttonStyles({ variant: "secondary", className: safePage <= 1 ? "pointer-events-none opacity-40" : "" })}>
-            ← Anterior
+            Anterior
           </Link>
           <span className="text-[var(--text-muted)]">Pagina {safePage} de {totalPages}</span>
           <Link href={buildHref(Math.min(totalPages, safePage + 1))} className={buttonStyles({ variant: "secondary", className: safePage >= totalPages ? "pointer-events-none opacity-40" : "" })}>
-            Siguiente →
+            Siguiente
           </Link>
         </div>
       ) : null}

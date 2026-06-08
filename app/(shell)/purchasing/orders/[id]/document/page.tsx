@@ -155,8 +155,8 @@ export default async function PurchaseOrderDocumentPage({
         <div className="grid gap-4 md:grid-cols-2 mt-4">
           <div className="space-y-1 text-sm">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Entrega y términos</p>
-            <p className="text-slate-200">Dirección de entrega: Por definir</p>
-            <p className="text-slate-200">Términos de pago: Por definir</p>
+            <p className="text-slate-200">Dirección de entrega: {snapshot.purchaseOrder.deliveryAddressSnapshot ?? "—"}</p>
+            <p className="text-slate-200">Términos de pago: {snapshot.supplier.paymentTerms ?? "—"}</p>
           </div>
           <div className="space-y-1 text-sm">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Notas</p>

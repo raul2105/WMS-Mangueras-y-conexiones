@@ -20,6 +20,10 @@ describe("purchase order document contracts", () => {
     expect(content).toContain("Ver documento oficial");
     expect(content).toContain("Descargar PDF");
     expect(content).toContain("Documento oficial no generado para esta OC. Revisión requerida.");
+    expect(content).toContain("Correo al proveedor");
+    expect(content).toContain("Enviar por correo");
+    expect(content).toContain("Vista previa del cuerpo");
+    expect(content).toContain("KAN-85");
   });
 
   it("guards the document preview page and print action", () => {
@@ -150,7 +154,6 @@ describe("purchase order document contracts", () => {
     expect(totalIndex).toBeGreaterThan(ivaIndex);
     expect(notesIndex).toBeGreaterThan(linesIndex);
   });
-
   it("adapts line typography for long SKU and product names", () => {
     const short = getPurchaseOrderPdfLineTypography({
       sku: "SKU-01",
@@ -167,7 +170,6 @@ describe("purchase order document contracts", () => {
     expect(injectSoftBreaks("SKU-2026/0004-LOREM")).toContain("\u200B");
     expect(injectSoftBreaks("Manguera industrial")).toContain("Manguera");
   });
-
   it("wires delivery warehouse selection and supplier payment terms into purchasing forms", () => {
     const orderCreateContent = readWorkspaceFile("app/(shell)/purchasing/orders/new/page.tsx");
     const supplierCreateContent = readWorkspaceFile("app/(shell)/purchasing/suppliers/new/page.tsx");

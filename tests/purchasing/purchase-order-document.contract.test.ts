@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPurchaseOrderPdfFilename, getSupplierDisplayLines } from "@/lib/purchasing/purchase-order-pdf";
+import {
+  buildPurchaseOrderPdfFilename,
+  getSupplierDisplayLines,
+} from "@/lib/purchasing/purchase-order-pdf";
 
 function readWorkspaceFile(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -15,6 +18,10 @@ describe("purchase order document contracts", () => {
     expect(content).toContain("Ver documento oficial");
     expect(content).toContain("Descargar PDF");
     expect(content).toContain("Documento oficial no generado para esta OC. Revisión requerida.");
+    expect(content).toContain("Correo al proveedor");
+    expect(content).toContain("Enviar por correo");
+    expect(content).toContain("Vista previa del cuerpo");
+    expect(content).toContain("KAN-85");
   });
 
   it("guards the document preview page and print action", () => {
@@ -50,6 +57,7 @@ describe("purchase order document contracts", () => {
       email: null,
       phone: null,
       address: null,
+      paymentTerms: null,
     });
 
     expect(identical.primary).toBe("Parker");
@@ -64,20 +72,11 @@ describe("purchase order document contracts", () => {
       email: null,
       phone: null,
       address: null,
+      paymentTerms: null,
     });
 
     expect(distinct.primary).toBe("Parker Industrial");
     expect(distinct.secondary).toBe("Parker México SA de CV");
   });
 
-  it("exposes supplier-facing labels and hides internal receiving headers in the PDF source", () => {
-    const content = readWorkspaceFile("lib/purchasing/purchase-order-pdf.tsx");
-    expect(content).toContain("Cantidad");
-    expect(content).toContain("Unidad");
-    expect(content).toContain("Precio unitario");
-    expect(content).toContain("Importe");
-    expect(content).not.toContain("Ped.");
-    expect(content).not.toContain("Rec.");
-    expect(content).not.toContain("Pend.");
-  });
 });

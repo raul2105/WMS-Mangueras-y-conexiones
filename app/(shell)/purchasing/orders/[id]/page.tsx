@@ -8,6 +8,10 @@ import {
   parsePurchaseOrderDocumentSnapshot,
   updatePurchaseOrderStatusWithDocument,
 } from "@/lib/purchasing/purchase-order-document-service";
+import {
+  buildPurchaseOrderEmailContract,
+  PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS,
+} from "@/lib/purchasing/purchase-order-email-contract";
 
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
@@ -25,6 +29,13 @@ const STATUS_COLORS: Record<string, string> = {
   RECIBIDA: "text-emerald-400 bg-emerald-500/20 border-emerald-500/30",
   PARCIAL: "text-orange-400 bg-orange-500/20 border-orange-500/30",
   CANCELADA: "text-red-400 bg-red-500/20 border-red-500/30",
+};
+
+const EMAIL_STATUS_COLORS: Record<string, string> = {
+  NOT_SENT: "text-slate-400 bg-slate-500/20 border-slate-500/30",
+  SENT: "text-emerald-400 bg-emerald-500/20 border-emerald-500/30",
+  RESENT: "text-blue-400 bg-blue-500/20 border-blue-500/30",
+  FAILED: "text-red-400 bg-red-500/20 border-red-500/30",
 };
 
 // Valid status transitions
@@ -144,7 +155,18 @@ export default async function PurchaseOrderDetailPage({
       status: true,
       expectedDate: true,
       notes: true,
-      supplier: { select: { id: true, code: true, name: true, businessName: true } },
+      deliveryAddressSnapshot: true,
+      paymentTermsSnapshot: true,
+      emailSendState: true,
+      emailRecipientSnapshot: true,
+      emailSubjectSnapshot: true,
+      emailBodySnapshot: true,
+      emailDocumentVersionSnapshot: true,
+      emailLastAttemptAt: true,
+      emailLastSentAt: true,
+      emailLastErrorCode: true,
+      emailLastErrorMessage: true,
+      supplier: { select: { id: true, code: true, name: true, businessName: true, email: true, paymentTerms: true } },
       lines: {
         select: {
           id: true,
@@ -179,7 +201,6 @@ export default async function PurchaseOrderDetailPage({
   const updateStatusBound = updateStatus.bind(null, id);
   const addLineBound = addLine.bind(null, id);
   const removeLineBound = removeLine.bind(null, id);
-
   const totalOrdered = order.lines.reduce((s, l) => s + l.qtyOrdered, 0);
   const totalReceived = order.lines.reduce((s, l) => s + l.qtyReceived, 0);
   const pctReceived = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
@@ -193,6 +214,12 @@ export default async function PurchaseOrderDetailPage({
       documentSnapshot = null;
     }
   }
+  const emailContract = buildPurchaseOrderEmailContract({
+    purchaseOrder: order,
+    documentRecord,
+    documentSnapshot,
+    providerConfigured: false,
+  });
 
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
@@ -307,6 +334,83 @@ export default async function PurchaseOrderDetailPage({
         ) : (
           <p className="text-sm text-amber-200">Documento oficial no generado para esta OC. Revisión requerida.</p>
         )}
+      </div>
+
+      <div className="glass-card space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Correo al proveedor</h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Contrato preparado para KAN-85. En esta versión no existe envío real por correo.
+            </p>
+          </div>
+          <span
+            className={`text-xs font-bold px-2 py-1 rounded border ${EMAIL_STATUS_COLORS[emailContract.sendState] ?? "text-slate-400 bg-slate-500/20 border-slate-500/30"}`}
+          >
+            {PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS[emailContract.sendState]}
+          </span>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 text-sm">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Destinatario</p>
+            <p className="text-slate-200">{emailContract.recipientEmail ?? "Sin correo registrado"}</p>
+            <p className="text-slate-500 text-xs">Origen: email congelado del documento oficial o ficha viva del proveedor.</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Adjunto oficial</p>
+            <p className="text-slate-200">
+              {emailContract.document
+                ? `v${emailContract.document.versionNumber}${emailContract.document.attachmentFilename ? ` · ${emailContract.document.attachmentFilename}` : ""}`
+                : "No disponible"}
+            </p>
+            <p className="text-slate-500 text-xs">
+              {emailContract.document?.isSnapshotValid
+                ? "Generado desde el snapshot oficial congelado."
+                : "Pendiente de documento oficial o revisión de integridad."}
+            </p>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Asunto</p>
+            <p className="text-slate-200 break-words">{emailContract.subject}</p>
+          </div>
+        </div>
+
+        <details className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-200">Vista previa del cuerpo</summary>
+          <pre className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{emailContract.body}</pre>
+        </details>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={!emailContract.canSend}
+            className={`rounded-lg border px-4 py-2 text-sm ${
+              emailContract.canSend
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/40 hover:text-white"
+                : "border-white/10 bg-white/5 text-slate-400 cursor-not-allowed"
+            }`}
+            title={emailContract.providerNote}
+          >
+            Enviar por correo
+          </button>
+          <p className="text-xs text-slate-500">{emailContract.providerNote}</p>
+        </div>
+
+        {emailContract.blockedReasons.length > 0 ? (
+          <div className="space-y-1 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="font-semibold">Bloqueos del contrato</p>
+            <ul className="space-y-1 text-xs">
+              {emailContract.blockedReasons.map((reason) => (
+                <li key={reason}>• {reason}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {emailContract.lastErrorMessage ? (
+          <p className="text-xs text-red-200">Último error registrado: {emailContract.lastErrorMessage}</p>
+        ) : null}
       </div>
 
       {/* Líneas */}

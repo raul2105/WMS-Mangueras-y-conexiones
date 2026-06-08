@@ -100,7 +100,7 @@ function getFlowStageCardClass(stage: SalesOrderFlowStage) {
 }
 
 function getPrimaryCtaClass(isAllowed: boolean, code: string) {
-  if (!isAllowed) return buttonStyles({ variant: "secondary", size: "lg", fullWidth: true, className: "cursor-not-allowed opacity-60" });
+  if (!isAllowed) return buttonStyles({ variant: "secondary", size: "lg", fullWidth: true, className: "pointer-events-none cursor-not-allowed opacity-60" });
   if (code === "TAKE_ORDER") {
     return "btn-mobile w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]";
   }

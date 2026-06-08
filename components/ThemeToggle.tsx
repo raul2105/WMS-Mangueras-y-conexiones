@@ -33,6 +33,7 @@ type ThemeToggleProps = {
 };
 
 export default function ThemeToggle({ compact = false, className }: ThemeToggleProps) {
+  const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined" || typeof document === "undefined") {
       return "dark";
@@ -42,9 +43,19 @@ export default function ThemeToggle({ compact = false, className }: ThemeToggleP
   });
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setMounted(true);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+
     applyTheme(theme);
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
+  }, [mounted, theme]);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -63,8 +74,16 @@ export default function ThemeToggle({ compact = false, className }: ThemeToggleP
       aria-label="Cambiar tema"
       title="Cambiar tema"
     >
-      {theme === "dark" ? <MoonIcon className="h-4 w-4" /> : <SunIcon className="h-4 w-4" />}
-      {!compact ? <span>{theme === "dark" ? "Modo oscuro" : "Modo claro"}</span> : null}
+      {mounted ? (
+        theme === "dark" ? (
+          <MoonIcon className="h-4 w-4" />
+        ) : (
+          <SunIcon className="h-4 w-4" />
+        )
+      ) : (
+        <span aria-hidden="true" className="inline-block h-4 w-4" />
+      )}
+      {!compact ? <span>{mounted ? (theme === "dark" ? "Modo oscuro" : "Modo claro") : "Tema"}</span> : null}
     </button>
   );
 }

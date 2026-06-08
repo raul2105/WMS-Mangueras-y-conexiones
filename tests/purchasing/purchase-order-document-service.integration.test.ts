@@ -24,6 +24,7 @@ describePostgres("purchase order document service integration", () => {
     await prisma.purchaseOrderLine.deleteMany();
     await prisma.purchaseOrder.deleteMany();
     await prisma.supplierProduct.deleteMany();
+    await prisma.warehouse.deleteMany();
     await prisma.supplier.deleteMany();
     await prisma.product.deleteMany();
   }
@@ -39,6 +40,15 @@ describePostgres("purchase order document service integration", () => {
         email: "compras@proveedor.test",
         phone: "555-111-2222",
         address: "Calle 1",
+        paymentTerms: "30 días",
+      },
+    });
+
+    const warehouse = await prisma.warehouse.create({
+      data: {
+        code: `WH-${unique()}`,
+        name: "Almacén Documento",
+        address: "Carretera 1 Km 10",
       },
     });
 
@@ -63,8 +73,11 @@ describePostgres("purchase order document service integration", () => {
       data: {
         folio: `OC-${unique()}`,
         supplierId: supplier.id,
+        deliveryWarehouseId: warehouse.id,
         status: "BORRADOR",
         notes: "OC para snapshot",
+        deliveryAddressSnapshot: warehouse.address,
+        paymentTermsSnapshot: supplier.paymentTerms,
         lines: {
           create: [
             {
@@ -84,7 +97,7 @@ describePostgres("purchase order document service integration", () => {
       },
     });
 
-    return { supplier, productA, productB, order };
+    return { supplier, warehouse, productA, productB, order };
   }
 
   beforeEach(async () => {
@@ -133,6 +146,10 @@ describePostgres("purchase order document service integration", () => {
     expect(snapshot.purchaseOrder.folio).toBe(order.folio);
     expect(snapshot.purchaseOrder.status).toBe("BORRADOR");
     expect(snapshot.supplier.businessName).toBe("Proveedor Documento SA");
+    expect(snapshot.supplier.paymentTerms).toBe("30 días");
+    expect(snapshot.purchaseOrder.deliveryWarehouseId).toBeTruthy();
+    expect(snapshot.purchaseOrder.deliveryAddressSnapshot).toBe("Carretera 1 Km 10");
+    expect(snapshot.purchaseOrder.paymentTermsSnapshot).toBe("30 días");
     expect(snapshot.lines).toHaveLength(2);
     expect(snapshot.lines[0].pendingQty).toBe(3);
     expect(snapshot.lines[0].currency).toBe("MXN");
@@ -168,8 +185,8 @@ describePostgres("purchase order document service integration", () => {
     expect(count).toBe(1);
   });
 
-  it("freezes supplier and product data after live relations change", async () => {
-    const { supplier, productA, order } = await createFixture({ unitPrice: 15 });
+  it("freezes supplier, warehouse and product data after live relations change", async () => {
+    const { supplier, warehouse, productA, order } = await createFixture({ unitPrice: 15 });
 
     await ensurePurchaseOrderDocumentVersion({
       purchaseOrderId: order.id,
@@ -179,7 +196,11 @@ describePostgres("purchase order document service integration", () => {
 
     await prisma.supplier.update({
       where: { id: supplier.id },
-      data: { businessName: "Proveedor Mutado" },
+      data: { businessName: "Proveedor Mutado", paymentTerms: "Contado" },
+    });
+    await prisma.warehouse.update({
+      where: { id: warehouse.id },
+      data: { address: "Dirección Mutada" },
     });
     await prisma.product.update({
       where: { id: productA.id },
@@ -190,8 +211,11 @@ describePostgres("purchase order document service integration", () => {
     expect(persisted).toBeTruthy();
     const snapshot = parsePurchaseOrderDocumentSnapshot(persisted?.snapshotJson ?? "");
     expect(snapshot.supplier.businessName).toBe("Proveedor Documento SA");
+    expect(snapshot.supplier.paymentTerms).toBe("30 días");
     expect(snapshot.lines[0].name).toBe("Manguera A");
     expect(snapshot.lines[0].subtotal).toBeCloseTo(60);
+    expect(snapshot.purchaseOrder.deliveryAddressSnapshot).toBe("Carretera 1 Km 10");
+    expect(snapshot.purchaseOrder.paymentTermsSnapshot).toBe("30 días");
   });
 
   it("confirms BORRADOR to CONFIRMADA creates one document v1", async () => {

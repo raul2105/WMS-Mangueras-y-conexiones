@@ -22,8 +22,9 @@ async function createSupplier(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim() || undefined;
   const phone = String(formData.get("phone") ?? "").trim() || undefined;
   const address = String(formData.get("address") ?? "").trim() || undefined;
+  const paymentTerms = String(formData.get("paymentTerms") ?? "").trim() || undefined;
 
-  const parsed = supplierCreateSchema.safeParse({ code, name, legalName, businessName, taxId, email, phone, address });
+  const parsed = supplierCreateSchema.safeParse({ code, name, legalName, businessName, taxId, email, phone, address, paymentTerms });
   if (!parsed.success) {
     redirect(`/purchasing/suppliers/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
@@ -43,6 +44,7 @@ async function createSupplier(formData: FormData) {
       email: parsed.data.email || null,
       phone: parsed.data.phone ?? null,
       address: parsed.data.address ?? null,
+      paymentTerms: parsed.data.paymentTerms ?? null,
     },
     select: { id: true },
   });
@@ -142,6 +144,15 @@ export default async function NewSupplierPage({
             maxLength={500}
             label="Direccion"
             placeholder="Calle, Numero, Colonia, CP, Ciudad"
+            textareaClassName="resize-none"
+          />
+
+          <Textarea
+            name="paymentTerms"
+            rows={2}
+            maxLength={500}
+            label="Términos de pago"
+            placeholder="Contado, 30 días, transferencia..."
             textareaClassName="resize-none"
           />
         </SectionCard>

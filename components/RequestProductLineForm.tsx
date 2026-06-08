@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import ProductSearchField from "@/components/ProductSearchField";
+import { buttonStyles } from "@/components/ui/button";
 
 type Props = {
   orderId: string;
@@ -49,7 +50,7 @@ export default function RequestProductLineForm({
       </div>
 
       <label className="space-y-1">
-        <span className="text-sm text-slate-400">Cantidad</span>
+        <span className="text-sm text-[var(--text-muted)]">Cantidad</span>
         <input
           name="requestedQty"
           type="number"
@@ -57,22 +58,22 @@ export default function RequestProductLineForm({
           step="0.0001"
           value={requestedQty}
           onChange={(event) => setRequestedQty(event.target.value)}
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+          className="field"
         />
       </label>
       <label className="space-y-1">
-        <span className="text-sm text-slate-400">Notas</span>
+        <span className="text-sm text-[var(--text-muted)]">Notas</span>
         <input
           name="notes"
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+          className="field"
           placeholder="Opcional"
         />
       </label>
       <div className="md:col-span-2 flex items-center justify-between gap-3">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-[var(--text-muted)]">
           Selecciona un producto de la lista para habilitar el alta de la línea.
         </p>
-        <button type="submit" className="btn-primary" disabled={submitDisabled}>
+        <button type="submit" className={buttonStyles({ variant: "primary" })} disabled={submitDisabled}>
           Agregar producto
         </button>
       </div>

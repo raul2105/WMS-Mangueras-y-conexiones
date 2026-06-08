@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ProductSearchMatch } from "@/lib/product-search";
+import { buttonStyles } from "@/components/ui/button";
 
 type ProductSearchResponse = {
   results: ProductSearchMatch[];
@@ -237,7 +238,7 @@ export default function ProductSearchField({
 
   return (
     <div className="space-y-2">
-      <span className="text-sm text-slate-400">{label}</span>
+      <span className="text-sm text-[var(--text-muted)]">{label}</span>
       <input type="hidden" name={name} value={selectedId} />
       <input
         data-testid={`${fieldKey}-input`}
@@ -263,15 +264,15 @@ export default function ProductSearchField({
           blurTimerRef.current = setTimeout(() => setIsOpen(false), 120);
         }}
         placeholder={disabled ? emptyWarehouseMessage : placeholder}
-        className="w-full px-4 py-3 glass rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
+        className="field disabled:cursor-not-allowed disabled:opacity-60"
       />
 
-      {visibleIsLoading && <p className="text-xs text-slate-500">{loadingMessage}</p>}
+      {visibleIsLoading && <p className="text-xs text-[var(--text-muted)]">{loadingMessage}</p>}
       {!visibleIsLoading && !disabled && trimmedQuery.length > 0 && trimmedQuery.length < 3 && (
-        <p className="text-xs text-slate-500">{effectiveMinCharsMessage}</p>
+        <p className="text-xs text-[var(--text-muted)]">{effectiveMinCharsMessage}</p>
       )}
-      {visibleSearchError && <p className="text-xs text-amber-300">{visibleSearchError}</p>}
-      {!disabled && !warehouseId ? <p className="text-xs text-slate-500">{emptyWarehouseMessage}</p> : null}
+      {visibleSearchError && <p className="text-xs text-[var(--status-warning-text)]">{visibleSearchError}</p>}
+      {!disabled && !warehouseId ? <p className="text-xs text-[var(--text-muted)]">{emptyWarehouseMessage}</p> : null}
 
       {isOpen && visibleResults.length > 0 && (
         <div className="grid grid-cols-1 gap-2">
@@ -279,7 +280,7 @@ export default function ProductSearchField({
             <button
               type="button"
               key={`${fieldKey}-${option.id}`}
-              className="text-left p-3 rounded-lg border border-white/10 hover:border-cyan-400/40 hover:bg-white/5 transition-colors"
+              className="text-left rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 searchRequestRef.current += 1;
@@ -295,13 +296,13 @@ export default function ProductSearchField({
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-mono text-sm text-cyan-300">{option.sku}</p>
-                  <p className="text-sm text-slate-100 truncate">{option.name}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="font-mono text-sm text-[var(--accent)]">{option.sku}</p>
+                  <p className="truncate text-sm text-[var(--text-primary)]">{option.name}</p>
+                  <p className="text-xs text-[var(--text-muted)]">
                     {[option.referenceCode, option.brand, option.category?.name, option.subcategory].filter(Boolean).join(" • ") || "Sin metadatos adicionales"}
                   </p>
                 </div>
-                <span className="text-xs font-semibold text-green-300">
+                <span className="text-xs font-semibold text-[var(--status-success-text)]">
                   {formatQty(option.totalAvailable)} disp.
                 </span>
               </div>
@@ -310,7 +311,7 @@ export default function ProductSearchField({
           {nextCursor ? (
             <button
               type="button"
-              className="text-left p-3 rounded-lg border border-white/10 hover:border-cyan-400/40 hover:bg-white/5 transition-colors text-sm text-cyan-300 disabled:opacity-60"
+              className="text-left rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-sm text-[var(--accent)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-subtle)] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
               disabled={isLoadingMore}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setCursor(nextCursor)}
@@ -324,23 +325,23 @@ export default function ProductSearchField({
       {selected && (
         <div
           data-testid={`${fieldKey}-selected`}
-          className={`rounded-lg border p-3 space-y-2 ${
+          className={`space-y-2 rounded-lg border p-3 ${
             isInsufficient
-              ? "border-red-500/30 bg-red-500/5"
-              : "border-cyan-400/20 bg-cyan-500/5"
+              ? "border-[var(--status-danger-border)] bg-[var(--status-danger-bg)]"
+              : "border-[var(--status-info-border)] bg-[var(--status-info-bg)]"
           }`}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-mono text-sm text-cyan-300">{selected.sku}</p>
-              <p className="text-sm text-slate-100">{selected.name}</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-mono text-sm text-[var(--accent)]">{selected.sku}</p>
+              <p className="text-sm text-[var(--text-primary)]">{selected.name}</p>
+              <p className="text-xs text-[var(--text-muted)]">
                 {[selected.referenceCode, selected.brand, selected.category?.name, selected.subcategory].filter(Boolean).join(" • ") || "Sin metadatos adicionales"}
               </p>
             </div>
             <button
               type="button"
-              className="px-2 py-1 rounded border border-white/10 text-xs text-slate-300 hover:text-white hover:border-cyan-400/40"
+              className={buttonStyles({ variant: "secondary", size: "sm" })}
               onClick={() => {
                 searchRequestRef.current += 1;
                 setSelected(null);
@@ -356,15 +357,15 @@ export default function ProductSearchField({
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-            <p className={isInsufficient ? "text-red-200" : "text-slate-300"}>
+            <p className={isInsufficient ? "text-[var(--status-danger-text)]" : "text-[var(--text-secondary)]"}>
               {availabilityLabel}: {formatQty(selected.totalAvailable)}
             </p>
-            <p className={isInsufficient ? "text-red-200" : "text-slate-300"}>
+            <p className={isInsufficient ? "text-[var(--status-danger-text)]" : "text-[var(--text-secondary)]"}>
               {hasRequiredQty ? `${requiredLabel}: ${formatQty(requiredQty!)}` : requiredLabel}
             </p>
           </div>
           {isInsufficient && (
-            <p className="text-xs text-red-200">
+            <p className="text-xs text-[var(--status-danger-text)]">
               {insufficientMessage}
             </p>
           )}

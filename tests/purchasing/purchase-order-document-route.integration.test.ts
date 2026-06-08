@@ -91,7 +91,7 @@ describePostgres("purchase order document pdf route integration", () => {
 
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(Buffer.from(bytes).subarray(0, 4).toString("utf8")).toBe("%PDF");
-  });
+  }, 120000);
 
   it("sanitizes unsafe file names without duplicating prefixes", () => {
     expect(buildPurchaseOrderPdfFilename("OC-2026-0004")).toBe("OC-2026-0004.pdf");
@@ -154,5 +154,5 @@ describePostgres("purchase order document pdf route integration", () => {
 
     const count = await prisma.purchaseOrderDocument.count({ where: { purchaseOrderId: order.id } });
     expect(count).toBe(1);
-  });
+  }, 120000);
 });

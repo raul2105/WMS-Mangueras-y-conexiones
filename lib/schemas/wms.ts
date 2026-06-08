@@ -149,6 +149,11 @@ export const supplierCreateSchema = z.object({
   email: z.union([z.string().trim().email("Email inválido"), z.literal("")]).optional(),
   phone: z.string().trim().max(20).optional(),
   address: z.string().trim().max(500).optional(),
+  paymentTerms: z.string().trim().max(500).optional(),
+});
+
+export const supplierUpdateSchema = z.object({
+  paymentTerms: z.string().trim().max(500).optional(),
 });
 
 export const customerCreateSchema = z.object({
@@ -221,6 +226,13 @@ export const supplierBrandSchema = z.object({
 
 export const purchaseOrderCreateSchema = z.object({
   supplierId: requiredText("Proveedor"),
+  deliveryWarehouseId: requiredText("Almacen destino"),
+  expectedDate: z.string().trim().optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+export const purchaseOrderUpdateSchema = z.object({
+  deliveryWarehouseId: requiredText("Almacen destino"),
   expectedDate: z.string().trim().optional(),
   notes: z.string().trim().max(1000).optional(),
 });

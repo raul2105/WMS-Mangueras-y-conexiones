@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { createAuditLogSafe } from "@/lib/audit-log";
-import { firstErrorMessage, supplierBrandSchema } from "@/lib/schemas/wms";
+import { firstErrorMessage, supplierBrandSchema, supplierUpdateSchema } from "@/lib/schemas/wms";
 import { z } from "zod";
 
 async function linkProduct(supplierId: string, formData: FormData) {
@@ -66,6 +66,31 @@ async function toggleActive(supplierId: string, formData: FormData) {
   const isActive = formData.get("isActive") === "true";
   await prisma.supplier.update({ where: { id: supplierId }, data: { isActive: !isActive } });
   redirect(`/purchasing/suppliers/${supplierId}`);
+}
+
+async function updatePaymentTerms(supplierId: string, formData: FormData) {
+  "use server";
+
+  const paymentTerms = String(formData.get("paymentTerms") ?? "").trim() || undefined;
+  const parsed = supplierUpdateSchema.safeParse({ paymentTerms });
+  if (!parsed.success) {
+    redirect(`/purchasing/suppliers/${supplierId}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+
+  await prisma.supplier.update({
+    where: { id: supplierId },
+    data: { paymentTerms: parsed.data.paymentTerms ?? null },
+  });
+
+  await createAuditLogSafe({
+    entityType: "SUPPLIER",
+    entityId: supplierId,
+    action: "UPDATE",
+    after: JSON.stringify({ paymentTerms: parsed.data.paymentTerms ?? null }),
+    source: "purchasing/suppliers",
+  });
+
+  redirect(`/purchasing/suppliers/${supplierId}?ok=terms`);
 }
 
 async function addBrand(supplierId: string, formData: FormData) {
@@ -146,6 +171,7 @@ export default async function SupplierDetailPage({
       email: true,
       phone: true,
       address: true,
+      paymentTerms: true,
       isActive: true,
       brands: {
         orderBy: { name: "asc" },
@@ -180,6 +206,7 @@ export default async function SupplierDetailPage({
   const linkProductBound = linkProduct.bind(null, id);
   const unlinkProductBound = unlinkProduct.bind(null, id);
   const toggleActiveBound = toggleActive.bind(null, id);
+  const updatePaymentTermsBound = updatePaymentTerms.bind(null, id);
   const addBrandBound = addBrand.bind(null, id);
 
   return (
@@ -209,6 +236,7 @@ export default async function SupplierDetailPage({
       {sp.error && <div className="glass-card border border-red-500/30 text-red-200 text-sm">{sp.error}</div>}
       {sp.ok === "1" && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Producto vinculado correctamente.</div>}
       {sp.ok === "brand" && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Marca agregada correctamente.</div>}
+      {sp.ok === "terms" && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Términos de pago actualizados correctamente.</div>}
 
       {/* Info del proveedor */}
       <div className="glass-card grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -235,6 +263,26 @@ export default async function SupplierDetailPage({
           </div>
         )}
       </div>
+
+      <form action={updatePaymentTermsBound} className="glass-card space-y-4">
+        <div>
+          <h2 className="text-lg font-bold">Términos de pago</h2>
+          <p className="text-sm text-slate-400 mt-1">Este valor se copia a nuevas órdenes de compra y se congela en el documento oficial.</p>
+        </div>
+        <textarea
+          name="paymentTerms"
+          rows={3}
+          defaultValue={supplier.paymentTerms ?? ""}
+          maxLength={500}
+          placeholder="Contado, 30 días, transferencia..."
+          className="w-full px-3 py-2 glass rounded-lg text-sm min-h-[96px]"
+        />
+        <div className="flex justify-end">
+          <button type="submit" className="btn-primary text-sm py-2 px-4">
+            Guardar términos
+          </button>
+        </div>
+      </form>
 
       {/* Marcas del proveedor */}
       <div className="glass-card space-y-4">

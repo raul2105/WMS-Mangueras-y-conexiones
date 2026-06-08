@@ -28,6 +28,7 @@ model User {
   inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
   traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
   auditLogs          AuditLog[]          @relation("AuditActorUser")
+  purchaseOrderEmailAttempts PurchaseOrderEmailAttempt[] @relation("PurchaseOrderEmailTriggeredByUser")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -224,6 +225,7 @@ model Warehouse {
   productionOrders ProductionOrder[]
   salesInternalOrders SalesInternalOrder[]
   assemblyWorkOrders AssemblyWorkOrder[]
+  purchaseOrders PurchaseOrder[]
   traceRecords TraceRecord[]
   
   createdAt   DateTime   @default(now())
@@ -906,6 +908,13 @@ enum PurchaseOrderStatus {
   CANCELADA
 }
 
+enum PurchaseOrderEmailSendState {
+  NOT_SENT
+  SENT
+  RESENT
+  FAILED
+}
+
 model Supplier {
   id           String   @id @default(uuid())
   code         String   @unique   // PROV-001
@@ -916,6 +925,7 @@ model Supplier {
   email        String?
   phone        String?
   address      String?
+  paymentTerms String?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -964,19 +974,35 @@ model PurchaseOrder {
   id           String              @id @default(uuid())
   folio        String              @unique   // OC-2026-0001
   supplierId   String
+  deliveryWarehouseId String?
   status       PurchaseOrderStatus @default(BORRADOR)
+  emailSendState PurchaseOrderEmailSendState @default(NOT_SENT)
+  emailRecipientSnapshot String?
+  emailSubjectSnapshot String?
+  emailBodySnapshot String?
+  emailDocumentVersionSnapshot Int?
+  emailLastAttemptAt DateTime?
+  emailLastSentAt DateTime?
+  emailLastErrorCode String?
+  emailLastErrorMessage String?
   expectedDate DateTime?
   notes        String?
+  deliveryAddressSnapshot String?
+  paymentTermsSnapshot String?
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
   supplier Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  deliveryWarehouse Warehouse? @relation(fields: [deliveryWarehouseId], references: [id], onDelete: Restrict)
   lines    PurchaseOrderLine[]
   receipts PurchaseReceipt[]
   documents PurchaseOrderDocument[]
+  emailAttempts PurchaseOrderEmailAttempt[]
 
   @@index([supplierId])
+  @@index([deliveryWarehouseId])
   @@index([status])
+  @@index([emailSendState])
   @@index([createdAt])
 }
 
@@ -1008,9 +1034,38 @@ model PurchaseOrderDocument {
   createdAt       DateTime @default(now())
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  emailAttempts PurchaseOrderEmailAttempt[]
 
   @@unique([purchaseOrderId, versionNumber])
   @@index([purchaseOrderId, createdAt])
+}
+
+model PurchaseOrderEmailAttempt {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  attemptNumber   Int
+  sendState       PurchaseOrderEmailSendState
+  recipientEmail  String
+  subject         String
+  body            String
+  purchaseOrderDocumentId String?
+  documentVersion Int?
+  snapshotHash    String?
+  errorCode       String?
+  errorMessage    String?
+  triggeredByUserId String?
+  triggerSource   String
+  createdAt       DateTime @default(now())
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrderDocument PurchaseOrderDocument? @relation(fields: [purchaseOrderDocumentId], references: [id], onDelete: SetNull)
+  triggeredByUser User? @relation("PurchaseOrderEmailTriggeredByUser", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([purchaseOrderId, attemptNumber])
+  @@index([purchaseOrderId, createdAt])
+  @@index([sendState])
+  @@index([triggeredByUserId])
+  @@index([purchaseOrderDocumentId])
 }
 
 model PurchaseReceipt {

@@ -1,13 +1,18 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { purchaseOrderLineSchema, firstErrorMessage } from "@/lib/schemas/wms";
+import { purchaseOrderLineSchema, purchaseOrderUpdateSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import {
   loadLatestPurchaseOrderDocument,
   parsePurchaseOrderDocumentSnapshot,
+  resolvePurchaseOrderFrozenFields,
   updatePurchaseOrderStatusWithDocument,
 } from "@/lib/purchasing/purchase-order-document-service";
+import {
+  buildPurchaseOrderEmailContract,
+  PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS,
+} from "@/lib/purchasing/purchase-order-email-contract";
 
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
@@ -27,6 +32,13 @@ const STATUS_COLORS: Record<string, string> = {
   CANCELADA: "text-red-400 bg-red-500/20 border-red-500/30",
 };
 
+const EMAIL_STATUS_COLORS: Record<string, string> = {
+  NOT_SENT: "text-slate-400 bg-slate-500/20 border-slate-500/30",
+  SENT: "text-emerald-400 bg-emerald-500/20 border-emerald-500/30",
+  RESENT: "text-blue-400 bg-blue-500/20 border-blue-500/30",
+  FAILED: "text-red-400 bg-red-500/20 border-red-500/30",
+};
+
 // Valid status transitions
 const TRANSITIONS: Record<string, string[]> = {
   BORRADOR: ["CONFIRMADA", "CANCELADA"],
@@ -36,6 +48,12 @@ const TRANSITIONS: Record<string, string[]> = {
   RECIBIDA: [],
   CANCELADA: [],
 };
+
+function formatDateInput(value: string | Date | null | undefined) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
 
 async function updateStatus(orderId: string, formData: FormData) {
   "use server";
@@ -102,6 +120,58 @@ async function addLine(orderId: string, formData: FormData) {
   redirect(`/purchasing/orders/${orderId}`);
 }
 
+async function updateDraftMetadata(orderId: string, formData: FormData) {
+  "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+
+  const deliveryWarehouseId = String(formData.get("deliveryWarehouseId") ?? "").trim();
+  const expectedDate = String(formData.get("expectedDate") ?? "").trim() || undefined;
+  const notes = String(formData.get("notes") ?? "").trim() || undefined;
+
+  const parsed = purchaseOrderUpdateSchema.safeParse({ deliveryWarehouseId, expectedDate, notes });
+  if (!parsed.success) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+
+  const order = await prisma.purchaseOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      status: true,
+      paymentTermsSnapshot: true,
+      supplier: { select: { paymentTerms: true } },
+    },
+  });
+  if (!order || order.status !== "BORRADOR") {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Solo se pueden editar datos de OCs en Borrador")}`);
+  }
+
+  const warehouse = await prisma.warehouse.findUnique({
+    where: { id: parsed.data.deliveryWarehouseId },
+    select: { id: true, address: true, isActive: true },
+  });
+  if (!warehouse || !warehouse.isActive) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Almacén destino no encontrado o inactivo")}`);
+  }
+
+  const frozenFields = resolvePurchaseOrderFrozenFields({
+    deliveryWarehouse: warehouse,
+    supplierPaymentTerms: order.paymentTermsSnapshot ?? order.supplier.paymentTerms,
+  });
+
+  await prisma.purchaseOrder.update({
+    where: { id: orderId },
+    data: {
+      deliveryWarehouseId: frozenFields.deliveryWarehouseId,
+      deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
+      paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
+      expectedDate: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
+      notes: parsed.data.notes ?? null,
+    },
+  });
+
+  redirect(`/purchasing/orders/${orderId}?ok=1`);
+}
+
 async function removeLine(orderId: string, formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
@@ -142,9 +212,22 @@ export default async function PurchaseOrderDetailPage({
       supplierId: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       expectedDate: true,
       notes: true,
-      supplier: { select: { id: true, code: true, name: true, businessName: true } },
+      deliveryAddressSnapshot: true,
+      paymentTermsSnapshot: true,
+      emailSendState: true,
+      emailRecipientSnapshot: true,
+      emailSubjectSnapshot: true,
+      emailBodySnapshot: true,
+      emailDocumentVersionSnapshot: true,
+      emailLastAttemptAt: true,
+      emailLastSentAt: true,
+      emailLastErrorCode: true,
+      emailLastErrorMessage: true,
+      supplier: { select: { id: true, code: true, name: true, businessName: true, email: true, paymentTerms: true } },
+      deliveryWarehouse: { select: { id: true, code: true, name: true, address: true, isActive: true } },
       lines: {
         select: {
           id: true,
@@ -179,6 +262,13 @@ export default async function PurchaseOrderDetailPage({
   const updateStatusBound = updateStatus.bind(null, id);
   const addLineBound = addLine.bind(null, id);
   const removeLineBound = removeLine.bind(null, id);
+  const updateDraftMetadataBound = updateDraftMetadata.bind(null, id);
+
+  const activeWarehouses = await prisma.warehouse.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: { id: true, code: true, name: true, address: true },
+  });
 
   const totalOrdered = order.lines.reduce((s, l) => s + l.qtyOrdered, 0);
   const totalReceived = order.lines.reduce((s, l) => s + l.qtyReceived, 0);
@@ -193,7 +283,12 @@ export default async function PurchaseOrderDetailPage({
       documentSnapshot = null;
     }
   }
-
+  const emailContract = buildPurchaseOrderEmailContract({
+    purchaseOrder: order,
+    documentRecord,
+    documentSnapshot,
+    providerConfigured: false,
+  });
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
   const canReceive = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status) && hasPending;
@@ -275,6 +370,80 @@ export default async function PurchaseOrderDetailPage({
         </div>
       )}
 
+      <div className="glass-card space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Entrega y términos oficiales</h2>
+            <p className="text-sm text-slate-400 mt-1">Estos valores se congelan en el documento oficial de la orden de compra.</p>
+          </div>
+          <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+            {order.status === "BORRADOR" ? "Editable" : "Congelado"}
+          </span>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 text-sm">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Dirección de entrega</p>
+            <p className="text-slate-200">{order.deliveryAddressSnapshot ?? order.deliveryWarehouse?.address ?? "—"}</p>
+            <p className="text-slate-500 text-xs">
+              {order.deliveryWarehouse ? `${order.deliveryWarehouse.code} — ${order.deliveryWarehouse.name}` : "Sin almacén seleccionado"}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Términos de pago</p>
+            <p className="text-slate-200">{order.paymentTermsSnapshot ?? order.supplier.paymentTerms ?? "—"}</p>
+            <p className="text-slate-500 text-xs">Origen: ficha del proveedor.</p>
+          </div>
+        </div>
+
+        {order.status === "BORRADOR" && (
+          <form action={updateDraftMetadataBound} className="grid gap-4 md:grid-cols-2 border-t border-white/10 pt-4">
+            <label className="space-y-1 md:col-span-2">
+              <span className="text-xs text-slate-400">Almacén destino *</span>
+              <select
+                name="deliveryWarehouseId"
+                required
+                defaultValue={order.deliveryWarehouseId ?? ""}
+                className="w-full px-3 py-2 glass rounded-lg text-sm"
+              >
+                <option value="">Seleccionar almacén...</option>
+                {activeWarehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.code} — {warehouse.name} {warehouse.address ? `(${warehouse.address})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-slate-400">Fecha esperada</span>
+              <input
+                name="expectedDate"
+                type="date"
+                defaultValue={formatDateInput(order.expectedDate)}
+                className="w-full px-3 py-2 glass rounded-lg text-sm"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-slate-400">Notas</span>
+              <textarea
+                name="notes"
+                rows={3}
+                defaultValue={order.notes ?? ""}
+                className="w-full px-3 py-2 glass rounded-lg text-sm min-h-[96px]"
+              />
+            </label>
+
+            <div className="md:col-span-2 flex justify-end">
+              <button type="submit" className="btn-primary text-sm py-2 px-4">
+                Guardar datos de borrador
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
       <div className="glass-card space-y-3">
         <h2 className="text-lg font-bold border-b border-white/10 pb-2">Documento oficial</h2>
         {order.status === "BORRADOR" ? (
@@ -307,6 +476,83 @@ export default async function PurchaseOrderDetailPage({
         ) : (
           <p className="text-sm text-amber-200">Documento oficial no generado para esta OC. Revisión requerida.</p>
         )}
+      </div>
+
+      <div className="glass-card space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Correo al proveedor</h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Contrato preparado para KAN-85. En esta versión no existe envío real por correo.
+            </p>
+          </div>
+          <span
+            className={`text-xs font-bold px-2 py-1 rounded border ${EMAIL_STATUS_COLORS[emailContract.sendState] ?? "text-slate-400 bg-slate-500/20 border-slate-500/30"}`}
+          >
+            {PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS[emailContract.sendState]}
+          </span>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 text-sm">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Destinatario</p>
+            <p className="text-slate-200">{emailContract.recipientEmail ?? "Sin correo registrado"}</p>
+            <p className="text-slate-500 text-xs">Origen: email congelado del documento oficial o ficha viva del proveedor.</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Adjunto oficial</p>
+            <p className="text-slate-200">
+              {emailContract.document
+                ? `v${emailContract.document.versionNumber}${emailContract.document.attachmentFilename ? ` · ${emailContract.document.attachmentFilename}` : ""}`
+                : "No disponible"}
+            </p>
+            <p className="text-slate-500 text-xs">
+              {emailContract.document?.isSnapshotValid
+                ? "Generado desde el snapshot oficial congelado."
+                : "Pendiente de documento oficial o revisión de integridad."}
+            </p>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Asunto</p>
+            <p className="text-slate-200 break-words">{emailContract.subject}</p>
+          </div>
+        </div>
+
+        <details className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-200">Vista previa del cuerpo</summary>
+          <pre className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{emailContract.body}</pre>
+        </details>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={!emailContract.canSend}
+            className={`rounded-lg border px-4 py-2 text-sm ${
+              emailContract.canSend
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/40 hover:text-white"
+                : "border-white/10 bg-white/5 text-slate-400 cursor-not-allowed"
+            }`}
+            title={emailContract.providerNote}
+          >
+            Enviar por correo
+          </button>
+          <p className="text-xs text-slate-500">{emailContract.providerNote}</p>
+        </div>
+
+        {emailContract.blockedReasons.length > 0 ? (
+          <div className="space-y-1 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="font-semibold">Bloqueos del contrato</p>
+            <ul className="space-y-1 text-xs">
+              {emailContract.blockedReasons.map((reason) => (
+                <li key={reason}>• {reason}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {emailContract.lastErrorMessage ? (
+          <p className="text-xs text-red-200">Último error registrado: {emailContract.lastErrorMessage}</p>
+        ) : null}
       </div>
 
       {/* Líneas */}

@@ -1,0 +1,164 @@
+import type {
+  SalesOrderFlowNarrative,
+  SalesOrderFlowStage,
+  SalesOrderPrimaryCtaCode,
+} from "@/lib/sales/internal-orders";
+import { SALES_ORDER_FLOW_STAGE_LABELS } from "@/lib/sales/internal-orders";
+
+export const SALES_CONSOLE_STAGE_FLOW: SalesOrderFlowStage[] = [
+  "captura",
+  "por_asignar",
+  "en_surtido",
+  "listo_entrega",
+  "entregado",
+  "cancelado",
+];
+
+export type SalesConsoleWorkTypeVariant = "neutral" | "accent" | "warning" | "success" | "danger";
+
+export type SalesConsoleWorkType = {
+  label: string;
+  detail: string;
+  variant: SalesConsoleWorkTypeVariant;
+};
+
+export type SalesConsoleStageProgressItem = {
+  stage: SalesOrderFlowStage;
+  label: string;
+  step: number;
+  variant: SalesConsoleWorkTypeVariant;
+  isCurrent: boolean;
+};
+
+export type SalesConsolePrimaryActionState = {
+  state: "allowed" | "blocked" | "informational";
+  label: string;
+  reason: string;
+  blockedReason?: string;
+  href: string;
+  code: SalesOrderPrimaryCtaCode;
+  requiresFormSubmit: boolean;
+};
+
+export function getSalesConsoleWorkType(input: {
+  flowStage: SalesOrderFlowStage;
+  hasProductLines: boolean;
+  hasAssemblyLines: boolean;
+}): SalesConsoleWorkType {
+  switch (input.flowStage) {
+    case "captura":
+      return input.hasProductLines || input.hasAssemblyLines
+        ? {
+            label: "Oportunidad activa",
+            detail: "Pedido en captura con líneas comerciales abiertas.",
+            variant: "accent",
+          }
+        : {
+            label: "Cotización pendiente",
+            detail: "Aún no tiene líneas para avanzar a confirmación.",
+            variant: "warning",
+          };
+    case "por_asignar":
+      return {
+        label: "Seguimiento cliente",
+        detail: "Pedido confirmado sin responsable asignado.",
+        variant: "warning",
+      };
+    case "en_surtido":
+      return {
+        label: "Orden confirmada",
+        detail: "Handoff a producción en curso.",
+        variant: "success",
+      };
+    case "listo_entrega":
+      return {
+        label: "Entrega pendiente",
+        detail: "Listo para cerrar con entrega.",
+        variant: "success",
+      };
+    case "entregado":
+      return {
+        label: "Cierre comercial",
+        detail: "Pedido entregado y cerrado.",
+        variant: "neutral",
+      };
+    case "cancelado":
+      return {
+        label: "Cancelado",
+        detail: "Sin acción operativa activa.",
+        variant: "danger",
+      };
+  }
+}
+
+export function getSalesConsoleStageProgress(currentStage: SalesOrderFlowStage): SalesConsoleStageProgressItem[] {
+  const currentIndex = SALES_CONSOLE_STAGE_FLOW.indexOf(currentStage);
+  return SALES_CONSOLE_STAGE_FLOW.map((stage, index) => ({
+    stage,
+    label: SALES_ORDER_FLOW_STAGE_LABELS[stage],
+    step: index + 1,
+    variant:
+      stage === currentStage
+        ? currentStage === "cancelado"
+          ? "danger"
+          : currentStage === "captura"
+            ? "accent"
+            : currentStage === "por_asignar"
+              ? "warning"
+              : currentStage === "en_surtido"
+                ? "warning"
+                : "success"
+        : currentIndex >= 0 && index < currentIndex && currentStage !== "cancelado"
+          ? "success"
+          : "neutral",
+    isCurrent: stage === currentStage,
+  }));
+}
+
+export function resolveSalesConsolePrimaryActionState(input: {
+  flowNarrative: SalesOrderFlowNarrative;
+  canExecuteSalesActions: boolean;
+  canExecuteProductionActions: boolean;
+}): SalesConsolePrimaryActionState {
+  const { primaryCta } = input.flowNarrative;
+
+  if (primaryCta.code === "REVIEW_BLOCK") {
+    return {
+      state: "informational",
+      label: primaryCta.action.label,
+      reason: primaryCta.reason,
+      blockedReason: primaryCta.blockedReason,
+      href: primaryCta.action.href,
+      code: primaryCta.code,
+      requiresFormSubmit: false,
+    };
+  }
+
+  const needsSalesWrite = primaryCta.code === "TAKE_ORDER" || primaryCta.code === "MARK_DELIVERED";
+  const canExecute = needsSalesWrite ? input.canExecuteSalesActions : input.canExecuteProductionActions;
+
+  if (primaryCta.isAllowed && canExecute) {
+    return {
+      state: "allowed",
+      label: primaryCta.action.label,
+      reason: primaryCta.reason,
+      href: primaryCta.action.href,
+      code: primaryCta.code,
+      requiresFormSubmit: primaryCta.code === "TAKE_ORDER",
+    };
+  }
+
+  const fallbackReason = needsSalesWrite
+    ? "Sin permisos de escritura para ejecutar esta accion"
+    : "Sin permisos operativos para ejecutar esta accion";
+
+  return {
+    state: "blocked",
+    label: primaryCta.action.label,
+    reason: primaryCta.reason,
+    blockedReason: primaryCta.blockedReason ?? fallbackReason,
+    href: primaryCta.action.href,
+    code: primaryCta.code,
+    requiresFormSubmit: false,
+  };
+}

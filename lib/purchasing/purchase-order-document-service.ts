@@ -14,6 +14,7 @@ export type PurchaseOrderDocumentSupplierSnapshot = {
   email: string | null;
   phone: string | null;
   address: string | null;
+  paymentTerms: string | null;
 };
 
 export type PurchaseOrderDocumentLineSnapshot = {
@@ -36,8 +37,11 @@ export type PurchaseOrderDocumentSnapshot = {
     id: string;
     folio: string;
     status: string;
+    deliveryWarehouseId: string | null;
     expectedDate: string | null;
     notes: string | null;
+    deliveryAddressSnapshot: string | null;
+    paymentTermsSnapshot: string | null;
     createdAt: string;
   };
   supplier: PurchaseOrderDocumentSupplierSnapshot;
@@ -109,14 +113,33 @@ function normalizeCurrency(value: string | null | undefined) {
   return currency || "MXN";
 }
 
+function normalizeOptionalText(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+}
+
+export function resolvePurchaseOrderFrozenFields(input: {
+  deliveryWarehouse: { id: string; address: string | null } | null;
+  supplierPaymentTerms: string | null | undefined;
+}) {
+  return {
+    deliveryWarehouseId: input.deliveryWarehouse?.id ?? null,
+    deliveryAddressSnapshot: normalizeOptionalText(input.deliveryWarehouse?.address),
+    paymentTermsSnapshot: normalizeOptionalText(input.supplierPaymentTerms),
+  };
+}
+
 function mapPurchaseOrderToSnapshot(input: {
   documentVersion: number;
   purchaseOrder: {
     id: string;
     folio: string;
     status: string;
+    deliveryWarehouseId: string | null;
     expectedDate: Date | null;
     notes: string | null;
+    deliveryAddressSnapshot: string | null;
+    paymentTermsSnapshot: string | null;
     createdAt: Date;
     supplier: {
       code: string;
@@ -127,7 +150,11 @@ function mapPurchaseOrderToSnapshot(input: {
       email: string | null;
       phone: string | null;
       address: string | null;
+      paymentTerms: string | null;
     };
+    deliveryWarehouse: {
+      address: string | null;
+    } | null;
     lines: Array<{
       productId: string;
       qtyOrdered: number;
@@ -164,6 +191,10 @@ function mapPurchaseOrderToSnapshot(input: {
 
   const currency = lines[0]?.currency ?? "MXN";
   const subtotal = Number(lines.reduce((sum, line) => sum + line.subtotal, 0).toFixed(2));
+  const deliveryAddressSnapshot = normalizeOptionalText(input.purchaseOrder.deliveryAddressSnapshot)
+    ?? normalizeOptionalText(input.purchaseOrder.deliveryWarehouse?.address);
+  const paymentTermsSnapshot = normalizeOptionalText(input.purchaseOrder.paymentTermsSnapshot)
+    ?? normalizeOptionalText(input.purchaseOrder.supplier.paymentTerms);
   const payloadWithoutHash = {
     documentVersion: input.documentVersion,
     generatedAt: new Date().toISOString(),
@@ -171,8 +202,11 @@ function mapPurchaseOrderToSnapshot(input: {
       id: input.purchaseOrder.id,
       folio: input.purchaseOrder.folio,
       status: input.purchaseOrder.status,
+      deliveryWarehouseId: input.purchaseOrder.deliveryWarehouseId,
       expectedDate: toIsoDate(input.purchaseOrder.expectedDate),
       notes: input.purchaseOrder.notes,
+      deliveryAddressSnapshot,
+      paymentTermsSnapshot,
       createdAt: input.purchaseOrder.createdAt.toISOString(),
     },
     supplier: {
@@ -184,6 +218,7 @@ function mapPurchaseOrderToSnapshot(input: {
       email: input.purchaseOrder.supplier.email,
       phone: input.purchaseOrder.supplier.phone,
       address: input.purchaseOrder.supplier.address,
+      paymentTerms: paymentTermsSnapshot,
     },
     lines,
     totals: {
@@ -212,8 +247,11 @@ async function loadPurchaseOrderForDocument(db: PrismaTransactionLike, purchaseO
       id: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       expectedDate: true,
       notes: true,
+      deliveryAddressSnapshot: true,
+      paymentTermsSnapshot: true,
       createdAt: true,
       supplier: {
         select: {
@@ -224,6 +262,12 @@ async function loadPurchaseOrderForDocument(db: PrismaTransactionLike, purchaseO
           taxId: true,
           email: true,
           phone: true,
+          address: true,
+          paymentTerms: true,
+        },
+      },
+      deliveryWarehouse: {
+        select: {
           address: true,
         },
       },
@@ -375,6 +419,19 @@ export async function updatePurchaseOrderStatusWithDocument(input: {
       select: {
         status: true,
         lines: { select: { qtyOrdered: true, qtyReceived: true } },
+        deliveryWarehouseId: true,
+        deliveryAddressSnapshot: true,
+        paymentTermsSnapshot: true,
+        supplier: {
+          select: {
+            paymentTerms: true,
+          },
+        },
+        deliveryWarehouse: {
+          select: {
+            address: true,
+          },
+        },
       },
     });
 
@@ -398,9 +455,28 @@ export async function updatePurchaseOrderStatusWithDocument(input: {
       }
     }
 
+    const frozenFields =
+      input.newStatus === "CONFIRMADA"
+        ? resolvePurchaseOrderFrozenFields({
+            deliveryWarehouse: order.deliveryWarehouseId
+              ? { id: order.deliveryWarehouseId, address: order.deliveryWarehouse?.address ?? null }
+              : null,
+            supplierPaymentTerms: order.paymentTermsSnapshot ?? order.supplier.paymentTerms,
+          })
+        : null;
+
     await tx.purchaseOrder.update({
       where: { id: input.purchaseOrderId },
-      data: { status: input.newStatus as never },
+      data: {
+        status: input.newStatus as never,
+        ...(frozenFields
+          ? {
+              deliveryWarehouseId: frozenFields.deliveryWarehouseId,
+              deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
+              paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
+            }
+          : {}),
+      },
     });
 
     if (input.newStatus === "CONFIRMADA") {

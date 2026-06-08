@@ -11,24 +11,37 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { resolvePurchaseOrderFrozenFields } from "@/lib/purchasing/purchase-order-document-service";
 
 async function createOrder(formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const supplierId = String(formData.get("supplierId") ?? "").trim();
+  const deliveryWarehouseId = String(formData.get("deliveryWarehouseId") ?? "").trim();
   const expectedDate = String(formData.get("expectedDate") ?? "").trim() || undefined;
   const notes = String(formData.get("notes") ?? "").trim() || undefined;
 
-  const parsed = purchaseOrderCreateSchema.safeParse({ supplierId, expectedDate, notes });
+  const parsed = purchaseOrderCreateSchema.safeParse({ supplierId, deliveryWarehouseId, expectedDate, notes });
   if (!parsed.success) {
     redirect(`/purchasing/orders/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  const supplier = await prisma.supplier.findUnique({ where: { id: parsed.data.supplierId } });
+  const [supplier, warehouse] = await Promise.all([
+    prisma.supplier.findUnique({ where: { id: parsed.data.supplierId } }),
+    prisma.warehouse.findUnique({ where: { id: parsed.data.deliveryWarehouseId } }),
+  ]);
   if (!supplier || !supplier.isActive) {
     redirect(`/purchasing/orders/new?error=${encodeURIComponent("Proveedor no encontrado o inactivo")}`);
   }
+  if (!warehouse || !warehouse.isActive) {
+    redirect(`/purchasing/orders/new?error=${encodeURIComponent("Almacén destino no encontrado o inactivo")}`);
+  }
+
+  const frozenFields = resolvePurchaseOrderFrozenFields({
+    deliveryWarehouse: { id: warehouse.id, address: warehouse.address ?? null },
+    supplierPaymentTerms: supplier.paymentTerms,
+  });
 
   const count = await prisma.purchaseOrder.count();
   const year = new Date().getFullYear();
@@ -38,8 +51,11 @@ async function createOrder(formData: FormData) {
     data: {
       folio,
       supplierId: parsed.data.supplierId,
+      deliveryWarehouseId: frozenFields.deliveryWarehouseId,
       expectedDate: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
       notes: parsed.data.notes ?? null,
+      deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
+      paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
     },
     select: { id: true, folio: true },
   });
@@ -76,6 +92,11 @@ export default async function NewPurchaseOrderPage({
     orderBy: { name: "asc" },
     select: { id: true, code: true, name: true },
   });
+  const warehouses = await prisma.warehouse.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: { id: true, code: true, name: true, address: true },
+  });
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -93,12 +114,23 @@ export default async function NewPurchaseOrderPage({
         <section className="surface border-[var(--danger)]/40 bg-[var(--danger-soft)] p-4 text-sm text-[var(--danger)]">{sp.error}</section>
       )}
 
-      {suppliers.length === 0 && (
+      {(suppliers.length === 0 || warehouses.length === 0) && (
         <EmptyState
           compact
-          title="No hay proveedores activos"
-          description="Registra un proveedor antes de generar nuevas ordenes de compra."
-          actions={<Link href="/purchasing/suppliers/new" className={buttonStyles({ variant: "secondary", size: "sm" })}>Crear proveedor</Link>}
+          title={suppliers.length === 0 ? "No hay proveedores activos" : "No hay almacenes activos"}
+          description={
+            suppliers.length === 0
+              ? "Registra un proveedor antes de generar nuevas ordenes de compra."
+              : "Registra un almacén activo antes de generar nuevas ordenes de compra."
+          }
+          actions={
+            <Link
+              href={suppliers.length === 0 ? "/purchasing/suppliers/new" : "/warehouse/new"}
+              className={buttonStyles({ variant: "secondary", size: "sm" })}
+            >
+              {suppliers.length === 0 ? "Crear proveedor" : "Crear almacén"}
+            </Link>
+          }
         />
       )}
 
@@ -108,7 +140,7 @@ export default async function NewPurchaseOrderPage({
           footer={
             <>
               <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary" })}>Cancelar</Link>
-              <Button type="submit" disabled={suppliers.length === 0}>Crear OC</Button>
+              <Button type="submit" disabled={suppliers.length === 0 || warehouses.length === 0}>Crear OC</Button>
             </>
           }
         >
@@ -116,6 +148,20 @@ export default async function NewPurchaseOrderPage({
             {suppliers.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.code} - {s.name}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            name="deliveryWarehouseId"
+            required
+            label="Almacén destino"
+            placeholder="Seleccionar almacén..."
+            hint="La dirección de este almacén se congelará como dirección de entrega."
+          >
+            {warehouses.map((warehouse) => (
+              <option key={warehouse.id} value={warehouse.id}>
+                {warehouse.code} - {warehouse.name} {warehouse.address ? `(${warehouse.address})` : ""}
               </option>
             ))}
           </Select>

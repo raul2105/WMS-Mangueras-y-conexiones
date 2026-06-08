@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { purchaseOrderLineSchema, firstErrorMessage } from "@/lib/schemas/wms";
+import { purchaseOrderLineSchema, purchaseOrderUpdateSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import {
   loadLatestPurchaseOrderDocument,
   parsePurchaseOrderDocumentSnapshot,
+  resolvePurchaseOrderFrozenFields,
   updatePurchaseOrderStatusWithDocument,
 } from "@/lib/purchasing/purchase-order-document-service";
 
@@ -36,6 +37,12 @@ const TRANSITIONS: Record<string, string[]> = {
   RECIBIDA: [],
   CANCELADA: [],
 };
+
+function formatDateInput(value: string | Date | null | undefined) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
 
 async function updateStatus(orderId: string, formData: FormData) {
   "use server";
@@ -102,6 +109,58 @@ async function addLine(orderId: string, formData: FormData) {
   redirect(`/purchasing/orders/${orderId}`);
 }
 
+async function updateDraftMetadata(orderId: string, formData: FormData) {
+  "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+
+  const deliveryWarehouseId = String(formData.get("deliveryWarehouseId") ?? "").trim();
+  const expectedDate = String(formData.get("expectedDate") ?? "").trim() || undefined;
+  const notes = String(formData.get("notes") ?? "").trim() || undefined;
+
+  const parsed = purchaseOrderUpdateSchema.safeParse({ deliveryWarehouseId, expectedDate, notes });
+  if (!parsed.success) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+
+  const order = await prisma.purchaseOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      status: true,
+      paymentTermsSnapshot: true,
+      supplier: { select: { paymentTerms: true } },
+    },
+  });
+  if (!order || order.status !== "BORRADOR") {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Solo se pueden editar datos de OCs en Borrador")}`);
+  }
+
+  const warehouse = await prisma.warehouse.findUnique({
+    where: { id: parsed.data.deliveryWarehouseId },
+    select: { id: true, address: true, isActive: true },
+  });
+  if (!warehouse || !warehouse.isActive) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Almacén destino no encontrado o inactivo")}`);
+  }
+
+  const frozenFields = resolvePurchaseOrderFrozenFields({
+    deliveryWarehouse: warehouse,
+    supplierPaymentTerms: order.paymentTermsSnapshot ?? order.supplier.paymentTerms,
+  });
+
+  await prisma.purchaseOrder.update({
+    where: { id: orderId },
+    data: {
+      deliveryWarehouseId: frozenFields.deliveryWarehouseId,
+      deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
+      paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
+      expectedDate: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
+      notes: parsed.data.notes ?? null,
+    },
+  });
+
+  redirect(`/purchasing/orders/${orderId}?ok=1`);
+}
+
 async function removeLine(orderId: string, formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
@@ -142,9 +201,14 @@ export default async function PurchaseOrderDetailPage({
       supplierId: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       expectedDate: true,
       notes: true,
-      supplier: { select: { id: true, code: true, name: true, businessName: true } },
+      deliveryAddressSnapshot: true,
+      paymentTermsSnapshot: true,
+      emailSendState: true,
+      supplier: { select: { id: true, code: true, name: true, businessName: true, paymentTerms: true } },
+      deliveryWarehouse: { select: { id: true, code: true, name: true, address: true, isActive: true } },
       lines: {
         select: {
           id: true,
@@ -179,6 +243,13 @@ export default async function PurchaseOrderDetailPage({
   const updateStatusBound = updateStatus.bind(null, id);
   const addLineBound = addLine.bind(null, id);
   const removeLineBound = removeLine.bind(null, id);
+  const updateDraftMetadataBound = updateDraftMetadata.bind(null, id);
+
+  const activeWarehouses = await prisma.warehouse.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: { id: true, code: true, name: true, address: true },
+  });
 
   const totalOrdered = order.lines.reduce((s, l) => s + l.qtyOrdered, 0);
   const totalReceived = order.lines.reduce((s, l) => s + l.qtyReceived, 0);
@@ -193,7 +264,6 @@ export default async function PurchaseOrderDetailPage({
       documentSnapshot = null;
     }
   }
-
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
   const canReceive = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status) && hasPending;
@@ -274,6 +344,80 @@ export default async function PurchaseOrderDetailPage({
           </div>
         </div>
       )}
+
+      <div className="glass-card space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Entrega y términos oficiales</h2>
+            <p className="text-sm text-slate-400 mt-1">Estos valores se congelan en el documento oficial de la orden de compra.</p>
+          </div>
+          <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+            {order.status === "BORRADOR" ? "Editable" : "Congelado"}
+          </span>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 text-sm">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Dirección de entrega</p>
+            <p className="text-slate-200">{order.deliveryAddressSnapshot ?? order.deliveryWarehouse?.address ?? "—"}</p>
+            <p className="text-slate-500 text-xs">
+              {order.deliveryWarehouse ? `${order.deliveryWarehouse.code} — ${order.deliveryWarehouse.name}` : "Sin almacén seleccionado"}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Términos de pago</p>
+            <p className="text-slate-200">{order.paymentTermsSnapshot ?? order.supplier.paymentTerms ?? "—"}</p>
+            <p className="text-slate-500 text-xs">Origen: ficha del proveedor.</p>
+          </div>
+        </div>
+
+        {order.status === "BORRADOR" && (
+          <form action={updateDraftMetadataBound} className="grid gap-4 md:grid-cols-2 border-t border-white/10 pt-4">
+            <label className="space-y-1 md:col-span-2">
+              <span className="text-xs text-slate-400">Almacén destino *</span>
+              <select
+                name="deliveryWarehouseId"
+                required
+                defaultValue={order.deliveryWarehouseId ?? ""}
+                className="w-full px-3 py-2 glass rounded-lg text-sm"
+              >
+                <option value="">Seleccionar almacén...</option>
+                {activeWarehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.code} — {warehouse.name} {warehouse.address ? `(${warehouse.address})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-slate-400">Fecha esperada</span>
+              <input
+                name="expectedDate"
+                type="date"
+                defaultValue={formatDateInput(order.expectedDate)}
+                className="w-full px-3 py-2 glass rounded-lg text-sm"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-slate-400">Notas</span>
+              <textarea
+                name="notes"
+                rows={3}
+                defaultValue={order.notes ?? ""}
+                className="w-full px-3 py-2 glass rounded-lg text-sm min-h-[96px]"
+              />
+            </label>
+
+            <div className="md:col-span-2 flex justify-end">
+              <button type="submit" className="btn-primary text-sm py-2 px-4">
+                Guardar datos de borrador
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
 
       <div className="glass-card space-y-3">
         <h2 className="text-lg font-bold border-b border-white/10 pb-2">Documento oficial</h2>

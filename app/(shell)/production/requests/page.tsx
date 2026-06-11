@@ -1,1 +1,2067 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */import Link from "next/link";import { redirect } from "next/navigation";import type { Prisma, SalesInternalOrderStatus } from "@prisma/client";import prisma from "@/lib/prisma";import { getSessionContext } from "@/lib/auth/session-context";import { pageGuard } from "@/components/rbac/PageGuard";import { PageHeader } from "@/components/ui/page-header";import { Badge } from "@/components/ui/badge";import { buttonStyles } from "@/components/ui/button";import { isSystemAdmin } from "@/lib/rbac/permissions";import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";import { pullSalesRequestOrder } from "@/lib/sales/request-service";import { firstErrorMessage, salesInternalOrderTransitionSchema } from "@/lib/schemas/wms";import { startPerf } from "@/lib/perf";import { getRequestId } from "@/lib/request-meta";import {  getSalesConsoleStageProgress,  getSalesConsoleWorkType,  resolveSalesConsolePrimaryActionState,  SALES_CONSOLE_STAGE_FLOW,} from "@/lib/sales/console";import {  getMarkDeliveredEligibility,  getTakeOrderEligibility,  getSalesOrderFlowStage,  getSalesOrderFlowNarrative,  SALES_ORDER_FLOW_STAGE_LABELS,  SALES_INTERNAL_ORDER_STATUS_LABELS,  summarizePickListStatus,  type SalesOrderFlowStage,} from "@/lib/sales/internal-orders";import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";import {  evaluateFulfillmentSignals,  isFulfillmentQueueFilter,  matchQueueFilter,  type FulfillmentQueueFilter,} from "@/lib/dashboard/fulfillment-dashboard";import {  evaluateOperationalPresets,  getOperationalPresetLabel,  isOperationalPresetFilter,  matchOperationalPreset,  type OperationalPresetFilter,} from "@/lib/dashboard/fulfillment-operational-presets";export const dynamic = "force-dynamic";const PAGE_SIZE = 50;const STALE_HOURS = 4;const OPEN_ASSEMBLY_STATUSES = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO"]);const BUSINESS_TIMEZONE = "America/Mexico_City";const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {  overdue: "Vencidos",  today: "Vencen hoy",  partial: "Parciales",  stale: "Sin movimiento",  unreleased: "Sin liberar",  assembly_blocked: "Ensamble bloqueado",};const PRESET_LABELS: Record<OperationalPresetFilter, string> = {  urgentes: getOperationalPresetLabel("URGENTES"),  vencen_hoy: getOperationalPresetLabel("VENCEN_HOY"),  sin_asignar: getOperationalPresetLabel("SIN_ASIGNAR"),  sin_movimiento: getOperationalPresetLabel("SIN_MOVIMIENTO"),  bloqueados: getOperationalPresetLabel("BLOQUEADOS"),  listos_para_entrega: getOperationalPresetLabel("LISTOS_PARA_ENTREGA"),};type SearchParams = {  status?: string;  stage?: string;  page?: string;  customer?: string;  queue?: string;  preset?: string;  ok?: string;  error?: string;};const STATUS_BADGE_VARIANTS: Record<SalesInternalOrderStatus, "neutral" | "success" | "danger"> = {  BORRADOR: "neutral",  CONFIRMADA: "success",  CANCELADA: "danger",};const ACTION_LINK_CLASS =  "inline-flex items-center justify-center rounded-[var(--radius-md)] border px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";const CHIP_BASE_CLASS =  "inline-flex items-center rounded-[var(--radius-md)] border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";function getStatusBadgeVariant(status: SalesInternalOrderStatus) {  return STATUS_BADGE_VARIANTS[status];}function getChipClassName(active: boolean) {  return active    ? `${CHIP_BASE_CLASS} border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--text-primary)]`    : `${CHIP_BASE_CLASS} border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]`;}function getTextLinkClassName() {  return "text-[var(--accent)] underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";}function getExecutionBadgeVariant(status: string | null | undefined): "neutral" | "accent" | "success" | "warning" | "danger" {  switch (status) {    case "COMPLETED":    case "COMPLETADA":      return "success";    case "PARTIAL":    case "IN_PROGRESS":    case "RELEASED":    case "ABIERTA":    case "EN_PROCESO":      return "warning";    case "CANCELLED":    case "CANCELADA":      return "danger";    default:      return "neutral";  }}function formatDate(value: Date | string | null | undefined) {  if (!value) return "--";  const date = value instanceof Date ? value : new Date(value);  if (Number.isNaN(date.getTime())) return "--";  return date.toLocaleDateString("es-MX");}function formatDateTime(value: Date | string | null | undefined) {  if (!value) return "--";  const date = value instanceof Date ? value : new Date(value);  if (Number.isNaN(date.getTime())) return "--";  return date.toLocaleString("es-MX");}function parsePage(value: string | undefined) {  const parsed = Number.parseInt(value ?? "1", 10);  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;}function isNextRedirectError(error: unknown) {  return Boolean(    error &&      typeof error === "object" &&      "digest" in error &&      typeof (error as { digest?: unknown }).digest === "string" &&      (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"),  );}function buildReturnHref(args: {  status?: SalesInternalOrderStatus;  customer?: string;  queue?: FulfillmentQueueFilter;  preset?: OperationalPresetFilter;  page: number;}) {  const params = new URLSearchParams();  if (args.status) params.set("status", args.status);  if (args.customer) params.set("customer", args.customer);  if (args.queue) params.set("queue", args.queue);  if (args.preset) params.set("preset", args.preset);  if (args.page > 1) params.set("page", String(args.page));  const qs = params.toString();  return qs ? `/production/requests?${qs}` : "/production/requests";}async function takeRequestFromList(formData: FormData) {  "use server";  const perf = startPerf("action.production.requests.list.pull");  const requestId = await getRequestId();  await requireSalesWriteAccess();  const sessionCtx = await getSessionContext();  const parsed = salesInternalOrderTransitionSchema.safeParse({    orderId: String(formData.get("orderId") ?? "").trim(),  });  const returnToRaw = String(formData.get("returnTo") ?? "").trim();  const returnTo = returnToRaw.startsWith("/production/requests") ? returnToRaw : "/production/requests";  if (!parsed.success) {    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);  }  if (!sessionCtx.user?.id) {    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("Sesion invalida para tomar pedido")}`);  }  try {    const servicePerf = startPerf("action.production.requests.list.pull.service");    await pullSalesRequestOrder(prisma, {      orderId: parsed.data.orderId,      assignedToUserId: sessionCtx.user.id,    });    servicePerf.end({ requestId, orderId: parsed.data.orderId });    perf.end({ requestId, orderId: parsed.data.orderId, ok: true });    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}ok=${encodeURIComponent("Pedido tomado y asignado")}`);  } catch (error) {    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });    if (isNextRedirectError(error)) throw error;    const message = error instanceof Error ? error.message : "No se pudo tomar el pedido";    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent(message)}`);  }}export default async function ProductionRequestsPage({  searchParams,}: {  searchParams: Promise<SearchParams>;}) {  await pageGuard("sales.view");  const [sp, sessionCtx] = await Promise.all([searchParams, getSessionContext()]);  const currentPage = parsePage(sp.page);  const statusFilter: SalesInternalOrderStatus | undefined =    sp.status === "BORRADOR" || sp.status === "CONFIRMADA" || sp.status === "CANCELADA" ? sp.status : undefined;  const stageFilter: SalesOrderFlowStage | undefined = SALES_CONSOLE_STAGE_FLOW.includes(sp.stage as SalesOrderFlowStage)    ? (sp.stage as SalesOrderFlowStage)    : undefined;  const queueFilter = isFulfillmentQueueFilter(sp.queue) ? sp.queue : undefined;  const presetFilter = isOperationalPresetFilter(sp.preset) ? sp.preset : undefined;  const customerFilter = (sp.customer ?? "").trim();  const baseWhere: Prisma.SalesInternalOrderWhereInput = {    ...(customerFilter ? { customerName: { contains: customerFilter } } : {}),  };  const visibleWhere = buildSalesRequestVisibilityWhere({    roles: sessionCtx.roles,    userId: sessionCtx.user?.id ?? null,    baseWhere,  });  const where: Prisma.SalesInternalOrderWhereInput = statusFilter    ? { AND: [visibleWhere, { status: statusFilter }] }    : visibleWhere;  const [totalCount, groupedStatuses, linkedAssemblyCount, directPickCount] = await Promise.all([    prisma.salesInternalOrder.count({ where: visibleWhere }),    prisma.salesInternalOrder.groupBy({ by: ["status"], _count: { status: true }, where: visibleWhere }),    prisma.salesInternalOrder.count({      where: {        AND: [          visibleWhere,          {            lines: {              some: { lineKind: "CONFIGURED_ASSEMBLY" },            },          },        ],      },    }),    prisma.salesInternalOrderPickList.count({      where: {        status: { in: ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] },        order: { is: visibleWhere },      },    }),  ]);  const orderSelect = {    id: true,    code: true,    status: true,    customerId: true,    customerName: true,    customer: {      select: {        id: true,        name: true,        isActive: true,      },    },    dueDate: true,    assignedToUserId: true,    assignedAt: true,    pulledAt: true,    deliveredToCustomerAt: true,    updatedAt: true,    warehouse: { select: { id: true, code: true, name: true } },    requestedByUser: {      select: {        name: true,        email: true,        userRoles: {          where: { role: { code: "MANAGER", isActive: true } },          select: { roleId: true },        },      },    },    assignedToUser: { select: { name: true, email: true } },    _count: { select: { lines: true, pickLists: true } },    lines: {      orderBy: { createdAt: "asc" },      select: {        id: true,        lineKind: true,        requestedQty: true,        notes: true,        product: {          select: {            id: true,            sku: true,            referenceCode: true,            name: true,            type: true,            unitLabel: true,            brand: true,            inventory: {              select: {                quantity: true,                reserved: true,                available: true,                location: {                  select: {                    warehouse: { select: { id: true } },                  },                },              },            },          },        },        assemblyConfiguration: {          select: {            hoseLength: true,            assemblyQuantity: true,            totalHoseRequired: true,            sourceDocumentRef: true,            notes: true,            entryFittingProduct: { select: { sku: true, name: true } },            hoseProduct: { select: { sku: true, name: true } },            exitFittingProduct: { select: { sku: true, name: true } },          },        },        pickTasks: {          select: {            reservedQty: true,            pickedQty: true,            shortQty: true,            status: true,            pickList: {              select: {                id: true,                code: true,                status: true,                updatedAt: true,                targetLocation: { select: { code: true, name: true } },              },            },          },        },      },    },    pickLists: {      where: { status: { not: "CANCELLED" } },      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],      take: 1,      select: {        code: true,        status: true,        updatedAt: true,        targetLocation: { select: { code: true, name: true } },      },    },  } as const;  let orders: any[] = [];  let filteredCount = 0;  if (queueFilter || stageFilter || presetFilter) {    const queueCandidates = await prisma.salesInternalOrder.findMany({      where,      select: {        id: true,        status: true,        dueDate: true,        updatedAt: true,        assignedToUserId: true,        pulledAt: true,        deliveredToCustomerAt: true,        lines: { select: { id: true, lineKind: true } },        pickLists: {          where: { status: { not: "CANCELLED" } },          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],          take: 1,          select: { status: true, updatedAt: true },        },      },    });    const candidateIds = queueCandidates.map((row) => row.id);    const linkedProduction = candidateIds.length      ? await prisma.productionOrder.findMany({          where: {            sourceDocumentType: "SalesInternalOrder",            sourceDocumentId: { in: candidateIds },          },          select: {            id: true,            code: true,            sourceDocumentId: true,            sourceDocumentLineId: true,            status: true,            updatedAt: true,            assemblyWorkOrder: {              select: {                pickStatus: true,              },            },          },        })      : [];    const linkedByOrder = new Map<string, typeof linkedProduction>();    for (const row of linkedProduction) {      const orderId = row.sourceDocumentId ?? "";      if (!orderId) continue;      const bucket = linkedByOrder.get(orderId);      if (bucket) {        bucket.push(row);      } else {        linkedByOrder.set(orderId, [row]);      }    }    const now = new Date();    const matchedIds = queueCandidates      .filter((candidate) => {        const latestPick = candidate.pickLists[0] ?? null;        const hasProductLines = candidate.lines.some((line) => line.lineKind === "PRODUCT");        const hasAssemblyLines = candidate.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY");        const assemblyLineIds = new Set(candidate.lines.filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line) => line.id));        const linkedForOrder = (linkedByOrder.get(candidate.id) ?? []).filter((row) => (row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false));        const linkedAssemblyOpen = linkedForOrder.filter((row) => OPEN_ASSEMBLY_STATUSES.has(row.status)).length;        const hasCompletedConfiguredAssembly = !hasAssemblyLines || (linkedForOrder.length > 0 && linkedAssemblyOpen === 0);        const latestAssemblyUpdatedAt = linkedForOrder          .map((row) => row.updatedAt)          .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;        const signals = evaluateFulfillmentSignals({          dueDate: candidate.dueDate,          orderUpdatedAt: candidate.updatedAt,          assignedToUserId: candidate.assignedToUserId,          hasProductLines,          hasAssemblyLines,          latestPickStatus: latestPick?.status ?? null,          latestPickUpdatedAt: latestPick?.updatedAt ?? null,          linkedAssemblyTotal: linkedForOrder.length,          linkedAssemblyOpen,          linkedAssemblyUpdatedAt: latestAssemblyUpdatedAt,          now,          staleHours: STALE_HOURS,        });        const flowStage = getSalesOrderFlowStage({          status: candidate.status as SalesInternalOrderStatus,          assignedToUserId: candidate.assignedToUserId,          deliveredToCustomerAt: candidate.deliveredToCustomerAt,          latestPickStatus: latestPick?.status ?? null,          hasProductLines,          hasAssemblyLines,          hasCompletedConfiguredAssembly,        });        const hasCompletedDirectPick = !hasProductLines || latestPick?.status === "COMPLETED";        const deliveredEligibility = getMarkDeliveredEligibility({          status: candidate.status as SalesInternalOrderStatus,          deliveredToCustomerAt: candidate.deliveredToCustomerAt,          assignedToUserId: candidate.assignedToUserId,          pulledAt: candidate.pulledAt,          hasCompletedDirectPick,          hasCompletedConfiguredAssembly,        });        const presetEvaluation = evaluateOperationalPresets(          {            dueDate: candidate.dueDate,            assignedToUserId: candidate.assignedToUserId,            flowStage,            isPartial: signals.isPartial,            isUnreleased: signals.isUnreleased,            assemblyBlocked: signals.assemblyBlocked,            canMarkDelivered: deliveredEligibility.canMarkDelivered,            isStale: signals.isStale,            lastOperationalUpdateAt: signals.lastUpdatedAt,            inActiveQueue: true,          },          {            now,            timezone: BUSINESS_TIMEZONE,            staleHours: STALE_HOURS,          },        );        const queueMatch = queueFilter ? matchQueueFilter(signals, queueFilter) : true;        const presetMatch = presetFilter ? matchOperationalPreset(presetEvaluation, presetFilter, "primary") : true;        const stageMatch = stageFilter ? flowStage === stageFilter : true;        return queueMatch && stageMatch && presetMatch;      })      .map((row) => row.id);    filteredCount = matchedIds.length;    const totalPagesForQueue = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));    const safeCandidatePage = Math.min(currentPage, totalPagesForQueue);    const pagedIds = matchedIds.slice((safeCandidatePage - 1) * PAGE_SIZE, safeCandidatePage * PAGE_SIZE);    orders = pagedIds.length      ? await (prisma as any).salesInternalOrder.findMany({          where: { id: { in: pagedIds } },          select: orderSelect,        })      : [];    const orderById = new Map(orders.map((order) => [order.id, order]));    orders = pagedIds.map((id) => orderById.get(id)).filter(Boolean);  } else {    [orders, filteredCount] = await Promise.all([      (prisma as any).salesInternalOrder.findMany({        where,        orderBy: { createdAt: "desc" },        skip: (currentPage - 1) * PAGE_SIZE,        take: PAGE_SIZE,        select: orderSelect,      }),      prisma.salesInternalOrder.count({ where }),    ]);  }  const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));  const safePage = Math.min(currentPage, totalPages);  const currentOrderIds = orders.map((order) => order.id);  const currentLinkedProduction = currentOrderIds.length    ? await prisma.productionOrder.findMany({        where: {          sourceDocumentType: "SalesInternalOrder",          sourceDocumentId: { in: currentOrderIds },        },        select: {          id: true,          code: true,          sourceDocumentId: true,          sourceDocumentLineId: true,          status: true,          updatedAt: true,          assemblyWorkOrder: {            select: {              pickStatus: true,            },          },        },      })    : [];  const currentLinkedByOrder = new Map<string, typeof currentLinkedProduction>();  for (const row of currentLinkedProduction) {    const orderId = row.sourceDocumentId ?? "";    if (!orderId) continue;    const bucket = currentLinkedByOrder.get(orderId);    if (bucket) {      bucket.push(row);    } else {      currentLinkedByOrder.set(orderId, [row]);    }  }  const statusCountMap = Object.fromEntries(groupedStatuses.map((row) => [row.status, row._count.status]));  const canRenderWriteActions = hasSalesWriteAccess({ roles: sessionCtx.roles, permissions: sessionCtx.permissions });  const canOperateProductionActions = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("production.execute");  const canViewCustomers = sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");  const buildHref = (page: number, status = statusFilter, queue = queueFilter, stage = stageFilter, preset = presetFilter) => {    const base = buildReturnHref({      status,      customer: customerFilter || undefined,      queue,      preset,      page,    });    if (!stage) return base;    const [path, query = ""] = base.split("?");    const params = new URLSearchParams(query);    params.set("stage", stage);    const qs = params.toString();    return qs ? `${path}?${qs}` : path;  };  return (    <div className="space-y-6">      <PageHeader        title="Warehouse Execution Cockpit"        description="Cola operativa para pedidos, surtido directo y ensambles configurados."        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Preset operativo: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}        actions={          <>            <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>              Disponibilidad            </Link>            <Link href="/production/equivalences" className={buttonStyles({ variant: "secondary", size: "sm" })}>              Equivalencias            </Link>            <Link href="/production/requests/new" className={buttonStyles({ variant: "primary", size: "sm" })}>              + Nuevo pedido            </Link>          </>        }      />      {sp.ok ? (        <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">          {sp.ok}        </div>      ) : null}      {sp.error ? (        <div className="rounded-xl border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">          {sp.error}        </div>      ) : null}      <section className="grid gap-4 md:grid-cols-4">        {[          { label: "Pedidos", value: totalCount, note: "Visibilidad total del filtro actual" },          { label: "Borrador", value: statusCountMap.BORRADOR ?? 0, note: "Pedidos todavía en captura" },          { label: "Ensamble ligado", value: linkedAssemblyCount, note: "Pedidos con líneas configuradas" },          { label: "Surtidos directos activos", value: directPickCount, note: "Pedidos con pick list activo" },        ].map((stat) => (          <article key={stat.label} className="glass-card space-y-2">            <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">{stat.label}</p>            <p className="text-3xl font-semibold text-[var(--text-primary)]">{stat.value}</p>            <p className="text-sm text-[var(--text-muted)]">{stat.note}</p>          </article>        ))}      </section>      <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">        {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}        {queueFilter ? <input type="hidden" name="queue" value={queueFilter} /> : null}        {presetFilter ? <input type="hidden" name="preset" value={presetFilter} /> : null}        {stageFilter ? <input type="hidden" name="stage" value={stageFilter} /> : null}        <label className="flex-1 space-y-1">          <span className="text-sm text-[var(--text-muted)]">Filtrar por cliente</span>          <input            type="text"            name="customer"            defaultValue={customerFilter}            placeholder="Nombre o cuenta del cliente"            className="field"          />        </label>        <div className="flex flex-wrap gap-2">          <button type="submit" className="btn-primary">            Filtrar          </button>          <Link href={buildHref(1, undefined, undefined, undefined, undefined)} className={buttonStyles({ variant: "secondary" })}>            Limpiar          </Link>        </div>      </form>      <section className="space-y-3">        <div className="flex flex-wrap gap-2">          <Link href={buildHref(1, statusFilter, undefined, stageFilter)} className={getChipClassName(!queueFilter)}>            Todos por atender          </Link>          {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map((queue) => (            <Link key={queue} href={buildHref(1, statusFilter, queue, stageFilter)} className={getChipClassName(queueFilter === queue)}>              {QUEUE_LABELS[queue]}            </Link>          ))}        </div>        <div className="flex flex-wrap gap-2">          <Link href={buildHref(1, statusFilter, queueFilter, stageFilter, undefined)} className={getChipClassName(!presetFilter)}>            Todos presets          </Link>          {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map((preset) => (            <Link key={preset} href={buildHref(1, statusFilter, queueFilter, stageFilter, preset)} className={getChipClassName(presetFilter === preset)}>              {PRESET_LABELS[preset]}            </Link>          ))}        </div>        <div className="flex flex-wrap gap-2">          <Link href={buildHref(1, statusFilter, queueFilter, undefined)} className={getChipClassName(!stageFilter)}>            Todas etapas          </Link>          {SALES_CONSOLE_STAGE_FLOW.map((stage) => (            <Link key={stage} href={buildHref(1, statusFilter, queueFilter, stage)} className={getChipClassName(stageFilter === stage)}>              {SALES_ORDER_FLOW_STAGE_LABELS[stage]}            </Link>          ))}        </div>        <div className="flex flex-wrap gap-2">          <Link href={buildHref(1, undefined, queueFilter)} className={getChipClassName(!statusFilter)}>            Todos ({totalCount})          </Link>          {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(([status, label]) => (            <Link key={status} href={buildHref(1, status as SalesInternalOrderStatus, queueFilter)} className={getChipClassName(statusFilter === status)}>              {label} ({statusCountMap[status] ?? 0})            </Link>          ))}        </div>      </section>      <section className="space-y-4">        {orders.length === 0 ? (          <div className="glass-card rounded-xl p-6 text-center text-[var(--text-muted)]">            No hay pedidos para el filtro seleccionado.          </div>        ) : (          orders.map((order) => {            const orderStatus = order.status as SalesInternalOrderStatus;            const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";            const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;            const productLines = (order.lines as any[]).filter((line: any) => line.lineKind === "PRODUCT");            const configuredLines = (order.lines as any[]).filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");            const assemblyLineIds = new Set(configuredLines.map((line: any) => line.id));            const linkedForOrder = (currentLinkedByOrder.get(order.id) ?? []).filter((row) =>              row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false,            );            const hasCompletedConfiguredAssembly =              configuredLines.length === 0 ||              (linkedForOrder.length === assemblyLineIds.size && linkedForOrder.every((row) => row.status === "COMPLETADA"));            const latestPick = order.pickLists[0] ?? null;            const latestPickStatus = latestPick?.status ?? null;            const hasCompletedDirectPick = productLines.length === 0 || latestPickStatus === "COMPLETED";            const takeEligibility = getTakeOrderEligibility({              roles: sessionCtx.roles,              status: orderStatus,              assignedToUserId: order.assignedToUserId,              isCreatedByManager: createdByManager,            });            const deliveredEligibility = getMarkDeliveredEligibility({              status: orderStatus,              deliveredToCustomerAt: order.deliveredToCustomerAt,              assignedToUserId: order.assignedToUserId,              pulledAt: order.pulledAt,              hasCompletedDirectPick,              hasCompletedConfiguredAssembly,            });            const flowNarrative = getSalesOrderFlowNarrative({              orderId: order.id,              roles: sessionCtx.roles,              status: orderStatus,              assignedToUserId: order.assignedToUserId,              deliveredToCustomerAt: order.deliveredToCustomerAt,              pulledAt: order.pulledAt,              latestPickStatus,              hasProductLines: productLines.length > 0,              hasAssemblyLines: configuredLines.length > 0,              hasCompletedConfiguredAssembly,              takeEligibility,              deliveredEligibility,            });            const workType = getSalesConsoleWorkType({              flowStage: flowNarrative.flowStage,              hasProductLines: productLines.length > 0,              hasAssemblyLines: configuredLines.length > 0,            });            const stageProgress = getSalesConsoleStageProgress(flowNarrative.flowStage);            const primaryActionState = resolveSalesConsolePrimaryActionState({              flowNarrative,              canExecuteSalesActions: canRenderWriteActions,              canExecuteProductionActions: canOperateProductionActions,            });            return (              <article key={order.id} className="glass-card space-y-5">                <header className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">                  <div className="space-y-4">                    <div className="space-y-2">                      <div className="flex flex-wrap items-center gap-2">                        <Link href={`/production/requests/${order.id}`} className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">                          {order.code}                        </Link>                        <Badge variant={getStatusBadgeVariant(orderStatus)}>{SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}</Badge>                        <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>                        <Badge variant={workType.variant}>{workType.label}</Badge>                        {takeEligibility.canTakeOrder ? <Badge variant="accent">Tomable</Badge> : null}                      </div>                      <p className="text-sm text-[var(--text-muted)]">                        Cliente:{" "}                        {order.customerId && canViewCustomers ? (                          <Link href={`/sales/customers/${order.customerId}`} className={getTextLinkClassName()}>                            {displayCustomer}                          </Link>                        ) : (                          displayCustomer                        )}                        {" · "}Almacen: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}                      </p>                    </div>                    <div className="grid gap-3 sm:grid-cols-2">                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">Trabajo actual</p>                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">{workType.label}</p>                        <p className="mt-1 text-sm text-[var(--text-muted)]">{workType.detail}</p>                      </div>                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">Matriz de mix</p>                        <div className="mt-2 flex flex-wrap gap-2">                          <Badge variant={productLines.length > 0 ? "accent" : "neutral"}>{productLines.length.toLocaleString("es-MX")} productos independientes</Badge>                          <Badge variant={configuredLines.length > 0 ? "warning" : "neutral"}>{configuredLines.length.toLocaleString("es-MX")} ensambles configurados</Badge>                        </div>                        <p className="mt-2 text-sm text-[var(--text-muted)]">                          {hasCompletedDirectPick ? "Surtido directo validado" : latestPickStatus ? summarizePickListStatus(latestPickStatus) : "Surtido directo pendiente"}                        </p>                      </div>                    </div>                  </div>                  <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">                    <div className="flex items-center justify-between gap-3">                      <div>                        <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">Next Action</p>                        <p className="mt-1 text-base font-semibold text-[var(--text-primary)]">{primaryActionState.label}</p>                      </div>                      <Badge                        variant={                          primaryActionState.state === "allowed"                            ? "success"                            : primaryActionState.state === "blocked"                              ? "warning"                              : "neutral"                        }                      >                        {primaryActionState.state === "allowed" ? "Disponible" : primaryActionState.state === "blocked" ? "Bloqueada" : "Informativa"}                      </Badge>                    </div>                    <p className="mt-2 text-sm text-[var(--text-muted)]">{primaryActionState.blockedReason ?? primaryActionState.reason}</p>                    <div className="mt-4 space-y-2">                      {primaryActionState.state === "allowed" && primaryActionState.code === "TAKE_ORDER" ? (                        <form action={takeRequestFromList}>                          <input type="hidden" name="orderId" value={order.id} />                          <input type="hidden" name="returnTo" value={buildHref(safePage)} />                          <button                            type="submit"                            disabled={!takeEligibility.canTakeOrder}                            className={buttonStyles({                              variant: "primary",                              fullWidth: true,                              className: !takeEligibility.canTakeOrder ? "cursor-not-allowed opacity-55" : "",                            })}                          >                            {primaryActionState.label}                          </button>                        </form>                      ) : primaryActionState.state === "allowed" ? (                        <Link href={primaryActionState.href} className={buttonStyles({ variant: "primary", fullWidth: true })}>                          {primaryActionState.label}                        </Link>                      ) : (                        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">                          <div className="flex flex-wrap items-center justify-between gap-2">                            <p className="text-sm font-medium text-[var(--text-primary)]">{primaryActionState.label}</p>                            <Badge variant={primaryActionState.state === "blocked" ? "warning" : "neutral"} size="md">                              {primaryActionState.state === "blocked" ? "Bloqueada" : "Informativa"}                            </Badge>                          </div>                          <p className="mt-1 text-xs text-[var(--text-muted)]">{primaryActionState.blockedReason ?? primaryActionState.reason}</p>                        </div>                      )}                      <Link href={`/production/requests/${order.id}`} className={buttonStyles({ variant: "secondary", fullWidth: true })}>                        Ver detalle                      </Link>                    </div>                  </section>                </header>                <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">                  <div className="flex flex-wrap items-center justify-between gap-3">                    <div>                      <p className="text-sm font-medium text-[var(--text-primary)]">Progreso comercial</p>                      <p className="text-xs text-[var(--text-muted)]">                        Captura, asignación, surtido, entrega y cierre con estados visibles por etapa.                      </p>                    </div>                    <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>                  </div>                  <div className="mt-3 flex flex-wrap gap-2">                    {stageProgress.map((step) => (                      <Badge key={step.stage} variant={step.variant}>                        {step.step}. {step.label}                      </Badge>                    ))}                  </div>                  <div className="mt-3 flex flex-wrap gap-2">                    <Badge variant={productLines.length > 0 ? "accent" : "neutral"}>{productLines.length.toLocaleString("es-MX")} productos independientes</Badge>                    <Badge variant={configuredLines.length > 0 ? "warning" : "neutral"}>{configuredLines.length.toLocaleString("es-MX")} ensambles configurados</Badge>                    <Badge variant={hasCompletedDirectPick ? "success" : latestPickStatus ? "warning" : "neutral"}>                      {hasCompletedDirectPick ? "Surtido directo validado" : latestPickStatus ? summarizePickListStatus(latestPickStatus) : "Surtido directo pendiente"}                    </Badge>                    <Badge variant={deliveredEligibility.canMarkDelivered ? "success" : "warning"}>                      {deliveredEligibility.canMarkDelivered ? "Entrega lista" : "Entrega bloqueada"}                    </Badge>                  </div>                </section>                <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">                  {[                    {                      label: "Asignación",                      value: order.assignedToUser ? order.assignedToUser.name ?? order.assignedToUser.email ?? "--" : "Sin asignar",                      note: order.assignedAt ? `Asignado el ${formatDateTime(order.assignedAt)}` : "Pendiente de asignación",                      badge: order.assignedToUser ? "success" : "neutral",                    },                    {                      label: "Compromiso",                      value: formatDate(order.dueDate),                      note: order.dueDate ? "Fecha compromiso" : "Sin fecha prometida",                      badge: order.dueDate ? "accent" : "neutral",                    },                    {                      label: "Ultimo movimiento",                      value: formatDateTime(order.updatedAt),                      note: "Actualizacion operativa mas reciente",                      badge: "neutral",                    },                    {                      label: "Validacion de surtido directo",                      value: hasCompletedDirectPick ? "Validado" : latestPickStatus ? summarizePickListStatus(latestPickStatus) : "Pendiente",                      note: latestPick ? `${latestPick.code} · ${latestPick.targetLocation.code} - ${latestPick.targetLocation.name}` : "Sin pick list activo",                      badge: hasCompletedDirectPick ? "success" : latestPickStatus ? "warning" : "neutral",                    },                    {                      label: "Validacion de ensamble",                      value: hasCompletedConfiguredAssembly ? "Validado" : configuredLines.length > 0 ? "Pendiente" : "No aplica",                      note: configuredLines.length > 0 ? `${configuredLines.length.toLocaleString("es-MX")} linea(s) configurada(s)` : "Sin ensambles configurados",                      badge: hasCompletedConfiguredAssembly ? "success" : configuredLines.length > 0 ? "warning" : "neutral",                    },                    {                      label: "Validacion de entrega",                      value: deliveredEligibility.canMarkDelivered ? "Lista" : "Bloqueada",                      note: deliveredEligibility.canMarkDelivered ? "Elegible para marcar entrega" : deliveredEligibility.deliveredBlockedReason ?? "Pendiente",                      badge: deliveredEligibility.canMarkDelivered ? "success" : "warning",                    },                  ].map((stat) => (                    <div key={stat.label} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">{stat.label}</p>                      <div className="mt-2">                        <Badge variant={stat.badge as "neutral" | "accent" | "success" | "warning"}>{stat.value}</Badge>                      </div>                      <p className="mt-2 text-sm text-[var(--text-muted)]">{stat.note}</p>                    </div>                  ))}                </section>                <section className="grid gap-4 lg:grid-cols-2">                  <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">                      <div>                        <p className="font-medium text-[var(--text-primary)]">Productos independientes</p>                        <p className="text-xs text-[var(--text-muted)]">Surtido directo y validacion por pick list.</p>                      </div>                      <Badge variant={productLines.length ? "accent" : "neutral"}>{productLines.length.toLocaleString("es-MX")} lineas</Badge>                    </summary>                    <div className="border-t border-[var(--border-soft)] p-4">                      {productLines.length === 0 ? (                        <p className="text-sm text-[var(--text-muted)]">Todavia no hay productos independientes en este pedido.</p>                      ) : (                        <div className="space-y-3">                          {productLines.map((line: any) => {                            const reserved = line.pickTasks.reduce((acc: number, task: any) => acc + task.reservedQty, 0);                            const picked = line.pickTasks.reduce((acc: number, task: any) => acc + task.pickedQty, 0);                            const shortQty = line.pickTasks.reduce((acc: number, task: any) => acc + task.shortQty, 0);                            const currentPickList = line.pickTasks[0]?.pickList ?? null;                            const filteredInventory = order.warehouse                              ? (line.product?.inventory ?? []).filter((row: any) => row.location.warehouse.id === order.warehouse?.id)                              : (line.product?.inventory ?? []);                            const available = filteredInventory.reduce((acc: number, row: any) => acc + row.available, 0);                            return (                              <article key={line.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">                                  <div className="space-y-1">                                    <p className="font-mono text-sm text-[var(--accent)]">{line.product?.sku ?? "Sin SKU"}</p>                                    <p className="font-medium text-[var(--text-primary)]">{line.product?.name ?? "Producto sin nombre"}</p>                                    <p className="text-xs text-[var(--text-muted)]">                                      {line.product?.referenceCode ?? line.product?.brand ?? "--"} · {line.product?.type ?? "--"} · {line.product?.unitLabel ?? "unidad"}                                    </p>                                    {line.notes ? <p className="text-xs text-[var(--text-muted)]">{line.notes}</p> : null}                                  </div>                                  <div className="flex flex-wrap gap-2">                                    <Badge variant={currentPickList ? getExecutionBadgeVariant(currentPickList.status) : "neutral"}>                                      {currentPickList ? summarizePickListStatus(currentPickList.status) : "Sin surtido"}                                    </Badge>                                    {currentPickList ? (                                      <Badge variant="accent">                                        {currentPickList.code} · {currentPickList.targetLocation.code}                                      </Badge>                                    ) : null}                                  </div>                                </div>                                <div className="mt-4 grid gap-2 sm:grid-cols-4">                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">                                    <p className="text-xs text-[var(--text-muted)]">Solicitado</p>                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">                                      {line.requestedQty.toLocaleString("es-MX")} {line.product?.unitLabel ?? "unidad"}                                    </p>                                  </div>                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">                                    <p className="text-xs text-[var(--text-muted)]">Reservado</p>                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{reserved.toLocaleString("es-MX")}</p>                                  </div>                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">                                    <p className="text-xs text-[var(--text-muted)]">Surtido</p>                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{picked.toLocaleString("es-MX")}</p>                                  </div>                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">                                    <p className="text-xs text-[var(--text-muted)]">Disponible</p>                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{available.toLocaleString("es-MX")}</p>                                  </div>                                </div>                                <p className="mt-3 text-xs text-[var(--text-muted)]">Faltante: {shortQty.toLocaleString("es-MX")}</p>                              </article>                            );                          })}                        </div>                      )}                    </div>                  </details>                  <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">                      <div>                        <p className="font-medium text-[var(--text-primary)]">Ensambles configurados</p>                        <p className="text-xs text-[var(--text-muted)]">Componentes, estado y orden ligada.</p>                      </div>                      <Badge variant={configuredLines.length ? "warning" : "neutral"}>{configuredLines.length.toLocaleString("es-MX")} lineas</Badge>                    </summary>                    <div className="border-t border-[var(--border-soft)] p-4">                      {configuredLines.length === 0 ? (                        <p className="text-sm text-[var(--text-muted)]">Todavia no hay ensambles configurados en este pedido.</p>                      ) : (                        <div className="space-y-3">                          {configuredLines.map((line: any) => {                            const linkedProduction = linkedForOrder.find((row) => row.sourceDocumentLineId === line.id) ?? null;                            const productionStatus = linkedProduction?.status ?? null;                            const productionPickStatus = linkedProduction?.assemblyWorkOrder?.pickStatus ?? null;                            const configurationStateLabel = linkedProduction                              ? productionStatus === "COMPLETADA"                                ? "Completada"                                : productionStatus === "CANCELADA"                                  ? "Cancelada"                                  : "En proceso"                              : "Pendiente de generar";                            return (                              <article key={line.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">                                  <div className="space-y-1">                                    <p className="font-semibold text-[var(--text-primary)]">                                      {line.assemblyConfiguration?.entryFittingProduct.sku} + {line.assemblyConfiguration?.hoseProduct.sku} + {line.assemblyConfiguration?.exitFittingProduct.sku}                                    </p>                                    <p className="text-xs text-[var(--text-muted)]">                                      Componentes: {line.assemblyConfiguration?.entryFittingProduct.name} · {line.assemblyConfiguration?.hoseProduct.name} · {line.assemblyConfiguration?.exitFittingProduct.name}                                    </p>                                    <p className="text-xs text-[var(--text-muted)]">                                      Cantidad solicitada/configurada: {line.assemblyConfiguration?.assemblyQuantity ?? "--"} · Longitud: {line.assemblyConfiguration?.hoseLength ?? "--"} · Total de manguera: {line.assemblyConfiguration?.totalHoseRequired ?? "--"}                                    </p>                                    <p className="text-xs text-[var(--text-muted)]">Referencia de configuracion: {line.assemblyConfiguration?.sourceDocumentRef ?? "--"}</p>                                    <p className="text-xs text-[var(--text-muted)]">Notas: {line.assemblyConfiguration?.notes ?? line.notes ?? "Sin notas"}</p>                                  </div>                                  <div className="flex flex-wrap gap-2">                                    <Badge variant={getExecutionBadgeVariant(productionStatus)}>Orden {configurationStateLabel}</Badge>                                    <Badge variant={getExecutionBadgeVariant(productionPickStatus)}>{productionPickStatus ? `Pick ${productionPickStatus}` : "Sin pick"}</Badge>                                    {linkedProduction ? (                                      <Link href={`/production/orders/${linkedProduction.id}`} className={buttonStyles({ variant: "secondary", size: "sm" })}>                                        {linkedProduction.code}                                      </Link>                                    ) : (                                      <Badge variant="neutral">Sin orden ligada</Badge>                                    )}                                  </div>                                </div>                                {linkedProduction?.assemblyWorkOrder?.pickStatus ? (                                  <p className="mt-3 text-xs text-[var(--text-muted)]">                                    Estado de pick de ensamble: {linkedProduction.assemblyWorkOrder.pickStatus}                                  </p>                                ) : null}                              </article>                            );                          })}                        </div>                      )}                    </div>                  </details>                </section>                <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">                    <div>                      <p className="text-sm font-medium text-[var(--text-primary)]">Resumen operativo persistente</p>                      <p className="text-xs text-[var(--text-muted)]">                        Asignacion, compromiso, ultimo movimiento y validaciones criticas del pedido.                      </p>                    </div>                    <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>                  </div>                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">                    <div>                      <p className="text-xs text-[var(--text-muted)]">Asignacion</p>                      <p className="text-sm text-[var(--text-primary)]">                        {order.assignedToUser ? order.assignedToUser.name ?? order.assignedToUser.email ?? "--" : "Sin asignar"}                      </p>                    </div>                    <div>                      <p className="text-xs text-[var(--text-muted)]">Compromiso</p>                      <p className="text-sm text-[var(--text-primary)]">{formatDate(order.dueDate)}</p>                    </div>                    <div>                      <p className="text-xs text-[var(--text-muted)]">Ultimo movimiento</p>                      <p className="text-sm text-[var(--text-primary)]">{formatDateTime(order.updatedAt)}</p>                    </div>                    <div>                      <p className="text-xs text-[var(--text-muted)]">Entrega</p>                      <p className="text-sm text-[var(--text-primary)]">                        {deliveredEligibility.canMarkDelivered ? "Lista para entrega" : deliveredEligibility.deliveredBlockedReason ?? "Bloqueada"}                      </p>                    </div>                  </div>                </section>              </article>            );          })        )}      </section>      <section className="glass-card space-y-4">        <div className="flex flex-col gap-1">          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Vista administrativa</h2>          <p className="text-sm text-[var(--text-muted)]">Fallback tabular para inspeccion rapida, sin desplazar el cockpit operativo principal.</p>        </div>        <div className="overflow-x-auto">          <table className="w-full text-sm">            <thead>              <tr className="border-b border-[var(--border-soft)] text-[var(--text-muted)]">                <th className="py-3 text-left">Codigo</th>                <th className="py-3 text-left">Cliente</th>                <th className="py-3 text-left">Estado</th>                <th className="py-3 text-left">Almacen</th>                <th className="py-3 text-left">Solicitado por</th>                <th className="py-3 text-left">Asignado a</th>                <th className="py-3 text-left">Entrega</th>                <th className="py-3 text-right">Lineas</th>                <th className="py-3 text-left">Acciones</th>              </tr>            </thead>            <tbody>              {orders.length === 0 ? (                <tr>                  <td colSpan={9} className="py-10 text-center text-[var(--text-muted)]">                    No hay pedidos para el filtro seleccionado.                  </td>                </tr>              ) : (                orders.map((order) => {                  const orderStatus = order.status as SalesInternalOrderStatus;                  const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";                  const createdByManager = (order.requestedByUser?.userRoles.length ?? 0) > 0;                  const hasProductLines = order.lines.some((line: any) => line.lineKind === "PRODUCT");                  const hasAssemblyLines = order.lines.some((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");                  const assemblyLineIds = new Set(order.lines.filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY").map((line: any) => line.id));                  const linkedForOrder = (currentLinkedByOrder.get(order.id) ?? []).filter((row) =>                    row.sourceDocumentLineId ? assemblyLineIds.has(row.sourceDocumentLineId) : false,                  );                  const hasCompletedConfiguredAssembly =                    !hasAssemblyLines || (linkedForOrder.length === assemblyLineIds.size && linkedForOrder.every((row) => row.status === "COMPLETADA"));                  const latestPickStatus = order.pickLists[0]?.status ?? null;                  const takeEligibility = getTakeOrderEligibility({                    roles: sessionCtx.roles,                    status: orderStatus,                    assignedToUserId: order.assignedToUserId,                    isCreatedByManager: createdByManager,                  });                  const hasCompletedDirectPick = !hasProductLines || latestPickStatus === "COMPLETED";                  const deliveredEligibility = getMarkDeliveredEligibility({                    status: orderStatus,                    deliveredToCustomerAt: order.deliveredToCustomerAt,                    assignedToUserId: order.assignedToUserId,                    pulledAt: order.pulledAt,                    hasCompletedDirectPick,                    hasCompletedConfiguredAssembly,                  });                  const flowNarrative = getSalesOrderFlowNarrative({                    orderId: order.id,                    roles: sessionCtx.roles,                    status: orderStatus,                    assignedToUserId: order.assignedToUserId,                    deliveredToCustomerAt: order.deliveredToCustomerAt,                    pulledAt: order.pulledAt,                    latestPickStatus,                    hasProductLines,                    hasAssemblyLines,                    hasCompletedConfiguredAssembly,                    takeEligibility,                    deliveredEligibility,                  });                  return (                    <tr key={order.id} className="border-b border-[var(--border-soft)] align-top hover:bg-[var(--table-hover)]">                      <td className="py-3">                        <Link href={`/production/requests/${order.id}`} className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">                          {order.code}                        </Link>                      </td>                      <td className="py-3 text-[var(--text-secondary)]">                        {order.customerId && canViewCustomers ? (                          <Link href={`/sales/customers/${order.customerId}`} className={getTextLinkClassName()}>                            {displayCustomer}                          </Link>                        ) : (                          displayCustomer                        )}                      </td>                      <td className="py-3">                        <Badge variant={getStatusBadgeVariant(orderStatus)}>{SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}</Badge>                      </td>                      <td className="py-3 text-[var(--text-muted)]">{order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</td>                      <td className="py-3 text-[var(--text-muted)]">{order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}</td>                      <td className="py-3 text-[var(--text-secondary)]">                        {order.assignedToUser ? order.assignedToUser.name ?? order.assignedToUser.email ?? "--" : <span className="text-[var(--text-muted)]">Sin asignar</span>}                      </td>                      <td className="py-3 text-[var(--text-muted)]">                        <p>{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>                        <div className="mt-1 flex flex-wrap items-center gap-2">                          <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>                          <span className="text-xs text-[var(--text-muted)]">{flowNarrative.nextRecommendedAction.label}</span>                        </div>                      </td>                      <td className="py-3 text-right text-[var(--text-secondary)]">{order._count.lines}</td>                      <td className="py-3">                        {canRenderWriteActions ? (                          <div className="space-y-1">                            <form action={takeRequestFromList}>                              <input type="hidden" name="orderId" value={order.id} />                              <input type="hidden" name="returnTo" value={buildHref(safePage)} />                              <button                                type="submit"                                disabled={!takeEligibility.canTakeOrder}                                className={`btn-primary ${!takeEligibility.canTakeOrder ? "cursor-not-allowed opacity-55" : ""}`}                              >                                Tomar pedido                              </button>                            </form>                            {!takeEligibility.canTakeOrder ? (                              <p className="text-xs text-[var(--status-warning-text)]">{takeEligibility.takeBlockedReason}</p>                            ) : null}                          </div>                        ) : (                          <span className="text-xs text-[var(--text-muted)]">Solo lectura</span>                        )}                      </td>                    </tr>                  );                })              )}            </tbody>          </table>        </div>      </section>      {totalPages > 1 ? (        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">          <Link            href={buildHref(Math.max(1, safePage - 1))}            className={`${ACTION_LINK_CLASS} border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] ${safePage <= 1 ? "pointer-events-none opacity-40" : ""}`}          >            ← Anterior          </Link>          <span className="text-[var(--text-muted)]">            Pagina {safePage} de {totalPages}          </span>          <Link            href={buildHref(Math.min(totalPages, safePage + 1))}            className={`${ACTION_LINK_CLASS} border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] ${safePage >= totalPages ? "pointer-events-none opacity-40" : ""}`}          >            Siguiente →          </Link>        </div>      ) : null}    </div>  );}
+/* eslint-disable @typescript-eslint/no-explicit-any */ import Link from "next/link";
+import { redirect } from "next/navigation";
+import type { Prisma, SalesInternalOrderStatus } from "@prisma/client";
+import prisma from "@/lib/prisma";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { pageGuard } from "@/components/rbac/PageGuard";
+import { PageHeader } from "@/components/ui/page-header";
+import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { isSystemAdmin } from "@/lib/rbac/permissions";
+import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
+import { pullSalesRequestOrder } from "@/lib/sales/request-service";
+import {
+  firstErrorMessage,
+  salesInternalOrderTransitionSchema,
+} from "@/lib/schemas/wms";
+import { startPerf } from "@/lib/perf";
+import { getRequestId } from "@/lib/request-meta";
+import {
+  getSalesConsoleStageProgress,
+  getSalesConsoleWorkType,
+  resolveSalesConsolePrimaryActionState,
+  SALES_CONSOLE_STAGE_FLOW,
+} from "@/lib/sales/console";
+import {
+  getMarkDeliveredEligibility,
+  getTakeOrderEligibility,
+  getSalesOrderFlowStage,
+  getSalesOrderFlowNarrative,
+  SALES_ORDER_FLOW_STAGE_LABELS,
+  SALES_INTERNAL_ORDER_STATUS_LABELS,
+  summarizePickListStatus,
+  type SalesOrderFlowStage,
+} from "@/lib/sales/internal-orders";
+import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
+import {
+  evaluateFulfillmentSignals,
+  isFulfillmentQueueFilter,
+  matchQueueFilter,
+  type FulfillmentQueueFilter,
+} from "@/lib/dashboard/fulfillment-dashboard";
+import {
+  evaluateOperationalPresets,
+  getOperationalPresetLabel,
+  isOperationalPresetFilter,
+  matchOperationalPreset,
+  type OperationalPresetFilter,
+} from "@/lib/dashboard/fulfillment-operational-presets";
+export const dynamic = "force-dynamic";
+const PAGE_SIZE = 50;
+const STALE_HOURS = 4;
+const OPEN_ASSEMBLY_STATUSES = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO"]);
+const BUSINESS_TIMEZONE = "America/Mexico_City";
+const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
+  overdue: "Vencidos",
+  today: "Vencen hoy",
+  partial: "Parciales",
+  stale: "Sin movimiento",
+  unreleased: "Sin liberar",
+  assembly_blocked: "Ensamble bloqueado",
+};
+const PRESET_LABELS: Record<OperationalPresetFilter, string> = {
+  urgentes: getOperationalPresetLabel("URGENTES"),
+  vencen_hoy: getOperationalPresetLabel("VENCEN_HOY"),
+  sin_asignar: getOperationalPresetLabel("SIN_ASIGNAR"),
+  sin_movimiento: getOperationalPresetLabel("SIN_MOVIMIENTO"),
+  bloqueados: getOperationalPresetLabel("BLOQUEADOS"),
+  listos_para_entrega: getOperationalPresetLabel("LISTOS_PARA_ENTREGA"),
+};
+type SearchParams = {
+  status?: string;
+  stage?: string;
+  page?: string;
+  customer?: string;
+  queue?: string;
+  preset?: string;
+  ok?: string;
+  error?: string;
+};
+const STATUS_BADGE_VARIANTS: Record<
+  SalesInternalOrderStatus,
+  "neutral" | "success" | "danger"
+> = { BORRADOR: "neutral", CONFIRMADA: "success", CANCELADA: "danger" };
+const ACTION_LINK_CLASS =
+  "inline-flex items-center justify-center rounded-[var(--radius-md)] border px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";
+const CHIP_BASE_CLASS =
+  "inline-flex items-center rounded-[var(--radius-md)] border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";
+function getStatusBadgeVariant(status: SalesInternalOrderStatus) {
+  return STATUS_BADGE_VARIANTS[status];
+}
+function getChipClassName(active: boolean) {
+  return active
+    ? `${CHIP_BASE_CLASS} border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--text-primary)] shadow-sm`
+    : `${CHIP_BASE_CLASS} border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]`;
+}
+function getTextLinkClassName() {
+  return "text-[var(--accent)] underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";
+}
+function getExecutionBadgeVariant(
+  status: string | null | undefined,
+): "neutral" | "accent" | "success" | "warning" | "danger" {
+  switch (status) {
+    case "COMPLETED":
+    case "COMPLETADA":
+      return "success";
+    case "PARTIAL":
+    case "IN_PROGRESS":
+    case "RELEASED":
+    case "ABIERTA":
+    case "EN_PROCESO":
+      return "warning";
+    case "CANCELLED":
+    case "CANCELADA":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+function formatDate(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleDateString("es-MX");
+}
+function formatDateTime(value: Date | string | null | undefined) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString("es-MX");
+}
+function parsePage(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "1", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+function isNextRedirectError(error: unknown) {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "digest" in error &&
+    typeof (error as { digest?: unknown }).digest === "string" &&
+    (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
+function buildReturnHref(args: {
+  status?: SalesInternalOrderStatus;
+  customer?: string;
+  queue?: FulfillmentQueueFilter;
+  preset?: OperationalPresetFilter;
+  page: number;
+}) {
+  const params = new URLSearchParams();
+  if (args.status) params.set("status", args.status);
+  if (args.customer) params.set("customer", args.customer);
+  if (args.queue) params.set("queue", args.queue);
+  if (args.preset) params.set("preset", args.preset);
+  if (args.page > 1) params.set("page", String(args.page));
+  const qs = params.toString();
+  return qs ? `/production/requests?${qs}` : "/production/requests";
+}
+async function takeRequestFromList(formData: FormData) {
+  "use server";
+  const perf = startPerf("action.production.requests.list.pull");
+  const requestId = await getRequestId();
+  await requireSalesWriteAccess();
+  const sessionCtx = await getSessionContext();
+  const parsed = salesInternalOrderTransitionSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+  });
+  const returnToRaw = String(formData.get("returnTo") ?? "").trim();
+  const returnTo = returnToRaw.startsWith("/production/requests")
+    ? returnToRaw
+    : "/production/requests";
+  if (!parsed.success) {
+    redirect(
+      `${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent(firstErrorMessage(parsed.error))}`,
+    );
+  }
+  if (!sessionCtx.user?.id) {
+    redirect(
+      `${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("Sesion invalida para tomar pedido")}`,
+    );
+  }
+  try {
+    const servicePerf = startPerf(
+      "action.production.requests.list.pull.service",
+    );
+    await pullSalesRequestOrder(prisma, {
+      orderId: parsed.data.orderId,
+      assignedToUserId: sessionCtx.user.id,
+    });
+    servicePerf.end({ requestId, orderId: parsed.data.orderId });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
+    redirect(
+      `${returnTo}${returnTo.includes("?") ? "&" : "?"}ok=${encodeURIComponent("Pedido tomado y asignado")}`,
+    );
+  } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
+    if (isNextRedirectError(error)) throw error;
+    const message =
+      error instanceof Error ? error.message : "No se pudo tomar el pedido";
+    redirect(
+      `${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent(message)}`,
+    );
+  }
+}
+export default async function ProductionRequestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  await pageGuard("sales.view");
+  const [sp, sessionCtx] = await Promise.all([
+    searchParams,
+    getSessionContext(),
+  ]);
+  const currentPage = parsePage(sp.page);
+  const statusFilter: SalesInternalOrderStatus | undefined =
+    sp.status === "BORRADOR" ||
+    sp.status === "CONFIRMADA" ||
+    sp.status === "CANCELADA"
+      ? sp.status
+      : undefined;
+  const stageFilter: SalesOrderFlowStage | undefined =
+    SALES_CONSOLE_STAGE_FLOW.includes(sp.stage as SalesOrderFlowStage)
+      ? (sp.stage as SalesOrderFlowStage)
+      : undefined;
+  const queueFilter = isFulfillmentQueueFilter(sp.queue) ? sp.queue : undefined;
+  const presetFilter = isOperationalPresetFilter(sp.preset)
+    ? sp.preset
+    : undefined;
+  const customerFilter = (sp.customer ?? "").trim();
+  const baseWhere: Prisma.SalesInternalOrderWhereInput = {
+    ...(customerFilter ? { customerName: { contains: customerFilter } } : {}),
+  };
+  const visibleWhere = buildSalesRequestVisibilityWhere({
+    roles: sessionCtx.roles,
+    userId: sessionCtx.user?.id ?? null,
+    baseWhere,
+  });
+  const where: Prisma.SalesInternalOrderWhereInput = statusFilter
+    ? { AND: [visibleWhere, { status: statusFilter }] }
+    : visibleWhere;
+  const [totalCount, groupedStatuses, linkedAssemblyCount, directPickCount] =
+    await Promise.all([
+      prisma.salesInternalOrder.count({ where: visibleWhere }),
+      prisma.salesInternalOrder.groupBy({
+        by: ["status"],
+        _count: { status: true },
+        where: visibleWhere,
+      }),
+      prisma.salesInternalOrder.count({
+        where: {
+          AND: [
+            visibleWhere,
+            { lines: { some: { lineKind: "CONFIGURED_ASSEMBLY" } } },
+          ],
+        },
+      }),
+      prisma.salesInternalOrderPickList.count({
+        where: {
+          status: { in: ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] },
+          order: { is: visibleWhere },
+        },
+      }),
+    ]);
+  const orderSelect = {
+    id: true,
+    code: true,
+    status: true,
+    customerId: true,
+    customerName: true,
+    customer: { select: { id: true, name: true, isActive: true } },
+    dueDate: true,
+    assignedToUserId: true,
+    assignedAt: true,
+    pulledAt: true,
+    deliveredToCustomerAt: true,
+    updatedAt: true,
+    warehouse: { select: { id: true, code: true, name: true } },
+    requestedByUser: {
+      select: {
+        name: true,
+        email: true,
+        userRoles: {
+          where: { role: { code: "MANAGER", isActive: true } },
+          select: { roleId: true },
+        },
+      },
+    },
+    assignedToUser: { select: { name: true, email: true } },
+    _count: { select: { lines: true, pickLists: true } },
+    lines: {
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        lineKind: true,
+        requestedQty: true,
+        notes: true,
+        product: {
+          select: {
+            id: true,
+            sku: true,
+            referenceCode: true,
+            name: true,
+            type: true,
+            unitLabel: true,
+            brand: true,
+            inventory: {
+              select: {
+                quantity: true,
+                reserved: true,
+                available: true,
+                location: { select: { warehouse: { select: { id: true } } } },
+              },
+            },
+          },
+        },
+        assemblyConfiguration: {
+          select: {
+            hoseLength: true,
+            assemblyQuantity: true,
+            totalHoseRequired: true,
+            sourceDocumentRef: true,
+            notes: true,
+            entryFittingProduct: { select: { sku: true, name: true } },
+            hoseProduct: { select: { sku: true, name: true } },
+            exitFittingProduct: { select: { sku: true, name: true } },
+          },
+        },
+        pickTasks: {
+          select: {
+            reservedQty: true,
+            pickedQty: true,
+            shortQty: true,
+            status: true,
+            pickList: {
+              select: {
+                id: true,
+                code: true,
+                status: true,
+                updatedAt: true,
+                targetLocation: { select: { code: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    },
+    pickLists: {
+      where: { status: { not: "CANCELLED" } },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      take: 1,
+      select: {
+        code: true,
+        status: true,
+        updatedAt: true,
+        targetLocation: { select: { code: true, name: true } },
+      },
+    },
+  } as const;
+  let orders: any[] = [];
+  let filteredCount = 0;
+  if (queueFilter || stageFilter || presetFilter) {
+    const queueCandidates = await prisma.salesInternalOrder.findMany({
+      where,
+      select: {
+        id: true,
+        status: true,
+        dueDate: true,
+        updatedAt: true,
+        assignedToUserId: true,
+        pulledAt: true,
+        deliveredToCustomerAt: true,
+        lines: { select: { id: true, lineKind: true } },
+        pickLists: {
+          where: { status: { not: "CANCELLED" } },
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 1,
+          select: { status: true, updatedAt: true },
+        },
+      },
+    });
+    const candidateIds = queueCandidates.map((row) => row.id);
+    const linkedProduction = candidateIds.length
+      ? await prisma.productionOrder.findMany({
+          where: {
+            sourceDocumentType: "SalesInternalOrder",
+            sourceDocumentId: { in: candidateIds },
+          },
+          select: {
+            id: true,
+            code: true,
+            sourceDocumentId: true,
+            sourceDocumentLineId: true,
+            status: true,
+            updatedAt: true,
+            assemblyWorkOrder: { select: { pickStatus: true } },
+          },
+        })
+      : [];
+    const linkedByOrder = new Map<string, typeof linkedProduction>();
+    for (const row of linkedProduction) {
+      const orderId = row.sourceDocumentId ?? "";
+      if (!orderId) continue;
+      const bucket = linkedByOrder.get(orderId);
+      if (bucket) {
+        bucket.push(row);
+      } else {
+        linkedByOrder.set(orderId, [row]);
+      }
+    }
+    const now = new Date();
+    const matchedIds = queueCandidates
+      .filter((candidate) => {
+        const latestPick = candidate.pickLists[0] ?? null;
+        const hasProductLines = candidate.lines.some(
+          (line) => line.lineKind === "PRODUCT",
+        );
+        const hasAssemblyLines = candidate.lines.some(
+          (line) => line.lineKind === "CONFIGURED_ASSEMBLY",
+        );
+        const assemblyLineIds = new Set(
+          candidate.lines
+            .filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY")
+            .map((line) => line.id),
+        );
+        const linkedForOrder = (linkedByOrder.get(candidate.id) ?? []).filter(
+          (row) =>
+            row.sourceDocumentLineId
+              ? assemblyLineIds.has(row.sourceDocumentLineId)
+              : false,
+        );
+        const linkedAssemblyOpen = linkedForOrder.filter((row) =>
+          OPEN_ASSEMBLY_STATUSES.has(row.status),
+        ).length;
+        const hasCompletedConfiguredAssembly =
+          !hasAssemblyLines ||
+          (linkedForOrder.length > 0 && linkedAssemblyOpen === 0);
+        const latestAssemblyUpdatedAt =
+          linkedForOrder
+            .map((row) => row.updatedAt)
+            .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+        const signals = evaluateFulfillmentSignals({
+          dueDate: candidate.dueDate,
+          orderUpdatedAt: candidate.updatedAt,
+          assignedToUserId: candidate.assignedToUserId,
+          hasProductLines,
+          hasAssemblyLines,
+          latestPickStatus: latestPick?.status ?? null,
+          latestPickUpdatedAt: latestPick?.updatedAt ?? null,
+          linkedAssemblyTotal: linkedForOrder.length,
+          linkedAssemblyOpen,
+          linkedAssemblyUpdatedAt: latestAssemblyUpdatedAt,
+          now,
+          staleHours: STALE_HOURS,
+        });
+        const flowStage = getSalesOrderFlowStage({
+          status: candidate.status as SalesInternalOrderStatus,
+          assignedToUserId: candidate.assignedToUserId,
+          deliveredToCustomerAt: candidate.deliveredToCustomerAt,
+          latestPickStatus: latestPick?.status ?? null,
+          hasProductLines,
+          hasAssemblyLines,
+          hasCompletedConfiguredAssembly,
+        });
+        const hasCompletedDirectPick =
+          !hasProductLines || latestPick?.status === "COMPLETED";
+        const deliveredEligibility = getMarkDeliveredEligibility({
+          status: candidate.status as SalesInternalOrderStatus,
+          deliveredToCustomerAt: candidate.deliveredToCustomerAt,
+          assignedToUserId: candidate.assignedToUserId,
+          pulledAt: candidate.pulledAt,
+          hasCompletedDirectPick,
+          hasCompletedConfiguredAssembly,
+        });
+        const presetEvaluation = evaluateOperationalPresets(
+          {
+            dueDate: candidate.dueDate,
+            assignedToUserId: candidate.assignedToUserId,
+            flowStage,
+            isPartial: signals.isPartial,
+            isUnreleased: signals.isUnreleased,
+            assemblyBlocked: signals.assemblyBlocked,
+            canMarkDelivered: deliveredEligibility.canMarkDelivered,
+            isStale: signals.isStale,
+            lastOperationalUpdateAt: signals.lastUpdatedAt,
+            inActiveQueue: true,
+          },
+          { now, timezone: BUSINESS_TIMEZONE, staleHours: STALE_HOURS },
+        );
+        const queueMatch = queueFilter
+          ? matchQueueFilter(signals, queueFilter)
+          : true;
+        const presetMatch = presetFilter
+          ? matchOperationalPreset(presetEvaluation, presetFilter, "primary")
+          : true;
+        const stageMatch = stageFilter ? flowStage === stageFilter : true;
+        return queueMatch && stageMatch && presetMatch;
+      })
+      .map((row) => row.id);
+    filteredCount = matchedIds.length;
+    const totalPagesForQueue = Math.max(
+      1,
+      Math.ceil(filteredCount / PAGE_SIZE),
+    );
+    const safeCandidatePage = Math.min(currentPage, totalPagesForQueue);
+    const pagedIds = matchedIds.slice(
+      (safeCandidatePage - 1) * PAGE_SIZE,
+      safeCandidatePage * PAGE_SIZE,
+    );
+    orders = pagedIds.length
+      ? await (prisma as any).salesInternalOrder.findMany({
+          where: { id: { in: pagedIds } },
+          select: orderSelect,
+        })
+      : [];
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    orders = pagedIds.map((id) => orderById.get(id)).filter(Boolean);
+  } else {
+    [orders, filteredCount] = await Promise.all([
+      (prisma as any).salesInternalOrder.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (currentPage - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        select: orderSelect,
+      }),
+      prisma.salesInternalOrder.count({ where }),
+    ]);
+  }
+  const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const currentOrderIds = orders.map((order) => order.id);
+  const currentLinkedProduction = currentOrderIds.length
+    ? await prisma.productionOrder.findMany({
+        where: {
+          sourceDocumentType: "SalesInternalOrder",
+          sourceDocumentId: { in: currentOrderIds },
+        },
+        select: {
+          id: true,
+          code: true,
+          sourceDocumentId: true,
+          sourceDocumentLineId: true,
+          status: true,
+          updatedAt: true,
+          assemblyWorkOrder: { select: { pickStatus: true } },
+        },
+      })
+    : [];
+  const currentLinkedByOrder = new Map<
+    string,
+    typeof currentLinkedProduction
+  >();
+  for (const row of currentLinkedProduction) {
+    const orderId = row.sourceDocumentId ?? "";
+    if (!orderId) continue;
+    const bucket = currentLinkedByOrder.get(orderId);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      currentLinkedByOrder.set(orderId, [row]);
+    }
+  }
+  const statusCountMap = Object.fromEntries(
+    groupedStatuses.map((row) => [row.status, row._count.status]),
+  );
+  const canRenderWriteActions = hasSalesWriteAccess({
+    roles: sessionCtx.roles,
+    permissions: sessionCtx.permissions,
+  });
+  const canOperateProductionActions =
+    isSystemAdmin(sessionCtx.roles) ||
+    sessionCtx.permissions.includes("production.execute");
+  const canViewCustomers =
+    sessionCtx.isSystemAdmin ||
+    sessionCtx.permissions.includes("customers.view");
+  const buildHref = (
+    page: number,
+    status = statusFilter,
+    queue = queueFilter,
+    stage = stageFilter,
+    preset = presetFilter,
+  ) => {
+    const base = buildReturnHref({
+      status,
+      customer: customerFilter || undefined,
+      queue,
+      preset,
+      page,
+    });
+    if (!stage) return base;
+    const [path, query = ""] = base.split("?");
+    const params = new URLSearchParams(query);
+    params.set("stage", stage);
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+  const myOrders = sessionCtx.user?.id
+    ? orders
+        .filter(
+          (order) =>
+            order.assignedToUserId === sessionCtx.user?.id &&
+            order.status !== "CANCELADA",
+        )
+        .slice(0, 3)
+    : [];
+  const claimableOrders = orders
+    .filter((order) => {
+      const createdByManager =
+        (order.requestedByUser?.userRoles.length ?? 0) > 0;
+      return getTakeOrderEligibility({
+        roles: sessionCtx.roles,
+        status: order.status as SalesInternalOrderStatus,
+        assignedToUserId: order.assignedToUserId,
+        isCreatedByManager: createdByManager,
+      }).canTakeOrder;
+    })
+    .slice(0, 3);
+  return (
+    <div className="space-y-6">
+      {" "}
+      <PageHeader
+        title="Warehouse Execution Cockpit"
+        description="Cola operativa para pedidos, surtido directo y ensambles configurados."
+        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Preset operativo: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
+        actions={
+          <>
+            {" "}
+            <Link
+              href="/production/availability"
+              className={buttonStyles({ variant: "secondary", size: "sm" })}
+            >
+              {" "}
+              Disponibilidad{" "}
+            </Link>{" "}
+            <Link
+              href="/production/equivalences"
+              className={buttonStyles({ variant: "secondary", size: "sm" })}
+            >
+              {" "}
+              Equivalencias{" "}
+            </Link>{" "}
+            <Link
+              href="/production/requests/new"
+              className={buttonStyles({ variant: "primary", size: "sm" })}
+            >
+              {" "}
+              + Nuevo pedido{" "}
+            </Link>{" "}
+          </>
+        }
+      />{" "}
+      {sp.ok ? (
+        <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">
+          {" "}
+          {sp.ok}{" "}
+        </div>
+      ) : null}{" "}
+      {sp.error ? (
+        <div className="rounded-xl border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">
+          {" "}
+          {sp.error}{" "}
+        </div>
+      ) : null}{" "}
+      <section className="grid gap-4 md:grid-cols-4">
+        {" "}
+        {[
+          {
+            label: "Pedidos",
+            value: totalCount,
+            note: "Visibilidad total del filtro actual",
+          },
+          {
+            label: "Borrador",
+            value: statusCountMap.BORRADOR ?? 0,
+            note: "Pedidos todavía en captura",
+          },
+          {
+            label: "Ensamble ligado",
+            value: linkedAssemblyCount,
+            note: "Pedidos con líneas configuradas",
+          },
+          {
+            label: "Surtidos directos activos",
+            value: directPickCount,
+            note: "Pedidos con pick list activo",
+          },
+        ].map((stat) => (
+          <article key={stat.label} className="glass-card space-y-2">
+            {" "}
+            <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
+              {stat.label}
+            </p>{" "}
+            <p className="text-3xl font-semibold text-[var(--text-primary)]">
+              {stat.value}
+            </p>{" "}
+            <p className="text-sm text-[var(--text-muted)]">{stat.note}</p>{" "}
+          </article>
+        ))}{" "}
+      </section>{" "}
+      <section className="grid gap-4 xl:grid-cols-2">
+        <article className="glass-card space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                Mis pedidos
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                Pedidos asignados a tu usuario dentro de la cola visible.
+              </p>
+            </div>
+            <Badge variant="accent">
+              {myOrders.length.toLocaleString("es-MX")}
+            </Badge>
+          </div>
+          {myOrders.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)]">
+              No tienes pedidos asignados en la vista actual.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {myOrders.map((order) => (
+                <Link
+                  key={order.id}
+                  href={`/production/requests/${order.id}`}
+                  className={buttonStyles({ variant: "secondary", size: "sm" })}
+                >
+                  {order.code}
+                </Link>
+              ))}
+            </div>
+          )}
+        </article>
+        <article className="glass-card space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                Disponibles para asignarme
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                Pedidos confirmados y sin responsable que puedes tomar desde la
+                lista.
+              </p>
+            </div>
+            <Badge variant="warning">
+              {claimableOrders.length.toLocaleString("es-MX")}
+            </Badge>
+          </div>
+          {claimableOrders.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)]">
+              No hay pedidos elegibles para asignarte en la vista actual.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {claimableOrders.map((order) => (
+                <Link
+                  key={order.id}
+                  href={`/production/requests/${order.id}`}
+                  className={buttonStyles({ variant: "secondary", size: "sm" })}
+                >
+                  {order.code}
+                </Link>
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+      <form
+        method="get"
+        className="glass-card flex flex-col gap-3 md:flex-row md:items-end"
+      >
+        {" "}
+        {statusFilter ? (
+          <input type="hidden" name="status" value={statusFilter} />
+        ) : null}{" "}
+        {queueFilter ? (
+          <input type="hidden" name="queue" value={queueFilter} />
+        ) : null}{" "}
+        {presetFilter ? (
+          <input type="hidden" name="preset" value={presetFilter} />
+        ) : null}{" "}
+        {stageFilter ? (
+          <input type="hidden" name="stage" value={stageFilter} />
+        ) : null}{" "}
+        <label className="flex-1 space-y-1">
+          {" "}
+          <span className="text-sm text-[var(--text-muted)]">
+            Filtrar por cliente
+          </span>{" "}
+          <input
+            type="text"
+            name="customer"
+            defaultValue={customerFilter}
+            placeholder="Nombre o cuenta del cliente"
+            className="field"
+          />{" "}
+        </label>{" "}
+        <div className="flex flex-wrap gap-2">
+          {" "}
+          <button type="submit" className="btn-primary">
+            {" "}
+            Filtrar{" "}
+          </button>{" "}
+          <Link
+            href={buildHref(1, undefined, undefined, undefined, undefined)}
+            className={buttonStyles({ variant: "secondary" })}
+          >
+            {" "}
+            Limpiar{" "}
+          </Link>{" "}
+        </div>{" "}
+      </form>{" "}
+      <section className="space-y-3">
+        {" "}
+        <div className="flex flex-wrap gap-2">
+          {" "}
+          <Link
+            href={buildHref(1, statusFilter, undefined, stageFilter)}
+            className={getChipClassName(!queueFilter)}
+          >
+            {" "}
+            Todos por atender{" "}
+          </Link>{" "}
+          {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map(
+            (queue) => (
+              <Link
+                key={queue}
+                href={buildHref(1, statusFilter, queue, stageFilter)}
+                className={getChipClassName(queueFilter === queue)}
+              >
+                {" "}
+                {QUEUE_LABELS[queue]}{" "}
+              </Link>
+            ),
+          )}{" "}
+        </div>{" "}
+        <div className="flex flex-wrap gap-2">
+          {" "}
+          <Link
+            href={buildHref(
+              1,
+              statusFilter,
+              queueFilter,
+              stageFilter,
+              undefined,
+            )}
+            className={getChipClassName(!presetFilter)}
+          >
+            {" "}
+            Todos presets{" "}
+          </Link>{" "}
+          {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map(
+            (preset) => (
+              <Link
+                key={preset}
+                href={buildHref(
+                  1,
+                  statusFilter,
+                  queueFilter,
+                  stageFilter,
+                  preset,
+                )}
+                className={getChipClassName(presetFilter === preset)}
+              >
+                {" "}
+                {PRESET_LABELS[preset]}{" "}
+              </Link>
+            ),
+          )}{" "}
+        </div>{" "}
+        <div className="flex flex-wrap gap-2">
+          {" "}
+          <Link
+            href={buildHref(1, statusFilter, queueFilter, undefined)}
+            className={getChipClassName(!stageFilter)}
+          >
+            {" "}
+            Todas etapas{" "}
+          </Link>{" "}
+          {SALES_CONSOLE_STAGE_FLOW.map((stage) => (
+            <Link
+              key={stage}
+              href={buildHref(1, statusFilter, queueFilter, stage)}
+              className={getChipClassName(stageFilter === stage)}
+            >
+              {" "}
+              {SALES_ORDER_FLOW_STAGE_LABELS[stage]}{" "}
+            </Link>
+          ))}{" "}
+        </div>{" "}
+        <div className="flex flex-wrap gap-2">
+          {" "}
+          <Link
+            href={buildHref(1, undefined, queueFilter)}
+            className={getChipClassName(!statusFilter)}
+          >
+            {" "}
+            Todos ({totalCount}){" "}
+          </Link>{" "}
+          {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(
+            ([status, label]) => (
+              <Link
+                key={status}
+                href={buildHref(
+                  1,
+                  status as SalesInternalOrderStatus,
+                  queueFilter,
+                )}
+                className={getChipClassName(statusFilter === status)}
+              >
+                {" "}
+                {label} ({statusCountMap[status] ?? 0}){" "}
+              </Link>
+            ),
+          )}{" "}
+        </div>{" "}
+      </section>{" "}
+      <section className="space-y-4">
+        {" "}
+        {orders.length === 0 ? (
+          <div className="glass-card rounded-xl p-6 text-center text-[var(--text-muted)]">
+            {" "}
+            No hay pedidos para el filtro seleccionado.{" "}
+          </div>
+        ) : (
+          orders.map((order) => {
+            const orderStatus = order.status as SalesInternalOrderStatus;
+              const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
+            const createdByManager =
+              (order.requestedByUser?.userRoles.length ?? 0) > 0;
+            const productLines = (order.lines as any[]).filter(
+              (line: any) => line.lineKind === "PRODUCT",
+            );
+            const configuredLines = (order.lines as any[]).filter(
+              (line: any) => line.lineKind === "CONFIGURED_ASSEMBLY",
+            );
+            const assemblyLineIds = new Set(
+              configuredLines.map((line: any) => line.id),
+            );
+            const linkedForOrder = (
+              currentLinkedByOrder.get(order.id) ?? []
+            ).filter((row) =>
+              row.sourceDocumentLineId
+                ? assemblyLineIds.has(row.sourceDocumentLineId)
+                : false,
+            );
+            const hasCompletedConfiguredAssembly =
+              configuredLines.length === 0 ||
+              (linkedForOrder.length === assemblyLineIds.size &&
+                linkedForOrder.every((row) => row.status === "COMPLETADA"));
+            const latestPick = order.pickLists[0] ?? null;
+            const latestPickStatus = latestPick?.status ?? null;
+            const hasCompletedDirectPick =
+              productLines.length === 0 || latestPickStatus === "COMPLETED";
+            const takeEligibility = getTakeOrderEligibility({
+              roles: sessionCtx.roles,
+              status: orderStatus,
+              assignedToUserId: order.assignedToUserId,
+              isCreatedByManager: createdByManager,
+            });
+            const deliveredEligibility = getMarkDeliveredEligibility({
+              status: orderStatus,
+              deliveredToCustomerAt: order.deliveredToCustomerAt,
+              assignedToUserId: order.assignedToUserId,
+              pulledAt: order.pulledAt,
+              hasCompletedDirectPick,
+              hasCompletedConfiguredAssembly,
+            });
+            const flowNarrative = getSalesOrderFlowNarrative({
+              orderId: order.id,
+              roles: sessionCtx.roles,
+              status: orderStatus,
+              assignedToUserId: order.assignedToUserId,
+              deliveredToCustomerAt: order.deliveredToCustomerAt,
+              pulledAt: order.pulledAt,
+              latestPickStatus,
+              hasProductLines: productLines.length > 0,
+              hasAssemblyLines: configuredLines.length > 0,
+              hasCompletedConfiguredAssembly,
+              takeEligibility,
+              deliveredEligibility,
+            });
+            const workType = getSalesConsoleWorkType({
+              flowStage: flowNarrative.flowStage,
+              hasProductLines: productLines.length > 0,
+              hasAssemblyLines: configuredLines.length > 0,
+            });
+            const stageProgress = getSalesConsoleStageProgress(
+              flowNarrative.flowStage,
+            );
+            const primaryActionState = resolveSalesConsolePrimaryActionState({
+              flowNarrative,
+              canExecuteSalesActions: canRenderWriteActions,
+              canExecuteProductionActions: canOperateProductionActions,
+            });
+            return (
+              <article key={order.id} className="glass-card space-y-5">
+                {" "}
+                <header className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+                  {" "}
+                  <div className="space-y-4">
+                    {" "}
+                    <div className="space-y-2">
+                      {" "}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {" "}
+                        <Link
+                          href={`/production/requests/${order.id}`}
+                          className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
+                        >
+                          {" "}
+                          {order.code}{" "}
+                        </Link>{" "}
+                        <Badge variant={getStatusBadgeVariant(orderStatus)}>
+                          {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
+                        </Badge>{" "}
+                        <Badge variant={flowNarrative.flowBadgeVariant}>
+                          {flowNarrative.flowStageLabel}
+                        </Badge>{" "}
+                        <Badge variant={workType.variant}>
+                          {workType.label}
+                        </Badge>{" "}
+                        {takeEligibility.canTakeOrder ? (
+                          <Badge variant="accent">Tomable</Badge>
+                        ) : null}{" "}
+                      </div>{" "}
+                      <p className="text-sm text-[var(--text-muted)]">
+                        {" "}
+                        Cliente:{" "}
+                        {order.customerId && canViewCustomers ? (
+                          <Link
+                            href={`/sales/customers/${order.customerId}`}
+                            className={getTextLinkClassName()}
+                          >
+                            {" "}
+                            {displayCustomer}{" "}
+                          </Link>
+                        ) : (
+                          displayCustomer
+                        )}{" "}
+                        {" · "}Almacen:{" "}
+                        {order.warehouse
+                          ? `${order.warehouse.code} - ${order.warehouse.name}`
+                          : "--"}{" "}
+                      </p>{" "}
+                    </div>{" "}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {" "}
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        {" "}
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Trabajo actual
+                        </p>{" "}
+                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
+                          {workType.label}
+                        </p>{" "}
+                        <p className="mt-1 text-sm text-[var(--text-muted)]">
+                          {workType.detail}
+                        </p>{" "}
+                      </div>{" "}
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        {" "}
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Matriz de mix
+                        </p>{" "}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {" "}
+                          <Badge
+                            variant={
+                              productLines.length > 0 ? "accent" : "neutral"
+                            }
+                          >
+                            {productLines.length.toLocaleString("es-MX")}{" "}
+                            productos independientes
+                          </Badge>{" "}
+                          <Badge
+                            variant={
+                              configuredLines.length > 0 ? "warning" : "neutral"
+                            }
+                          >
+                            {configuredLines.length.toLocaleString("es-MX")}{" "}
+                            ensambles configurados
+                          </Badge>{" "}
+                        </div>{" "}
+                        <p className="mt-2 text-sm text-[var(--text-muted)]">
+                          {" "}
+                          {hasCompletedDirectPick
+                            ? "Surtido directo validado"
+                            : latestPickStatus
+                              ? summarizePickListStatus(latestPickStatus)
+                              : "Surtido directo pendiente"}{" "}
+                        </p>{" "}
+                      </div>{" "}
+                    </div>{" "}
+                  </div>{" "}
+                  <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
+                    {" "}
+                    <div className="flex items-center justify-between gap-3">
+                      {" "}
+                      <div>
+                        {" "}
+                        <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                          Next Action
+                        </p>{" "}
+                        <p className="mt-1 text-base font-semibold text-[var(--text-primary)]">
+                          {primaryActionState.label}
+                        </p>{" "}
+                      </div>{" "}
+                      <Badge
+                        variant={
+                          primaryActionState.state === "allowed"
+                            ? "success"
+                            : primaryActionState.state === "blocked"
+                              ? "warning"
+                              : "neutral"
+                        }
+                      >
+                        {" "}
+                        {primaryActionState.state === "allowed"
+                          ? "Disponible"
+                          : primaryActionState.state === "blocked"
+                            ? "Bloqueada"
+                            : "Informativa"}{" "}
+                      </Badge>{" "}
+                    </div>{" "}
+                    <p className="mt-2 text-sm text-[var(--text-muted)]">
+                      {primaryActionState.blockedReason ??
+                        primaryActionState.reason}
+                    </p>{" "}
+                    <div className="mt-4 space-y-2">
+                      {" "}
+                      {primaryActionState.state === "allowed" &&
+                      primaryActionState.code === "TAKE_ORDER" ? (
+                        <form action={takeRequestFromList}>
+                          {" "}
+                          <input
+                            type="hidden"
+                            name="orderId"
+                            value={order.id}
+                          />{" "}
+                          <input
+                            type="hidden"
+                            name="returnTo"
+                            value={buildHref(safePage)}
+                          />{" "}
+                          <button
+                            type="submit"
+                            disabled={!takeEligibility.canTakeOrder}
+                            className={buttonStyles({
+                              variant: "primary",
+                              fullWidth: true,
+                              className: !takeEligibility.canTakeOrder
+                                ? "cursor-not-allowed opacity-55"
+                                : "",
+                            })}
+                          >
+                            {" "}
+                            {primaryActionState.label}{" "}
+                          </button>{" "}
+                        </form>
+                      ) : primaryActionState.state === "allowed" ? (
+                        <Link
+                          href={primaryActionState.href}
+                          className={buttonStyles({
+                            variant: "primary",
+                            fullWidth: true,
+                          })}
+                        >
+                          {" "}
+                          {primaryActionState.label}{" "}
+                        </Link>
+                      ) : (
+                        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
+                          {" "}
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            {" "}
+                            <p className="text-sm font-medium text-[var(--text-primary)]">
+                              {primaryActionState.label}
+                            </p>{" "}
+                            <Badge
+                              variant={
+                                primaryActionState.state === "blocked"
+                                  ? "warning"
+                                  : "neutral"
+                              }
+                              size="md"
+                            >
+                              {" "}
+                              {primaryActionState.state === "blocked"
+                                ? "Bloqueada"
+                                : "Informativa"}{" "}
+                            </Badge>{" "}
+                          </div>{" "}
+                          <p className="mt-1 text-xs text-[var(--text-muted)]">
+                            {primaryActionState.blockedReason ??
+                              primaryActionState.reason}
+                          </p>{" "}
+                        </div>
+                      )}{" "}
+                      <Link
+                        href={`/production/requests/${order.id}`}
+                        className={buttonStyles({
+                          variant: "secondary",
+                          fullWidth: true,
+                        })}
+                      >
+                        {" "}
+                        Ver detalle{" "}
+                      </Link>{" "}
+                    </div>{" "}
+                  </section>{" "}
+                </header>{" "}
+                <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                  {" "}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    {" "}
+                    <div>
+                      {" "}
+                      <p className="text-sm font-medium text-[var(--text-primary)]">
+                        Progreso comercial
+                      </p>{" "}
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {" "}
+                        Captura, asignación, surtido, entrega y cierre con
+                        estados visibles por etapa.{" "}
+                      </p>{" "}
+                    </div>{" "}
+                    <Badge variant={flowNarrative.flowBadgeVariant}>
+                      {flowNarrative.flowStageLabel}
+                    </Badge>{" "}
+                  </div>{" "}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {" "}
+                    {stageProgress.map((step) => (
+                      <Badge key={step.stage} variant={step.variant}>
+                        {" "}
+                        {step.step}. {step.label}{" "}
+                      </Badge>
+                    ))}{" "}
+                  </div>{" "}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {" "}
+                    <Badge
+                      variant={productLines.length > 0 ? "accent" : "neutral"}
+                    >
+                      {productLines.length.toLocaleString("es-MX")} productos
+                      independientes
+                    </Badge>{" "}
+                    <Badge
+                      variant={
+                        configuredLines.length > 0 ? "warning" : "neutral"
+                      }
+                    >
+                      {configuredLines.length.toLocaleString("es-MX")} ensambles
+                      configurados
+                    </Badge>{" "}
+                    <Badge
+                      variant={
+                        hasCompletedDirectPick
+                          ? "success"
+                          : latestPickStatus
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
+                      {" "}
+                      {hasCompletedDirectPick
+                        ? "Surtido directo validado"
+                        : latestPickStatus
+                          ? summarizePickListStatus(latestPickStatus)
+                          : "Surtido directo pendiente"}{" "}
+                    </Badge>{" "}
+                    <Badge
+                      variant={
+                        deliveredEligibility.canMarkDelivered
+                          ? "success"
+                          : "warning"
+                      }
+                    >
+                      {" "}
+                      {deliveredEligibility.canMarkDelivered
+                        ? "Entrega lista"
+                        : "Entrega bloqueada"}{" "}
+                    </Badge>{" "}
+                  </div>{" "}
+                </section>{" "}
+                <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {" "}
+                  {[
+                    {
+                      label: "Asignación",
+                      value: order.assignedToUser
+                        ? (order.assignedToUser.name ??
+                          order.assignedToUser.email ??
+                          "--")
+                        : "Sin asignar",
+                      note: order.assignedAt
+                        ? `Asignado el ${formatDateTime(order.assignedAt)}`
+                        : "Pendiente de asignación",
+                      badge: order.assignedToUser ? "success" : "neutral",
+                    },
+                    {
+                      label: "Compromiso",
+                      value: formatDate(order.dueDate),
+                      note: order.dueDate
+                        ? "Fecha compromiso"
+                        : "Sin fecha prometida",
+                      badge: order.dueDate ? "accent" : "neutral",
+                    },
+                    {
+                      label: "Ultimo movimiento",
+                      value: formatDateTime(order.updatedAt),
+                      note: "Actualizacion operativa mas reciente",
+                      badge: "neutral",
+                    },
+                    {
+                      label: "Validacion de surtido directo",
+                      value: hasCompletedDirectPick
+                        ? "Validado"
+                        : latestPickStatus
+                          ? summarizePickListStatus(latestPickStatus)
+                          : "Pendiente",
+                      note: latestPick
+                        ? `${latestPick.code} · ${latestPick.targetLocation.code} - ${latestPick.targetLocation.name}`
+                        : "Sin pick list activo",
+                      badge: hasCompletedDirectPick
+                        ? "success"
+                        : latestPickStatus
+                          ? "warning"
+                          : "neutral",
+                    },
+                    {
+                      label: "Validacion de ensamble",
+                      value: hasCompletedConfiguredAssembly
+                        ? "Validado"
+                        : configuredLines.length > 0
+                          ? "Pendiente"
+                          : "No aplica",
+                      note:
+                        configuredLines.length > 0
+                          ? `${configuredLines.length.toLocaleString("es-MX")} linea(s) configurada(s)`
+                          : "Sin ensambles configurados",
+                      badge: hasCompletedConfiguredAssembly
+                        ? "success"
+                        : configuredLines.length > 0
+                          ? "warning"
+                          : "neutral",
+                    },
+                    {
+                      label: "Validacion de entrega",
+                      value: deliveredEligibility.canMarkDelivered
+                        ? "Lista"
+                        : "Bloqueada",
+                      note: deliveredEligibility.canMarkDelivered
+                        ? "Elegible para marcar entrega"
+                        : (deliveredEligibility.deliveredBlockedReason ??
+                          "Pendiente"),
+                      badge: deliveredEligibility.canMarkDelivered
+                        ? "success"
+                        : "warning",
+                    },
+                  ].map((stat) => (
+                    <div
+                      key={stat.label}
+                      className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4"
+                    >
+                      {" "}
+                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                        {stat.label}
+                      </p>{" "}
+                      <div className="mt-2">
+                        {" "}
+                        <Badge
+                          variant={
+                            stat.badge as
+                              | "neutral"
+                              | "accent"
+                              | "success"
+                              | "warning"
+                          }
+                        >
+                          {stat.value}
+                        </Badge>{" "}
+                      </div>{" "}
+                      <p className="mt-2 text-sm text-[var(--text-muted)]">
+                        {stat.note}
+                      </p>{" "}
+                    </div>
+                  ))}{" "}
+                </section>{" "}
+                <section className="grid gap-4 lg:grid-cols-2">
+                  {" "}
+                  <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">
+                    {" "}
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
+                      {" "}
+                      <div>
+                        {" "}
+                        <p className="font-medium text-[var(--text-primary)]">
+                          Productos independientes
+                        </p>{" "}
+                        <p className="text-xs text-[var(--text-muted)]">
+                          Surtido directo y validacion por pick list.
+                        </p>{" "}
+                      </div>{" "}
+                      <Badge
+                        variant={productLines.length ? "accent" : "neutral"}
+                      >
+                        {productLines.length.toLocaleString("es-MX")} lineas
+                      </Badge>{" "}
+                    </summary>{" "}
+                    <div className="border-t border-[var(--border-soft)] p-4">
+                      {" "}
+                      {productLines.length === 0 ? (
+                        <p className="text-sm text-[var(--text-muted)]">
+                          Todavia no hay productos independientes en este
+                          pedido.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {" "}
+                          {productLines.map((line: any) => {
+                            const reserved = line.pickTasks.reduce(
+                              (acc: number, task: any) =>
+                                acc + task.reservedQty,
+                              0,
+                            );
+                            const picked = line.pickTasks.reduce(
+                              (acc: number, task: any) => acc + task.pickedQty,
+                              0,
+                            );
+                            const shortQty = line.pickTasks.reduce(
+                              (acc: number, task: any) => acc + task.shortQty,
+                              0,
+                            );
+                            const currentPickList =
+                              line.pickTasks[0]?.pickList ?? null;
+                            const filteredInventory = order.warehouse
+                              ? (line.product?.inventory ?? []).filter(
+                                  (row: any) =>
+                                    row.location.warehouse.id ===
+                                    order.warehouse?.id,
+                                )
+                              : (line.product?.inventory ?? []);
+                            const available = filteredInventory.reduce(
+                              (acc: number, row: any) => acc + row.available,
+                              0,
+                            );
+                            return (
+                              <article
+                                key={line.id}
+                                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4"
+                              >
+                                {" "}
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  {" "}
+                                  <div className="space-y-1">
+                                    {" "}
+                                    <p className="font-mono text-sm text-[var(--accent)]">
+                                      {line.product?.sku ?? "Sin SKU"}
+                                    </p>{" "}
+                                    <p className="font-medium text-[var(--text-primary)]">
+                                      {line.product?.name ??
+                                        "Producto sin nombre"}
+                                    </p>{" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      {" "}
+                                      {line.product?.referenceCode ??
+                                        line.product?.brand ??
+                                        "--"}{" "}
+                                      · {line.product?.type ?? "--"} ·{" "}
+                                      {line.product?.unitLabel ?? "unidad"}{" "}
+                                    </p>{" "}
+                                    {line.notes ? (
+                                      <p className="text-xs text-[var(--text-muted)]">
+                                        {line.notes}
+                                      </p>
+                                    ) : null}{" "}
+                                  </div>{" "}
+                                  <div className="flex flex-wrap gap-2">
+                                    {" "}
+                                    <Badge
+                                      variant={
+                                        currentPickList
+                                          ? getExecutionBadgeVariant(
+                                              currentPickList.status,
+                                            )
+                                          : "neutral"
+                                      }
+                                    >
+                                      {" "}
+                                      {currentPickList
+                                        ? summarizePickListStatus(
+                                            currentPickList.status,
+                                          )
+                                        : "Sin surtido"}{" "}
+                                    </Badge>{" "}
+                                    {currentPickList ? (
+                                      <Badge variant="accent">
+                                        {" "}
+                                        {currentPickList.code} ·{" "}
+                                        {
+                                          currentPickList.targetLocation.code
+                                        }{" "}
+                                      </Badge>
+                                    ) : null}{" "}
+                                  </div>{" "}
+                                </div>{" "}
+                                <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                                  {" "}
+                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
+                                    {" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      Solicitado
+                                    </p>{" "}
+                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                                      {" "}
+                                      {line.requestedQty.toLocaleString(
+                                        "es-MX",
+                                      )}{" "}
+                                      {line.product?.unitLabel ?? "unidad"}{" "}
+                                    </p>{" "}
+                                  </div>{" "}
+                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
+                                    {" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      Reservado
+                                    </p>{" "}
+                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                                      {reserved.toLocaleString("es-MX")}
+                                    </p>{" "}
+                                  </div>{" "}
+                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
+                                    {" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      Surtido
+                                    </p>{" "}
+                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                                      {picked.toLocaleString("es-MX")}
+                                    </p>{" "}
+                                  </div>{" "}
+                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
+                                    {" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      Disponible
+                                    </p>{" "}
+                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                                      {available.toLocaleString("es-MX")}
+                                    </p>{" "}
+                                  </div>{" "}
+                                </div>{" "}
+                                <p className="mt-3 text-xs text-[var(--text-muted)]">
+                                  Faltante: {shortQty.toLocaleString("es-MX")}
+                                </p>{" "}
+                              </article>
+                            );
+                          })}{" "}
+                        </div>
+                      )}{" "}
+                    </div>{" "}
+                  </details>{" "}
+                  <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">
+                    {" "}
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
+                      {" "}
+                      <div>
+                        {" "}
+                        <p className="font-medium text-[var(--text-primary)]">
+                          Ensambles configurados
+                        </p>{" "}
+                        <p className="text-xs text-[var(--text-muted)]">
+                          Componentes, estado y orden ligada.
+                        </p>{" "}
+                      </div>{" "}
+                      <Badge
+                        variant={configuredLines.length ? "warning" : "neutral"}
+                      >
+                        {configuredLines.length.toLocaleString("es-MX")} lineas
+                      </Badge>{" "}
+                    </summary>{" "}
+                    <div className="border-t border-[var(--border-soft)] p-4">
+                      {" "}
+                      {configuredLines.length === 0 ? (
+                        <p className="text-sm text-[var(--text-muted)]">
+                          Todavia no hay ensambles configurados en este pedido.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {" "}
+                          {configuredLines.map((line: any) => {
+                            const linkedProduction =
+                              linkedForOrder.find(
+                                (row) => row.sourceDocumentLineId === line.id,
+                              ) ?? null;
+                            const productionStatus =
+                              linkedProduction?.status ?? null;
+                            const productionPickStatus =
+                              linkedProduction?.assemblyWorkOrder?.pickStatus ??
+                              null;
+                            const configurationStateLabel = linkedProduction
+                              ? productionStatus === "COMPLETADA"
+                                ? "Completada"
+                                : productionStatus === "CANCELADA"
+                                  ? "Cancelada"
+                                  : "En proceso"
+                              : "Pendiente de generar";
+                            return (
+                              <article
+                                key={line.id}
+                                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4"
+                              >
+                                {" "}
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                  {" "}
+                                  <div className="space-y-1">
+                                    {" "}
+                                    <p className="font-semibold text-[var(--text-primary)]">
+                                      {" "}
+                                      {
+                                        line.assemblyConfiguration
+                                          ?.entryFittingProduct.sku
+                                      }{" "}
+                                      +{" "}
+                                      {
+                                        line.assemblyConfiguration?.hoseProduct
+                                          .sku
+                                      }{" "}
+                                      +{" "}
+                                      {
+                                        line.assemblyConfiguration
+                                          ?.exitFittingProduct.sku
+                                      }{" "}
+                                    </p>{" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      {" "}
+                                      Componentes:{" "}
+                                      {
+                                        line.assemblyConfiguration
+                                          ?.entryFittingProduct.name
+                                      }{" "}
+                                      ·{" "}
+                                      {
+                                        line.assemblyConfiguration?.hoseProduct
+                                          .name
+                                      }{" "}
+                                      ·{" "}
+                                      {
+                                        line.assemblyConfiguration
+                                          ?.exitFittingProduct.name
+                                      }{" "}
+                                    </p>{" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      {" "}
+                                      Cantidad solicitada/configurada:{" "}
+                                      {line.assemblyConfiguration
+                                        ?.assemblyQuantity ?? "--"}{" "}
+                                      · Longitud:{" "}
+                                      {line.assemblyConfiguration?.hoseLength ??
+                                        "--"}{" "}
+                                      · Total de manguera:{" "}
+                                      {line.assemblyConfiguration
+                                        ?.totalHoseRequired ?? "--"}{" "}
+                                    </p>{" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      Referencia de configuracion:{" "}
+                                      {line.assemblyConfiguration
+                                        ?.sourceDocumentRef ?? "--"}
+                                    </p>{" "}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                      Notas:{" "}
+                                      {line.assemblyConfiguration?.notes ??
+                                        line.notes ??
+                                        "Sin notas"}
+                                    </p>{" "}
+                                  </div>{" "}
+                                  <div className="flex flex-wrap gap-2">
+                                    {" "}
+                                    <Badge
+                                      variant={getExecutionBadgeVariant(
+                                        productionStatus,
+                                      )}
+                                    >
+                                      Orden {configurationStateLabel}
+                                    </Badge>{" "}
+                                    <Badge
+                                      variant={getExecutionBadgeVariant(
+                                        productionPickStatus,
+                                      )}
+                                    >
+                                      {productionPickStatus
+                                        ? `Pick ${productionPickStatus}`
+                                        : "Sin pick"}
+                                    </Badge>{" "}
+                                    {linkedProduction ? (
+                                      <Link
+                                        href={`/production/orders/${linkedProduction.id}`}
+                                        className={buttonStyles({
+                                          variant: "secondary",
+                                          size: "sm",
+                                        })}
+                                      >
+                                        {" "}
+                                        {linkedProduction.code}{" "}
+                                      </Link>
+                                    ) : (
+                                      <Badge variant="neutral">
+                                        Sin orden ligada
+                                      </Badge>
+                                    )}{" "}
+                                  </div>{" "}
+                                </div>{" "}
+                                {linkedProduction?.assemblyWorkOrder
+                                  ?.pickStatus ? (
+                                  <p className="mt-3 text-xs text-[var(--text-muted)]">
+                                    {" "}
+                                    Estado de pick de ensamble:{" "}
+                                    {
+                                      linkedProduction.assemblyWorkOrder
+                                        .pickStatus
+                                    }{" "}
+                                  </p>
+                                ) : null}{" "}
+                              </article>
+                            );
+                          })}{" "}
+                        </div>
+                      )}{" "}
+                    </div>{" "}
+                  </details>{" "}
+                </section>{" "}
+                <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                  {" "}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    {" "}
+                    <div>
+                      {" "}
+                      <p className="text-sm font-medium text-[var(--text-primary)]">
+                        Resumen operativo persistente
+                      </p>{" "}
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {" "}
+                        Asignacion, compromiso, ultimo movimiento y validaciones
+                        criticas del pedido.{" "}
+                      </p>{" "}
+                    </div>{" "}
+                    <Badge variant={flowNarrative.flowBadgeVariant}>
+                      {flowNarrative.flowStageLabel}
+                    </Badge>{" "}
+                  </div>{" "}
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {" "}
+                    <div>
+                      {" "}
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Asignacion
+                      </p>{" "}
+                      <p className="text-sm text-[var(--text-primary)]">
+                        {" "}
+                        {order.assignedToUser
+                          ? (order.assignedToUser.name ??
+                            order.assignedToUser.email ??
+                            "--")
+                          : "Sin asignar"}{" "}
+                      </p>{" "}
+                    </div>{" "}
+                    <div>
+                      {" "}
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Compromiso
+                      </p>{" "}
+                      <p className="text-sm text-[var(--text-primary)]">
+                        {formatDate(order.dueDate)}
+                      </p>{" "}
+                    </div>{" "}
+                    <div>
+                      {" "}
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Ultimo movimiento
+                      </p>{" "}
+                      <p className="text-sm text-[var(--text-primary)]">
+                        {formatDateTime(order.updatedAt)}
+                      </p>{" "}
+                    </div>{" "}
+                    <div>
+                      {" "}
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Entrega
+                      </p>{" "}
+                      <p className="text-sm text-[var(--text-primary)]">
+                        {" "}
+                        {deliveredEligibility.canMarkDelivered
+                          ? "Lista para entrega"
+                          : (deliveredEligibility.deliveredBlockedReason ??
+                            "Bloqueada")}{" "}
+                      </p>{" "}
+                    </div>{" "}
+                  </div>{" "}
+                </section>{" "}
+              </article>
+            );
+          })
+        )}{" "}
+      </section>{" "}
+      <section className="glass-card space-y-4">
+        {" "}
+        <div className="flex flex-col gap-1">
+          {" "}
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+            Vista administrativa
+          </h2>{" "}
+          <p className="text-sm text-[var(--text-muted)]">
+            Fallback tabular para inspeccion rapida, sin desplazar el cockpit
+            operativo principal.
+          </p>{" "}
+        </div>{" "}
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          aria-label="Tabla administrativa de pedidos"
+        >
+          {" "}
+          <table className="w-full text-sm">
+            {" "}
+            <thead>
+              {" "}
+              <tr className="border-b border-[var(--border-soft)] text-[var(--text-muted)]">
+                {" "}
+                <th className="py-3 text-left">Codigo</th>{" "}
+                <th className="py-3 text-left">Cliente</th>{" "}
+                <th className="py-3 text-left">Estado</th>{" "}
+                <th className="py-3 text-left">Almacen</th>{" "}
+                <th className="py-3 text-left">Solicitado por</th>{" "}
+                <th className="py-3 text-left">Asignado a</th>{" "}
+                <th className="py-3 text-left">Entrega</th>{" "}
+                <th className="py-3 text-right">Lineas</th>{" "}
+                <th className="py-3 text-left">Acciones</th>{" "}
+              </tr>{" "}
+            </thead>{" "}
+            <tbody>
+              {" "}
+              {orders.length === 0 ? (
+                <tr>
+                  {" "}
+                  <td
+                    colSpan={9}
+                    className="py-10 text-center text-[var(--text-muted)]"
+                  >
+                    {" "}
+                    No hay pedidos para el filtro seleccionado.{" "}
+                  </td>{" "}
+                </tr>
+              ) : (
+                orders.map((order) => {
+                  const orderStatus = order.status as SalesInternalOrderStatus;
+                  const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
+                  const createdByManager =
+                    (order.requestedByUser?.userRoles.length ?? 0) > 0;
+                  const hasProductLines = order.lines.some(
+                    (line: any) => line.lineKind === "PRODUCT",
+                  );
+                  const hasAssemblyLines = order.lines.some(
+                    (line: any) => line.lineKind === "CONFIGURED_ASSEMBLY",
+                  );
+                  const assemblyLineIds = new Set(
+                    order.lines
+                      .filter(
+                        (line: any) => line.lineKind === "CONFIGURED_ASSEMBLY",
+                      )
+                      .map((line: any) => line.id),
+                  );
+                  const linkedForOrder = (
+                    currentLinkedByOrder.get(order.id) ?? []
+                  ).filter((row) =>
+                    row.sourceDocumentLineId
+                      ? assemblyLineIds.has(row.sourceDocumentLineId)
+                      : false,
+                  );
+                  const hasCompletedConfiguredAssembly =
+                    !hasAssemblyLines ||
+                    (linkedForOrder.length === assemblyLineIds.size &&
+                      linkedForOrder.every(
+                        (row) => row.status === "COMPLETADA",
+                      ));
+                  const latestPickStatus = order.pickLists[0]?.status ?? null;
+                  const takeEligibility = getTakeOrderEligibility({
+                    roles: sessionCtx.roles,
+                    status: orderStatus,
+                    assignedToUserId: order.assignedToUserId,
+                    isCreatedByManager: createdByManager,
+                  });
+                  const hasCompletedDirectPick =
+                    !hasProductLines || latestPickStatus === "COMPLETED";
+                  const deliveredEligibility = getMarkDeliveredEligibility({
+                    status: orderStatus,
+                    deliveredToCustomerAt: order.deliveredToCustomerAt,
+                    assignedToUserId: order.assignedToUserId,
+                    pulledAt: order.pulledAt,
+                    hasCompletedDirectPick,
+                    hasCompletedConfiguredAssembly,
+                  });
+                  const flowNarrative = getSalesOrderFlowNarrative({
+                    orderId: order.id,
+                    roles: sessionCtx.roles,
+                    status: orderStatus,
+                    assignedToUserId: order.assignedToUserId,
+                    deliveredToCustomerAt: order.deliveredToCustomerAt,
+                    pulledAt: order.pulledAt,
+                    latestPickStatus,
+                    hasProductLines,
+                    hasAssemblyLines,
+                    hasCompletedConfiguredAssembly,
+                    takeEligibility,
+                    deliveredEligibility,
+                  });
+                  return (
+                    <tr
+                      key={order.id}
+                      className="border-b border-[var(--border-soft)] align-top hover:bg-[var(--table-hover)]"
+                    >
+                      {" "}
+                      <td className="py-3">
+                        {" "}
+                        <Link
+                          href={`/production/requests/${order.id}`}
+                          className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
+                        >
+                          {" "}
+                          {order.code}{" "}
+                        </Link>{" "}
+                      </td>{" "}
+                      <td className="py-3 text-[var(--text-secondary)]">
+                        {" "}
+                        {order.customerId && canViewCustomers ? (
+                          <Link
+                            href={`/sales/customers/${order.customerId}`}
+                            className={getTextLinkClassName()}
+                          >
+                            {" "}
+                            {displayCustomer}{" "}
+                          </Link>
+                        ) : (
+                          displayCustomer
+                        )}{" "}
+                      </td>{" "}
+                      <td className="py-3">
+                        {" "}
+                        <Badge variant={getStatusBadgeVariant(orderStatus)}>
+                          {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
+                        </Badge>{" "}
+                      </td>{" "}
+                      <td className="py-3 text-[var(--text-muted)]">
+                        {order.warehouse
+                          ? `${order.warehouse.code} - ${order.warehouse.name}`
+                          : "--"}
+                      </td>{" "}
+                      <td className="py-3 text-[var(--text-muted)]">
+                        {order.requestedByUser?.name ??
+                          order.requestedByUser?.email ??
+                          "--"}
+                      </td>{" "}
+                      <td className="py-3 text-[var(--text-secondary)]">
+                        {" "}
+                        {order.assignedToUser ? (
+                          (order.assignedToUser.name ??
+                          order.assignedToUser.email ??
+                          "--")
+                        ) : (
+                          <span className="text-[var(--text-muted)]">
+                            Sin asignar
+                          </span>
+                        )}{" "}
+                      </td>{" "}
+                      <td className="py-3 text-[var(--text-muted)]">
+                        {" "}
+                        <p>
+                          {order.dueDate
+                            ? new Date(order.dueDate).toLocaleDateString(
+                                "es-MX",
+                              )
+                            : "--"}
+                        </p>{" "}
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {" "}
+                          <Badge variant={flowNarrative.flowBadgeVariant}>
+                            {flowNarrative.flowStageLabel}
+                          </Badge>{" "}
+                          <span className="text-xs text-[var(--text-muted)]">
+                            {flowNarrative.nextRecommendedAction.label}
+                          </span>{" "}
+                        </div>{" "}
+                      </td>{" "}
+                      <td className="py-3 text-right text-[var(--text-secondary)]">
+                        {order._count.lines}
+                      </td>{" "}
+                      <td className="py-3">
+                        {" "}
+                        {canRenderWriteActions ? (
+                          <div className="space-y-1">
+                            {" "}
+                            <form action={takeRequestFromList}>
+                              {" "}
+                              <input
+                                type="hidden"
+                                name="orderId"
+                                value={order.id}
+                              />{" "}
+                              <input
+                                type="hidden"
+                                name="returnTo"
+                                value={buildHref(safePage)}
+                              />{" "}
+                              <button
+                                type="submit"
+                                disabled={!takeEligibility.canTakeOrder}
+                                className={`btn-primary ${!takeEligibility.canTakeOrder ? "cursor-not-allowed opacity-55" : ""}`}
+                              >
+                                {" "}
+                                Tomar pedido{" "}
+                              </button>{" "}
+                            </form>{" "}
+                            {!takeEligibility.canTakeOrder ? (
+                              <p className="text-xs text-[var(--status-warning-text)]">
+                                {takeEligibility.takeBlockedReason}
+                              </p>
+                            ) : null}{" "}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--text-muted)]">
+                            Solo lectura
+                          </span>
+                        )}{" "}
+                      </td>{" "}
+                    </tr>
+                  );
+                })
+              )}{" "}
+            </tbody>{" "}
+          </table>{" "}
+        </div>{" "}
+      </section>{" "}
+      {totalPages > 1 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          {" "}
+          <Link
+            href={buildHref(Math.max(1, safePage - 1))}
+            className={`${ACTION_LINK_CLASS} border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] ${safePage <= 1 ? "pointer-events-none opacity-40" : ""}`}
+          >
+            {" "}
+            ← Anterior{" "}
+          </Link>{" "}
+          <span className="text-[var(--text-muted)]">
+            {" "}
+            Pagina {safePage} de {totalPages}{" "}
+          </span>{" "}
+          <Link
+            href={buildHref(Math.min(totalPages, safePage + 1))}
+            className={`${ACTION_LINK_CLASS} border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] ${safePage >= totalPages ? "pointer-events-none opacity-40" : ""}`}
+          >
+            {" "}
+            Siguiente →{" "}
+          </Link>{" "}
+        </div>
+      ) : null}{" "}
+    </div>
+  );
+}

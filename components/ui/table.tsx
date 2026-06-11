@@ -5,9 +5,19 @@ type TableWrapProps = HTMLAttributes<HTMLDivElement> & {
   dense?: boolean;
   striped?: boolean;
   hoverable?: boolean;
+  label?: string;
+  focusable?: boolean;
 };
 
-export function TableWrap({ className, dense = false, striped = false, hoverable = true, ...props }: TableWrapProps) {
+export function TableWrap({
+  className,
+  dense = false,
+  striped = false,
+  hoverable = true,
+  label,
+  focusable = true,
+  ...props
+}: TableWrapProps) {
   return (
     <div
       className={cn(
@@ -17,6 +27,9 @@ export function TableWrap({ className, dense = false, striped = false, hoverable
         hoverable ? "[&_tbody_tr:hover]:bg-[var(--bg-subtle)]" : "",
         className,
       )}
+      role={label ? "region" : undefined}
+      aria-label={label}
+      tabIndex={focusable ? 0 : undefined}
       {...props}
     />
   );
@@ -30,7 +43,7 @@ export function Th({ className, ...props }: ThHTMLAttributes<HTMLTableCellElemen
   return (
     <th
       className={cn(
-        "border-b border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]",
+        "border-b border-[var(--border-default)] bg-[var(--surface-secondary)] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]",
         className,
       )}
       {...props}

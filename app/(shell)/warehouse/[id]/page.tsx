@@ -1,6 +1,13 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
+import { pageGuard } from "@/components/rbac/PageGuard";
+import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { StatCard } from "@/components/ui/stat-card";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +16,7 @@ interface PageProps {
 }
 
 export default async function WarehouseDetailPage({ params }: PageProps) {
+  await pageGuard("warehouse.manage");
   const { id } = await params;
   if (!id) {
     notFound();
@@ -50,160 +58,124 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
   });
 
   const totalLocations = locations.length;
-  const activeLocations = locations.filter((l) => l.isActive).length;
-  const occupiedLocations = locations.filter((l) => l._count.inventory > 0).length;
+  const activeLocations = locations.filter((location) => location.isActive).length;
+  const occupiedLocations = locations.filter((location) => location._count.inventory > 0).length;
 
-  // Group locations by zone
-  const locationsByZone = locations.reduce((acc, loc) => {
-    const zone = loc.zone || "SIN ZONA";
+  const locationsByZone = locations.reduce((acc, location) => {
+    const zone = location.zone || "SIN ZONA";
     if (!acc[zone]) acc[zone] = [];
-    acc[zone].push(loc);
+    acc[zone].push(location);
     return acc;
   }, {} as Record<string, typeof locations>);
 
   return (
-    <div className="space-y-8">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-slate-400">
-        <Link href="/warehouse" className="hover:text-white">
-          Almacenes
-        </Link>
-        <span>/</span>
-        <span className="text-white">{warehouse.name}</span>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Almacenes"
+        title={warehouse.name}
+        description={warehouse.description || "Detalle operativo del almacén, su estado y sus ubicaciones."}
+        meta={
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs text-[var(--text-muted)]">{warehouse.code}</span>
+            <Badge variant={warehouse.isActive ? "success" : "danger"} size="sm">
+              {warehouse.isActive ? "Activo" : "Inactivo"}
+            </Badge>
+          </div>
+        }
+        actions={
+          <>
+            <Link href="/warehouse" className={buttonStyles({ variant: "secondary" })}>
+              Almacenes
+            </Link>
+            <Link href={`/warehouse/${warehouse.id}/edit`} className={buttonStyles({ variant: "secondary" })}>
+              Editar
+            </Link>
+            <Link href={`/warehouse/${warehouse.id}/locations/new`} className={buttonStyles()}>
+              + Nueva ubicación
+            </Link>
+          </>
+        }
+      />
+
+      {warehouse.address ? (
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface-secondary)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+          <span className="font-semibold text-[var(--text-primary)]">Dirección:</span> {warehouse.address}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard label="Total ubicaciones" value={totalLocations.toLocaleString("es-MX")} meta="Configuradas en este almacén" />
+        <StatCard label="Ubicaciones activas" value={activeLocations.toLocaleString("es-MX")} meta="Disponibles para operar" tone="success" />
+        <StatCard label="Con inventario" value={occupiedLocations.toLocaleString("es-MX")} meta="Ubicaciones con stock" tone="accent" />
       </div>
 
-      {/* Header Card */}
-      <div className="glass-card p-8">
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">
-              {warehouse.name}
-            </h1>
-            <div className="flex items-center gap-3 mt-2">
-              <span className="bg-slate-700 px-2 py-1 rounded text-sm text-slate-300 font-mono">
-                {warehouse.code}
-              </span>
-              <span
-                className={`text-xs font-bold px-2 py-1 rounded ${
-                  warehouse.isActive
-                    ? "bg-green-500/20 text-green-400"
-                    : "bg-red-500/20 text-red-400"
-                }`}
+      <SectionCard title="Ubicaciones" description="Agrupadas por zona para revisar capacidad y estado operativo.">
+        {Object.keys(locationsByZone).length === 0 ? (
+          <EmptyState
+            title="No hay ubicaciones en este almacén"
+            description="Crea la primera ubicación para empezar a organizar el inventario."
+            actions={
+              <Link href={`/warehouse/${warehouse.id}/locations/new`} className={buttonStyles({ size: "sm" })}>
+                + Crear ubicación
+              </Link>
+            }
+            compact
+          />
+        ) : (
+          <div className="space-y-4">
+            {Object.entries(locationsByZone).map(([zone, zoneLocations]) => (
+              <SectionCard
+                key={zone}
+                title={`Zona: ${zone}`}
+                description={`${zoneLocations.length} ubicaciones`}
+                contentClassName="space-y-3"
               >
-                {warehouse.isActive ? "ACTIVO" : "INACTIVO"}
-              </span>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Link href={`/warehouse/${warehouse.id}/edit`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white text-sm">
-              ✏️ Editar
-            </Link>
-            <Link href={`/warehouse/${warehouse.id}/locations/new`} className="btn-primary">
-              + Nueva Ubicación
-            </Link>
-          </div>
-        </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {zoneLocations.map((location) => (
+                    <article key={location.id} className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface-primary)] p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="font-mono text-xs text-[var(--text-muted)]">{location.code}</p>
+                          <p className="font-semibold text-[var(--text-primary)]">{location.name}</p>
+                        </div>
+                        <Badge variant={location.isActive ? "success" : "danger"} size="sm">
+                          {location.isActive ? "Activa" : "Inactiva"}
+                        </Badge>
+                      </div>
 
-        {warehouse.description && (
-          <p className="text-slate-300 mb-4">{warehouse.description}</p>
-        )}
+                      <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <dt className="text-xs text-[var(--text-muted)]">Pasillo</dt>
+                          <dd className="text-[var(--text-secondary)]">{location.aisle || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-[var(--text-muted)]">Rack</dt>
+                          <dd className="text-[var(--text-secondary)]">{location.rack || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-[var(--text-muted)]">Nivel</dt>
+                          <dd className="text-[var(--text-secondary)]">{location.level || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-[var(--text-muted)]">Capacidad</dt>
+                          <dd className="text-[var(--text-secondary)]">{location.capacity ?? "—"}</dd>
+                        </div>
+                      </dl>
 
-        {warehouse.address && (
-          <p className="text-slate-400 text-sm">📍 {warehouse.address}</p>
-        )}
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-          <div className="glass p-4 rounded-lg">
-            <p className="text-xs text-slate-400 uppercase font-bold">Total Ubicaciones</p>
-            <p className="text-2xl font-bold text-white">{totalLocations}</p>
-          </div>
-          <div className="glass p-4 rounded-lg">
-            <p className="text-xs text-slate-400 uppercase font-bold">Activas</p>
-            <p className="text-2xl font-bold text-green-400">{activeLocations}</p>
-          </div>
-          <div className="glass p-4 rounded-lg">
-            <p className="text-xs text-slate-400 uppercase font-bold">Con Inventario</p>
-            <p className="text-2xl font-bold text-cyan-400">{occupiedLocations}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Locations by Zone */}
-      {Object.keys(locationsByZone).length === 0 ? (
-        <div className="glass-card text-center py-12">
-          <span className="text-6xl block mb-4">📍</span>
-          <p className="text-slate-400 text-lg">No hay ubicaciones en este almacén</p>
-          <p className="text-slate-500 text-sm mt-2">
-            Crea ubicaciones para organizar tu inventario
-          </p>
-          <Link
-            href={`/warehouse/${warehouse.id}/locations/new`}
-            className="btn-primary mt-6 inline-block"
-          >
-            + Crear Ubicación
-          </Link>
-        </div>
-      ) : (
-        Object.entries(locationsByZone).map(([zone, locations]) => (
-          <div key={zone} className="glass-card">
-            <h2 className="text-xl font-bold mb-4 text-cyan-400">
-              Zona: {zone} ({locations.length})
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {locations.map((location) => (
-                <div
-                  key={location.id}
-                  className="glass p-4 rounded-lg border border-white/5 hover:border-cyan-500/50 transition-colors"
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-white font-mono">{location.code}</h3>
-                    <span
-                      className={`text-xs px-2 py-1 rounded ${
-                        location.isActive
-                          ? "bg-green-500/20 text-green-400"
-                          : "bg-red-500/20 text-red-400"
-                      }`}
-                    >
-                      {location.isActive ? "✓" : "✗"}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-400 mb-3">{location.name}</p>
-
-                  <div className="flex gap-2 text-xs text-slate-500">
-                    {location.aisle && <span>Pasillo: {location.aisle}</span>}
-                    {location.rack && <span>Rack: {location.rack}</span>}
-                    {location.level && <span>Nivel: {location.level}</span>}
-                  </div>
-
-                  {location.capacity && (
-                    <p className="text-xs text-slate-600 mt-2">
-                      Capacidad: {location.capacity}
-                    </p>
-                  )}
-
-                  <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center">
-                    <span className="text-sm text-slate-400">
-                      {location._count.inventory} productos
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {location._count.inventory > 0 && (
-                        <span className="text-xs text-cyan-400">📦</span>
-                      )}
-                      <Link
-                        href={`/labels/location/${location.id}`}
-                        className="text-xs text-cyan-300 hover:underline"
-                      >
-                        Etiqueta
-                      </Link>
-                    </div>
-                  </div>
+                      <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--border-default)] pt-3 text-sm">
+                        <span className="text-[var(--text-secondary)]">{location._count.inventory} productos</span>
+                        <Link href={`/labels/location/${location.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                          Etiqueta
+                        </Link>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </SectionCard>
+            ))}
           </div>
-        ))
-      )}
+        )}
+      </SectionCard>
     </div>
   );
 }

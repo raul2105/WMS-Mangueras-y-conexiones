@@ -2,11 +2,11 @@ import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
 
 const variants = {
-  neutral: "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--text-secondary)]",
-  accent: "border-[color-mix(in_oklab,var(--accent)_35%,var(--border-default))] bg-[var(--accent-soft)] text-[var(--accent)]",
-  success: "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[var(--success-soft)] text-[var(--success)]",
-  warning: "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[var(--warning-soft)] text-[var(--warning)]",
-  danger: "border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[var(--danger-soft)] text-[var(--danger)]",
+  neutral: "border-[var(--border-muted)] bg-[var(--surface-secondary)] text-[var(--status-neutral)]",
+  accent: "border-[var(--status-info-border)] bg-[var(--status-info-bg)] text-[var(--status-info-text)]",
+  success: "border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
+  warning: "border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]",
+  danger: "border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]",
 } as const;
 
 type Variant = keyof typeof variants;

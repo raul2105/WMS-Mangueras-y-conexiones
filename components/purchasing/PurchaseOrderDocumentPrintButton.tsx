@@ -1,10 +1,12 @@
 "use client";
 
+import { buttonStyles } from "@/components/ui/button";
+
 export function PurchaseOrderDocumentPrintButton() {
   return (
     <button
       type="button"
-      className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white"
+      className={buttonStyles({ variant: "secondary", size: "md" })}
       onClick={() => window.print()}
     >
       Imprimir / Guardar PDF

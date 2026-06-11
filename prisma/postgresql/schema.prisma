@@ -1090,6 +1090,11 @@ model PurchaseReceiptLine {
   purchaseOrderLineId String
   productId           String
   qtyReceived         Int
+  qtyDamaged          Int  @default(0)
+  qtyMissing          Int  @default(0)
+  qtyRejected         Int  @default(0)
+  qtySurplusReported  Int  @default(0)
+  discrepancyReason   String?
 
   purchaseReceipt   PurchaseReceipt   @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
   purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)

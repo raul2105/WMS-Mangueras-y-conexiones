@@ -24,6 +24,29 @@ async function seedDemoData(prisma) {
   const p = Object.fromEntries(products.map((row) => [row.sku, row]));
   const l = Object.fromEntries(locations.map((row) => [row.code, row]));
   const w = Object.fromEntries(warehouses.map((row) => [row.code, row]));
+  const demoSupplierIds = (await prisma.supplier.findMany({
+    where: { code: { startsWith: 'DEMO-SUP-' } },
+    select: { id: true },
+  })).map((row) => row.id);
+  const demoPurchaseOrders = demoSupplierIds.length === 0
+    ? []
+    : await prisma.purchaseOrder.findMany({
+        where: { supplierId: { in: demoSupplierIds } },
+        select: { id: true },
+      });
+  const demoPurchaseOrderIds = demoPurchaseOrders.map((row) => row.id);
+  const demoReceiptIds = demoPurchaseOrderIds.length === 0
+    ? []
+    : (await prisma.purchaseReceipt.findMany({
+        where: { purchaseOrderId: { in: demoPurchaseOrderIds } },
+        select: { id: true },
+      })).map((row) => row.id);
+  const demoBrandIds = demoSupplierIds.length === 0
+    ? []
+    : (await prisma.supplierBrand.findMany({
+        where: { supplierId: { in: demoSupplierIds } },
+        select: { id: true },
+      })).map((row) => row.id);
 
   const inv = async (sku, code, quantity, reserved = 0) => {
     const row = await prisma.inventory.upsert({
@@ -85,12 +108,27 @@ async function seedDemoData(prisma) {
   await prisma.labelPrintJob.deleteMany({ where: { traceRecord: { traceId: { startsWith: 'TRC-DEMO-' } } } });
   await prisma.traceRecord.deleteMany({ where: { OR: [{ traceId: { startsWith: 'TRC-DEMO-' } }, { sourceEntityType: { startsWith: 'DEMO_' } }] } });
   await prisma.inventoryMovement.deleteMany({ where: { OR: [{ reference: { startsWith: 'DEMO-' } }, { traceId: { startsWith: 'TRC-DEMO-' } }] } });
-  await prisma.purchaseReceiptLine.deleteMany({ where: { purchaseReceipt: { purchaseOrder: { folio: { startsWith: 'DEMO-OC-' } } } } });
-  await prisma.purchaseReceipt.deleteMany({ where: { purchaseOrder: { folio: { startsWith: 'DEMO-OC-' } } } });
-  await prisma.purchaseOrderLine.deleteMany({ where: { purchaseOrder: { folio: { startsWith: 'DEMO-OC-' } } } });
-  await prisma.purchaseOrder.deleteMany({ where: { folio: { startsWith: 'DEMO-OC-' } } });
+  if (demoPurchaseOrderIds.length > 0) {
+    await prisma.purchaseReceiptLine.deleteMany({ where: { purchaseReceiptId: { in: demoReceiptIds } } });
+    await prisma.purchaseReceipt.deleteMany({ where: { id: { in: demoReceiptIds } } });
+    await prisma.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: { in: demoPurchaseOrderIds } } });
+    await prisma.purchaseOrder.deleteMany({ where: { id: { in: demoPurchaseOrderIds } } });
+  }
   await prisma.productionOrder.deleteMany({ where: { code: { startsWith: 'DEMO-' } } });
   await prisma.supplierProduct.deleteMany({ where: { supplier: { code: { startsWith: 'DEMO-SUP-' } } } });
+  if (demoBrandIds.length > 0) {
+    await prisma.product.updateMany({
+      where: { supplierBrandId: { in: demoBrandIds } },
+      data: { supplierBrandId: null },
+    });
+  }
+  if (demoSupplierIds.length > 0) {
+    await prisma.product.updateMany({
+      where: { primarySupplierId: { in: demoSupplierIds } },
+      data: { primarySupplierId: null },
+    });
+  }
+  await prisma.supplierBrand.deleteMany({ where: { supplierId: { in: demoSupplierIds } } });
   await prisma.supplier.deleteMany({ where: { code: { startsWith: 'DEMO-SUP-' } } });
 
   const templates = {};
@@ -114,8 +152,10 @@ async function seedDemoData(prisma) {
     }
   }
 
-  const sup1 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-001', name: 'HoseTech Monterrey', legalName: 'HoseTech Monterrey S.A. de C.V.', businessName: 'HoseTech Monterrey', taxId: 'HTM260401AB1', email: 'compras@hosetech.example', phone: '81-5555-0101', address: 'Parque Industrial Norte', isActive: true } });
-  const sup2 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-002', name: 'Conecta Industrial Bajio', legalName: 'Conecta Industrial Bajio S.A. de C.V.', businessName: 'Conecta Industrial Bajio', taxId: 'CIB260401CD2', email: 'ventas@conecta.example', phone: '442-555-0202', address: 'Zona Industrial Queretaro', isActive: true } });
+  const sup1 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-001', name: 'HoseTech Monterrey', taxId: 'HTM260401AB1', email: 'compras@hosetech.example', phone: '81-5555-0101', address: 'Parque Industrial Norte', isActive: true } });
+  const sup2 = await prisma.supplier.create({ data: { code: 'DEMO-SUP-002', name: 'Conecta Industrial Bajio', taxId: 'CIB260401CD2', email: 'ventas@conecta.example', phone: '442-555-0202', address: 'Zona Industrial Queretaro', isActive: true } });
+
+  // Certifying optional columns omitted: legalName, businessName, paymentTerms
 
   const [brandContinental, brandGates] = await Promise.all([
     prisma.supplierBrand.create({ data: { supplierId: sup1.id, name: 'Continental' } }),

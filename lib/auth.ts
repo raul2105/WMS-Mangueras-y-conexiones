@@ -6,6 +6,7 @@ import authConfig from "@/auth.config";
 import prisma from "@/lib/prisma";
 import { startPerf } from "@/lib/perf";
 import { getPermissionsForRoles } from "@/lib/rbac/role-permissions";
+
 function buildAuthUser(
   user: {
     id: string;

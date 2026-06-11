@@ -258,6 +258,23 @@ export const purchaseReceiptOperationSchema = z.object({
   notes: z.string().trim().max(500).optional(),
 });
 
+// Per-line receiving discrepancy schema
+export const purchaseReceiptLineDiscrepancySchema = z.object({
+  lineId: requiredText("Línea"),
+  qtyReceived: z.coerce.number().int().min(0),
+  qtyDamaged: z.coerce.number().int().min(0).default(0),
+  qtyMissing: z.coerce.number().int().min(0).default(0),
+  qtyRejected: z.coerce.number().int().min(0).default(0),
+  qtySurplusReported: z.coerce.number().int().min(0).default(0),
+  discrepancyReason: z.string().trim().max(500).optional(),
+}).refine(
+  (data) => {
+    const hasDiscrepancy = data.qtyDamaged > 0 || data.qtyMissing > 0 || data.qtyRejected > 0 || data.qtySurplusReported > 0;
+    return !hasDiscrepancy || (data.discrepancyReason && data.discrepancyReason.length > 0);
+  },
+  { message: "Motivo de discrepancia requerido cuando hay cantidades dañadas, faltantes, rechazadas o sobrantes", path: ["discrepancyReason"] }
+);
+
 // ─── Pedidos de surtido / captura comercial ─────────────────────────────────
 
 export const salesInternalOrderCreateSchema = z.object({

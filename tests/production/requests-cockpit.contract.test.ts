@@ -15,6 +15,8 @@ describe("production requests cockpit contract", () => {
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(listContent).toContain("takeRequestFromList");
     expect(listContent).toContain("Warehouse Execution Cockpit");
+    expect(listContent).toContain("Mis pedidos");
+    expect(listContent).toContain("Disponibles para asignarme");
     expect(listContent).toContain("Next Action");
     expect(listContent).toContain("Trabajo actual");
     expect(listContent).toContain("Matriz de mix");

@@ -45,7 +45,7 @@ export default function SidebarNav({
   onNavigate,
 }: Props) {
   return (
-    <nav className="space-y-1 px-2 py-3" aria-label="Navegacion principal">
+     <nav className="space-y-1 px-2 py-3" aria-label="Navegacion principal" data-testid={mode === "desktop" ? "desktop-main-nav" : "mobile-main-nav"}>
       {modules.map((item) => {
         const Icon = iconMap[item.icon];
         const active = isNavItemActive(pathname, item);
@@ -62,8 +62,8 @@ export default function SidebarNav({
             className={cn(
               "group flex items-center rounded-lg border px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]",
               active
-                ? "border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--text-primary)]"
-                : "border-transparent text-[var(--text-secondary)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]",
+                ? "border-[var(--action-primary)] bg-[var(--accent-soft)] text-[var(--text-primary)] font-semibold"
+                : "border-transparent text-[var(--text-secondary)] hover:border-[var(--border-muted)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]",
               compact ? "justify-center px-2" : "gap-3",
             )}
           >

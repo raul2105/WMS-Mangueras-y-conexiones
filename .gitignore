@@ -65,6 +65,10 @@ prisma/*.backup*
 /playwright-report/
 /test-results/
 
+# Temp runtime logs & Playwright output artifacts
+/.tmp/
+/output/
+
 # OpenNext build output
 /.open-next/
 

@@ -2,11 +2,10 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 const variants = {
-  primary:
-    "border-[var(--accent)] bg-[var(--accent)] text-[var(--text-inverse)] hover:border-[var(--accent-hover)] hover:bg-[var(--accent-hover)]",
+  primary: "border-[var(--action-primary)] bg-[var(--action-primary)] text-inverse hover:border-[var(--accent-hover)] hover:bg-[var(--accent-hover)]",
   secondary:
-    "border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]",
-  ghost: "border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]",
+    "border-[var(--action-secondary)] bg-[var(--surface-primary)] text-[var(--text-primary)] hover:bg-[var(--surface-secondary)]",
+  ghost: "border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]",
   danger: "border-[var(--danger-soft-hover)] bg-[var(--danger-soft)] text-[var(--danger-text)] hover:bg-[var(--danger-soft-hover)]",
 } as const;
 

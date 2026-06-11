@@ -1,3 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Product {
+  id            String    @id @default(uuid())
+  sku           String    @unique
+  referenceCode String    @unique
+  name          String
+  description   String?
+  type          ProductType
+  brand         String?
+  baseCost      Float     @default(0)
+  price         Float     @default(0)
+  attributes    Json?
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  inventory     Inventory[]
+  movements     InventoryMovement[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Inventory {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  location  String
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, location])
+}
+
+model InventoryMovement {
+  id          String           @id @default(uuid())
+  productId   String
+  product     Product          @relation(fields: [productId], references: [id])
+  type        MovementType
+  quantity    Int
+  location    String
+  reference   String?
+  notes       String?
+  createdAt   DateTime         @default(now())
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  USER
+}
+
+enum ProductType {
+  HOSE
+  FITTING
+  ASSEMBLY
+  ACCESSORY
+}
+
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  TRANSFER
+  ASSEMBLY
+}
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 

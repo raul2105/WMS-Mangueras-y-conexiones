@@ -21,7 +21,7 @@ describe("purchase order document contracts", () => {
     expect(content).toContain("Descargar PDF");
     expect(content).toContain("Documento oficial no generado para esta OC. Revisión requerida.");
     expect(content).toContain("Correo al proveedor");
-    expect(content).toContain("Enviar por correo");
+    expect(content).toContain("Envío por correo deshabilitado");
     expect(content).toContain("Vista previa del cuerpo");
     expect(content).toContain("KAN-85");
   });

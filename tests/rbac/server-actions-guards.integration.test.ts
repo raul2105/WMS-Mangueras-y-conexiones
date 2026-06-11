@@ -28,6 +28,14 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(content).toContain('pageGuard("audit.view")');
   });
 
+  it("warehouse list and detail are protected by warehouse.manage page guard", () => {
+    const listContent = readWorkspaceFile("app/(shell)/warehouse/page.tsx");
+    const detailContent = readWorkspaceFile("app/(shell)/warehouse/[id]/page.tsx");
+
+    expect(listContent).toContain('pageGuard("warehouse.manage")');
+    expect(detailContent).toContain('pageGuard("warehouse.manage")');
+  });
+
   it("users pages are protected by users.manage page guard", () => {
     const listContent = readWorkspaceFile("app/(shell)/users/page.tsx");
     const newContent = readWorkspaceFile("app/(shell)/users/new/page.tsx");
@@ -68,16 +76,18 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(formContent).toContain("ProductSearchField");
   });
 
-  it("purchase order detail and receive flows are protected by purchasing.manage", () => {
+  it("purchase order list is view-only while detail, document and receive flows stay under the correct purchasing permissions", () => {
+    const listContent = readWorkspaceFile("app/(shell)/purchasing/orders/page.tsx");
     const detailContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/page.tsx");
     const receiveContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/receive/page.tsx");
     const documentContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/document/page.tsx");
     const pdfRouteContent = readWorkspaceFile("app/api/purchasing/orders/[id]/pdf/route.ts");
 
+    expect(listContent).toContain('pageGuard("purchasing.view")');
     expect(detailContent).toContain('pageGuard("purchasing.manage")');
     expect(detailContent).toContain('requirePermission("purchasing.manage")');
-    expect(receiveContent).toContain('pageGuard("purchasing.manage")');
-    expect(receiveContent).toContain('requirePermission("purchasing.manage")');
+    expect(receiveContent).toContain('pageGuard("purchasing.receive")');
+    expect(receiveContent).toContain('requirePermission("purchasing.receive")');
     expect(documentContent).toContain('pageGuard("purchasing.manage")');
     expect(pdfRouteContent).toContain('requirePermission("purchasing.manage")');
   });

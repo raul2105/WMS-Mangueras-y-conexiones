@@ -1,5 +1,18 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { pageGuard } from "@/components/rbac/PageGuard";
+import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import {
+  buildPurchaseOrderPresetWhere,
+  getPurchaseOrderPresetLabel,
+  isPurchaseOrderPresetFilter,
+} from "@/lib/purchasing/purchase-order-presets";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
@@ -13,34 +26,66 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELADA: "Cancelada",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  BORRADOR: "text-slate-400 bg-slate-500/20",
-  CONFIRMADA: "text-blue-400 bg-blue-500/20",
-  EN_TRANSITO: "text-amber-400 bg-amber-500/20",
-  RECIBIDA: "text-emerald-400 bg-emerald-500/20",
-  PARCIAL: "text-orange-400 bg-orange-500/20",
-  CANCELADA: "text-red-400 bg-red-500/20",
+const STATUS_BADGE_VARIANTS: Record<string, "neutral" | "accent" | "success" | "warning" | "danger"> = {
+  BORRADOR: "neutral",
+  CONFIRMADA: "accent",
+  EN_TRANSITO: "warning",
+  RECIBIDA: "success",
+  PARCIAL: "warning",
+  CANCELADA: "danger",
 };
 
-type SearchParams = { status?: string };
+type SearchParams = { status?: string; page?: string };
+type PurchaseOrderSearchParams = SearchParams & { preset?: string };
 
 function parsePage(value: string | undefined) {
   const parsed = Number.parseInt(value ?? "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+function formatDate(value: Date | string | null | undefined) {
+  if (!value) return "—";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("es-MX");
+}
+
 export default async function PurchaseOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<SearchParams & { page?: string }>;
+  searchParams: Promise<PurchaseOrderSearchParams>;
 }) {
+  await pageGuard("purchasing.view");
   const sp = await searchParams;
-  const statusFilter = sp.status as "BORRADOR" | "CONFIRMADA" | "EN_TRANSITO" | "RECIBIDA" | "PARCIAL" | "CANCELADA" | undefined;
+  const sessionCtx = await getSessionContext();
+  const canManagePurchasing =
+    sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.manage");
+  const presetFilter = isPurchaseOrderPresetFilter(sp.preset) ? sp.preset : undefined;
+  const statusFilter = !presetFilter ? (sp.status as
+    | "BORRADOR"
+    | "CONFIRMADA"
+    | "EN_TRANSITO"
+    | "RECIBIDA"
+    | "PARCIAL"
+    | "CANCELADA"
+    | undefined) : undefined;
   const currentPage = parsePage(sp.page);
 
-  const where = statusFilter ? { status: statusFilter } : {};
+  const presetWhere = buildPurchaseOrderPresetWhere(presetFilter);
+  const where = statusFilter ? { status: statusFilter } : presetWhere;
 
-  const [orders, totalCount, filteredCount] = await Promise.all([
+  const [
+    orders,
+    totalCount,
+    filteredCount,
+    draftCount,
+    confirmedCount,
+    transitCount,
+    partialCount,
+    receivedCount,
+    overdueCount,
+    dueTodayCount,
+  ] = await Promise.all([
     prisma.purchaseOrder.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -58,6 +103,13 @@ export default async function PurchaseOrdersPage({
     }),
     prisma.purchaseOrder.count(),
     prisma.purchaseOrder.count({ where }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("borrador") }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("confirmadas") }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("en_transito") }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("parciales") }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("recibidas") }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("vencidas") }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("por_recibir_hoy") }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
@@ -65,127 +117,247 @@ export default async function PurchaseOrdersPage({
 
   const buildHref = (page: number) => {
     const params = new URLSearchParams();
-    if (statusFilter) params.set("status", statusFilter);
+    if (presetFilter) params.set("preset", presetFilter);
+    else if (statusFilter) params.set("status", statusFilter);
     if (page > 1) params.set("page", String(page));
     const query = params.toString();
     return query ? `/purchasing/orders?${query}` : "/purchasing/orders";
   };
 
-  return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-            Órdenes de Compra
-          </h1>
-          <p className="text-slate-400 mt-1">{filteredCount} órdenes registradas.</p>
-        </div>
-        <div className="flex gap-3">
-          <Link href="/purchasing" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Compras</Link>
-          <Link href="/purchasing/orders/new" className="btn-primary">+ Nueva OC</Link>
-        </div>
-      </div>
+  const filterButtons = [
+    { key: "todas", label: `Todas (${totalCount})` },
+    { key: "borrador", label: `${getPurchaseOrderPresetLabel("borrador")} (${draftCount})` },
+    { key: "confirmadas", label: `${getPurchaseOrderPresetLabel("confirmadas")} (${confirmedCount})` },
+    { key: "en_transito", label: `${getPurchaseOrderPresetLabel("en_transito")} (${transitCount})` },
+    { key: "parciales", label: `${getPurchaseOrderPresetLabel("parciales")} (${partialCount})` },
+    { key: "recibidas", label: `${getPurchaseOrderPresetLabel("recibidas")} (${receivedCount})` },
+    { key: "vencidas", label: `${getPurchaseOrderPresetLabel("vencidas")} (${overdueCount})` },
+    { key: "por_recibir_hoy", label: `${getPurchaseOrderPresetLabel("por_recibir_hoy")} (${dueTodayCount})` },
+  ];
 
-      {/* Filtros por estado */}
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href="/purchasing/orders"
-          className={`px-3 py-1.5 rounded-lg text-sm glass ${!statusFilter ? "bg-white/10 text-white font-bold" : "text-slate-400 hover:text-white"}`}
-        >
-          Todas ({totalCount})
-        </Link>
-        {Object.entries(STATUS_LABELS).map(([key, label]) => (
-          <Link
-            key={key}
-            href={`/purchasing/orders?status=${key}`}
-            className={`px-3 py-1.5 rounded-lg text-sm glass ${statusFilter === key ? "bg-white/10 text-white font-bold" : "text-slate-400 hover:text-white"}`}
-          >
-            {label}
-          </Link>
-        ))}
-      </div>
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Compras"
+        title="Órdenes de compra"
+        description="Lista operativa por preset. El detalle y las acciones de gestión solo aparecen para roles autorizados."
+        meta={`${filteredCount} órdenes registradas`}
+        actions={
+          <>
+            <Link href="/purchasing" className={buttonStyles({ variant: "secondary" })}>
+              Compras
+            </Link>
+            {canManagePurchasing ? (
+              <Link href="/purchasing/orders/new" className={buttonStyles()}>
+                + Nueva OC
+              </Link>
+            ) : null}
+          </>
+        }
+      />
+
+      <SectionCard
+        title="Presets operativos"
+        description="Filtra por ciclo operativo sin perder el contexto de la lista."
+        contentClassName="space-y-3"
+      >
+        <div className="flex flex-wrap gap-2">
+          {filterButtons.map((filter) => (
+            <Link
+              key={filter.key}
+              href={filter.key === "todas" ? "/purchasing/orders" : `/purchasing/orders?preset=${filter.key}`}
+              className={buttonStyles({
+                variant: presetFilter === filter.key || (filter.key === "todas" && !presetFilter && !statusFilter)
+                  ? "primary"
+                  : "secondary",
+                size: "sm",
+              })}
+            >
+              {filter.label}
+            </Link>
+          ))}
+        </div>
+        {!canManagePurchasing ? (
+          <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-secondary)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+            Vista de solo lectura para tu rol. No se muestran enlaces de gestión ni rutas restringidas.
+          </div>
+        ) : null}
+      </SectionCard>
 
       {orders.length === 0 ? (
-        <div className="glass-card text-center py-12">
-          <p className="text-slate-500 mb-4">
-            {statusFilter ? `No hay órdenes con estado "${STATUS_LABELS[statusFilter]}".` : "No hay órdenes de compra."}
-          </p>
-          <Link href="/purchasing/orders/new" className="btn-primary">+ Crear primera OC</Link>
-        </div>
+        <EmptyState
+          title={statusFilter ? `No hay órdenes con estado "${STATUS_LABELS[statusFilter]}"` : "No hay órdenes de compra"}
+          description="Cambia el filtro o crea la primera orden si tu rol lo permite."
+          actions={
+            canManagePurchasing ? (
+              <Link href="/purchasing/orders/new" className={buttonStyles({ size: "sm" })}>
+                + Crear primera OC
+              </Link>
+            ) : undefined
+          }
+        />
       ) : (
-        <div className="glass-card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-slate-400 border-b border-white/10">
-                <th className="text-left py-3">Folio</th>
-                <th className="text-left py-3">Proveedor</th>
-                <th className="text-left py-3">Estado</th>
-                <th className="text-left py-3">Fecha Esperada</th>
-                <th className="text-right py-3">Líneas</th>
-                <th className="text-right py-3">% Recibido</th>
-                <th className="py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => {
-                const totalOrdered = order.lines.reduce((s, l) => s + l.qtyOrdered, 0);
-                const totalReceived = order.lines.reduce((s, l) => s + l.qtyReceived, 0);
-                const pct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
+        <SectionCard
+          title="Listado de órdenes"
+          description={`Página ${safePage} de ${totalPages}`}
+          footer={
+            totalPages > 1 ? (
+              <div className="flex w-full items-center justify-between gap-2 text-sm">
+                <Link
+                  href={buildHref(Math.max(1, safePage - 1))}
+                  className={buttonStyles({
+                    variant: "secondary",
+                    size: "sm",
+                    className: safePage <= 1 ? "pointer-events-none opacity-40" : "",
+                  })}
+                >
+                  Anterior
+                </Link>
+                <span className="text-[var(--text-muted)]">
+                  Página {safePage} de {totalPages}
+                </span>
+                <Link
+                  href={buildHref(Math.min(totalPages, safePage + 1))}
+                  className={buttonStyles({
+                    variant: "secondary",
+                    size: "sm",
+                    className: safePage >= totalPages ? "pointer-events-none opacity-40" : "",
+                  })}
+                >
+                  Siguiente
+                </Link>
+              </div>
+            ) : null
+          }
+          contentClassName="space-y-0 px-0 py-0"
+        >
+          <div className="grid gap-3 md:hidden">
+            {orders.map((order) => {
+              const totalOrdered = order.lines.reduce((sum, line) => sum + line.qtyOrdered, 0);
+              const totalReceived = order.lines.reduce((sum, line) => sum + line.qtyReceived, 0);
+              const pct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
 
-                return (
-                  <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="py-3">
-                      <Link href={`/purchasing/orders/${order.id}`} className="text-orange-400 hover:underline font-mono text-xs font-bold">
-                        {order.folio}
+              return (
+                <article
+                  key={order.id}
+                  className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface-secondary)] p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Folio</p>
+                      {canManagePurchasing ? (
+                        <Link href={`/purchasing/orders/${order.id}`} className="font-mono text-sm font-semibold text-[var(--text-primary)] hover:text-[var(--text-accent)]">
+                          {order.folio}
+                        </Link>
+                      ) : (
+                        <p className="font-mono text-sm font-semibold text-[var(--text-primary)]">{order.folio}</p>
+                      )}
+                    </div>
+                    <Badge variant={STATUS_BADGE_VARIANTS[order.status] ?? "neutral"} size="sm">
+                      {STATUS_LABELS[order.status] ?? order.status}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="col-span-2">
+                      <p className="text-xs text-[var(--text-muted)]">Proveedor</p>
+                      <p className="text-[var(--text-primary)]">
+                        <span className="font-mono text-xs text-[var(--text-muted)] mr-1">{order.supplier.code}</span>
+                        {order.supplier.businessName ?? order.supplier.name}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text-muted)]">Esperada</p>
+                      <p className="text-[var(--text-secondary)]">{formatDate(order.expectedDate)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text-muted)]">Líneas</p>
+                      <p className="font-semibold text-[var(--text-primary)]">{order._count.lines}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text-muted)]">% recibido</p>
+                      <p className="font-semibold text-[var(--status-info)]">{pct}%</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text-muted)]">Recepciones</p>
+                      <p className="font-semibold text-[var(--text-primary)]">{order._count.receipts}</p>
+                    </div>
+                  </div>
+
+                  {canManagePurchasing ? (
+                    <div className="mt-4">
+                      <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "secondary", size: "sm", fullWidth: true })}>
+                        Ver detalle
                       </Link>
-                    </td>
-                    <td className="py-3 text-slate-300">
-                      <span className="text-xs text-slate-500 font-mono mr-1">{order.supplier.code}</span>
-                      {order.supplier.businessName ?? order.supplier.name}
-                    </td>
-                    <td className="py-3">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${STATUS_COLORS[order.status] ?? "text-slate-400 bg-slate-500/20"}`}>
-                        {STATUS_LABELS[order.status] ?? order.status}
-                      </span>
-                    </td>
-                    <td className="py-3 text-slate-400 text-xs">
-                      {order.expectedDate ? new Date(order.expectedDate).toLocaleDateString("es-MX") : "—"}
-                    </td>
-                    <td className="py-3 text-right text-slate-300">{order._count.lines}</td>
-                    <td className="py-3 text-right">
-                      <span className={`text-xs font-bold ${pct === 100 ? "text-emerald-400" : pct > 0 ? "text-orange-400" : "text-slate-400"}`}>
-                        {pct}%
-                      </span>
-                    </td>
-                    <td className="py-3 text-right">
-                      <Link href={`/purchasing/orders/${order.id}`} className="text-xs text-cyan-400 hover:underline">Ver →</Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-xs text-[var(--text-muted)]">Detalle no disponible para tu rol.</p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
 
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between gap-3 text-sm">
-          <Link
-            href={buildHref(Math.max(1, safePage - 1))}
-            className={`px-4 py-2 glass rounded-lg ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
-          >
-            ← Anterior
-          </Link>
-          <span className="text-slate-500">
-            Página {safePage} de {totalPages}
-          </span>
-          <Link
-            href={buildHref(Math.min(totalPages, safePage + 1))}
-            className={`px-4 py-2 glass rounded-lg ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
-          >
-            Siguiente →
-          </Link>
-        </div>
+          <div className="hidden md:block">
+            <TableWrap dense striped label="Listado de órdenes de compra" className="rounded-none border-0 shadow-none">
+              <Table className="min-w-[760px]">
+                <thead>
+                  <tr>
+                    <Th>Folio</Th>
+                    <Th>Proveedor</Th>
+                    <Th>Estado</Th>
+                    <Th>Fecha esperada</Th>
+                    <Th className="text-right">Líneas</Th>
+                    <Th className="text-right">% recibido</Th>
+                    <Th className="text-right">Acción</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((order) => {
+                    const totalOrdered = order.lines.reduce((sum, line) => sum + line.qtyOrdered, 0);
+                    const totalReceived = order.lines.reduce((sum, line) => sum + line.qtyReceived, 0);
+                    const pct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
+
+                    return (
+                      <TableRow key={order.id}>
+                        <Td className="font-mono text-xs text-[var(--text-primary)]">
+                          {canManagePurchasing ? (
+                            <Link href={`/purchasing/orders/${order.id}`} className="font-semibold text-[var(--text-primary)] hover:text-[var(--text-accent)]">
+                              {order.folio}
+                            </Link>
+                          ) : (
+                            order.folio
+                          )}
+                        </Td>
+                        <Td className="text-[var(--text-secondary)]">
+                          <span className="text-xs font-mono text-[var(--text-muted)] mr-1">{order.supplier.code}</span>
+                          {order.supplier.businessName ?? order.supplier.name}
+                        </Td>
+                        <Td>
+                          <Badge variant={STATUS_BADGE_VARIANTS[order.status] ?? "neutral"} size="sm">
+                            {STATUS_LABELS[order.status] ?? order.status}
+                          </Badge>
+                        </Td>
+                        <Td className="text-sm text-[var(--text-secondary)]">{formatDate(order.expectedDate)}</Td>
+                        <Td className="text-right font-semibold text-[var(--text-primary)]">{order._count.lines}</Td>
+                        <Td className="text-right font-semibold text-[var(--status-info)]">{pct}%</Td>
+                        <Td className="text-right">
+                          {canManagePurchasing ? (
+                            <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                              Ver detalle
+                            </Link>
+                          ) : (
+                            <span className="text-xs text-[var(--text-muted)]">Solo lectura</span>
+                          )}
+                        </Td>
+                      </TableRow>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </TableWrap>
+          </div>
+        </SectionCard>
       )}
     </div>
   );

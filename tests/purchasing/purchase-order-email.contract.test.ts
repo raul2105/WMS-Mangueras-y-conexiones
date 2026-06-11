@@ -188,7 +188,7 @@ describe("purchase order email contract", () => {
     expect(helperContent).toContain("El envío real por correo no está configurado en este entorno");
     expect(pageContent).toContain("Correo al proveedor");
     expect(pageContent).toContain("Vista previa del cuerpo");
-    expect(pageContent).toContain("Enviar por correo");
+    expect(pageContent).toContain("Envío por correo deshabilitado");
     expect(pageContent).toContain("KAN-85");
   });
 });

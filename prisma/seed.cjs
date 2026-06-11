@@ -57,6 +57,7 @@ const RBAC_ROLES = [
       'production.execute',
       'purchasing.view',
       'purchasing.manage',
+      'purchasing.receive',
       'sales.view',
       'sales.create_order',
       'customers.view',
@@ -106,7 +107,7 @@ const RBAC_USERS = [
 ];
 
 async function seedRbac() {
-  console.log('🔐 Seeding RBAC (users, roles, permissions)...');
+  console.log('Seeding RBAC (users, roles, permissions)...');
 
   for (const permissionCode of RBAC_PERMISSIONS) {
     await prisma.permission.upsert({

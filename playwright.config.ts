@@ -30,6 +30,18 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
+    {
+      name: 'mobile-chrome',
+      use: { ...devices['iPhone 12'] },
+    },
+    {
+      name: 'mobile-safari',
+      use: { ...devices['iPad (gen 7)'] },
+    },
+    {
+      name: 'accessibility',
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: {
     command: 'npm run dev',

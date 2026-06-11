@@ -25,7 +25,7 @@ export function FulfillmentPriorityQueue({ rows }: Props) {
         </Link>
       }
     >
-      <TableWrap dense className="p-0">
+      <TableWrap dense className="p-0" label="Cola prioritaria de pedidos por atender">
         <Table className="min-w-[1080px]">
           <thead>
             <tr>

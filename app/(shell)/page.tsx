@@ -68,15 +68,14 @@ export default async function Home() {
         }
       />
 
-      <FulfillmentKpiGrid kpis={snapshot.kpis} />
-
       {role === "SYSTEM_ADMIN" ? (
         <>
-          <FulfillmentAnalyticsPanels analytics={snapshot.analytics} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
             <FulfillmentPriorityQueue rows={snapshot.queue} />
             <FulfillmentAlertList alerts={snapshot.alerts} />
           </div>
+          <FulfillmentKpiGrid kpis={snapshot.kpis} />
+          <FulfillmentAnalyticsPanels analytics={snapshot.analytics} />
         </>
       ) : (
         <>
@@ -84,6 +83,7 @@ export default async function Home() {
             <FulfillmentPriorityQueue rows={snapshot.queue} />
             <FulfillmentAlertList alerts={snapshot.alerts} />
           </div>
+          <FulfillmentKpiGrid kpis={snapshot.kpis} />
           <FulfillmentAnalyticsPanels analytics={snapshot.analytics} />
         </>
       )}

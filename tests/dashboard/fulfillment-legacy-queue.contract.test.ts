@@ -12,6 +12,6 @@ describe("fulfillment legacy queue contract (KAN-56)", () => {
 
     expect(content).toContain("isFulfillmentQueueFilter");
     expect(content).toContain("matchQueueFilter(signals, queueFilter)");
-    expect(content).toContain("queueFilter ? matchQueueFilter(signals, queueFilter) : true");
+    expect(content).toMatch(/queueFilter\s*\?\s*matchQueueFilter\(signals,\s*queueFilter\)\s*:\s*true/);
   });
 });

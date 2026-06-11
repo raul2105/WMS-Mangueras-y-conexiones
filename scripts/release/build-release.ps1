@@ -284,13 +284,13 @@ try {
   foreach ($launcher in @("launcher.cmd", "stop.cmd", "uninstall.cmd")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $launcher) -Destination $releaseDir -Force
   }
-  foreach ($maintenanceCmd in @("init-local.cmd", "healthcheck.cmd", "backup-db.cmd", "restore-db.cmd", "setup-aws.cmd")) {
+  foreach ($maintenanceCmd in @("init-local.cmd", "healthcheck.cmd", "backup-db.cmd", "restore-db.cmd", "setup-aws.cmd", "studio.cmd")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "maintenance\$maintenanceCmd") -Destination $releaseMaintenanceDir -Force
   }
   foreach ($psLauncher in @("common.ps1", "launcher.ps1", "stop.ps1", "uninstall.ps1")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\release\$psLauncher") -Destination $releaseToolsDir -Force
   }
-  foreach ($maintenancePs in @("init-local.ps1", "healthcheck.ps1", "backup-db.ps1", "restore-db.ps1", "setup-aws.ps1")) {
+  foreach ($maintenancePs in @("init-local.ps1", "healthcheck.ps1", "backup-db.ps1", "restore-db.ps1", "setup-aws.ps1", "studio.ps1")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\release\maintenance\$maintenancePs") -Destination $releaseToolsMaintenanceDir -Force
   }
 

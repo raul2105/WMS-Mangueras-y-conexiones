@@ -45,6 +45,7 @@
     "db:setup": "npm run db:push && npm run db:seed",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "db:studio:aws": "maintenance\\studio.cmd",
     "db:reset": "prisma migrate reset --force",
     "import:products": "node scripts/data/import-products-from-csv.cjs",
     "link:product-images": "node scripts/data/link-product-images-from-folder.cjs",
@@ -84,6 +85,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@opennextjs/aws": "^3.10.0",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",

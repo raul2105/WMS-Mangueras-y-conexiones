@@ -65,7 +65,7 @@ jobs:
         run: npm run prisma:generate
 
       - name: Sync test schema (PostgreSQL)
-        run: npm run db:push
+        run: npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
 
       - name: Run PostgreSQL regression suite
         run: npm run test:regression:postgres
@@ -161,7 +161,7 @@ jobs:
         run: npm run prisma:generate
 
       - name: Sync test schema (PostgreSQL)
-        run: npm run db:push
+        run: npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
 
       - name: Run full PostgreSQL suite
         run: npm run test:postgres

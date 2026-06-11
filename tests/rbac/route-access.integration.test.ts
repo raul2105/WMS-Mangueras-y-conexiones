@@ -19,6 +19,8 @@ describe("rbac role-route access matrix", () => {
     "/inventory/adjust",
     "/inventory/transfer",
     "/inventory/pick",
+    "/warehouse",
+    "/warehouse/abc",
     "/audit",
     "/purchasing/orders",
     "/purchasing/orders/new",
@@ -42,15 +44,23 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/inventory/adjust")).toBe("inventory.adjust");
     expect(getRequiredPermissionForPath("/inventory/transfer")).toBe("inventory.transfer");
     expect(getRequiredPermissionForPath("/inventory/pick")).toBe("inventory.pick");
+    expect(getRequiredPermissionForPath("/warehouse")).toBe("warehouse.manage");
+    expect(getRequiredPermissionForPath("/warehouse/abc")).toBe("warehouse.manage");
     expect(getRequiredPermissionForPath("/audit")).toBe("audit.view");
     expect(getRequiredPermissionForPath("/production/requests")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/production/orders")).toBe("production.view");
+    expect(getRequiredPermissionForPath("/production/orders/new")).toBe("production.execute");
+    expect(getRequiredPermissionForPath("/production/orders/abc")).toBe("production.view");
     expect(getRequiredPermissionForPath("/sales/orders")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/purchasing/orders")).toBe("purchasing.view");
     expect(getRequiredPermissionForPath("/purchasing/orders/new")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/purchasing/orders/abc")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/purchasing/orders/abc/receive")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/labels/document/PURCHASE_RECEIPT/abc")).toBe("labels.manage");
+    expect(getRequiredPermissionForPath("/labels/jobs/abc")).toBe("labels.manage");
+    expect(getRequiredPermissionForPath("/labels/location/abc")).toBe("labels.manage");
     expect(getRequiredPermissionForPath("/sales/customers")).toBe("customers.view");
     expect(getRequiredPermissionForPath("/sales/customers/new")).toBe("customers.manage");
     expect(getRequiredPermissionForPath("/sales/customers/abc")).toBe("customers.view");
@@ -67,13 +77,17 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/inventory/adjust")).toBe(true);
     expect(canAccess("MANAGER", "/inventory/transfer")).toBe(true);
     expect(canAccess("MANAGER", "/inventory/pick")).toBe(true);
+    expect(canAccess("MANAGER", "/warehouse")).toBe(true);
+    expect(canAccess("MANAGER", "/warehouse/abc")).toBe(true);
     expect(canAccess("MANAGER", "/audit")).toBe(true);
   });
 
-  it("WAREHOUSE_OPERATOR can do physical inventory but not audit", () => {
+  it("WAREHOUSE_OPERATOR can do physical inventory but not warehouse admin or audit", () => {
     expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/adjust")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/transfer")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/pick")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/warehouse")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/warehouse/abc")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/audit")).toBe(false);
   });
 
@@ -125,6 +139,11 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/purchasing/orders/new")).toBe(true);
     expect(canAccess("MANAGER", "/purchasing/orders/abc")).toBe(true);
     expect(canAccess("MANAGER", "/purchasing/orders/abc/receive")).toBe(true);
+
+    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/new")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/abc")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/abc/receive")).toBe(false);
 
     expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders/new")).toBe(false);

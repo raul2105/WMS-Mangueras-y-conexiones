@@ -24,6 +24,7 @@ export default function ProductImage({
     const [src, setSrc] = useState<string>(imageUrl || localSrc);
     const [failed, setFailed] = useState(false);
     const isCompact = size <= 72;
+    const isLocalAsset = src.startsWith("/product-images/") || src.startsWith("/uploads/");
 
     if (failed) {
         return (
@@ -56,6 +57,7 @@ export default function ProductImage({
                 fill
                 sizes={`${size}px`}
                 className="object-contain"
+                unoptimized={isLocalAsset}
                 onError={() => {
                     if (src !== localSrc) {
                         setSrc(localSrc);

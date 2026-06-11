@@ -25,33 +25,47 @@ function Normalize-DatabaseUrl {
   return $normalized
 }
 
+function Test-PostgresDatabaseUrl {
+  param([string]$Value)
+
+  if (-not $Value) {
+    return $false
+  }
+
+  return $Value.StartsWith("postgres://", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $Value.StartsWith("postgresql://", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 if ($Source -eq "env_file") {
   if (-not (Test-Path -LiteralPath $EnvFilePath)) {
     exit 0
   }
 
-  $line = Get-Content -LiteralPath $EnvFilePath |
+  $databaseUrl = Get-Content -LiteralPath $EnvFilePath |
     Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } |
+    ForEach-Object {
+      $parts = $_ -split "=", 2
+      if ($parts.Count -lt 2) {
+        return
+      }
+
+      $candidate = Normalize-DatabaseUrl -Value $parts[1]
+      if (Test-PostgresDatabaseUrl -Value $candidate) {
+        $candidate
+      }
+    } |
     Select-Object -First 1
 
-  if (-not $line) {
+  if (-not $databaseUrl) {
     exit 0
   }
 
-  $parts = $line -split "=", 2
-  if ($parts.Count -lt 2) {
-    exit 0
-  }
-
-  $value = Normalize-DatabaseUrl -Value $parts[1]
-  if ($value) {
-    [Console]::Write($value)
-  }
+  [Console]::Write($databaseUrl)
   exit 0
 }
 
 $machineValue = [System.Environment]::GetEnvironmentVariable("DATABASE_URL", "Machine")
 $normalizedMachineValue = Normalize-DatabaseUrl -Value $machineValue
-if ($normalizedMachineValue) {
+if (Test-PostgresDatabaseUrl -Value $normalizedMachineValue) {
   [Console]::Write($normalizedMachineValue)
 }

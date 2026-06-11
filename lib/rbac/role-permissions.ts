@@ -18,6 +18,7 @@ const ROLE_PERMISSION_MAP: Record<RoleCode, PermissionCode[]> = {
     "production.execute",
     "purchasing.view",
     "purchasing.manage",
+    "purchasing.receive",
     "sales.view",
     "sales.create_order",
     "customers.view",
@@ -40,6 +41,7 @@ const ROLE_PERMISSION_MAP: Record<RoleCode, PermissionCode[]> = {
     "production.execute",
     "purchasing.view",
     "purchasing.manage",
+    "purchasing.receive",
     "sales.view",
     "sales.create_order",
     "customers.view",
@@ -58,6 +60,7 @@ const ROLE_PERMISSION_MAP: Record<RoleCode, PermissionCode[]> = {
     "production.view",
     "production.execute",
     "purchasing.view",
+    "purchasing.receive",
     "labels.manage",
   ],
   SALES_EXECUTIVE: [

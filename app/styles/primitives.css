@@ -381,7 +381,17 @@
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-sm);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.table-shell:focus-visible {
+  outline: none;
+  box-shadow: var(--ops-focus-shadow);
+}
+
+.table-shell[aria-label] {
+  scroll-padding: 1rem;
 }
 
 .page-title {
@@ -390,6 +400,10 @@
 
 .page-subtitle {
   color: var(--text-secondary);
+}
+
+.text-inverse {
+  color: var(--text-inverse);
 }
 
 .table-head {

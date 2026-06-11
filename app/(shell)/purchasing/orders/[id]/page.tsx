@@ -3,6 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { purchaseOrderLineSchema, purchaseOrderUpdateSchema, firstErrorMessage } from "@/lib/schemas/wms";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { Badge } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
+import { TableWrap } from "@/components/ui/table";
 import {
   loadLatestPurchaseOrderDocument,
   parsePurchaseOrderDocumentSnapshot,
@@ -14,6 +17,14 @@ import {
   PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS,
 } from "@/lib/purchasing/purchase-order-email-contract";
 
+const ORDER_TIMELINE = [
+  { status: "BORRADOR", label: "Borrador" },
+  { status: "CONFIRMADA", label: "Confirmada" },
+  { status: "EN_TRANSITO", label: "En tránsito" },
+  { status: "PARCIAL", label: "Parcial" },
+  { status: "RECIBIDA", label: "Recibida" },
+] as const;
+
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
   CONFIRMADA: "Confirmada",
@@ -23,21 +34,29 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELADA: "Cancelada",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  BORRADOR: "text-slate-400 bg-slate-500/20 border-slate-500/30",
-  CONFIRMADA: "text-blue-400 bg-blue-500/20 border-blue-500/30",
-  EN_TRANSITO: "text-amber-400 bg-amber-500/20 border-amber-500/30",
-  RECIBIDA: "text-emerald-400 bg-emerald-500/20 border-emerald-500/30",
-  PARCIAL: "text-orange-400 bg-orange-500/20 border-orange-500/30",
-  CANCELADA: "text-red-400 bg-red-500/20 border-red-500/30",
+const STATUS_BADGE_VARIANTS: Record<string, "neutral" | "accent" | "success" | "warning" | "danger"> = {
+  BORRADOR: "neutral",
+  CONFIRMADA: "accent",
+  EN_TRANSITO: "warning",
+  RECIBIDA: "success",
+  PARCIAL: "warning",
+  CANCELADA: "danger",
 };
 
-const EMAIL_STATUS_COLORS: Record<string, string> = {
-  NOT_SENT: "text-slate-400 bg-slate-500/20 border-slate-500/30",
-  SENT: "text-emerald-400 bg-emerald-500/20 border-emerald-500/30",
-  RESENT: "text-blue-400 bg-blue-500/20 border-blue-500/30",
-  FAILED: "text-red-400 bg-red-500/20 border-red-500/30",
-};
+const EMAIL_STATUS_BADGE_VARIANTS: Record<string, "neutral" | "accent" | "success" | "warning" | "danger"> = {
+    NOT_SENT: "neutral",
+    SENT: "success",
+    RESENT: "accent",
+    FAILED: "danger",
+  };
+
+const mutedText = "text-[var(--text-secondary)]";
+const softText = "text-[var(--text-muted)]";
+const primaryText = "text-[var(--text-primary)]";
+const successText = "text-[var(--status-success)]";
+const warningText = "text-[var(--status-warning)]";
+const dangerText = "text-[var(--status-danger)]";
+const surfaceBorderSoft = "border-[var(--border-soft)]";
 
 // Valid status transitions
 const TRANSITIONS: Record<string, string[]> = {
@@ -48,6 +67,63 @@ const TRANSITIONS: Record<string, string[]> = {
   RECIBIDA: [],
   CANCELADA: [],
 };
+
+function getTimelineBadgeVariant(stepIndex: number, activeIndex: number, currentStatus: string) {
+  if (currentStatus === "CANCELADA") {
+    return stepIndex <= activeIndex ? "danger" : "neutral";
+  }
+  if (stepIndex < activeIndex) return "success";
+  if (stepIndex === activeIndex) return "accent";
+  return "neutral";
+}
+
+function getNextAction(orderStatus: string, canReceive: boolean, allowedTransitions: string[]) {
+  if (orderStatus === "BORRADOR") {
+    return {
+      title: "Completar borrador",
+      description: "Define almacén destino, fecha esperada y líneas antes de confirmar la orden.",
+      action: allowedTransitions.includes("CONFIRMADA") ? "Confirmar OC" : null,
+    };
+  }
+
+  if (canReceive) {
+    return {
+      title: "Registrar recepción",
+      description: "La orden ya puede recibir mercancía. Continúa con la recepción operativa.",
+      action: "Recibir mercancía",
+    };
+  }
+
+  if (orderStatus === "PARCIAL") {
+    return {
+      title: "Completar recepciones",
+      description: "Hay cantidades pendientes por cerrar. Revisa el historial antes de avanzar.",
+      action: allowedTransitions.includes("EN_TRANSITO") ? "Volver a en tránsito" : null,
+    };
+  }
+
+  if (orderStatus === "RECIBIDA") {
+    return {
+      title: "Orden cerrada",
+      description: "Revisa documento oficial, correo al proveedor y historial de recepciones.",
+      action: null,
+    };
+  }
+
+  if (orderStatus === "CANCELADA") {
+    return {
+      title: "Orden cancelada",
+      description: "No hay acciones operativas disponibles para esta OC.",
+      action: null,
+    };
+  }
+
+  return {
+    title: "Revisar siguiente paso",
+    description: "Consulta el estado de la orden y continúa con el flujo autorizado.",
+    action: allowedTransitions[0] ? `Ir a ${allowedTransitions[0]}` : null,
+  };
+}
 
 function formatDateInput(value: string | Date | null | undefined) {
   if (!value) return "";
@@ -292,21 +368,23 @@ export default async function PurchaseOrderDetailPage({
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
   const canReceive = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status) && hasPending;
+  const currentTimelineIndex = ORDER_TIMELINE.findIndex((step) => step.status === order.status);
+  const nextAction = getNextAction(order.status, canReceive, allowedTransitions);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-4">
-          <Link href="/purchasing/orders" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← OCs</Link>
+          <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary", size: "md" })}>← OCs</Link>
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold font-mono">{order.folio}</h1>
-              <span className={`text-xs font-bold px-2 py-1 rounded border ${STATUS_COLORS[order.status] ?? "text-slate-400 bg-slate-500/20 border-slate-500/30"}`}>
+              <Badge variant={STATUS_BADGE_VARIANTS[order.status] ?? "neutral"} size="sm">
                 {STATUS_LABELS[order.status] ?? order.status}
-              </span>
+              </Badge>
             </div>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <p className={`text-sm ${mutedText} mt-0.5`}>
               {order.supplier.code} — {order.supplier.businessName ?? order.supplier.name}
             </p>
           </div>
@@ -314,37 +392,107 @@ export default async function PurchaseOrderDetailPage({
         {canReceive && (
           <Link
             href={`/purchasing/orders/${id}/receive`}
-            className="btn-primary"
+            className={buttonStyles({ variant: "primary", size: "md" })}
           >
             Recibir mercancía →
           </Link>
         )}
       </div>
 
-      {sp.error && <div className="glass-card border border-red-500/30 text-red-200 text-sm">{sp.error}</div>}
-      {sp.ok && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Orden actualizada correctamente.</div>}
+      {sp.error && <div className={`glass-card border ${surfaceBorderSoft} ${dangerText} text-sm`}>{sp.error}</div>}
+      {sp.ok && <div className={`glass-card border ${surfaceBorderSoft} ${successText} text-sm`}>Orden actualizada correctamente.</div>}
+
+      <div className="grid gap-4 lg:grid-cols-[1.35fr_0.95fr]">
+        <div className="glass-card space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold">Línea de tiempo operativa</h2>
+              <p className={`text-sm ${mutedText} mt-1`}>
+                KAN-88: resume el avance real de la OC y el estado visible para el siguiente paso.
+              </p>
+            </div>
+            <Badge
+              variant={order.status === "CANCELADA" ? "danger" : order.status === "RECIBIDA" ? "success" : "accent"}
+              size="sm"
+            >
+              {STATUS_LABELS[order.status] ?? order.status}
+            </Badge>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-5">
+            {ORDER_TIMELINE.map((step, index) => (
+              <div
+                key={step.status}
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  index < currentTimelineIndex
+                    ? "border-[var(--status-success-border)] bg-[var(--status-success-bg)]"
+                    : index === currentTimelineIndex
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                      : "border-[var(--border-soft)] bg-[var(--surface-secondary)]"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-[var(--text-primary)]">{step.label}</p>
+                  <Badge
+                    variant={index === currentTimelineIndex ? "neutral" : getTimelineBadgeVariant(index, currentTimelineIndex, order.status)}
+                    size="sm"
+                  >
+                    {index < currentTimelineIndex ? "Hecho" : index === currentTimelineIndex ? "Actual" : "Pendiente"}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="glass-card space-y-4">
+          <div>
+            <h2 className="text-lg font-bold">Siguiente acción</h2>
+            <p className={`text-sm ${mutedText} mt-1`}>Acción prioritaria del flujo de compras para este estado.</p>
+          </div>
+          <div className="space-y-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-secondary)] px-4 py-3">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">{nextAction.title}</p>
+            <p className={`text-sm ${mutedText}`}>{nextAction.description}</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {canReceive ? (
+              <Link href={`/purchasing/orders/${id}/receive`} className={buttonStyles({ variant: "primary", size: "md" })}>
+                {nextAction.action ?? "Recibir mercancía"}
+              </Link>
+            ) : nextAction.action ? (
+              <div className={`rounded-lg border ${surfaceBorderSoft} px-4 py-2 text-sm ${mutedText}`}>
+                {nextAction.action}
+              </div>
+            ) : (
+              <div className={`rounded-lg border ${surfaceBorderSoft} px-4 py-2 text-sm ${mutedText}`}>
+                OC cerrada. Revisa el documento oficial si necesitas evidencia.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="glass p-4 rounded-lg">
-          <p className="text-xs text-slate-400 uppercase font-bold">Líneas</p>
-          <p className="text-xl font-bold text-white mt-1">{order.lines.length}</p>
+          <p className={`text-xs ${softText} uppercase font-bold`}>Líneas</p>
+          <p className={`text-xl font-bold ${primaryText} mt-1`}>{order.lines.length}</p>
         </div>
         <div className="glass p-4 rounded-lg">
-          <p className="text-xs text-slate-400 uppercase font-bold">Valor estimado</p>
-          <p className="text-xl font-bold text-orange-400 mt-1">
+          <p className={`text-xs ${softText} uppercase font-bold`}>Valor estimado</p>
+          <p className={`text-xl font-bold ${warningText} mt-1`}>
             ${totalValue.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
           </p>
         </div>
         <div className="glass p-4 rounded-lg">
-          <p className="text-xs text-slate-400 uppercase font-bold">% Recibido</p>
-          <p className={`text-xl font-bold mt-1 ${pctReceived === 100 ? "text-emerald-400" : pctReceived > 0 ? "text-orange-400" : "text-slate-400"}`}>
+          <p className={`text-xs ${softText} uppercase font-bold`}>% Recibido</p>
+          <p className={`text-xl font-bold mt-1 ${pctReceived === 100 ? successText : pctReceived > 0 ? warningText : mutedText}`}>
             {pctReceived}%
           </p>
         </div>
         <div className="glass p-4 rounded-lg">
-          <p className="text-xs text-slate-400 uppercase font-bold">Fecha esperada</p>
-          <p className="text-sm font-medium text-slate-200 mt-1">
+          <p className={`text-xs ${softText} uppercase font-bold`}>Fecha esperada</p>
+          <p className={`text-sm font-medium ${primaryText} mt-1`}>
             {order.expectedDate ? new Date(order.expectedDate).toLocaleDateString("es-MX") : "—"}
           </p>
         </div>
@@ -353,14 +501,17 @@ export default async function PurchaseOrderDetailPage({
       {/* Cambio de estado */}
       {allowedTransitions.length > 0 && (
         <div className="glass-card">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3">Cambiar estado</h3>
+          <h3 className={`text-sm font-semibold ${primaryText} mb-3`}>Cambiar estado</h3>
           <div className="flex flex-wrap gap-3">
             {allowedTransitions.map((s) => (
               <form key={s} action={updateStatusBound}>
                 <input type="hidden" name="status" value={s} />
                 <button
                   type="submit"
-                  className={`text-sm px-4 py-2 rounded-lg glass border transition-colors ${STATUS_COLORS[s] ?? "text-slate-400"} hover:brightness-125`}
+                  className={buttonStyles({
+                    variant: s === "CANCELADA" ? "danger" : "secondary",
+                    size: "sm",
+                  })}
                 >
                   → {STATUS_LABELS[s] ?? s}
                 </button>
@@ -374,32 +525,32 @@ export default async function PurchaseOrderDetailPage({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold">Entrega y términos oficiales</h2>
-            <p className="text-sm text-slate-400 mt-1">Estos valores se congelan en el documento oficial de la orden de compra.</p>
+            <p className={`text-sm ${mutedText} mt-1`}>Estos valores se congelan en el documento oficial de la orden de compra.</p>
           </div>
-          <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+          <span className={`text-xs uppercase tracking-[0.2em] ${softText}`}>
             {order.status === "BORRADOR" ? "Editable" : "Congelado"}
           </span>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 text-sm">
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Dirección de entrega</p>
-            <p className="text-slate-200">{order.deliveryAddressSnapshot ?? order.deliveryWarehouse?.address ?? "—"}</p>
-            <p className="text-slate-500 text-xs">
+            <p className={`text-xs uppercase tracking-[0.18em] ${softText}`}>Dirección de entrega</p>
+            <p className={primaryText}>{order.deliveryAddressSnapshot ?? order.deliveryWarehouse?.address ?? "—"}</p>
+            <p className={`text-xs ${softText}`}>
               {order.deliveryWarehouse ? `${order.deliveryWarehouse.code} — ${order.deliveryWarehouse.name}` : "Sin almacén seleccionado"}
             </p>
           </div>
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Términos de pago</p>
-            <p className="text-slate-200">{order.paymentTermsSnapshot ?? order.supplier.paymentTerms ?? "—"}</p>
-            <p className="text-slate-500 text-xs">Origen: ficha del proveedor.</p>
+            <p className={`text-xs uppercase tracking-[0.18em] ${softText}`}>Términos de pago</p>
+            <p className={primaryText}>{order.paymentTermsSnapshot ?? order.supplier.paymentTerms ?? "—"}</p>
+            <p className={`text-xs ${softText}`}>Origen: ficha del proveedor.</p>
           </div>
         </div>
 
         {order.status === "BORRADOR" && (
-          <form action={updateDraftMetadataBound} className="grid gap-4 md:grid-cols-2 border-t border-white/10 pt-4">
+          <form action={updateDraftMetadataBound} className={`grid gap-4 md:grid-cols-2 border-t ${surfaceBorderSoft} pt-4`}>
             <label className="space-y-1 md:col-span-2">
-              <span className="text-xs text-slate-400">Almacén destino *</span>
+              <span className={`text-xs ${mutedText}`}>Almacén destino *</span>
               <select
                 name="deliveryWarehouseId"
                 required
@@ -416,7 +567,7 @@ export default async function PurchaseOrderDetailPage({
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs text-slate-400">Fecha esperada</span>
+              <span className={`text-xs ${mutedText}`}>Fecha esperada</span>
               <input
                 name="expectedDate"
                 type="date"
@@ -426,7 +577,7 @@ export default async function PurchaseOrderDetailPage({
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs text-slate-400">Notas</span>
+              <span className={`text-xs ${mutedText}`}>Notas</span>
               <textarea
                 name="notes"
                 rows={3}
@@ -436,7 +587,7 @@ export default async function PurchaseOrderDetailPage({
             </label>
 
             <div className="md:col-span-2 flex justify-end">
-              <button type="submit" className="btn-primary text-sm py-2 px-4">
+              <button type="submit" className={buttonStyles({ variant: "primary", size: "md" })}>
                 Guardar datos de borrador
               </button>
             </div>
@@ -445,36 +596,36 @@ export default async function PurchaseOrderDetailPage({
       </div>
 
       <div className="glass-card space-y-3">
-        <h2 className="text-lg font-bold border-b border-white/10 pb-2">Documento oficial</h2>
+        <h2 className={`text-lg font-bold border-b ${surfaceBorderSoft} pb-2`}>Documento oficial</h2>
         {order.status === "BORRADOR" ? (
-          <p className="text-sm text-slate-400">Documento oficial disponible al confirmar.</p>
+          <p className={`text-sm ${mutedText}`}>Documento oficial disponible al confirmar.</p>
         ) : documentSnapshot ? (
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-sm">
               <div className="glass p-3 rounded-lg">
-                <p className="text-xs uppercase text-slate-400">Versión</p>
-                <p className="text-white font-semibold">v{documentSnapshot.documentVersion}</p>
+                <p className={`text-xs uppercase ${softText}`}>Versión</p>
+                <p className={`font-semibold ${primaryText}`}>v{documentSnapshot.documentVersion}</p>
               </div>
               <div className="glass p-3 rounded-lg">
-                <p className="text-xs uppercase text-slate-400">Generado</p>
-                <p className="text-white font-semibold">{new Date(documentSnapshot.generatedAt).toLocaleString("es-MX")}</p>
+                <p className={`text-xs uppercase ${softText}`}>Generado</p>
+                <p className={`font-semibold ${primaryText}`}>{new Date(documentSnapshot.generatedAt).toLocaleString("es-MX")}</p>
               </div>
               <div className="glass p-3 rounded-lg">
-                <p className="text-xs uppercase text-slate-400">Estado congelado</p>
-                <p className="text-white font-semibold">{documentSnapshot.purchaseOrder.status}</p>
+                <p className={`text-xs uppercase ${softText}`}>Estado congelado</p>
+                <p className={`font-semibold ${primaryText}`}>{documentSnapshot.purchaseOrder.status}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link href={`/purchasing/orders/${id}/document`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+              <Link href={`/purchasing/orders/${id}/document`} className={buttonStyles({ variant: "secondary", size: "md" })}>
                 Ver documento oficial
               </Link>
-              <a href={`/api/purchasing/orders/${id}/pdf`} className="btn-primary">
+              <a href={`/api/purchasing/orders/${id}/pdf`} className={buttonStyles({ variant: "primary", size: "md" })}>
                 Descargar PDF
               </a>
             </div>
           </div>
         ) : (
-          <p className="text-sm text-amber-200">Documento oficial no generado para esta OC. Revisión requerida.</p>
+          <p className={`text-sm ${warningText}`}>Documento oficial no generado para esta OC. Revisión requerida.</p>
         )}
       </div>
 
@@ -482,65 +633,60 @@ export default async function PurchaseOrderDetailPage({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold">Correo al proveedor</h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className={`text-sm ${mutedText} mt-1`}>
               Contrato preparado para KAN-85. En esta versión no existe envío real por correo.
             </p>
           </div>
-          <span
-            className={`text-xs font-bold px-2 py-1 rounded border ${EMAIL_STATUS_COLORS[emailContract.sendState] ?? "text-slate-400 bg-slate-500/20 border-slate-500/30"}`}
-          >
-            {PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS[emailContract.sendState]}
+          <span className="inline-flex items-center gap-2">
+            <Badge variant={EMAIL_STATUS_BADGE_VARIANTS[emailContract.sendState] ?? "neutral"} size="sm" />
+            <span className="text-xs font-semibold">{PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS[emailContract.sendState]}</span>
           </span>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 text-sm">
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Destinatario</p>
-            <p className="text-slate-200">{emailContract.recipientEmail ?? "Sin correo registrado"}</p>
-            <p className="text-slate-500 text-xs">Origen: email congelado del documento oficial o ficha viva del proveedor.</p>
+            <p className={`text-xs uppercase tracking-[0.18em] ${softText}`}>Destinatario</p>
+            <p className={primaryText}>{emailContract.recipientEmail ?? "Sin correo registrado"}</p>
+            <p className={`text-xs ${softText}`}>Origen: email congelado del documento oficial o ficha viva del proveedor.</p>
           </div>
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Adjunto oficial</p>
-            <p className="text-slate-200">
+            <p className={`text-xs uppercase tracking-[0.18em] ${softText}`}>Adjunto oficial</p>
+            <p className={primaryText}>
               {emailContract.document
                 ? `v${emailContract.document.versionNumber}${emailContract.document.attachmentFilename ? ` · ${emailContract.document.attachmentFilename}` : ""}`
                 : "No disponible"}
             </p>
-            <p className="text-slate-500 text-xs">
+            <p className={`text-xs ${softText}`}>
               {emailContract.document?.isSnapshotValid
                 ? "Generado desde el snapshot oficial congelado."
                 : "Pendiente de documento oficial o revisión de integridad."}
             </p>
           </div>
           <div className="space-y-1 md:col-span-2">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Asunto</p>
-            <p className="text-slate-200 break-words">{emailContract.subject}</p>
+            <p className={`text-xs uppercase tracking-[0.18em] ${softText}`}>Asunto</p>
+            <p className={`${primaryText} break-words`}>{emailContract.subject}</p>
           </div>
         </div>
 
-        <details className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-200">Vista previa del cuerpo</summary>
-          <pre className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{emailContract.body}</pre>
+        <details className={`rounded-lg border ${surfaceBorderSoft} bg-[var(--surface-secondary)] px-4 py-3`}>
+          <summary className={`cursor-pointer text-sm font-semibold ${primaryText}`}>Vista previa del cuerpo</summary>
+          <pre className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${mutedText}`}>{emailContract.body}</pre>
         </details>
 
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            disabled={!emailContract.canSend}
-            className={`rounded-lg border px-4 py-2 text-sm ${
-              emailContract.canSend
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/40 hover:text-white"
-                : "border-white/10 bg-white/5 text-slate-400 cursor-not-allowed"
-            }`}
-            title={emailContract.providerNote}
+            disabled
+            className={buttonStyles({ variant: "secondary", size: "md" })}
+            title={`${emailContract.providerNote} Envío deshabilitado en esta versión.`}
           >
-            Enviar por correo
+            Envío por correo deshabilitado
           </button>
-          <p className="text-xs text-slate-500">{emailContract.providerNote}</p>
+          <p className={`text-xs ${softText}`}>{emailContract.providerNote}</p>
         </div>
 
         {emailContract.blockedReasons.length > 0 ? (
-          <div className="space-y-1 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <div className={`space-y-1 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm ${warningText}`}>
             <p className="font-semibold">Bloqueos del contrato</p>
             <ul className="space-y-1 text-xs">
               {emailContract.blockedReasons.map((reason) => (
@@ -551,24 +697,70 @@ export default async function PurchaseOrderDetailPage({
         ) : null}
 
         {emailContract.lastErrorMessage ? (
-          <p className="text-xs text-red-200">Último error registrado: {emailContract.lastErrorMessage}</p>
+          <p className={`text-xs ${dangerText}`}>Último error registrado: {emailContract.lastErrorMessage}</p>
         ) : null}
       </div>
 
       {/* Líneas */}
       <div className="glass-card space-y-4">
-        <h2 className="text-lg font-bold border-b border-white/10 pb-2">
+        <h2 className={`text-lg font-bold border-b ${surfaceBorderSoft} pb-2`}>
           Líneas de Compra
-          <span className="text-sm text-slate-400 font-normal ml-2">({order.lines.length})</span>
+          <span className={`text-sm ${mutedText} font-normal ml-2`}>({order.lines.length})</span>
         </h2>
 
         {order.lines.length === 0 ? (
-          <p className="text-slate-500 text-sm">Sin líneas. Agrega productos a continuación.</p>
+          <p className={`text-sm ${softText}`}>Sin líneas. Agrega productos a continuación.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="space-y-3 md:hidden">
+            {order.lines.map((line) => {
+              const pending = line.qtyOrdered - line.qtyReceived;
+              const subtotal = (line.unitPrice ?? 0) * line.qtyOrdered;
+              return (
+                <article key={line.id} className={`rounded-lg border ${surfaceBorderSoft} bg-[var(--surface-primary)] p-3 text-sm`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-xs text-[var(--text-accent)]">{line.product.sku}</p>
+                      <p className={`${primaryText} font-medium`}>{line.product.name}</p>
+                    </div>
+                    <div className={`text-right text-xs ${mutedText}`}>
+                      <p>Pedido: <span className={primaryText}>{line.qtyOrdered}</span></p>
+                      <p>Recibido: <span className={successText}>{line.qtyReceived}</span></p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className={`rounded-md border ${surfaceBorderSoft} px-2 py-1`}>
+                      <p className={softText}>Pendiente</p>
+                      <p className={pending > 0 ? warningText : mutedText}>{pending}</p>
+                    </div>
+                    <div className={`rounded-md border ${surfaceBorderSoft} px-2 py-1`}>
+                      <p className={softText}>Precio / Subtotal</p>
+                      <p className={primaryText}>
+                        {line.unitPrice != null ? `$${line.unitPrice.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "—"}
+                      </p>
+                      <p className={mutedText}>
+                        {line.unitPrice != null ? `$${subtotal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "—"}
+                      </p>
+                    </div>
+                  </div>
+                  {order.status === "BORRADOR" ? (
+                    <form action={removeLineBound} className="mt-3">
+                      <input type="hidden" name="lineId" value={line.id} />
+                      <button type="submit" className={buttonStyles({ variant: "danger", size: "sm" })}>
+                        Quitar línea
+                      </button>
+                    </form>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        {order.lines.length > 0 ? (
+          <TableWrap label="Tabla de líneas de compra" className="hidden md:block">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-slate-400 border-b border-white/10">
+                <tr className={`border-b ${surfaceBorderSoft} ${mutedText}`}>
                   <th className="text-left py-2">SKU</th>
                   <th className="text-left py-2">Producto</th>
                   <th className="text-right py-2">Pedido</th>
@@ -584,25 +776,25 @@ export default async function PurchaseOrderDetailPage({
                   const pending = line.qtyOrdered - line.qtyReceived;
                   const subtotal = (line.unitPrice ?? 0) * line.qtyOrdered;
                   return (
-                    <tr key={line.id} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="py-2 font-mono text-cyan-400 text-xs">{line.product.sku}</td>
-                      <td className="py-2 text-slate-300">{line.product.name}</td>
-                      <td className="py-2 text-right text-white font-semibold">{line.qtyOrdered}</td>
-                      <td className="py-2 text-right text-emerald-400">{line.qtyReceived}</td>
-                      <td className={`py-2 text-right font-semibold ${pending > 0 ? "text-amber-400" : "text-slate-500"}`}>
+                    <tr key={line.id} className={`border-b ${surfaceBorderSoft} hover:bg-[var(--table-hover)]`}>
+                      <td className="py-2 font-mono text-[var(--text-accent)] text-xs">{line.product.sku}</td>
+                      <td className={`py-2 ${primaryText}`}>{line.product.name}</td>
+                      <td className={`py-2 text-right font-semibold ${primaryText}`}>{line.qtyOrdered}</td>
+                      <td className={`py-2 text-right ${successText}`}>{line.qtyReceived}</td>
+                      <td className={`py-2 text-right font-semibold ${pending > 0 ? warningText : softText}`}>
                         {pending}
                       </td>
-                      <td className="py-2 text-right text-slate-400 text-xs">
+                      <td className={`py-2 text-right ${mutedText} text-xs`}>
                         {line.unitPrice != null ? `$${line.unitPrice.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="py-2 text-right text-slate-300 text-xs">
+                      <td className={`py-2 text-right ${mutedText} text-xs`}>
                         {line.unitPrice != null ? `$${subtotal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
                       {order.status === "BORRADOR" && (
                         <td className="py-2 text-right">
                           <form action={removeLineBound} className="inline">
                             <input type="hidden" name="lineId" value={line.id} />
-                            <button type="submit" className="text-xs text-red-400 hover:text-red-300 hover:underline">
+                            <button type="submit" className={buttonStyles({ variant: "danger", size: "sm" })}>
                               Quitar
                             </button>
                           </form>
@@ -613,16 +805,16 @@ export default async function PurchaseOrderDetailPage({
                 })}
               </tbody>
             </table>
-          </div>
-        )}
+          </TableWrap>
+        ) : null}
 
         {/* Form agregar línea (solo en BORRADOR) */}
         {order.status === "BORRADOR" && (
-          <form action={addLineBound} className="border-t border-white/10 pt-4">
-            <h3 className="text-sm font-semibold text-slate-300 mb-3">Agregar producto</h3>
+          <form action={addLineBound} className={`border-t ${surfaceBorderSoft} pt-4`}>
+            <h3 className={`text-sm font-semibold ${primaryText} mb-3`}>Agregar producto</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-slate-400">Producto *</span>
+                <span className={`text-xs ${mutedText}`}>Producto *</span>
                 <select name="productId" required className="w-full px-3 py-2 glass rounded-lg text-sm">
                   <option value="">Seleccionar…</option>
                   {products.map((p) => (
@@ -631,7 +823,7 @@ export default async function PurchaseOrderDetailPage({
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Cantidad *</span>
+                <span className={`text-xs ${mutedText}`}>Cantidad *</span>
                 <input
                   name="qtyOrderedRaw"
                   type="number"
@@ -643,7 +835,7 @@ export default async function PurchaseOrderDetailPage({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Precio Unit. (MXN)</span>
+                <span className={`text-xs ${mutedText}`}>Precio Unit. (MXN)</span>
                 <input
                   name="unitPriceRaw"
                   type="number"
@@ -654,7 +846,7 @@ export default async function PurchaseOrderDetailPage({
                 />
               </label>
               <div className="flex items-end">
-                <button type="submit" className="btn-primary text-sm py-2 px-4">Agregar</button>
+                <button type="submit" className={buttonStyles({ variant: "primary", size: "md" })}>Agregar</button>
               </div>
             </div>
           </form>
@@ -664,7 +856,7 @@ export default async function PurchaseOrderDetailPage({
       {/* Historial de recepciones */}
       {order.receipts.length > 0 && (
         <div className="glass-card space-y-3">
-          <h2 className="text-lg font-bold border-b border-white/10 pb-2">
+          <h2 className={`text-lg font-bold border-b ${surfaceBorderSoft} pb-2`}>
             Recepciones ({order.receipts.length})
           </h2>
           <div className="space-y-3">
@@ -672,21 +864,21 @@ export default async function PurchaseOrderDetailPage({
               <div key={receipt.id} className="glass p-3 rounded-lg text-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-slate-200 font-medium">
+                    <p className={`font-medium ${primaryText}`}>
                       {new Date(receipt.receivedAt).toLocaleString("es-MX")}
                     </p>
-                    <p className="text-slate-400 text-xs mt-0.5">
+                    <p className={`text-xs mt-0.5 ${mutedText}`}>
                       Ubicación: <span className="text-cyan-400 font-mono">{receipt.location.code}</span>
                       {receipt.referenceDoc && (
-                        <span> · Referencia: <span className="text-slate-300">{receipt.referenceDoc}</span></span>
+                        <span> · Referencia: <span className={primaryText}>{receipt.referenceDoc}</span></span>
                       )}
                     </p>
                   </div>
-                  <span className="text-emerald-400 font-bold">
+                  <span className={`${successText} font-bold`}>
                     {receipt.lines.reduce((s, l) => s + l.qtyReceived, 0)} u.
                   </span>
                 </div>
-                {receipt.notes && <p className="text-slate-500 text-xs mt-1">{receipt.notes}</p>}
+                {receipt.notes && <p className={`text-xs mt-1 ${softText}`}>{receipt.notes}</p>}
               </div>
             ))}
           </div>
@@ -695,8 +887,8 @@ export default async function PurchaseOrderDetailPage({
 
       {order.notes && (
         <div className="glass-card">
-          <p className="text-xs text-slate-400 uppercase font-bold mb-1">Notas</p>
-          <p className="text-slate-300 text-sm">{order.notes}</p>
+          <p className={`text-xs ${mutedText} uppercase font-bold mb-1`}>Notas</p>
+          <p className={`text-sm ${primaryText}`}>{order.notes}</p>
         </div>
       )}
     </div>

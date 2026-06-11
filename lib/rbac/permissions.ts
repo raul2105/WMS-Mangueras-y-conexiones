@@ -23,6 +23,7 @@ export const RBAC_PERMISSIONS = [
   "production.view",
   "production.execute",
   "purchasing.view",
+  "purchasing.receive",
   "purchasing.manage",
   "sales.view",
   "sales.create_order",

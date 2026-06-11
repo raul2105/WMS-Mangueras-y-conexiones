@@ -1,3 +1,10 @@
+# WMS-Mangueras-y-conexiones
+
+# WMS-Mangueras-y-conexiones
+
+# WMS-Mangueras-y-conexiones
+
+Checking test files and config
 # WMS-SCMayher
 
 Sistema WMS para mangueras y conexiones industriales sobre Next.js, TypeScript, Prisma y PostgreSQL.
@@ -101,6 +108,7 @@ npm run prisma:generate
 npm run db:migrate
 npm run db:push
 npm run db:studio
+npm run db:studio:aws
 npm run verify:release
 npm run build:release
 npm run infra:synth

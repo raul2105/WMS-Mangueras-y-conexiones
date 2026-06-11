@@ -222,6 +222,18 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
   },
   {
+    route: "/production/orders",
+    description: "Listado de ordenes de ensamble con filtros operativos",
+    permission: "production.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
+    route: "/production/orders/new",
+    description: "Formulario para crear una nueva orden de ensamble",
+    permission: "production.execute",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
     route: "/production/orders/new/generic",
     description: "Formulario para crear una nueva orden de ensamble genérica",
     permission: "production.execute",
@@ -330,14 +342,20 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
   {
     route: "/purchasing/orders/[id]",
     description: "Detalle de orden de compra",
-    permission: "purchasing.view",
-    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+    permission: "purchasing.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
+  },
+  {
+    route: "/purchasing/orders/[id]/document",
+    description: "Vista documental de una orden de compra",
+    permission: "purchasing.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
   },
   {
     route: "/purchasing/orders/[id]/receive",
     description: "Recepción de artículos de una orden de compra",
-    permission: "purchasing.manage",
-    roles: ["SYSTEM_ADMIN", "MANAGER"],
+    permission: "purchasing.receive",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
   },
 
   // ── Auditoría & Trazabilidad ───────────────────────────────────────────
@@ -366,6 +384,38 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     description: "Generación e impresión de etiquetas para ubicaciones y documentos",
     permission: "labels.manage",
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
+    route: "/labels/document/[documentType]/[documentId]",
+    description: "Consulta de etiquetas vinculadas a un documento operativo",
+    permission: "labels.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
+    route: "/labels/jobs/[id]",
+    description: "Detalle de un trabajo de impresión de etiquetas",
+    permission: "labels.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
+    route: "/labels/location/[locationId]",
+    description: "Generación de etiqueta para una ubicación de almacén",
+    permission: "labels.manage",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+
+  // ── Público / sistema ────────────────────────────────────────────────
+  {
+    route: "/login",
+    description: "Pantalla pública de acceso al sistema",
+    permission: null,
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR", "SALES_EXECUTIVE"],
+  },
+  {
+    route: "/forbidden",
+    description: "Pantalla pública de acceso denegado",
+    permission: null,
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR", "SALES_EXECUTIVE"],
   },
 ];
 

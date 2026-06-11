@@ -22,6 +22,22 @@ Si falta o es invalida, el launcher ejecuta `maintenance\setup-aws.cmd`, reinten
 - Deploy/migraciones: `scripts/deploy/aws-web.ps1`.
 - El deploy ejecuta `prisma migrate deploy` y valida tablas base.
 
+### Launcher GUI para edición manual
+
+Para abrir Prisma Studio contra la base AWS actual:
+
+```powershell
+maintenance\studio.cmd
+```
+
+O con npm:
+
+```powershell
+npm run db:studio:aws
+```
+
+El launcher resuelve `DATABASE_URL` con el mismo flujo AWS del repo, valida que el puerto local este libre y abre la GUI en el navegador.
+
 ## Modo SQLite (solo compatibilidad local)
 
 Se mantiene para pruebas aisladas o escenarios offline, pero no es el flujo principal de pruebas integradas.

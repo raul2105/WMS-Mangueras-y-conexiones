@@ -90,12 +90,16 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Ensamble",
+      label: "Pedidos",
       icon: "production",
-      description: "Pedidos de surtido, configurador y seguimiento comercial dentro de ensamble.",
+      description: "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
       match: "prefix",
       requiredPermission: "sales.view",
     };
+  }
+
+  if (primaryRole === "SALES_EXECUTIVE") {
+    return items.filter((item) => item.href !== "/inventory");
   }
 
   return items;
@@ -124,8 +128,11 @@ export function getVisibleNavItems(roles: string[] = [], permissions: string[] =
   const homeItem: NavItem = {
     ...navItems[0],
     href: homeHref,
-    label: "Inicio",
-    description: "Acceso principal de tu rol.",
+    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : "Inicio",
+    description:
+      primaryRole === "SALES_EXECUTIVE"
+        ? "Acceso principal a tus pedidos de surtido."
+        : "Acceso principal de tu rol.",
     match: "prefix",
   };
 

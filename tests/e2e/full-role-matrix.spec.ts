@@ -1,7 +1,20 @@
 import { expect, test } from "@playwright/test";
-import { EXPECTED_HOME, loginAs, type RoleKey, expectAllowed, expectForbidden } from "./lib/auth.helpers";
+import {
+  EXPECTED_HOME,
+  loginAs,
+  type RoleKey,
+  expectAllowed,
+  expectForbidden,
+} from "./lib/auth.helpers";
 
-const ROLE_CHECKS: Record<RoleKey, { home: string; visibleRoutes: Array<[string, RegExp]>; blockedRoutes: string[] }> = {
+const ROLE_CHECKS: Record<
+  RoleKey,
+  {
+    home: string;
+    visibleRoutes: Array<[string, RegExp]>;
+    blockedRoutes: string[];
+  }
+> = {
   SYSTEM_ADMIN: {
     home: "/",
     visibleRoutes: [
@@ -35,27 +48,45 @@ const ROLE_CHECKS: Record<RoleKey, { home: string; visibleRoutes: Array<[string,
       ["/purchasing/orders", /Órdenes de compra/i],
       ["/production", /Produccion/i],
     ],
-    blockedRoutes: ["/users", "/warehouse", "/audit", "/sales/availability", "/sales/equivalences"],
+    blockedRoutes: [
+      "/users",
+      "/warehouse",
+      "/audit",
+      "/sales/availability",
+      "/sales/equivalences",
+    ],
   },
   SALES_EXECUTIVE: {
     home: "/production/requests",
     visibleRoutes: [
-      ["/production/requests", /Warehouse Execution Cockpit/i],
-      ["/production/requests/new", /Nuevo pedido de surtido/i],
+      ["/production/requests", /Pedidos comerciales/i],
+      ["/production/requests/new", /Nuevo pedido comercial/i],
+      ["/catalog", /Cat[aá]logo/i],
       ["/production/availability", /Disponibilidad para pedidos/i],
       ["/production/equivalences", /Equivalencias para pedidos/i],
       ["/sales/customers", /Clientes/i],
     ],
-    blockedRoutes: ["/users", "/warehouse", "/inventory/adjust", "/inventory/transfer", "/inventory/pick", "/audit"],
+    blockedRoutes: [
+      "/users",
+      "/warehouse",
+      "/inventory/adjust",
+      "/inventory/transfer",
+      "/inventory/pick",
+      "/audit",
+    ],
   },
 };
 
 test.describe("full role matrix", () => {
   for (const role of Object.keys(ROLE_CHECKS) as RoleKey[]) {
-    test(`${role} keeps the expected home, nav and route access`, async ({ page }) => {
+    test(`${role} keeps the expected home, nav and route access`, async ({
+      page,
+    }) => {
       const config = ROLE_CHECKS[role];
       await loginAs(page, role, config.home);
-      await expect(page).toHaveURL(new RegExp(`${EXPECTED_HOME[role]}(?:\\?.*)?$`));
+      await expect(page).toHaveURL(
+        new RegExp(`${EXPECTED_HOME[role]}(?:\\?.*)?$`),
+      );
 
       for (const [route, heading] of config.visibleRoutes) {
         await expectAllowed(page, route, heading);

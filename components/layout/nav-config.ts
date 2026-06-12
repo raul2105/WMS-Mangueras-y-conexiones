@@ -3,7 +3,16 @@ import type { RoleCode } from "@/lib/rbac/permissions";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
 import { ROLE_HOME } from "@/lib/rbac/route-access-map";
 
-export type NavIcon = "dashboard" | "users" | "catalog" | "warehouse" | "inventory" | "sales" | "purchasing" | "production" | "audit";
+export type NavIcon =
+  | "dashboard"
+  | "users"
+  | "catalog"
+  | "warehouse"
+  | "inventory"
+  | "sales"
+  | "purchasing"
+  | "production"
+  | "audit";
 
 export type NavMatchMode = "exact" | "prefix";
 
@@ -28,7 +37,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/users",
     label: "Usuarios",
     icon: "users",
-    description: "Administracion de usuarios, roles y estado de acceso al sistema.",
+    description:
+      "Administracion de usuarios, roles y estado de acceso al sistema.",
     match: "prefix",
     requiredPermission: "users.manage",
   },
@@ -36,7 +46,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/catalog",
     label: "Catalogo",
     icon: "catalog",
-    description: "Maestro de productos, atributos tecnicos y estructura comercial.",
+    description:
+      "Maestro de productos, atributos tecnicos y estructura comercial.",
     match: "prefix",
     requiredPermission: "catalog.view",
   },
@@ -52,7 +63,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/inventory",
     label: "Inventario",
     icon: "inventory",
-    description: "Control de stock, movimientos, trazabilidad y disponibilidad.",
+    description:
+      "Control de stock, movimientos, trazabilidad y disponibilidad.",
     match: "prefix",
     requiredPermission: "inventory.view",
   },
@@ -76,7 +88,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/audit",
     label: "Auditoria",
     icon: "audit",
-    description: "Bitacora de eventos criticos del sistema por entidad y accion.",
+    description:
+      "Bitacora de eventos criticos del sistema por entidad y accion.",
     match: "prefix",
     requiredPermission: "audit.view",
   },
@@ -86,13 +99,27 @@ export const NAV_ITEMS = BASE_NAV_ITEMS;
 
 function buildNavItems(primaryRole: RoleCode): NavItem[] {
   const items = [...BASE_NAV_ITEMS];
-  const productionIndex = items.findIndex((item) => item.href === "/production");
+  if (primaryRole === "SALES_EXECUTIVE") {
+    items.splice(1, 0, {
+      href: "/sales/customers",
+      label: "Clientes",
+      icon: "users",
+      description: "Clientes, cuentas y seguimiento comercial.",
+      match: "prefix",
+      requiredPermission: "customers.view",
+    });
+  }
+
+  const productionIndex = items.findIndex(
+    (item) => item.href === "/production",
+  );
   if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
     items[productionIndex] = {
       href: "/production/requests",
       label: "Pedidos",
       icon: "production",
-      description: "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
+      description:
+        "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
       match: "prefix",
       requiredPermission: "sales.view",
     };
@@ -106,20 +133,31 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
 }
 
 function getPrimaryRole(roles: string[]): RoleCode {
-  const firstKnownRole = roles.find((role): role is RoleCode =>
-    role === "SYSTEM_ADMIN" || role === "MANAGER" || role === "WAREHOUSE_OPERATOR" || role === "SALES_EXECUTIVE",
+  const firstKnownRole = roles.find(
+    (role): role is RoleCode =>
+      role === "SYSTEM_ADMIN" ||
+      role === "MANAGER" ||
+      role === "WAREHOUSE_OPERATOR" ||
+      role === "SALES_EXECUTIVE",
   );
   return firstKnownRole ?? "MANAGER";
 }
 
-export function getVisibleNavItems(roles: string[] = [], permissions: string[] = []): NavItem[] {
+export function getVisibleNavItems(
+  roles: string[] = [],
+  permissions: string[] = [],
+): NavItem[] {
   const primaryRole = getPrimaryRole(roles);
   const homeHref = ROLE_HOME[primaryRole] ?? "/";
   const navItems = buildNavItems(primaryRole);
 
   const byPermissions = isSystemAdmin(roles)
     ? navItems
-    : navItems.filter((item) => !item.requiredPermission || permissions.includes(item.requiredPermission));
+    : navItems.filter(
+        (item) =>
+          !item.requiredPermission ||
+          permissions.includes(item.requiredPermission),
+      );
 
   if (homeHref === "/") {
     return byPermissions;
@@ -138,7 +176,9 @@ export function getVisibleNavItems(roles: string[] = [], permissions: string[] =
 
   return [
     homeItem,
-    ...byPermissions.filter((item) => item.href !== "/" && item.href !== homeHref),
+    ...byPermissions.filter(
+      (item) => item.href !== "/" && item.href !== homeHref,
+    ),
   ];
 }
 
@@ -147,6 +187,13 @@ export function isNavItemActive(pathname: string, item: NavItem) {
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-export function getActiveNavItem(pathname: string, items: NavItem[] = NAV_ITEMS) {
-  return items.find((item) => isNavItemActive(pathname, item)) ?? items[0] ?? NAV_ITEMS[0];
+export function getActiveNavItem(
+  pathname: string,
+  items: NavItem[] = NAV_ITEMS,
+) {
+  return (
+    items.find((item) => isNavItemActive(pathname, item)) ??
+    items[0] ??
+    NAV_ITEMS[0]
+  );
 }

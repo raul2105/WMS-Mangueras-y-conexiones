@@ -1,10 +1,15 @@
 import Link from "next/link";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { getSessionContext } from "@/lib/auth/session-context";
 import CatalogFilters from "@/components/CatalogFilters";
 import ProductImage from "@/components/ProductImage";
 import { normalizeTechnicalText } from "@/lib/product-attributes";
 import { TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
+import {
+    buildCommercialAvailabilityHref,
+    buildCommercialEquivalencesHref,
+} from "@/lib/commercial-toolkit";
 import { PageHeader } from "@/components/ui/page-header";
 import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -103,8 +108,13 @@ interface PageProps {
 }
 
 export default async function CatalogPage({ searchParams }: PageProps) {
-    const params = await searchParams;
+    const [params, sessionCtx] = await Promise.all([
+        searchParams,
+        getSessionContext(),
+    ]);
     const currentPage = parsePositiveInt(params.page, 1);
+    const canEditCatalog =
+        sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("catalog.edit");
 
     const selectedType = params.type?.trim() || undefined;
     const selectedBrand = params.brand?.trim() || undefined;
@@ -280,22 +290,60 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         return qs ? `/catalog?${qs}` : "/catalog";
     };
 
+    const commercialToolkitLinks = [
+        {
+            href: buildCommercialAvailabilityHref(searchQuery),
+            label: "Ver disponibilidad",
+        },
+        {
+            href: buildCommercialEquivalencesHref(searchQuery),
+            label: "Revisar equivalencias",
+        },
+        {
+            href: "/production/requests/new",
+            label: "Crear pedido",
+            variant: "primary" as const,
+        },
+    ];
+
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Catalogo Maestro"
-        description="Gestion de mangueras, conexiones y ensambles."
+        title="Catálogo comercial"
+        description="Busca producto antes de validar disponibilidad, revisar equivalencias o crear un pedido."
         actions={
-          <>
-            <Link href="/catalog/import" className={buttonStyles({ variant: "secondary" })}>
-              Importar CSV
-            </Link>
-            <Link href="/catalog/new" className={buttonStyles()}>
-              Nuevo articulo
-            </Link>
-          </>
+          canEditCatalog ? (
+            <>
+              <Link href="/catalog/import" className={buttonStyles({ variant: "secondary" })}>
+                Importar CSV
+              </Link>
+              <Link href="/catalog/new" className={buttonStyles()}>
+                Nuevo artículo
+              </Link>
+            </>
+          ) : null
         }
       />
+
+      <SectionCard
+        title="Flujo comercial"
+        description="Producto requerido → disponibilidad → equivalencias → pedido."
+      >
+        <div className="flex flex-wrap gap-2">
+          {commercialToolkitLinks.map((action) => (
+            <Link
+              key={action.label}
+              href={action.href}
+              className={buttonStyles({
+                variant: action.variant ?? "secondary",
+                size: "sm",
+              })}
+            >
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      </SectionCard>
 
       <CatalogFilters
         counts={counts}
@@ -307,7 +355,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       />
 
       <SectionCard
-        title="Productos"
+        title="Productos del catálogo"
         description={
           <span className="text-xs text-[var(--text-muted)]">
             {totalProducts.toLocaleString("es-MX")} resultados • Pagina {Math.min(currentPage, totalPages)} de {totalPages}
@@ -316,7 +364,24 @@ export default async function CatalogPage({ searchParams }: PageProps) {
       >
         <div className="space-y-4">
           {products.length === 0 ? (
-            <EmptyState compact title="Sin resultados" description="No se encontraron productos con los filtros activos." />
+            <EmptyState
+              compact
+              title="Sin resultados"
+              description="No se encontraron productos con los filtros activos. Prueba otro producto o salta a disponibilidad, equivalencias o nuevo pedido."
+              actions={
+                <>
+                  <Link href={buildCommercialAvailabilityHref(searchQuery)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                    Ver disponibilidad
+                  </Link>
+                  <Link href={buildCommercialEquivalencesHref(searchQuery)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                    Revisar equivalencias
+                  </Link>
+                  <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                    Crear pedido
+                  </Link>
+                </>
+              }
+            />
           ) : (
             <>
               <div className="hidden md:block">
@@ -330,12 +395,14 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                         <Th>Categoria</Th>
                         <Th className="text-right">Stock</Th>
                         <Th className="text-right">Precio</Th>
-                        <Th className="text-right">Accion</Th>
+                        <Th className="text-right">Siguiente acción</Th>
                       </tr>
                     </thead>
                     <tbody>
                       {products.map((product) => {
                         const stock = sumStock(product.inventory);
+                        const availabilityHref = buildCommercialAvailabilityHref(product.sku);
+                        const equivalencesHref = buildCommercialEquivalencesHref(product.sku);
                         return (
                           <TableRow key={product.id}>
                             <Td>
@@ -355,9 +422,20 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                             <Td className={`text-right font-semibold ${stock > 0 ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>{stock}</Td>
                             <Td className="text-right font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</Td>
                             <Td className="text-right">
-                              <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                                  Ver disponibilidad
+                                </Link>
+                                <Link href={equivalencesHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                                  Revisar equivalencias
+                                </Link>
+                                <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                                  Crear pedido
+                                </Link>
+                                <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
                                 Ver detalle
-                              </Link>
+                                </Link>
+                              </div>
                             </Td>
                           </TableRow>
                         );
@@ -392,11 +470,22 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                           </p>
                         ))}
                       </div>
-                      <div className="mt-3 flex items-center justify-between">
+                      <div className="mt-3 flex flex-col gap-2">
                         <p className="font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</p>
-                        <Link href={`/catalog/${product.id}`} className={buttonStyles({ size: "sm" })}>
-                          Ver detalle
-                        </Link>
+                        <div className="flex flex-wrap gap-2">
+                          <Link href={buildCommercialAvailabilityHref(product.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                            Ver disponibilidad
+                          </Link>
+                          <Link href={buildCommercialEquivalencesHref(product.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                            Revisar equivalencias
+                          </Link>
+                          <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                            Crear pedido
+                          </Link>
+                          <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                            Ver detalle
+                          </Link>
+                        </div>
                       </div>
                     </article>
                   );

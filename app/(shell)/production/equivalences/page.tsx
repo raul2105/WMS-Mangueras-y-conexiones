@@ -2,8 +2,14 @@ import Link from "next/link";
 import prisma from "@/lib/prisma";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { buttonStyles } from "@/components/ui/button";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
 import { searchProducts } from "@/lib/product-search";
+import {
+  buildCommercialAvailabilityHref,
+} from "@/lib/commercial-toolkit";
 
 export const dynamic = "force-dynamic";
 
@@ -41,15 +47,32 @@ export default async function ProductionEquivalencesPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Equivalencias para pedidos"
-        description="Consulta sustitutos registrados por producto con stock disponible por almacen cuando aplique."
+        title="Alternativas y equivalencias"
+        description="Revisa sustitutos registrados para decidir si conviene validar disponibilidad o crear un pedido comercial."
         meta={query ? `${groups.length} productos analizados` : "Busca un SKU o referencia para explorar equivalencias"}
         actions={<Link href="/production/requests/new" className="btn-primary">+ Nuevo pedido</Link>}
       />
 
+      <SectionCard
+        title="Siguiente acción"
+        description="Usa equivalencias para encontrar un sustituto y continuar con disponibilidad o captura de pedido."
+      >
+        <div className="flex flex-wrap gap-2">
+          <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Buscar en catálogo
+          </Link>
+          <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Ver disponibilidad
+          </Link>
+          <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+            Crear pedido
+          </Link>
+        </div>
+      </SectionCard>
+
       <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
         <label className="space-y-1">
-          <span className="text-sm text-slate-400">Producto base</span>
+          <span className="text-sm text-slate-400">Producto requerido</span>
           <input
             name="q"
             defaultValue={query}
@@ -58,7 +81,7 @@ export default async function ProductionEquivalencesPage({
           />
         </label>
         <label className="space-y-1">
-          <span className="text-sm text-slate-400">Almacen</span>
+          <span className="text-sm text-slate-400">Almacén</span>
           <select name="warehouseId" defaultValue={warehouseId} className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white">
             <option value="">Todos</option>
             {warehouses.map((warehouse) => (
@@ -69,21 +92,49 @@ export default async function ProductionEquivalencesPage({
           </select>
         </label>
         <div className="flex items-end gap-2">
-          <button type="submit" className="btn-primary">Buscar</button>
+          <button type="submit" className="btn-primary">Revisar equivalencias</button>
           <Link href="/production/equivalences" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">
-            Limpiar
+            Limpiar filtros
           </Link>
         </div>
       </form>
 
       {!query ? (
-        <div className="glass-card px-4 py-10 text-center text-slate-400">
-          Ingresa un SKU, referencia o nombre para mostrar equivalencias del pedido.
-        </div>
+        <EmptyState
+          title="Busca un producto requerido"
+          description="Ingresa un SKU, referencia o nombre para ver alternativas disponibles y decidir si validas existencia o creas el pedido comercial."
+          actions={
+            <>
+              <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Ir al catálogo
+              </Link>
+              <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Ver disponibilidad
+              </Link>
+              <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                Crear pedido
+              </Link>
+            </>
+          }
+        />
       ) : groups.length === 0 ? (
-        <div className="glass-card px-4 py-10 text-center text-slate-400">
-          No se encontraron productos base para esa busqueda.
-        </div>
+        <EmptyState
+          title="Sin resultados"
+          description="No se encontraron productos base para esa búsqueda. Prueba con otro SKU, referencia o vuelve al catálogo para buscar el producto requerido."
+          actions={
+            <>
+              <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Buscar en catálogo
+              </Link>
+              <Link href={buildCommercialAvailabilityHref(query)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Ver disponibilidad
+              </Link>
+              <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                Crear pedido
+              </Link>
+            </>
+          }
+        />
       ) : (
         <div className="space-y-4">
           {groups.map(({ product, equivalents }) => (
@@ -92,14 +143,22 @@ export default async function ProductionEquivalencesPage({
                 <div>
                   <p className="font-mono text-sm text-cyan-300">{product.sku}</p>
                   <h2 className="text-lg font-semibold text-white">{product.name}</h2>
-                  <p className="text-sm text-slate-400">Disponible actual: {product.totalAvailable.toLocaleString("es-MX")}</p>
+                  <p className="text-sm text-slate-400">Existencia disponible: {product.totalAvailable.toLocaleString("es-MX")}</p>
                 </div>
-                <Link href={`/catalog/${product.id}`} className="text-sm text-cyan-300 hover:text-white">Ver producto base</Link>
+                <div className="flex flex-wrap gap-2">
+                  <Link href={`/catalog/${product.id}`} className="text-sm text-cyan-300 hover:text-white">Ver producto</Link>
+                  <Link href={buildCommercialAvailabilityHref(product.sku)} className="text-sm text-cyan-300 hover:text-white">
+                    Ver disponibilidad
+                  </Link>
+                  <Link href="/production/requests/new" className="text-sm text-cyan-300 hover:text-white">
+                    Crear pedido
+                  </Link>
+                </div>
               </div>
 
               {equivalents.length === 0 ? (
                 <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
-                  No hay equivalencias registradas para este producto.
+                  No hay equivalencias registradas para este producto. Puedes seguir con disponibilidad o crear el pedido comercial.
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -126,6 +185,14 @@ export default async function ProductionEquivalencesPage({
                             {location.code} ({location.warehouseCode}) - {location.available} disp.
                           </p>
                         ))}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Link href={buildCommercialAvailabilityHref(equivalent.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                          Ver disponibilidad
+                        </Link>
+                        <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                          Crear pedido
+                        </Link>
                       </div>
                     </div>
                   ))}

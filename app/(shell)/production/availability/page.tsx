@@ -3,7 +3,13 @@ import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { buttonStyles } from "@/components/ui/button";
 import { buildProductSearchWhere } from "@/lib/product-search";
+import {
+  buildCommercialEquivalencesHref,
+} from "@/lib/commercial-toolkit";
 
 export const dynamic = "force-dynamic";
 
@@ -121,24 +127,41 @@ export default async function ProductionAvailabilityPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Disponibilidad para pedidos"
-        description="Stock total, reservado y disponible en tiempo real para promesa comercial dentro de ensamble."
+        title="Disponibilidad comercial"
+        description="Consulta existencia disponible, reservada y total para decidir si avanzas al pedido o revisas equivalencias."
         meta={`${totalRows.toLocaleString("es-MX")} productos con inventario`}
         actions={<Link href="/production/requests/new" className="btn-primary">+ Nuevo pedido</Link>}
       />
 
+      <SectionCard
+        title="Siguiente acción"
+        description="Si la existencia disponible no cubre el pedido, sigue con equivalencias o captura el pedido comercial."
+      >
+        <div className="flex flex-wrap gap-2">
+          <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Buscar en catálogo
+          </Link>
+          <Link href="/production/equivalences" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Revisar equivalencias
+          </Link>
+          <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+            Crear pedido
+          </Link>
+        </div>
+      </SectionCard>
+
       <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
         <label className="space-y-1">
-          <span className="text-sm text-slate-400">Buscar producto</span>
+          <span className="text-sm text-slate-400">Producto requerido</span>
           <input
             name="q"
             defaultValue={query}
             className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-            placeholder="SKU, referencia, nombre, marca..."
+            placeholder="SKU, referencia, nombre o marca..."
           />
         </label>
         <label className="space-y-1">
-          <span className="text-sm text-slate-400">Almacen</span>
+          <span className="text-sm text-slate-400">Almacén</span>
           <select name="warehouse" defaultValue={selectedWarehouse} className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white">
             <option value="">Todos</option>
             {warehouses.map((warehouse) => (
@@ -149,57 +172,84 @@ export default async function ProductionAvailabilityPage({
           </select>
         </label>
         <div className="flex items-end gap-2">
-          <button type="submit" className="btn-primary">Filtrar</button>
+          <button type="submit" className="btn-primary">Ver disponibilidad</button>
           <Link href="/production/availability" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">
-            Limpiar
+            Limpiar filtros
           </Link>
         </div>
       </form>
 
-      <div className="glass-card overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-white/10 text-slate-400">
-              <th className="py-3 text-left">SKU</th>
-              <th className="py-3 text-left">Producto</th>
-              <th className="py-3 text-right">Total</th>
-              <th className="py-3 text-right">Reservado</th>
-              <th className="py-3 text-right">Disponible</th>
-              <th className="py-3 text-left">Por almacen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-10 text-center text-slate-500">No hay productos para el filtro seleccionado.</td>
+      {rows.length === 0 ? (
+        <EmptyState
+          title="Busca un producto requerido"
+          description="Usa SKU, referencia, nombre o marca para revisar la existencia disponible. Si no encuentras el producto, pasa al catálogo, equivalencias o nuevo pedido."
+          actions={
+            <>
+              <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Ir al catálogo
+              </Link>
+              <Link href={buildCommercialEquivalencesHref(query)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                Revisar equivalencias
+              </Link>
+              <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                Crear pedido
+              </Link>
+            </>
+          }
+        />
+      ) : (
+        <div className="glass-card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-white/10 text-slate-400">
+                <th className="py-3 text-left">SKU</th>
+                <th className="py-3 text-left">Producto</th>
+                <th className="py-3 text-right">Total</th>
+                <th className="py-3 text-right">Reservado</th>
+                <th className="py-3 text-right">Disponible</th>
+                <th className="py-3 text-left">Por almacén</th>
+                <th className="py-3 text-left">Siguiente acción</th>
               </tr>
-            ) : rows.map((row) => (
-              <tr key={row.id} className="border-b border-white/5 align-top hover:bg-white/5">
-                <td className="py-3 font-mono text-cyan-300">
-                  <Link href={`/catalog/${row.id}`}>{row.sku}</Link>
-                  {row.referenceCode ? <p className="text-[11px] text-slate-500">{row.referenceCode}</p> : null}
-                </td>
-                <td className="py-3 text-slate-300">
-                  <p>{row.name}</p>
-                  <p className="text-xs text-slate-500">{row.brand ?? row.type}</p>
-                </td>
-                <td className="py-3 text-right text-slate-200">{row.total.toLocaleString("es-MX")}</td>
-                <td className="py-3 text-right text-amber-300">{row.reserved.toLocaleString("es-MX")}</td>
-                <td className="py-3 text-right text-emerald-300">{row.available.toLocaleString("es-MX")}</td>
-                <td className="py-3 text-xs text-slate-400">
-                  <div className="space-y-1">
-                    {row.byWarehouse.map((warehouse) => (
-                      <p key={warehouse.warehouseCode}>
-                        {warehouse.warehouseCode}: T {warehouse.quantity.toLocaleString("es-MX")} / R {warehouse.reserved.toLocaleString("es-MX")} / D {warehouse.available.toLocaleString("es-MX")}
-                      </p>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} className="border-b border-white/5 align-top hover:bg-white/5">
+                  <td className="py-3 font-mono text-cyan-300">
+                    <Link href={`/catalog/${row.id}`}>{row.sku}</Link>
+                    {row.referenceCode ? <p className="text-[11px] text-slate-500">{row.referenceCode}</p> : null}
+                  </td>
+                  <td className="py-3 text-slate-300">
+                    <p>{row.name}</p>
+                    <p className="text-xs text-slate-500">{row.brand ?? row.type}</p>
+                  </td>
+                  <td className="py-3 text-right text-slate-200">{row.total.toLocaleString("es-MX")}</td>
+                  <td className="py-3 text-right text-amber-300">{row.reserved.toLocaleString("es-MX")}</td>
+                  <td className="py-3 text-right text-emerald-300">{row.available.toLocaleString("es-MX")}</td>
+                  <td className="py-3 text-xs text-slate-400">
+                    <div className="space-y-1">
+                      {row.byWarehouse.map((warehouse) => (
+                        <p key={warehouse.warehouseCode}>
+                          {warehouse.warehouseCode}: T {warehouse.quantity.toLocaleString("es-MX")} / R {warehouse.reserved.toLocaleString("es-MX")} / D {warehouse.available.toLocaleString("es-MX")}
+                        </p>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3">
+                    <div className="flex flex-wrap gap-2">
+                      <Link href={buildCommercialEquivalencesHref(row.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                        Ver equivalencias
+                      </Link>
+                      <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                        Crear pedido
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {totalPages > 1 ? (
         <div className="flex items-center justify-between gap-3 text-sm">

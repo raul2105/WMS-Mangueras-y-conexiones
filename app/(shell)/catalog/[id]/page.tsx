@@ -1,8 +1,14 @@
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getSessionContext } from "@/lib/auth/session-context";
 import ProductImage from "@/components/ProductImage";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
+import { buttonStyles } from "@/components/ui/button";
+import {
+    buildCommercialAvailabilityHref,
+    buildCommercialEquivalencesHref,
+} from "@/lib/commercial-toolkit";
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -10,6 +16,9 @@ interface PageProps {
 
 export default async function ProductDetailPage({ params }: PageProps) {
     const { id } = await params;
+    const sessionCtx = await getSessionContext();
+    const canEditCatalog =
+        sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("catalog.edit");
     const product = await prisma.product.findUnique({
         where: { id },
         select: {
@@ -58,7 +67,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
         <div className="max-w-5xl mx-auto space-y-6">
             {/* Breadcrumb */}
             <div className="flex items-center gap-2 text-sm text-slate-400">
-                <Link href="/catalog" className="hover:text-white">Catálogo</Link>
+                <Link href="/catalog" className="hover:text-white">Catálogo comercial</Link>
                 <span>/</span>
                 <span className="text-white">{product.name}</span>
             </div>
@@ -98,13 +107,35 @@ export default async function ProductDetailPage({ params }: PageProps) {
                                     </>
                                 )}
                             </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                <Link
+                                    href={buildCommercialAvailabilityHref(product.sku)}
+                                    className={buttonStyles({ variant: "secondary", size: "sm" })}
+                                >
+                                    Ver disponibilidad
+                                </Link>
+                                <Link
+                                    href={buildCommercialEquivalencesHref(product.sku)}
+                                    className={buttonStyles({ variant: "secondary", size: "sm" })}
+                                >
+                                    Revisar equivalencias
+                                </Link>
+                                <Link
+                                    href="/production/requests/new"
+                                    className={buttonStyles({ size: "sm" })}
+                                >
+                                    Crear pedido
+                                </Link>
+                            </div>
                         </div>
                         <div className="text-right space-y-2">
                             <p className="text-3xl font-bold text-white">${product.price?.toFixed(2)}</p>
-                            <p className="text-xs text-slate-500">Precio de Lista</p>
-                            <Link href={`/catalog/${product.id}/edit`} className="inline-block px-3 py-1 glass rounded text-xs text-cyan-400 hover:text-white border border-cyan-500/30">
-                                ✏️ Editar
-                            </Link>
+                            <p className="text-xs text-slate-500">Precio de lista</p>
+                            {canEditCatalog ? (
+                                <Link href={`/catalog/${product.id}/edit`} className="inline-block px-3 py-1 glass rounded text-xs text-cyan-400 hover:text-white border border-cyan-500/30">
+                                    ✏️ Editar
+                                </Link>
+                            ) : null}
                         </div>
                     </div>
 
@@ -114,7 +145,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
                     <div className="grid grid-cols-2 gap-4 mt-6">
                         <div className="glass p-4 rounded-lg bg-green-500/5 border-green-500/20">
-                            <p className="text-xs text-green-400 uppercase font-bold">Stock Disponible</p>
+                            <p className="text-xs text-green-400 uppercase font-bold">Existencia disponible</p>
                             <p className="text-2xl font-bold text-white">{stock} <span className="text-sm font-normal text-slate-400">unidades</span></p>
                         </div>
                         <div className="glass p-4 rounded-lg">
@@ -146,7 +177,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                 {/* Related/Assembly Info (Placeholder) */}
                 <div className="glass-card">
                     <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        <span className="text-purple-400">🔗</span> Compatibilidad
+                        <span className="text-purple-400">🔗</span> Alternativas y equivalencias
                     </h2>
                     {equivalents.length > 0 ? (
                         <div className="space-y-3">
@@ -175,12 +206,26 @@ export default async function ProductDetailPage({ params }: PageProps) {
                                             Equivalencia registrada sin stock disponible.
                                         </p>
                                     )}
+                                    <div className="flex flex-wrap gap-2 pt-1">
+                                        <Link
+                                            href={buildCommercialAvailabilityHref(equivalent.sku)}
+                                            className={buttonStyles({ variant: "secondary", size: "sm" })}
+                                        >
+                                            Ver disponibilidad
+                                        </Link>
+                                        <Link
+                                            href="/production/requests/new"
+                                            className={buttonStyles({ size: "sm" })}
+                                        >
+                                            Crear pedido
+                                        </Link>
+                                    </div>
                                 </div>
                             ))}
                         </div>
                     ) : (
                         <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 text-sm">
-                            No hay equivalencias activas registradas para este producto.
+                            No hay equivalencias activas registradas para este producto. Puedes seguir con disponibilidad o crear un pedido comercial.
                         </div>
                     )}
                 </div>

@@ -44,10 +44,10 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/catalog",
-    label: "Catalogo",
+    label: "Catálogo",
     icon: "catalog",
     description:
-      "Maestro de productos, atributos tecnicos y estructura comercial.",
+      "Catálogo comercial, atributos técnicos y estructura de producto.",
     match: "prefix",
     requiredPermission: "catalog.view",
   },

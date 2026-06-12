@@ -115,8 +115,8 @@ export default function CatalogFilters({
           value={searchValue}
           onChange={(e) => setSearchValue(e.target.value)}
           rootClassName="md:col-span-2"
-          label="Buscar"
-          placeholder="SKU, nombre, referencia, descripcion"
+          label="Buscar producto"
+          placeholder="SKU, nombre, referencia, descripción"
         />
 
         <Select label="Categoria" value={searchParams.get("category") ?? ""} onChange={(e) => handleSelectChange("category", e.target.value)} placeholder="Todas">

@@ -6,6 +6,8 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import CustomerSearchField from "@/components/CustomerSearchField";
+import { SectionCard } from "@/components/ui/section-card";
+import { buttonStyles } from "@/components/ui/button";
 import { createSalesRequestDraftHeader } from "@/lib/sales/request-service";
 import { requireSalesWriteAccess } from "@/lib/rbac/sales";
 import {
@@ -164,6 +166,23 @@ export default async function NewProductionRequestPage({
           </Link>
         }
       />
+
+      <SectionCard
+        title="Herramientas de apoyo"
+        description="Abre catálogo, disponibilidad o equivalencias sin salir del flujo de captura."
+      >
+        <div className="flex flex-wrap gap-2">
+          <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Buscar en catálogo
+          </Link>
+          <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Ver disponibilidad
+          </Link>
+          <Link href="/production/equivalences" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+            Revisar equivalencias
+          </Link>
+        </div>
+      </SectionCard>
 
       <section className="glass-card space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

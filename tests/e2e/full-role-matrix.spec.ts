@@ -19,7 +19,7 @@ const ROLE_CHECKS: Record<
     home: "/",
     visibleRoutes: [
       ["/users", /Usuarios/i],
-      ["/catalog", /Catalogo/i],
+      ["/catalog", /Cat[aá]logo comercial/i],
       ["/inventory", /Inventario/i],
       ["/warehouse", /^Almacenes$/],
       ["/production", /Produccion/i],
@@ -31,7 +31,7 @@ const ROLE_CHECKS: Record<
   MANAGER: {
     home: "/",
     visibleRoutes: [
-      ["/catalog", /Catalogo/i],
+      ["/catalog", /Cat[aá]logo comercial/i],
       ["/inventory", /Inventario/i],
       ["/warehouse", /^Almacenes$/],
       ["/production", /Produccion/i],
@@ -61,9 +61,9 @@ const ROLE_CHECKS: Record<
     visibleRoutes: [
       ["/production/requests", /Pedidos comerciales/i],
       ["/production/requests/new", /Nuevo pedido comercial/i],
-      ["/catalog", /Cat[aá]logo/i],
-      ["/production/availability", /Disponibilidad para pedidos/i],
-      ["/production/equivalences", /Equivalencias para pedidos/i],
+      ["/catalog", /Cat[aá]logo comercial/i],
+      ["/production/availability", /Disponibilidad comercial/i],
+      ["/production/equivalences", /Alternativas y equivalencias/i],
       ["/sales/customers", /Clientes/i],
     ],
     blockedRoutes: [

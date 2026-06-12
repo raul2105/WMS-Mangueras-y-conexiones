@@ -331,17 +331,25 @@ test.describe
     await page.goto("/production/availability");
 
     await expect(
-      page.getByRole("heading", { name: /Disponibilidad para pedidos/i }),
+      page.getByRole("heading", { name: /Disponibilidad comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /Filtrar/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Limpiar/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Ver disponibilidad/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /Limpiar filtros/i }),
+    ).toBeVisible();
 
     await page.goto("/production/equivalences");
     await expect(
-      page.getByRole("heading", { name: /Equivalencias para pedidos/i }),
+      page.getByRole("heading", { name: /Alternativas y equivalencias/i }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /Buscar/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Limpiar/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Revisar equivalencias/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /Limpiar filtros/i }),
+    ).toBeVisible();
   });
 
   test("KAN-82 dark/light theme toggle keeps the sales cockpit usable", async ({

@@ -78,16 +78,16 @@ test.describe("RBAC en navegador por rol", () => {
       "/production/requests/new",
       /Nuevo pedido comercial/i,
     );
-    await expectAllowed(page, "/catalog", /Cat[aá]logo/i);
+    await expectAllowed(page, "/catalog", /Cat[aá]logo comercial/i);
     await expectAllowed(
       page,
       "/production/availability",
-      /Disponibilidad para pedidos/i,
+      /Disponibilidad comercial/i,
     );
     await expectAllowed(
       page,
       "/production/equivalences",
-      /Equivalencias para pedidos/i,
+      /Alternativas y equivalencias/i,
     );
     await page.goto("/production/requests");
     await expect(

@@ -16,17 +16,57 @@ import {
   salesInternalOrderCreateSchema,
 } from "@/lib/schemas/wms";
 import { startPerf } from "@/lib/perf";
+import { getProductSearchSelection, resolveProductInput } from "@/lib/product-search";
+import {
+  buildCommercialSearchHref,
+} from "@/lib/commercial-toolkit";
 
 export const dynamic = "force-dynamic";
+
+type SearchParams = Record<string, string | string[] | undefined>;
+
+const SOURCE_LABELS: Record<string, string> = {
+  catalog: "Catálogo",
+  availability: "Disponibilidad",
+  equivalences: "Equivalencias",
+};
 
 function isNextRedirectError(error: unknown) {
   return Boolean(
     error &&
-    typeof error === "object" &&
-    "digest" in error &&
-    typeof (error as { digest?: unknown }).digest === "string" &&
-    (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+      typeof error === "object" &&
+      "digest" in error &&
+      typeof (error as { digest?: unknown }).digest === "string" &&
+      (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
   );
+}
+
+function firstParam(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0]?.trim() ?? "";
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getSourceLabel(source: string) {
+  return SOURCE_LABELS[source] ?? "Contexto comercial";
+}
+
+function buildHandoffParams(input: {
+  selectedProduct?: { id: string; sku: string } | null;
+  searchQuery?: string;
+  source?: string;
+  equivalentProductId?: string | null;
+}) {
+  const params: Record<string, string | undefined> = {
+    productId: input.selectedProduct?.id,
+    sku: input.selectedProduct?.sku,
+    q: input.searchQuery || input.selectedProduct?.sku,
+    source: input.source,
+    equivalentProductId: input.equivalentProductId ?? undefined,
+  };
+
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => Boolean(value?.trim())),
+  ) as Record<string, string | undefined>;
 }
 
 async function createSalesRequest(formData: FormData) {
@@ -137,7 +177,7 @@ async function createSalesRequest(formData: FormData) {
 export default async function NewProductionRequestPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   await pageGuard("sales.view");
   const [sp, ctx] = await Promise.all([searchParams, getSessionContext()]);
@@ -152,11 +192,51 @@ export default async function NewProductionRequestPage({
     select: { id: true, code: true, name: true },
   });
 
+  const error = firstParam(sp.error);
+  const productId = firstParam(sp.productId);
+  const sku = firstParam(sp.sku);
+  const searchQuery = firstParam(sp.q);
+  const source = firstParam(sp.source);
+  const equivalentProductId = firstParam(sp.equivalentProductId);
+  const displayQuery = searchQuery || sku;
+
+  const selectedProduct = productId
+    ? await getProductSearchSelection(prisma, productId)
+    : sku
+      ? (await resolveProductInput(prisma, sku, { minScore: 1600 })).product
+      : null;
+  const originalProduct =
+    equivalentProductId && equivalentProductId !== selectedProduct?.id
+      ? await getProductSearchSelection(prisma, equivalentProductId)
+      : null;
+  const invalidProductContext = Boolean(productId && !selectedProduct);
+  const sourceLabel = getSourceLabel(source);
+  const requestContext = buildHandoffParams({
+    selectedProduct,
+    searchQuery: displayQuery,
+    source,
+    equivalentProductId: originalProduct?.id,
+  });
+  const catalogQuery = displayQuery || selectedProduct?.sku;
+  const catalogHref = catalogQuery
+    ? buildCommercialSearchHref("/catalog", catalogQuery)
+    : "/catalog";
+  const availabilityHref = catalogQuery
+    ? buildCommercialSearchHref("/production/availability", catalogQuery, requestContext)
+    : buildCommercialSearchHref("/production/availability", undefined, requestContext);
+  const equivalencesHref = catalogQuery
+    ? buildCommercialSearchHref("/production/equivalences", catalogQuery, requestContext)
+    : buildCommercialSearchHref("/production/equivalences", undefined, requestContext);
+
+  const hasCommercialContext = Boolean(
+    selectedProduct || displayQuery || invalidProductContext || originalProduct,
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Nuevo pedido comercial"
-        description="Captura primero al cliente, luego confirma almacén, fecha compromiso y notas. Las líneas se agregan después."
+        description="Captura primero al cliente, confirma almacén, fecha compromiso y notas. Si llegas desde catálogo, disponibilidad o equivalencias, el producto aparecerá arriba como contexto comercial."
         actions={
           <Link
             href="/production/requests"
@@ -167,18 +247,151 @@ export default async function NewProductionRequestPage({
         }
       />
 
+      {hasCommercialContext ? (
+        <SectionCard
+          title="Contexto comercial"
+          description="Producto de referencia para capturar el pedido. Este contexto no se guarda como línea todavía."
+        >
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+            <div className="space-y-3">
+              {invalidProductContext ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  No encontramos el producto seleccionado. Puedes corregir la
+                  selección o seguir con la captura manual sin perder el
+                  pedido.
+                </div>
+              ) : null}
+
+              {selectedProduct ? (
+                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                      Producto de referencia
+                    </p>
+                    <Badge variant="accent">{sourceLabel}</Badge>
+                  </div>
+                  <p className="mt-2 text-lg font-semibold text-white">
+                    {selectedProduct.name}
+                  </p>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
+                    <p>
+                      <span className="text-slate-400">SKU:</span>{" "}
+                      <span className="font-mono">{selectedProduct.sku}</span>
+                    </p>
+                    {selectedProduct.referenceCode ? (
+                      <p>
+                        <span className="text-slate-400">Referencia:</span>{" "}
+                        <span className="font-mono">
+                          {selectedProduct.referenceCode}
+                        </span>
+                      </p>
+                    ) : null}
+                    <p>
+                      <span className="text-slate-400">Stock disponible:</span>{" "}
+                      {selectedProduct.totalAvailable.toLocaleString("es-MX")}
+                    </p>
+                    <p>
+                      <span className="text-slate-400">Origen:</span>{" "}
+                      {sourceLabel}
+                    </p>
+                  </div>
+                </div>
+              ) : displayQuery ? (
+                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                      Contexto comercial
+                    </p>
+                    <Badge variant="accent">{sourceLabel}</Badge>
+                  </div>
+                  <p className="mt-2 text-lg font-semibold text-white">
+                    Búsqueda comercial: {displayQuery}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-300">
+                    No hay un producto resuelto todavía. La búsqueda se
+                    mantiene como referencia para continuar el pedido manual.
+                  </p>
+                </div>
+              ) : null}
+
+              {originalProduct ? (
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Sustituye a
+                  </p>
+                  <p className="mt-1 font-semibold text-white">
+                    {originalProduct.name}
+                  </p>
+                  <p className="font-mono text-xs text-slate-400">
+                    {originalProduct.sku}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm font-semibold text-white">Siguiente acción</p>
+              <p className="mt-2 text-sm text-slate-300">
+                {selectedProduct
+                  ? "Continúa con el cliente, confirma el almacén y guarda el encabezado. El producto queda como referencia para capturar líneas después."
+                  : invalidProductContext
+                    ? "Corrige el producto de referencia o quítalo y sigue con la captura manual del pedido."
+                    : displayQuery
+                      ? "Mantén la búsqueda como referencia, elige el cliente y confirma los datos del pedido."
+                      : "Puedes seguir con la captura manual y regresar al catálogo cuando necesites contexto comercial."}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {selectedProduct ? (
+                  <Link
+                    href="#captura-cliente"
+                    className={buttonStyles({ size: "sm" })}
+                  >
+                    Continuar con este producto
+                  </Link>
+                ) : (
+                  <Link
+                    href="#captura-cliente"
+                    className={buttonStyles({ size: "sm" })}
+                  >
+                    Continuar con la captura
+                  </Link>
+                )}
+                <Link
+                  href={catalogHref}
+                  className={buttonStyles({ variant: "secondary", size: "sm" })}
+                >
+                  Cambiar producto
+                </Link>
+                <Link
+                  href="/production/requests/new"
+                  className={buttonStyles({ variant: "secondary", size: "sm" })}
+                >
+                  Quitar selección
+                </Link>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
+
       <SectionCard
         title="Herramientas de apoyo"
         description="Abre catálogo, disponibilidad o equivalencias sin salir del flujo de captura."
       >
         <div className="flex flex-wrap gap-2">
-          <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+          <Link href={catalogHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
             Buscar en catálogo
           </Link>
-          <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+          <Link
+            href={availabilityHref}
+            className={buttonStyles({ variant: "secondary", size: "sm" })}
+          >
             Ver disponibilidad
           </Link>
-          <Link href="/production/equivalences" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+          <Link
+            href={equivalencesHref}
+            className={buttonStyles({ variant: "secondary", size: "sm" })}
+          >
             Revisar equivalencias
           </Link>
         </div>
@@ -232,16 +445,16 @@ export default async function NewProductionRequestPage({
         </div>
       </section>
 
-      {sp.error ? (
+      {error ? (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {sp.error}
+          {error}
         </div>
       ) : null}
 
       <form action={createSalesRequest} className="space-y-6">
         <section className="glass-card grid gap-4 md:grid-cols-2">
           {canViewCustomers ? (
-            <div className="md:col-span-2">
+            <div id="captura-cliente" className="md:col-span-2">
               <CustomerSearchField
                 name="customerId"
                 label="1. Selecciona o crea el cliente"
@@ -254,7 +467,7 @@ export default async function NewProductionRequestPage({
               </p>
             </div>
           ) : (
-            <label className="space-y-1 md:col-span-2">
+            <label id="captura-cliente" className="space-y-1 md:col-span-2">
               <span className="text-sm text-slate-400">
                 1. Cliente comercial
               </span>

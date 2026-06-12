@@ -6,8 +6,8 @@ import ProductImage from "@/components/ProductImage";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
 import { buttonStyles } from "@/components/ui/button";
 import {
-    buildCommercialAvailabilityHref,
-    buildCommercialEquivalencesHref,
+    buildCommercialRequestHref,
+    buildCommercialSearchHref,
 } from "@/lib/commercial-toolkit";
 
 interface PageProps {
@@ -109,20 +109,23 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                                 <Link
-                                    href={buildCommercialAvailabilityHref(product.sku)}
+                                    href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })}
                                     className={buttonStyles({ variant: "secondary", size: "sm" })}
+                                    aria-label={`Ver disponibilidad de ${product.name} (${product.sku})`}
                                 >
                                     Ver disponibilidad
                                 </Link>
                                 <Link
-                                    href={buildCommercialEquivalencesHref(product.sku)}
+                                    href={buildCommercialSearchHref("/production/equivalences", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })}
                                     className={buttonStyles({ variant: "secondary", size: "sm" })}
+                                    aria-label={`Revisar equivalencias de ${product.name} (${product.sku})`}
                                 >
                                     Revisar equivalencias
                                 </Link>
                                 <Link
-                                    href="/production/requests/new"
+                                    href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, source: "catalog" })}
                                     className={buttonStyles({ size: "sm" })}
+                                    aria-label={`Crear pedido con ${product.name} (${product.sku})`}
                                 >
                                     Crear pedido
                                 </Link>
@@ -208,13 +211,13 @@ export default async function ProductDetailPage({ params }: PageProps) {
                                     )}
                                     <div className="flex flex-wrap gap-2 pt-1">
                                         <Link
-                                            href={buildCommercialAvailabilityHref(equivalent.sku)}
+                                            href={buildCommercialSearchHref("/production/availability", equivalent.sku, { productId: equivalent.productId, sku: equivalent.sku, source: "equivalences", equivalentProductId: product.id })}
                                             className={buttonStyles({ variant: "secondary", size: "sm" })}
                                         >
                                             Ver disponibilidad
                                         </Link>
                                         <Link
-                                            href="/production/requests/new"
+                                            href={buildCommercialRequestHref({ productId: equivalent.productId, sku: equivalent.sku, q: product.sku, source: "equivalences", equivalentProductId: product.id })}
                                             className={buttonStyles({ size: "sm" })}
                                         >
                                             Crear pedido

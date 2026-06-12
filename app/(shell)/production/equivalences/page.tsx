@@ -8,7 +8,8 @@ import { buttonStyles } from "@/components/ui/button";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
 import { searchProducts } from "@/lib/product-search";
 import {
-  buildCommercialAvailabilityHref,
+  buildCommercialRequestHref,
+  buildCommercialSearchHref,
 } from "@/lib/commercial-toolkit";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,10 @@ export const dynamic = "force-dynamic";
 type SearchParams = {
   q?: string;
   warehouseId?: string;
+  productId?: string;
+  sku?: string;
+  source?: string;
+  equivalentProductId?: string;
 };
 
 export default async function ProductionEquivalencesPage({
@@ -27,6 +32,10 @@ export default async function ProductionEquivalencesPage({
   const sp = await searchParams;
   const query = sp.q?.trim() ?? "";
   const warehouseId = sp.warehouseId?.trim() ?? "";
+  const productId = sp.productId?.trim() ?? "";
+  const sku = sp.sku?.trim() ?? "";
+  const source = sp.source?.trim() ?? "";
+  const equivalentProductId = sp.equivalentProductId?.trim() ?? "";
 
   const [warehouses, matches] = await Promise.all([
     prisma.warehouse.findMany({
@@ -44,13 +53,31 @@ export default async function ProductionEquivalencesPage({
     })),
   );
 
+  const requestHref = query || sku
+    ? buildCommercialRequestHref({
+        productId: productId || undefined,
+        sku: sku || undefined,
+        q: query || sku || undefined,
+        source: "equivalences",
+        equivalentProductId: equivalentProductId || undefined,
+      })
+    : "/production/requests/new";
+  const availabilityHref = query || sku
+    ? buildCommercialSearchHref("/production/availability", query || sku, {
+        productId: productId || undefined,
+        sku: sku || undefined,
+        source: "equivalences",
+        equivalentProductId: equivalentProductId || undefined,
+      })
+    : "/production/availability";
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Alternativas y equivalencias"
         description="Revisa sustitutos registrados para decidir si conviene validar disponibilidad o crear un pedido comercial."
         meta={query ? `${groups.length} productos analizados` : "Busca un SKU o referencia para explorar equivalencias"}
-        actions={<Link href="/production/requests/new" className="btn-primary">+ Nuevo pedido</Link>}
+        actions={<Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link>}
       />
 
       <SectionCard
@@ -61,10 +88,10 @@ export default async function ProductionEquivalencesPage({
           <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
             Buscar en catálogo
           </Link>
-          <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+          <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
             Ver disponibilidad
           </Link>
-          <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+          <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
             Crear pedido
           </Link>
         </div>
@@ -79,6 +106,10 @@ export default async function ProductionEquivalencesPage({
             className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
             placeholder="SKU, referencia, nombre..."
           />
+          <input type="hidden" name="productId" value={productId} />
+          <input type="hidden" name="sku" value={sku} />
+          <input type="hidden" name="source" value={source} />
+          <input type="hidden" name="equivalentProductId" value={equivalentProductId} />
         </label>
         <label className="space-y-1">
           <span className="text-sm text-slate-400">Almacén</span>
@@ -104,19 +135,19 @@ export default async function ProductionEquivalencesPage({
           title="Busca un producto requerido"
           description="Ingresa un SKU, referencia o nombre para ver alternativas disponibles y decidir si validas existencia o creas el pedido comercial."
           actions={
-            <>
-              <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                Ir al catálogo
-              </Link>
-              <Link href="/production/availability" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                Ver disponibilidad
-              </Link>
-              <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
-                Crear pedido
-              </Link>
-            </>
-          }
-        />
+              <>
+                <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Ir al catálogo
+                </Link>
+                <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Ver disponibilidad
+                </Link>
+                <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
+                  Crear pedido
+                </Link>
+              </>
+            }
+          />
       ) : groups.length === 0 ? (
         <EmptyState
           title="Sin resultados"
@@ -126,10 +157,10 @@ export default async function ProductionEquivalencesPage({
               <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
                 Buscar en catálogo
               </Link>
-              <Link href={buildCommercialAvailabilityHref(query)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+              <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                 Ver disponibilidad
               </Link>
-              <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+              <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
                 Crear pedido
               </Link>
             </>
@@ -147,10 +178,10 @@ export default async function ProductionEquivalencesPage({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link href={`/catalog/${product.id}`} className="text-sm text-cyan-300 hover:text-white">Ver producto</Link>
-                  <Link href={buildCommercialAvailabilityHref(product.sku)} className="text-sm text-cyan-300 hover:text-white">
+                  <Link href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "equivalences", equivalentProductId: productId || undefined })} className="text-sm text-cyan-300 hover:text-white">
                     Ver disponibilidad
                   </Link>
-                  <Link href="/production/requests/new" className="text-sm text-cyan-300 hover:text-white">
+                  <Link href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, q: query || sku || product.sku, source: "equivalences", equivalentProductId: productId || undefined })} className="text-sm text-cyan-300 hover:text-white">
                     Crear pedido
                   </Link>
                 </div>
@@ -187,10 +218,10 @@ export default async function ProductionEquivalencesPage({
                         ))}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Link href={buildCommercialAvailabilityHref(equivalent.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                        <Link href={buildCommercialSearchHref("/production/availability", equivalent.sku, { productId: equivalent.productId, sku: equivalent.sku, source: "equivalences", equivalentProductId: product.id })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                           Ver disponibilidad
                         </Link>
-                        <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                        <Link href={buildCommercialRequestHref({ productId: equivalent.productId, sku: equivalent.sku, q: query || sku || product.sku, source: "equivalences", equivalentProductId: product.id })} className={buttonStyles({ size: "sm" })} aria-label={`Crear pedido con ${equivalent.name} (${equivalent.sku})`}>
                           Crear pedido
                         </Link>
                       </div>

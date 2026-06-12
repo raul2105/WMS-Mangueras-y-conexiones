@@ -7,8 +7,8 @@ import ProductImage from "@/components/ProductImage";
 import { normalizeTechnicalText } from "@/lib/product-attributes";
 import { TAXONOMY_SUBCATEGORIES } from "@/lib/catalog-taxonomy";
 import {
-    buildCommercialAvailabilityHref,
-    buildCommercialEquivalencesHref,
+    buildCommercialRequestHref,
+    buildCommercialSearchHref,
 } from "@/lib/commercial-toolkit";
 import { PageHeader } from "@/components/ui/page-header";
 import { buttonStyles } from "@/components/ui/button";
@@ -292,15 +292,22 @@ export default async function CatalogPage({ searchParams }: PageProps) {
 
     const commercialToolkitLinks = [
         {
-            href: buildCommercialAvailabilityHref(searchQuery),
+            href: buildCommercialSearchHref("/production/availability", searchQuery, {
+                source: "catalog",
+            }),
             label: "Ver disponibilidad",
         },
         {
-            href: buildCommercialEquivalencesHref(searchQuery),
+            href: buildCommercialSearchHref("/production/equivalences", searchQuery, {
+                source: "catalog",
+            }),
             label: "Revisar equivalencias",
         },
         {
-            href: "/production/requests/new",
+            href: buildCommercialRequestHref({
+                q: searchQuery,
+                source: "catalog",
+            }),
             label: "Crear pedido",
             variant: "primary" as const,
         },
@@ -370,13 +377,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
               description="No se encontraron productos con los filtros activos. Prueba otro producto o salta a disponibilidad, equivalencias o nuevo pedido."
               actions={
                 <>
-                  <Link href={buildCommercialAvailabilityHref(searchQuery)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  <Link href={buildCommercialSearchHref("/production/availability", searchQuery, { source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                     Ver disponibilidad
                   </Link>
-                  <Link href={buildCommercialEquivalencesHref(searchQuery)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  <Link href={buildCommercialSearchHref("/production/equivalences", searchQuery, { source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                     Revisar equivalencias
                   </Link>
-                  <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                  <Link href={buildCommercialRequestHref({ q: searchQuery, source: "catalog" })} className={buttonStyles({ size: "sm" })}>
                     Crear pedido
                   </Link>
                 </>
@@ -401,8 +408,30 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                     <tbody>
                       {products.map((product) => {
                         const stock = sumStock(product.inventory);
-                        const availabilityHref = buildCommercialAvailabilityHref(product.sku);
-                        const equivalencesHref = buildCommercialEquivalencesHref(product.sku);
+                        const availabilityHref = buildCommercialSearchHref(
+                            "/production/availability",
+                            product.sku,
+                            {
+                                productId: product.id,
+                                sku: product.sku,
+                                source: "catalog",
+                            },
+                        );
+                        const equivalencesHref = buildCommercialSearchHref(
+                            "/production/equivalences",
+                            product.sku,
+                            {
+                                productId: product.id,
+                                sku: product.sku,
+                                source: "catalog",
+                            },
+                        );
+                        const requestHref = buildCommercialRequestHref({
+                            productId: product.id,
+                            sku: product.sku,
+                            q: searchQuery,
+                            source: "catalog",
+                        });
                         return (
                           <TableRow key={product.id}>
                             <Td>
@@ -429,7 +458,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                                 <Link href={equivalencesHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                                   Revisar equivalencias
                                 </Link>
-                                <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                                <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
                                   Crear pedido
                                 </Link>
                                 <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
@@ -473,13 +502,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                       <div className="mt-3 flex flex-col gap-2">
                         <p className="font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</p>
                         <div className="flex flex-wrap gap-2">
-                          <Link href={buildCommercialAvailabilityHref(product.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                          <Link href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                             Ver disponibilidad
                           </Link>
-                          <Link href={buildCommercialEquivalencesHref(product.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                          <Link href={buildCommercialSearchHref("/production/equivalences", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                             Revisar equivalencias
                           </Link>
-                          <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                          <Link href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, q: searchQuery, source: "catalog" })} className={buttonStyles({ size: "sm" })}>
                             Crear pedido
                           </Link>
                           <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>

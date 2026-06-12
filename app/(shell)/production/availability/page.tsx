@@ -8,7 +8,8 @@ import { SectionCard } from "@/components/ui/section-card";
 import { buttonStyles } from "@/components/ui/button";
 import { buildProductSearchWhere } from "@/lib/product-search";
 import {
-  buildCommercialEquivalencesHref,
+  buildCommercialRequestHref,
+  buildCommercialSearchHref,
 } from "@/lib/commercial-toolkit";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,10 @@ type SearchParams = {
   q?: string;
   warehouse?: string;
   page?: string;
+  productId?: string;
+  sku?: string;
+  source?: string;
+  equivalentProductId?: string;
 };
 
 function parsePage(value: string | undefined) {
@@ -36,6 +41,10 @@ export default async function ProductionAvailabilityPage({
   const query = sp.q?.trim() ?? "";
   const selectedWarehouse = sp.warehouse?.trim() ?? "";
   const currentPage = parsePage(sp.page);
+  const productId = sp.productId?.trim() ?? "";
+  const sku = sp.sku?.trim() ?? "";
+  const source = sp.source?.trim() ?? "";
+  const equivalentProductId = sp.equivalentProductId?.trim() ?? "";
 
   const inventoryWhere: Prisma.InventoryWhereInput = selectedWarehouse
     ? { location: { warehouse: { code: selectedWarehouse } } }
@@ -119,10 +128,32 @@ export default async function ProductionAvailabilityPage({
     const params = new URLSearchParams();
     if (query) params.set("q", query);
     if (selectedWarehouse) params.set("warehouse", selectedWarehouse);
+    if (productId) params.set("productId", productId);
+    if (sku) params.set("sku", sku);
+    if (source) params.set("source", source);
+    if (equivalentProductId) params.set("equivalentProductId", equivalentProductId);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     return qs ? `/production/availability?${qs}` : "/production/availability";
   };
+
+  const requestHref = query || sku
+    ? buildCommercialRequestHref({
+        productId,
+        sku: sku || undefined,
+        q: query || sku || undefined,
+        source: "availability",
+        equivalentProductId: equivalentProductId || undefined,
+      })
+    : "/production/requests/new";
+  const equivalenceHref = query || sku
+    ? buildCommercialSearchHref("/production/equivalences", query || sku, {
+        productId: productId || undefined,
+        sku: sku || undefined,
+        source: "availability",
+        equivalentProductId: equivalentProductId || undefined,
+      })
+    : "/production/equivalences";
 
   return (
     <div className="space-y-6">
@@ -130,7 +161,7 @@ export default async function ProductionAvailabilityPage({
         title="Disponibilidad comercial"
         description="Consulta existencia disponible, reservada y total para decidir si avanzas al pedido o revisas equivalencias."
         meta={`${totalRows.toLocaleString("es-MX")} productos con inventario`}
-        actions={<Link href="/production/requests/new" className="btn-primary">+ Nuevo pedido</Link>}
+        actions={<Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link>}
       />
 
       <SectionCard
@@ -141,10 +172,10 @@ export default async function ProductionAvailabilityPage({
           <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
             Buscar en catálogo
           </Link>
-          <Link href="/production/equivalences" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+          <Link href={equivalenceHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
             Revisar equivalencias
           </Link>
-          <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+          <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
             Crear pedido
           </Link>
         </div>
@@ -159,6 +190,10 @@ export default async function ProductionAvailabilityPage({
             className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
             placeholder="SKU, referencia, nombre o marca..."
           />
+          <input type="hidden" name="productId" value={productId} />
+          <input type="hidden" name="sku" value={sku} />
+          <input type="hidden" name="source" value={source} />
+          <input type="hidden" name="equivalentProductId" value={equivalentProductId} />
         </label>
         <label className="space-y-1">
           <span className="text-sm text-slate-400">Almacén</span>
@@ -180,23 +215,23 @@ export default async function ProductionAvailabilityPage({
       </form>
 
       {rows.length === 0 ? (
-        <EmptyState
-          title="Busca un producto requerido"
-          description="Usa SKU, referencia, nombre o marca para revisar la existencia disponible. Si no encuentras el producto, pasa al catálogo, equivalencias o nuevo pedido."
-          actions={
-            <>
-              <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                Ir al catálogo
-              </Link>
-              <Link href={buildCommercialEquivalencesHref(query)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                Revisar equivalencias
-              </Link>
-              <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
-                Crear pedido
-              </Link>
-            </>
-          }
-        />
+          <EmptyState
+            title="Busca un producto requerido"
+            description="Usa SKU, referencia, nombre o marca para revisar la existencia disponible. Si no encuentras el producto, pasa al catálogo, equivalencias o nuevo pedido."
+            actions={
+              <>
+                <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Ir al catálogo
+                </Link>
+                <Link href={buildCommercialSearchHref("/production/equivalences", query || sku, { productId: productId || undefined, sku: sku || undefined, source: "availability", equivalentProductId: equivalentProductId || undefined })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Revisar equivalencias
+                </Link>
+                <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
+                  Crear pedido
+                </Link>
+              </>
+            }
+          />
       ) : (
         <div className="glass-card overflow-x-auto">
           <table className="w-full text-sm">
@@ -234,12 +269,12 @@ export default async function ProductionAvailabilityPage({
                       ))}
                     </div>
                   </td>
-                  <td className="py-3">
+                <td className="py-3">
                     <div className="flex flex-wrap gap-2">
-                      <Link href={buildCommercialEquivalencesHref(row.sku)} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                      <Link href={buildCommercialSearchHref("/production/equivalences", row.sku, { productId: row.id, sku: row.sku, source: "availability" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                         Ver equivalencias
                       </Link>
-                      <Link href="/production/requests/new" className={buttonStyles({ size: "sm" })}>
+                      <Link href={buildCommercialRequestHref({ productId: row.id, sku: row.sku, q: query || row.sku, source: "availability" })} className={buttonStyles({ size: "sm" })}>
                         Crear pedido
                       </Link>
                     </div>

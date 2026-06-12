@@ -8,22 +8,26 @@ function readWorkspaceFile(relativePath: string) {
 
 describe("production requests cockpit contract", () => {
   it("keeps the list page on shared flow helpers and cockpit primitives", () => {
-    const listContent = readWorkspaceFile("app/(shell)/production/requests/page.tsx");
+    const listContent = readWorkspaceFile(
+      "app/(shell)/production/requests/page.tsx",
+    );
     const consoleContent = readWorkspaceFile("lib/sales/console.ts");
 
-    expect(listContent).toContain("pageGuard(\"sales.view\")");
+    expect(listContent).toContain('pageGuard("sales.view")');
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(listContent).toContain("takeRequestFromList");
-    expect(listContent).toContain("Warehouse Execution Cockpit");
+    expect(listContent).toContain("Pedidos comerciales");
+    expect(listContent).toContain("Accesos comerciales");
     expect(listContent).toContain("Mis pedidos");
     expect(listContent).toContain("Disponibles para asignarme");
-    expect(listContent).toContain("Next Action");
-    expect(listContent).toContain("Trabajo actual");
-    expect(listContent).toContain("Matriz de mix");
-    expect(listContent).toContain("Progreso comercial");
+    expect(listContent).toContain("Siguiente acción");
+    expect(listContent).toContain("Seguimiento");
+    expect(listContent).toContain("Seguimiento comercial");
     expect(listContent).toContain("Ver detalle");
-    expect(listContent).toContain("Productos independientes");
-    expect(listContent).toContain("Ensambles configurados");
+    expect(listContent).toContain("Clientes");
+    expect(listContent).toContain("Catálogo");
+    expect(listContent).toContain("Disponibilidad");
+    expect(listContent).toContain("Equivalencias");
     expect(listContent).toContain("buttonStyles");
     expect(listContent).toContain("Badge");
     expect(listContent).toContain("buildHref");
@@ -36,9 +40,11 @@ describe("production requests cockpit contract", () => {
   });
 
   it("keeps the detail page on shared write guards and tokenized controls", () => {
-    const detailContent = readWorkspaceFile("app/(shell)/production/requests/[id]/page.tsx");
+    const detailContent = readWorkspaceFile(
+      "app/(shell)/production/requests/[id]/page.tsx",
+    );
 
-    expect(detailContent).toContain("pageGuard(\"sales.view\")");
+    expect(detailContent).toContain('pageGuard("sales.view")');
     expect(detailContent).toContain("requireSalesWriteAccess()");
     expect(detailContent).toContain("getSalesOrderFlowNarrative");
     expect(detailContent).toContain("buttonStyles");

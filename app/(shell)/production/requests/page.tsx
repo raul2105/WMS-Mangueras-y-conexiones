@@ -617,40 +617,109 @@ export default async function ProductionRequestsPage({
       }).canTakeOrder;
     })
     .slice(0, 3);
+  const salesQuickActions = [
+    canViewCustomers
+      ? {
+          href: "/sales/customers",
+          label: "Clientes",
+          description:
+            "Busca cuentas, historial y acceso al catálogo comercial.",
+        }
+      : null,
+    sessionCtx.permissions.includes("catalog.view")
+      ? {
+          href: "/catalog",
+          label: "Catálogo",
+          description: "Consulta productos, familias y atributos para cotizar.",
+        }
+      : null,
+    sessionCtx.permissions.includes("sales.view")
+      ? {
+          href: "/production/availability",
+          label: "Disponibilidad",
+          description: "Revisa existencias y cobertura antes de prometer.",
+        }
+      : null,
+    sessionCtx.permissions.includes("sales.view")
+      ? {
+          href: "/production/equivalences",
+          label: "Equivalencias",
+          description: "Encuentra sustitutos compatibles para cerrar la venta.",
+        }
+      : null,
+    canRenderWriteActions
+      ? {
+          href: "/production/requests/new",
+          label: "Nuevo pedido",
+          description: "Captura un pedido comercial con cliente primero.",
+        }
+      : null,
+  ].filter(
+    (item): item is { href: string; label: string; description: string } =>
+      item !== null,
+  );
   return (
     <div className="space-y-6">
       {" "}
       <PageHeader
-        title="Warehouse Execution Cockpit"
-        description="Cola operativa para pedidos, surtido directo y ensambles configurados."
-        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Pedidos por atender: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Preset operativo: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
+        title="Pedidos comerciales"
+        description="Cola comercial para captura, seguimiento, asignación, surtido y entrega."
+        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Cola: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
-            {" "}
             <Link
               href="/production/availability"
               className={buttonStyles({ variant: "secondary", size: "sm" })}
             >
-              {" "}
               Disponibilidad{" "}
             </Link>{" "}
             <Link
               href="/production/equivalences"
               className={buttonStyles({ variant: "secondary", size: "sm" })}
             >
-              {" "}
               Equivalencias{" "}
             </Link>{" "}
             <Link
               href="/production/requests/new"
               className={buttonStyles({ variant: "primary", size: "sm" })}
             >
-              {" "}
               + Nuevo pedido{" "}
             </Link>{" "}
           </>
         }
       />{" "}
+      <section className="glass-card space-y-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-[var(--text-primary)]">
+              Accesos comerciales
+            </p>
+            <p className="text-xs text-[var(--text-muted)]">
+              Clientes, catálogo, disponibilidad, equivalencias y captura de
+              pedidos.
+            </p>
+          </div>
+          {canRenderWriteActions ? (
+            <Badge variant="accent">Vista comercial</Badge>
+          ) : null}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {salesQuickActions.map((action) => (
+            <Link
+              key={action.href}
+              href={action.href}
+              className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
+            >
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                {action.label}
+              </p>
+              <p className="mt-2 text-sm text-[var(--text-muted)]">
+                {action.description}
+              </p>
+            </Link>
+          ))}
+        </div>
+      </section>
       {sp.ok ? (
         <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">
           {" "}
@@ -820,7 +889,7 @@ export default async function ProductionRequestsPage({
             className={getChipClassName(!queueFilter)}
           >
             {" "}
-            Todos por atender{" "}
+            Todos los pedidos{" "}
           </Link>{" "}
           {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map(
             (queue) => (
@@ -848,7 +917,7 @@ export default async function ProductionRequestsPage({
             className={getChipClassName(!presetFilter)}
           >
             {" "}
-            Todos presets{" "}
+            Todos los filtros{" "}
           </Link>{" "}
           {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map(
             (preset) => (
@@ -876,7 +945,7 @@ export default async function ProductionRequestsPage({
             className={getChipClassName(!stageFilter)}
           >
             {" "}
-            Todas etapas{" "}
+            Todas las etapas{" "}
           </Link>{" "}
           {SALES_CONSOLE_STAGE_FLOW.map((stage) => (
             <Link
@@ -926,7 +995,8 @@ export default async function ProductionRequestsPage({
         ) : (
           orders.map((order) => {
             const orderStatus = order.status as SalesInternalOrderStatus;
-              const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
+            const displayCustomer =
+              order.customerName?.trim() || order.customer?.name || "--";
             const createdByManager =
               (order.requestedByUser?.userRoles.length ?? 0) > 0;
             const productLines = (order.lines as any[]).filter(
@@ -1050,7 +1120,7 @@ export default async function ProductionRequestsPage({
                       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
                         {" "}
                         <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Trabajo actual
+                          Seguimiento
                         </p>{" "}
                         <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
                           {workType.label}
@@ -1062,7 +1132,7 @@ export default async function ProductionRequestsPage({
                       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
                         {" "}
                         <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Matriz de mix
+                          Siguiente acción
                         </p>{" "}
                         <div className="mt-2 flex flex-wrap gap-2">
                           {" "}
@@ -1101,7 +1171,7 @@ export default async function ProductionRequestsPage({
                       <div>
                         {" "}
                         <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                          Next Action
+                          Siguiente acción
                         </p>{" "}
                         <p className="mt-1 text-base font-semibold text-[var(--text-primary)]">
                           {primaryActionState.label}
@@ -1218,7 +1288,7 @@ export default async function ProductionRequestsPage({
                     <div>
                       {" "}
                       <p className="text-sm font-medium text-[var(--text-primary)]">
-                        Progreso comercial
+                        Seguimiento comercial
                       </p>{" "}
                       <p className="text-xs text-[var(--text-muted)]">
                         {" "}
@@ -1802,58 +1872,52 @@ export default async function ProductionRequestsPage({
           })
         )}{" "}
       </section>{" "}
-      <section className="glass-card space-y-4">
-        {" "}
-        <div className="flex flex-col gap-1">
-          {" "}
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            Vista administrativa
-          </h2>{" "}
-          <p className="text-sm text-[var(--text-muted)]">
-            Fallback tabular para inspeccion rapida, sin desplazar el cockpit
-            operativo principal.
-          </p>{" "}
-        </div>{" "}
+      <details className="glass-card space-y-4">
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              Vista administrativa
+            </h2>
+            <p className="text-sm text-[var(--text-muted)]">
+              Resumen tabular para managers y admin sin desplazar la vista
+              comercial principal.
+            </p>
+          </div>
+        </summary>
         <div
-          className="overflow-x-auto"
+          className="overflow-x-auto pt-4"
           tabIndex={0}
           aria-label="Tabla administrativa de pedidos"
         >
-          {" "}
           <table className="w-full text-sm">
-            {" "}
             <thead>
-              {" "}
               <tr className="border-b border-[var(--border-soft)] text-[var(--text-muted)]">
-                {" "}
-                <th className="py-3 text-left">Codigo</th>{" "}
-                <th className="py-3 text-left">Cliente</th>{" "}
-                <th className="py-3 text-left">Estado</th>{" "}
-                <th className="py-3 text-left">Almacen</th>{" "}
-                <th className="py-3 text-left">Solicitado por</th>{" "}
-                <th className="py-3 text-left">Asignado a</th>{" "}
-                <th className="py-3 text-left">Entrega</th>{" "}
-                <th className="py-3 text-right">Lineas</th>{" "}
-                <th className="py-3 text-left">Acciones</th>{" "}
-              </tr>{" "}
-            </thead>{" "}
+                <th className="py-3 text-left">Código</th>
+                <th className="py-3 text-left">Cliente</th>
+                <th className="py-3 text-left">Estado</th>
+                <th className="py-3 text-left">Almacén</th>
+                <th className="py-3 text-left">Solicitado por</th>
+                <th className="py-3 text-left">Asignado a</th>
+                <th className="py-3 text-left">Entrega</th>
+                <th className="py-3 text-right">Líneas</th>
+                <th className="py-3 text-left">Acciones</th>
+              </tr>
+            </thead>
             <tbody>
-              {" "}
               {orders.length === 0 ? (
                 <tr>
-                  {" "}
                   <td
                     colSpan={9}
                     className="py-10 text-center text-[var(--text-muted)]"
                   >
-                    {" "}
-                    No hay pedidos para el filtro seleccionado.{" "}
-                  </td>{" "}
+                    No hay pedidos para el filtro seleccionado.
+                  </td>
                 </tr>
               ) : (
                 orders.map((order) => {
                   const orderStatus = order.status as SalesInternalOrderStatus;
-                  const displayCustomer = order.customerName?.trim() || order.customer?.name || "--";
+                  const displayCustomer =
+                    order.customerName?.trim() || order.customer?.name || "--";
                   const createdByManager =
                     (order.requestedByUser?.userRoles.length ?? 0) > 0;
                   const hasProductLines = order.lines.some(
@@ -1913,54 +1977,48 @@ export default async function ProductionRequestsPage({
                     takeEligibility,
                     deliveredEligibility,
                   });
+
                   return (
                     <tr
                       key={order.id}
                       className="border-b border-[var(--border-soft)] align-top hover:bg-[var(--table-hover)]"
                     >
-                      {" "}
                       <td className="py-3">
-                        {" "}
                         <Link
                           href={`/production/requests/${order.id}`}
                           className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
                         >
-                          {" "}
-                          {order.code}{" "}
-                        </Link>{" "}
-                      </td>{" "}
+                          {order.code}
+                        </Link>
+                      </td>
                       <td className="py-3 text-[var(--text-secondary)]">
-                        {" "}
                         {order.customerId && canViewCustomers ? (
                           <Link
                             href={`/sales/customers/${order.customerId}`}
                             className={getTextLinkClassName()}
                           >
-                            {" "}
-                            {displayCustomer}{" "}
+                            {displayCustomer}
                           </Link>
                         ) : (
                           displayCustomer
-                        )}{" "}
-                      </td>{" "}
+                        )}
+                      </td>
                       <td className="py-3">
-                        {" "}
                         <Badge variant={getStatusBadgeVariant(orderStatus)}>
                           {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
-                        </Badge>{" "}
-                      </td>{" "}
+                        </Badge>
+                      </td>
                       <td className="py-3 text-[var(--text-muted)]">
                         {order.warehouse
                           ? `${order.warehouse.code} - ${order.warehouse.name}`
                           : "--"}
-                      </td>{" "}
+                      </td>
                       <td className="py-3 text-[var(--text-muted)]">
                         {order.requestedByUser?.name ??
                           order.requestedByUser?.email ??
                           "--"}
-                      </td>{" "}
+                      </td>
                       <td className="py-3 text-[var(--text-secondary)]">
-                        {" "}
                         {order.assignedToUser ? (
                           (order.assignedToUser.name ??
                           order.assignedToUser.email ??
@@ -1969,76 +2027,70 @@ export default async function ProductionRequestsPage({
                           <span className="text-[var(--text-muted)]">
                             Sin asignar
                           </span>
-                        )}{" "}
-                      </td>{" "}
+                        )}
+                      </td>
                       <td className="py-3 text-[var(--text-muted)]">
-                        {" "}
                         <p>
                           {order.dueDate
                             ? new Date(order.dueDate).toLocaleDateString(
                                 "es-MX",
                               )
                             : "--"}
-                        </p>{" "}
+                        </p>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
-                          {" "}
                           <Badge variant={flowNarrative.flowBadgeVariant}>
                             {flowNarrative.flowStageLabel}
-                          </Badge>{" "}
+                          </Badge>
                           <span className="text-xs text-[var(--text-muted)]">
                             {flowNarrative.nextRecommendedAction.label}
-                          </span>{" "}
-                        </div>{" "}
-                      </td>{" "}
+                          </span>
+                        </div>
+                      </td>
                       <td className="py-3 text-right text-[var(--text-secondary)]">
                         {order._count.lines}
-                      </td>{" "}
+                      </td>
                       <td className="py-3">
-                        {" "}
                         {canRenderWriteActions ? (
                           <div className="space-y-1">
-                            {" "}
                             <form action={takeRequestFromList}>
-                              {" "}
                               <input
                                 type="hidden"
                                 name="orderId"
                                 value={order.id}
-                              />{" "}
+                              />
                               <input
                                 type="hidden"
                                 name="returnTo"
                                 value={buildHref(safePage)}
-                              />{" "}
+                              />
                               <button
                                 type="submit"
                                 disabled={!takeEligibility.canTakeOrder}
                                 className={`btn-primary ${!takeEligibility.canTakeOrder ? "cursor-not-allowed opacity-55" : ""}`}
                               >
-                                {" "}
-                                Tomar pedido{" "}
-                              </button>{" "}
-                            </form>{" "}
+                                Tomar pedido
+                              </button>
+                            </form>
                             {!takeEligibility.canTakeOrder ? (
                               <p className="text-xs text-[var(--status-warning-text)]">
                                 {takeEligibility.takeBlockedReason}
                               </p>
-                            ) : null}{" "}
+                            ) : null}
                           </div>
                         ) : (
                           <span className="text-xs text-[var(--text-muted)]">
                             Solo lectura
                           </span>
-                        )}{" "}
-                      </td>{" "}
+                        )}
+                      </td>
                     </tr>
                   );
                 })
-              )}{" "}
-            </tbody>{" "}
-          </table>{" "}
-        </div>{" "}
-      </section>{" "}
+              )}
+            </tbody>
+          </table>
+        </div>
+      </details>
       {totalPages > 1 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
           {" "}

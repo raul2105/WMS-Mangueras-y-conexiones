@@ -37,7 +37,7 @@ export default function CustomerSearchField({
   label,
   required = false,
   disabled = false,
-  placeholder = "Busca cliente por código, nombre o RFC",
+  placeholder = "Busca por código, nombre o RFC",
   minChars = 2,
   allowQuickCreate = false,
   quickCreateLabel = "Crear cliente rápido",
@@ -64,13 +64,19 @@ export default function CustomerSearchField({
 
   const trimmedQuery = query.trim();
   const selectedText = selected ? customerLabel(selected) : "";
-  const isSelectedQuery = Boolean(selectedId && selectedText && selectedText === trimmedQuery);
-  const shouldSearch = !disabled && !isSelectedQuery && trimmedQuery.length >= minChars;
+  const isSelectedQuery = Boolean(
+    selectedId && selectedText && selectedText === trimmedQuery,
+  );
+  const shouldSearch =
+    !disabled && !isSelectedQuery && trimmedQuery.length >= minChars;
 
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!shouldSearch) {
@@ -96,7 +102,9 @@ export default function CustomerSearchField({
       if (cursor) params.set("cursor", cursor);
 
       setIsLoading(true);
-      fetch(`/api/customers/search?${params.toString()}`, { signal: controller.signal })
+      fetch(`/api/customers/search?${params.toString()}`, {
+        signal: controller.signal,
+      })
         .then(async (response) => {
           if (!response.ok) throw new Error("CUSTOMER_SEARCH_FAILED");
           return response.json() as Promise<CustomerSearchResponse>;
@@ -115,7 +123,11 @@ export default function CustomerSearchField({
             return merged;
           });
           setNextCursor(payload.nextCursor ?? null);
-          setSearchError(incoming.length === 0 && !cursor ? "No se encontraron clientes activos." : null);
+          setSearchError(
+            incoming.length === 0 && !cursor
+              ? "No se encontraron clientes activos."
+              : null,
+          );
         })
         .catch((error) => {
           if (requestId !== requestRef.current) return;
@@ -136,10 +148,16 @@ export default function CustomerSearchField({
 
   const helperText = useMemo(() => {
     if (disabled) return "Campo deshabilitado.";
-    if (!trimmedQuery) return `Escribe al menos ${minChars} caracteres para buscar.`;
-    if (trimmedQuery.length < minChars) return `Escribe al menos ${minChars} caracteres para buscar.`;
+    if (!trimmedQuery)
+      return allowQuickCreate
+        ? `Empieza por el cliente. Escribe al menos ${minChars} caracteres para buscar o crea uno rápido si no existe.`
+        : `Empieza por el cliente. Escribe al menos ${minChars} caracteres para buscar.`;
+    if (trimmedQuery.length < minChars)
+      return allowQuickCreate
+        ? `Escribe al menos ${minChars} caracteres para buscar o crea uno rápido si no existe.`
+        : `Escribe al menos ${minChars} caracteres para buscar.`;
     return null;
-  }, [disabled, minChars, trimmedQuery]);
+  }, [allowQuickCreate, disabled, minChars, trimmedQuery]);
 
   const showList = isOpen && results.length > 0;
   const showRequiredHint = required && !selectedId;
@@ -150,7 +168,8 @@ export default function CustomerSearchField({
     (isOpen || isQuickCreateOpen) &&
     trimmedQuery.length >= minChars &&
     results.length === 0;
-  const canSubmitQuickCreate = quickCreateName.trim().length > 0 && !isQuickCreateSaving;
+  const canSubmitQuickCreate =
+    quickCreateName.trim().length > 0 && !isQuickCreateSaving;
 
   const resetQuickCreate = () => {
     setIsQuickCreateOpen(false);
@@ -164,7 +183,9 @@ export default function CustomerSearchField({
 
   async function submitQuickCreate() {
     if (isLoading) {
-      setQuickCreateError("Espera a que termine la búsqueda para crear un cliente.");
+      setQuickCreateError(
+        "Espera a que termine la búsqueda para crear un cliente.",
+      );
       return;
     }
 
@@ -189,9 +210,15 @@ export default function CustomerSearchField({
         }),
       });
 
-      const payload = (await response.json().catch(() => null)) as CustomerSearchMatch | { error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as
+        | CustomerSearchMatch
+        | { error?: string }
+        | null;
       if (!response.ok) {
-        const message = payload && typeof payload === "object" && "error" in payload ? String(payload.error ?? "") : "";
+        const message =
+          payload && typeof payload === "object" && "error" in payload
+            ? String(payload.error ?? "")
+            : "";
         throw new Error(message || "No se pudo crear el cliente");
       }
 
@@ -206,7 +233,8 @@ export default function CustomerSearchField({
       setIsOpen(false);
       resetQuickCreate();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo crear el cliente";
+      const message =
+        error instanceof Error ? error.message : "No se pudo crear el cliente";
       setQuickCreateError(message);
     } finally {
       setIsQuickCreateSaving(false);
@@ -249,10 +277,20 @@ export default function CustomerSearchField({
         />
       </label>
 
-      {isLoading ? <p className="text-xs text-slate-500">Buscando clientes...</p> : null}
-      {!isLoading && helperText ? <p className="text-xs text-slate-500">{helperText}</p> : null}
-      {searchError ? <p className="text-xs text-amber-300">{searchError}</p> : null}
-      {showRequiredHint ? <p className="text-xs text-amber-300">Selecciona un cliente del catálogo para continuar.</p> : null}
+      {isLoading ? (
+        <p className="text-xs text-slate-500">Buscando clientes...</p>
+      ) : null}
+      {!isLoading && helperText ? (
+        <p className="text-xs text-slate-500">{helperText}</p>
+      ) : null}
+      {searchError ? (
+        <p className="text-xs text-amber-300">{searchError}</p>
+      ) : null}
+      {showRequiredHint ? (
+        <p className="text-xs text-amber-300">
+          Selecciona o crea un cliente para continuar.
+        </p>
+      ) : null}
 
       {showList ? (
         <div className="grid gap-2">
@@ -275,7 +313,9 @@ export default function CustomerSearchField({
             >
               <p className="text-xs font-mono text-cyan-300">{option.code}</p>
               <p className="text-sm text-slate-100">{option.name}</p>
-              <p className="text-xs text-slate-500">{option.taxId ?? option.email ?? "Sin RFC/email"}</p>
+              <p className="text-xs text-slate-500">
+                {option.taxId ?? option.email ?? "Sin RFC/email"}
+              </p>
             </button>
           ))}
           {nextCursor ? (
@@ -321,7 +361,9 @@ export default function CustomerSearchField({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Código (opcional)</span>
+                <span className="text-xs text-slate-400">
+                  Código (opcional)
+                </span>
                 <input
                   value={quickCreateCode}
                   onChange={(event) => setQuickCreateCode(event.target.value)}
@@ -347,7 +389,11 @@ export default function CustomerSearchField({
                   placeholder="contacto@cliente.com"
                 />
               </label>
-              {quickCreateError ? <p className="text-xs text-amber-300 md:col-span-2">{quickCreateError}</p> : null}
+              {quickCreateError ? (
+                <p className="text-xs text-amber-300 md:col-span-2">
+                  {quickCreateError}
+                </p>
+              ) : null}
               <div className="flex gap-2 md:col-span-2">
                 <button
                   type="button"
@@ -355,7 +401,9 @@ export default function CustomerSearchField({
                   disabled={!canSubmitQuickCreate}
                   className="rounded border border-cyan-500/40 px-3 py-2 text-xs text-cyan-300 hover:border-cyan-400 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isQuickCreateSaving ? "Guardando..." : "Guardar y seleccionar"}
+                  {isQuickCreateSaving
+                    ? "Guardando..."
+                    : "Guardar y seleccionar"}
                 </button>
                 <button
                   type="button"
@@ -377,7 +425,9 @@ export default function CustomerSearchField({
             <div>
               <p className="text-xs text-cyan-300 font-mono">{selected.code}</p>
               <p className="text-sm text-slate-100">{selected.name}</p>
-              <p className="text-xs text-slate-300">{selected.taxId ?? selected.email ?? "Sin datos de contacto"}</p>
+              <p className="text-xs text-slate-300">
+                {selected.taxId ?? selected.email ?? "Sin datos de contacto"}
+              </p>
             </div>
             <button
               type="button"

@@ -26,17 +26,17 @@ test.describe("KAN-48 customer quick-create", () => {
 
   test("customers.view sin customers.manage no ve CTA de creación rápida", async ({ page }) => {
     await loginAs(page, USERS.SALES_EXECUTIVE.email, USERS.SALES_EXECUTIVE.password);
-    await expect(page.getByRole("heading", { name: /Nuevo pedido de surtido/i })).toBeVisible();
-    await page.getByLabel("Cliente").fill(`KAN48-SALES-${Date.now()}`);
+    await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
+    await page.getByLabel(/Selecciona o crea el cliente/i).fill(`KAN48-SALES-${Date.now()}`);
     await expect(page.getByText("Crear cliente rápido")).toHaveCount(0);
   });
 
   test("customers.manage puede crear cliente y queda seleccionado", async ({ page }) => {
     await loginAs(page, USERS.MANAGER.email, USERS.MANAGER.password);
-    await expect(page.getByRole("heading", { name: /Nuevo pedido de surtido/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
 
     const uniqueName = `KAN48-QC-${Date.now()}`;
-    await page.getByLabel("Cliente").fill(uniqueName);
+    await page.getByLabel(/Selecciona o crea el cliente/i).fill(uniqueName);
     await expect(page.getByRole("button", { name: "Crear cliente rápido" })).toBeVisible();
     await page.getByRole("button", { name: "Crear cliente rápido" }).click();
     await page.getByRole("button", { name: "Guardar y seleccionar" }).click();
@@ -48,9 +48,9 @@ test.describe("KAN-48 customer quick-create", () => {
 
   test("errores API de quick-create se muestran inline y no rompen el formulario", async ({ page }) => {
     await loginAs(page, USERS.MANAGER.email, USERS.MANAGER.password);
-    await expect(page.getByRole("heading", { name: /Nuevo pedido de surtido/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
 
-    await page.getByLabel("Cliente").fill(`KAN48-ERR-${Date.now()}`);
+    await page.getByLabel(/Selecciona o crea el cliente/i).fill(`KAN48-ERR-${Date.now()}`);
     await expect(page.getByRole("button", { name: "Crear cliente rápido" })).toBeVisible();
     await page.getByRole("button", { name: "Crear cliente rápido" }).click();
     await page.locator('input[placeholder="contacto@cliente.com"]').fill("correo-invalido");

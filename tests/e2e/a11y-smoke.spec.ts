@@ -4,7 +4,15 @@ import { loginAs, type RoleKey } from "./lib/auth.helpers";
 
 const TAGS: string[] = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-const A11Y_ROUTES = [
+type A11yRoute = {
+  path: string;
+  role: RoleKey | null;
+  heading: RegExp;
+  tags: string[];
+  extraChecks?: (page: import("@playwright/test").Page) => Promise<void>;
+};
+
+const A11Y_ROUTES: A11yRoute[] = [
   { path: "/login", role: null, heading: /Acceso WMS/i, tags: TAGS },
   {
     path: "/",
@@ -17,17 +25,34 @@ const A11Y_ROUTES = [
     role: "SALES_EXECUTIVE" as RoleKey,
     heading: /Pedidos comerciales/i,
     tags: TAGS,
+    extraChecks: async (page: import("@playwright/test").Page) => {
+      await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
+      await expect(page.getByText("Más filtros", { exact: true })).toBeVisible();
+      await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
+      await page.locator('[data-testid="requests-more-filters"] summary').click();
+      await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
+    },
+  },
+  {
+    path: "/production/requests/new",
+    role: "SALES_EXECUTIVE" as RoleKey,
+    heading: /Nuevo pedido comercial/i,
+    tags: TAGS,
+    extraChecks: async (page: import("@playwright/test").Page) => {
+      await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+      await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
+    },
   },
   {
     path: "/purchasing/orders",
     role: "MANAGER" as RoleKey,
-    heading: /Órdenes de Compra/i,
+    heading: /^Órdenes de compra$/i,
     tags: TAGS,
   },
   {
     path: "/purchasing/orders",
     role: "WAREHOUSE_OPERATOR" as RoleKey,
-    heading: /Órdenes de Compra/i,
+    heading: /^Órdenes de compra$/i,
     tags: TAGS,
   },
   {
@@ -44,7 +69,7 @@ const A11Y_ROUTES = [
   },
 ] as const;
 
-for (const { path, role, heading, tags } of A11Y_ROUTES) {
+for (const { path, role, heading, tags, extraChecks } of A11Y_ROUTES) {
   if (role) {
     test.describe(`KAN-55/KAN-63/KAN-87 A11y: ${path} (authenticated as ${role})`, () => {
       test(`no axe violations on ${path}`, async ({ page }) => {
@@ -53,6 +78,9 @@ for (const { path, role, heading, tags } of A11Y_ROUTES) {
         await expect(
           page.getByRole("heading", { name: heading }),
         ).toBeVisible();
+        if (extraChecks) {
+          await extraChecks(page);
+        }
 
         const results = await new AxeBuilder({ page }).withTags(tags).analyze();
 

@@ -179,11 +179,12 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: /Catálogo comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Flujo comercial/i })).toBeVisible();
-    await expect(page.getByText(/Producto requerido → disponibilidad → equivalencias → pedido/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /Ver disponibilidad/i }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /Revisar equivalencias/i }).first()).toBeVisible();
+    await expect(page.getByLabel(/Buscar producto/i)).toBeVisible();
+    await expect(page.getByText("Filtros avanzados", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver disponibilidad/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /Revisar equivalencias/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver detalle/i }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Importar CSV/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Nuevo artículo/i })).toHaveCount(0);
 
@@ -191,34 +192,62 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: new RegExp(FIXTURE.baseName, "i") }),
     ).toBeVisible();
+    await expect(page.getByText("Decisión comercial", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver disponibilidad/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Revisar equivalencias/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Editar/i })).toHaveCount(0);
 
     await page.goto(`/catalog?q=${fixture.baseSku}`);
-
-    await page.getByRole("link", { name: /Ver disponibilidad/i }).first().click();
-    await expect(page).toHaveURL(/\/production\/availability(?:\?.*)?$/);
-    await expect(
-      page.getByRole("heading", { name: /Disponibilidad comercial/i }),
-    ).toBeVisible();
-    await expect(page.getByLabel(/Producto requerido/i)).toHaveValue(fixture.baseSku);
-    await expect(page.getByRole("link", { name: /Ver equivalencias/i }).first()).toBeVisible();
-
-    await page.getByRole("link", { name: /Ver equivalencias/i }).first().click();
-    await expect(page).toHaveURL(/\/production\/equivalences(?:\?.*)?$/);
-    await expect(
-      page.getByRole("heading", { name: /Alternativas y equivalencias/i }),
-    ).toBeVisible();
-    await expect(page.getByLabel(/Producto requerido/i)).toHaveValue(fixture.baseSku);
-    await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
 
     await page.getByRole("link", { name: /Crear pedido/i }).first().click();
     await expect(page).toHaveURL(/\/production\/requests\/new(?:\?.*)?$/);
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
+    const supportSummary = page.locator("summary").filter({ hasText: /Herramientas de apoyo/i });
+    await expect(supportSummary).toBeVisible();
+    await supportSummary.click();
     await expect(page.getByRole("link", { name: /Buscar en catálogo/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Ver disponibilidad/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Revisar equivalencias/i })).toBeVisible();
+    await page.getByRole("link", { name: /Quitar selección/i }).first().click();
+    await expect(page).toHaveURL(/\/production\/requests\/new(?:\?.*)?$/);
+    await page.waitForLoadState("networkidle");
+
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    if (viewportWidth >= 768) {
+      await page.goto(`/catalog?q=${fixture.baseSku}`);
+      await page.getByRole("link", { name: /Ver detalle/i }).first().click();
+      await expect(page).toHaveURL(/\/catalog\/.+$/);
+      await expect(
+        page.getByRole("heading", { name: new RegExp(FIXTURE.baseName, "i") }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: /Ver disponibilidad/i }).first().click();
+      await expect(page).toHaveURL(/\/production\/availability(?:\?.*)?$/);
+      await expect(
+        page.getByRole("heading", { name: /Disponibilidad comercial/i }),
+      ).toBeVisible();
+      await expect(page.getByLabel(/Producto requerido/i)).toHaveValue(fixture.baseSku);
+      await expect(page.getByRole("link", { name: /Ver equivalencias/i }).first()).toBeVisible();
+
+      await page.getByRole("link", { name: /Ver equivalencias/i }).first().click();
+      await expect(page).toHaveURL(/\/production\/equivalences(?:\?.*)?$/);
+      await expect(
+        page.getByRole("heading", { name: /Alternativas y equivalencias/i }),
+      ).toBeVisible();
+      await expect(page.getByLabel(/Producto requerido/i)).toHaveValue(fixture.baseSku);
+      await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
+
+      await page.getByRole("link", { name: /Crear pedido/i }).first().click();
+      await expect(page).toHaveURL(/\/production\/requests\/new(?:\?.*)?$/);
+      await expect(
+        page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
+      ).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+      await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
+    }
   });
 
   test("MANAGER can still access the commercial toolkit", async ({ page }) => {
@@ -228,7 +257,8 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: /Catálogo comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: /Ver disponibilidad/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver disponibilidad/i })).toHaveCount(0);
 
     await page.goto("/production/availability");
     await expect(
@@ -244,6 +274,7 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
   });
 
   test("mobile layout remains usable for the commercial toolkit", async ({ page }) => {
@@ -254,7 +285,7 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: /Catálogo comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: /Ver disponibilidad/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
 
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(410);

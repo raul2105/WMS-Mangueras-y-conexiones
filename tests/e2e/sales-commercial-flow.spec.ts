@@ -76,17 +76,37 @@ test.describe("sales commercial flow", () => {
       page.getByRole("heading", { name: /Pedidos comerciales/i }),
     ).toBeVisible();
     await expect(
-      page.getByText("Accesos comerciales", { exact: true }),
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Mis pedidos$/,
+      }),
     ).toBeVisible();
-    await expect(page.getByText("Mis pedidos", { exact: true })).toBeVisible();
     await expect(
       page.getByText("Disponibles para asignarme", { exact: true }),
     ).toBeVisible();
     await expect(page.getByText(/Siguiente acción/i).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Clientes\s/i }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Cat[aá]logo\s/i }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Disponibilidad\s/i }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Equivalencias\s/i }).first()).toBeVisible();
+    await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
+    await expect(
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Todos$/,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Urgentes$/,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /^Vencen hoy$/i }),
+    ).toHaveCount(1);
+    await expect(page.getByText("Más filtros", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
+    await page.locator('[data-testid="requests-more-filters"] summary').click();
+    await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Pedidos$/i })).toBeVisible();
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes/i })).toBeVisible();
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i })).toHaveCount(0);
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Disponibilidad/i })).toHaveCount(0);
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Equivalencias/i })).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: /\+ Nuevo pedido/i }),
     ).toBeVisible();
@@ -111,17 +131,62 @@ test.describe("sales commercial flow", () => {
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
-    await expect(page.getByText("Captura guiada", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Paso 1 de 3/i)).toBeVisible();
-    await expect(page.getByLabel(/1\. Selecciona o crea el cliente/i)).toBeVisible();
-    await expect(page.getByText(/Confirma almacén y fecha/i)).toBeVisible();
-    await expect(page.getByText(/Completa el pedido/i)).toBeVisible();
-    await expect(
-      page.getByLabel(/Selecciona o crea el cliente/i),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
+    await expect(page.getByText(/¿No encuentras al cliente\? Regístralo/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /2\. Datos del pedido/i })).toBeVisible();
+    await expect(page.getByLabel(/Almacén/i)).toBeVisible();
+    await expect(page.getByLabel(/Fecha compromiso/i)).toBeVisible();
+    await expect(page.getByLabel(/Notas del pedido/i)).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Crear pedido/i }),
     ).toBeVisible();
+  });
+
+  test("requests page summarizes active filters compactly and exposes advanced groups", async ({
+    page,
+  }) => {
+    await loginAs(page, "SALES_EXECUTIVE", "/production/requests?queue=today&customer=ACME");
+    await page.goto("/production/requests?queue=today&customer=ACME");
+
+    await expect(
+      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+    ).toBeVisible();
+    await expect(page.getByTestId("requests-active-filters")).toBeVisible();
+    await expect(page.getByTestId("requests-active-filters")).toContainText(
+      "Filtros activos:",
+    );
+    await expect(page.getByTestId("requests-active-filters")).toContainText(
+      "Cola: Vencen hoy",
+    );
+    await expect(page.getByTestId("requests-active-filters")).toContainText(
+      "Cliente: ACME",
+    );
+    await expect(
+      page.getByTestId("requests-active-filters").getByRole("link", {
+        name: /Limpiar todo/i,
+      }),
+    ).toBeVisible();
+    await page
+      .getByTestId("requests-active-filters")
+      .getByRole("link", { name: /Cliente: ACME/i })
+      .click();
+    await expect(page).toHaveURL(/\/production\/requests\?queue=today(?:&.*)?$/);
+    await expect(page).not.toHaveURL(/customer=/);
+
+    await page.locator('[data-testid="requests-more-filters"] summary').click();
+    await expect(
+      page.getByTestId("requests-more-filters").getByText("Cliente", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Filtrar por cliente", { exact: true })).toBeVisible();
+    await expect(page.getByText("Estado comercial", { exact: true })).toBeVisible();
+    await expect(page.getByText("Etapa", { exact: true })).toBeVisible();
+    await expect(page.getByText("Riesgo / tiempo", { exact: true })).toBeVisible();
+    await expect(page.getByText("Operación", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Borrador$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Captura$/i })).toBeVisible();
   });
 
   test("mobile queue remains card-first and readable", async ({ page }) => {
@@ -132,8 +197,12 @@ test.describe("sales commercial flow", () => {
     await expect(
       page.getByRole("heading", { name: /Pedidos comerciales/i }),
     ).toBeVisible();
-    await expect(page.getByText(/Siguiente acción/i).first()).toBeVisible();
-    await expect(page.getByText("Mis pedidos", { exact: true })).toBeVisible();
+    await expect(
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Mis pedidos$/,
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver detalle/i }).first()).toBeVisible();
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(410);
   });

@@ -17,9 +17,7 @@ import {
 } from "@/lib/schemas/wms";
 import { startPerf } from "@/lib/perf";
 import { getProductSearchSelection, resolveProductInput } from "@/lib/product-search";
-import {
-  buildCommercialSearchHref,
-} from "@/lib/commercial-toolkit";
+import { buildCommercialSearchHref } from "@/lib/commercial-toolkit";
 
 export const dynamic = "force-dynamic";
 
@@ -247,313 +245,320 @@ export default async function NewProductionRequestPage({
         }
       />
 
-      {hasCommercialContext ? (
+      <form action={createSalesRequest} className="space-y-6">
         <SectionCard
-          title="Contexto comercial"
-          description="Producto de referencia para capturar el pedido. Este contexto no se guarda como línea todavía."
+          title="Captura comercial"
+          description="Empieza por el cliente, agrega contexto de producto solo si existe y termina el pedido sin abrir otra pantalla."
         >
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-            <div className="space-y-3">
-              {invalidProductContext ? (
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-                  No encontramos el producto seleccionado. Puedes corregir la
-                  selección o seguir con la captura manual sin perder el
-                  pedido.
-                </div>
-              ) : null}
+          <div className="space-y-5">
+            {error ? (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {error}
+              </div>
+            ) : null}
 
-              {selectedProduct ? (
-                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                      Producto de referencia
-                    </p>
-                    <Badge variant="accent">{sourceLabel}</Badge>
-                  </div>
-                  <p className="mt-2 text-lg font-semibold text-white">
-                    {selectedProduct.name}
+            {hasCommercialContext ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    {selectedProduct ? "Producto de referencia" : "Contexto comercial"}
                   </p>
-                  <div className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
-                    <p>
-                      <span className="text-slate-400">SKU:</span>{" "}
-                      <span className="font-mono">{selectedProduct.sku}</span>
-                    </p>
-                    {selectedProduct.referenceCode ? (
-                      <p>
-                        <span className="text-slate-400">Referencia:</span>{" "}
-                        <span className="font-mono">
-                          {selectedProduct.referenceCode}
-                        </span>
-                      </p>
-                    ) : null}
-                    <p>
-                      <span className="text-slate-400">Stock disponible:</span>{" "}
-                      {selectedProduct.totalAvailable.toLocaleString("es-MX")}
-                    </p>
-                    <p>
-                      <span className="text-slate-400">Origen:</span>{" "}
-                      {sourceLabel}
-                    </p>
-                  </div>
+                  <Badge variant="accent">{sourceLabel}</Badge>
                 </div>
-              ) : displayQuery ? (
-                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4">
-                  <div className="flex flex-wrap items-center gap-2">
+
+                {invalidProductContext ? (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                    No encontramos el producto seleccionado. Puedes corregir la
+                    selección o seguir con la captura manual sin perder el
+                    pedido.
+                  </div>
+                ) : selectedProduct ? (
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.7fr)]">
+                    <div className="space-y-2">
+                      <p className="text-lg font-semibold text-white">
+                        {selectedProduct.name}
+                      </p>
+                      <div className="grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
+                        <p>
+                          <span className="text-slate-400">SKU:</span>{" "}
+                          <span className="font-mono">{selectedProduct.sku}</span>
+                        </p>
+                        {selectedProduct.referenceCode ? (
+                          <p>
+                            <span className="text-slate-400">Referencia:</span>{" "}
+                            <span className="font-mono">
+                              {selectedProduct.referenceCode}
+                            </span>
+                          </p>
+                        ) : null}
+                        <p>
+                          <span className="text-slate-400">Stock disponible:</span>{" "}
+                          {selectedProduct.totalAvailable.toLocaleString("es-MX")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                        Siguiente acción
+                      </p>
+                      <p className="mt-2">
+                        Confirma el cliente y continúa el pedido con esta
+                        referencia comercial.
+                      </p>
+                    </div>
+                  </div>
+                ) : displayQuery ? (
+                  <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
                       Contexto comercial
                     </p>
-                    <Badge variant="accent">{sourceLabel}</Badge>
+                    <p className="mt-2 text-lg font-semibold text-white">
+                      Búsqueda comercial: {displayQuery}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-300">
+                      No hay un producto resuelto todavía. La búsqueda se
+                      mantiene como referencia para continuar el pedido manual.
+                    </p>
                   </div>
-                  <p className="mt-2 text-lg font-semibold text-white">
-                    Búsqueda comercial: {displayQuery}
-                  </p>
-                  <p className="mt-2 text-sm text-slate-300">
-                    No hay un producto resuelto todavía. La búsqueda se
-                    mantiene como referencia para continuar el pedido manual.
+                ) : null}
+
+                {originalProduct ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                      Sustituye a
+                    </p>
+                    <p className="mt-1 font-semibold text-white">
+                      {originalProduct.name}
+                    </p>
+                    <p className="font-mono text-xs text-slate-400">
+                      {originalProduct.sku}
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href="#captura-cliente"
+                    className={buttonStyles({ size: "sm" })}
+                  >
+                    {selectedProduct
+                      ? "Continuar con este producto"
+                      : "Continuar con la captura"}
+                  </Link>
+                  <Link
+                    href={catalogHref}
+                    className={buttonStyles({ variant: "secondary", size: "sm" })}
+                  >
+                    Cambiar producto
+                  </Link>
+                  <Link
+                    href="/production/requests/new"
+                    className={buttonStyles({ variant: "secondary", size: "sm" })}
+                  >
+                    Quitar selección
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+
+            <section id="captura-cliente" className="space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-white">1. Cliente</h2>
+                  <p className="text-sm text-slate-400">
+                    Empieza por la cuenta comercial. Si no existe, usa el alta
+                    rápida para continuar sin bloquear el pedido.
                   </p>
                 </div>
+                {canManageCustomers ? (
+                  <Link
+                    href="/sales/customers/new"
+                    className={buttonStyles({ variant: "secondary", size: "sm" })}
+                  >
+                    Registrar cliente
+                  </Link>
+                ) : null}
+              </div>
+              {canViewCustomers ? (
+                <CustomerSearchField
+                  name="customerId"
+                  label="Selecciona o crea el cliente"
+                  required
+                  allowQuickCreate={canManageCustomers}
+                />
+              ) : (
+                <label className="space-y-1">
+                  <span className="text-sm text-slate-400">
+                    Cliente comercial
+                  </span>
+                  <input
+                    name="customerName"
+                    required
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                    placeholder="Cliente, cuenta o razón social"
+                  />
+                  <p className="text-xs text-slate-500">
+                    No tienes acceso al catálogo de clientes. Captura el nombre
+                    comercial para continuar con el pedido.
+                  </p>
+                </label>
+              )}
+              {canViewCustomers && canManageCustomers ? (
+                <p className="text-xs text-slate-400">
+                  ¿No encuentras al cliente? Regístralo para continuar con el pedido.
+                </p>
               ) : null}
+            </section>
 
-              {originalProduct ? (
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                    Sustituye a
-                  </p>
-                  <p className="mt-1 font-semibold text-white">
-                    {originalProduct.name}
-                  </p>
-                  <p className="font-mono text-xs text-slate-400">
-                    {originalProduct.sku}
-                  </p>
+            {selectedProduct ? (
+              <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">
+                      2. Contexto del producto
+                    </h2>
+                    <p className="text-sm text-slate-300">
+                      El producto seleccionado acompaña la captura comercial y
+                      sirve como referencia para continuar el pedido.
+                    </p>
+                  </div>
+                  <Badge variant="accent">Referencia</Badge>
                 </div>
-              ) : null}
-            </div>
 
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-              <p className="text-sm font-semibold text-white">Siguiente acción</p>
-              <p className="mt-2 text-sm text-slate-300">
-                {selectedProduct
-                  ? "Continúa con el cliente, confirma el almacén y guarda el encabezado. El producto queda como referencia para capturar líneas después."
-                  : invalidProductContext
-                    ? "Corrige el producto de referencia o quítalo y sigue con la captura manual del pedido."
-                    : displayQuery
-                      ? "Mantén la búsqueda como referencia, elige el cliente y confirma los datos del pedido."
-                      : "Puedes seguir con la captura manual y regresar al catálogo cuando necesites contexto comercial."}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {selectedProduct ? (
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                      Producto seleccionado
+                    </p>
+                    <p className="mt-2 text-lg font-semibold text-white">
+                      {selectedProduct.name}
+                    </p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-300">
+                      <p>
+                        <span className="text-slate-400">SKU:</span>{" "}
+                        <span className="font-mono">{selectedProduct.sku}</span>
+                      </p>
+                      <p>
+                        <span className="text-slate-400">Fuente:</span>{" "}
+                        {sourceLabel}
+                      </p>
+                      <p>
+                        <span className="text-slate-400">Acción sugerida:</span>{" "}
+                        Continúa con el cliente y el detalle del pedido.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <Link
                     href="#captura-cliente"
                     className={buttonStyles({ size: "sm" })}
                   >
                     Continuar con este producto
                   </Link>
-                ) : (
                   <Link
-                    href="#captura-cliente"
-                    className={buttonStyles({ size: "sm" })}
+                    href={catalogHref}
+                    className={buttonStyles({ variant: "secondary", size: "sm" })}
                   >
-                    Continuar con la captura
+                    Cambiar producto
                   </Link>
-                )}
+                  <Link
+                    href="/production/requests/new"
+                    className={buttonStyles({ variant: "secondary", size: "sm" })}
+                  >
+                    Quitar selección
+                  </Link>
+                </div>
+              </section>
+            ) : null}
+
+            <section className="space-y-3">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-white">
+                  {selectedProduct ? "3. Datos del pedido" : "2. Datos del pedido"}
+                </h2>
+                <p className="text-sm text-slate-400">
+                  Confirma almacén, fecha compromiso y notas del pedido.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="text-sm text-slate-400">Almacén</span>
+                  <select
+                    name="warehouseId"
+                    required
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                  >
+                    <option value="">Selecciona un almacén</option>
+                    {warehouses.map((warehouse) => (
+                      <option key={warehouse.id} value={warehouse.id}>
+                        {warehouse.code} - {warehouse.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-sm text-slate-400">Fecha compromiso</span>
+                  <input
+                    name="dueDate"
+                    type="date"
+                    required
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                  />
+                </label>
+
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-sm text-slate-400">Notas del pedido</span>
+                  <textarea
+                    name="notes"
+                    className="min-h-[96px] w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                    placeholder="Contexto comercial, prioridad o consideraciones del cliente"
+                  />
+                </label>
+              </div>
+            </section>
+
+            <details className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-white">
+                Herramientas de apoyo
+              </summary>
+              <div className="mt-3 flex flex-wrap gap-2">
                 <Link
                   href={catalogHref}
                   className={buttonStyles({ variant: "secondary", size: "sm" })}
                 >
-                  Cambiar producto
+                  Buscar en catálogo
                 </Link>
                 <Link
-                  href="/production/requests/new"
+                  href={availabilityHref}
                   className={buttonStyles({ variant: "secondary", size: "sm" })}
                 >
-                  Quitar selección
+                  Ver disponibilidad
+                </Link>
+                <Link
+                  href={equivalencesHref}
+                  className={buttonStyles({ variant: "secondary", size: "sm" })}
+                >
+                  Revisar equivalencias
                 </Link>
               </div>
+            </details>
+
+            <div className="flex justify-end gap-3">
+              <Link
+                href="/production/requests"
+                className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white"
+              >
+                Cancelar
+              </Link>
+              <button type="submit" className="btn-primary">
+                Crear pedido
+              </button>
             </div>
           </div>
         </SectionCard>
-      ) : null}
-
-      <SectionCard
-        title="Herramientas de apoyo"
-        description="Abre catálogo, disponibilidad o equivalencias sin salir del flujo de captura."
-      >
-        <div className="flex flex-wrap gap-2">
-          <Link href={catalogHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-            Buscar en catálogo
-          </Link>
-          <Link
-            href={availabilityHref}
-            className={buttonStyles({ variant: "secondary", size: "sm" })}
-          >
-            Ver disponibilidad
-          </Link>
-          <Link
-            href={equivalencesHref}
-            className={buttonStyles({ variant: "secondary", size: "sm" })}
-          >
-            Revisar equivalencias
-          </Link>
-        </div>
-      </SectionCard>
-
-      <section className="glass-card space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-white">Captura guiada</p>
-            <p className="text-sm text-slate-400">
-              Sigue este orden para crear el pedido sin perder contexto
-              comercial.
-            </p>
-          </div>
-          <Badge variant="accent">Paso 1 de 3</Badge>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            {
-              step: "1",
-              title: "Selecciona o crea el cliente",
-              description:
-                "Busca en el catálogo o usa el alta rápida si hace falta.",
-            },
-            {
-              step: "2",
-              title: "Confirma almacén y fecha",
-              description:
-                "Define desde dónde surtir y para cuándo se promete.",
-            },
-            {
-              step: "3",
-              title: "Agrega líneas o continúa",
-              description:
-                "Guarda el encabezado y completa productos o ensambles después.",
-            },
-          ].map((item) => (
-            <div
-              key={item.step}
-              className="rounded-xl border border-white/10 bg-white/5 p-4"
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Paso {item.step}
-              </p>
-              <p className="mt-2 text-sm font-semibold text-white">
-                {item.title}
-              </p>
-              <p className="mt-1 text-sm text-slate-400">{item.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {error ? (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {error}
-        </div>
-      ) : null}
-
-      <form action={createSalesRequest} className="space-y-6">
-        <section className="glass-card grid gap-4 md:grid-cols-2">
-          {canViewCustomers ? (
-            <div id="captura-cliente" className="md:col-span-2">
-              <CustomerSearchField
-                name="customerId"
-                label="1. Selecciona o crea el cliente"
-                required
-                allowQuickCreate={canManageCustomers}
-              />
-              <p className="mt-2 text-xs text-slate-400">
-                Empieza por la cuenta comercial. Si no existe, usa el alta
-                rápida para continuar sin bloquear el pedido.
-              </p>
-            </div>
-          ) : (
-            <label id="captura-cliente" className="space-y-1 md:col-span-2">
-              <span className="text-sm text-slate-400">
-                1. Cliente comercial
-              </span>
-              <input
-                name="customerName"
-                required
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-                placeholder="Cliente, cuenta o razón social"
-              />
-              <p className="text-xs text-slate-500">
-                No tienes acceso al catálogo de clientes. Captura el nombre
-                comercial para continuar con el pedido.
-              </p>
-            </label>
-          )}
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">2. Almacén</span>
-            <select
-              name="warehouseId"
-              required
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-            >
-              <option value="">Selecciona un almacén</option>
-              {warehouses.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.code} - {warehouse.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-sm text-slate-400">2. Fecha compromiso</span>
-            <input
-              name="dueDate"
-              type="date"
-              required
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-            />
-          </label>
-
-          <label className="space-y-1 md:col-span-2">
-            <span className="text-sm text-slate-400">2. Notas del pedido</span>
-            <textarea
-              name="notes"
-              className="min-h-[96px] w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-              placeholder="Contexto comercial, prioridad o consideraciones del cliente"
-            />
-          </label>
-        </section>
-
-        <section className="glass-card space-y-3">
-          <h2 className="text-lg font-semibold text-white">
-            3. Completa el pedido
-          </h2>
-          <p className="text-sm text-slate-400">
-            Después de guardar el encabezado podrás:
-          </p>
-          <ul className="space-y-2 text-sm text-slate-300">
-            <li>
-              Agregar productos independientes con reserva y surtido directo a
-              staging.
-            </li>
-            <li>
-              Agregar ensambles configurados sin depender de un SKU de ensamble
-              predefinido.
-            </li>
-            <li>
-              Dar seguimiento al surtido directo y a las órdenes exactas ligadas
-              desde un solo pedido.
-            </li>
-          </ul>
-        </section>
-
-        <div className="flex justify-end gap-3">
-          <Link
-            href="/production/requests"
-            className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:text-white"
-          >
-            Cancelar
-          </Link>
-          <button type="submit" className="btn-primary">
-            Crear pedido
-          </button>
-        </div>
       </form>
     </div>
   );

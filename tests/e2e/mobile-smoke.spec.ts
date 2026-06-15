@@ -9,14 +9,19 @@ const MOBILE_ROUTES = [
     heading: /Pedidos comerciales/i,
   },
   {
+    path: "/production/requests/new",
+    role: "SALES_EXECUTIVE" as RoleKey,
+    heading: /Nuevo pedido comercial/i,
+  },
+  {
     path: "/purchasing/orders",
     role: "MANAGER" as RoleKey,
-    heading: /Órdenes de Compra/i,
+    heading: /^Órdenes de compra$/i,
   },
   {
     path: "/purchasing/orders",
     role: "WAREHOUSE_OPERATOR" as RoleKey,
-    heading: /Órdenes de Compra/i,
+    heading: /^Órdenes de compra$/i,
   },
   {
     path: "/inventory",
@@ -36,6 +41,26 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
         await expect(
           page.getByRole("heading", { name: heading }),
         ).toBeVisible();
+        if (path === "/production/requests" && role === "SALES_EXECUTIVE") {
+          await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
+          await expect(
+            page.getByTestId("requests-quick-filters").getByRole("link", {
+              name: /^Mis pedidos$/,
+            }),
+          ).toBeVisible();
+          await expect(page.getByText("Más filtros", { exact: true })).toBeVisible();
+          await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
+          await page.locator('[data-testid="requests-more-filters"] summary').click();
+          await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
+          const quickFiltersHeight = await page
+            .getByTestId("requests-quick-filters")
+            .boundingBox();
+          expect(quickFiltersHeight?.height ?? 0).toBeLessThan(120);
+        }
+        if (path === "/production/requests/new" && role === "SALES_EXECUTIVE") {
+          await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+          await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
+        }
         if (path === "/purchasing/orders" && role === "WAREHOUSE_OPERATOR") {
           await expect(
             page.getByRole("link", { name: /\+ Nueva OC/i }),

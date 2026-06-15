@@ -537,7 +537,7 @@ export default async function ProductionRequestDetailPage({
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <p className="font-mono text-sm text-[var(--accent)]">{order.code}</p>
-          <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Pedido de surtido</h1>
+          <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Pedido comercial</h1>
           <p className="text-sm text-[var(--text-muted)]">
             Cliente:{" "}
             {order.customerId && canViewCustomers ? (
@@ -569,35 +569,88 @@ export default async function ProductionRequestDetailPage({
         </div>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]">
         <div className="glass-card space-y-4 text-sm text-[var(--text-secondary)]">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Resumen</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[var(--text-muted)]">Etapa actual:</span>
-            <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
-          </div>
-          <p className="text-[var(--text-primary)]">
-            Siguiente acción:{" "}
-            {flowNarrative.nextRecommendedAction.blockedReason ? (
-              <span className="text-[var(--text-muted)]">{flowNarrative.nextRecommendedAction.label}</span>
-            ) : (
-              <Link href={flowNarrative.nextRecommendedAction.href} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
-                {flowNarrative.nextRecommendedAction.label}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-2">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado y siguiente acción</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[var(--text-muted)]">Etapa actual:</span>
+                <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
+              </div>
+              <p className="text-[var(--text-primary)]">
+                Cliente:{" "}
+                {order.customerId && canViewCustomers ? (
+                  <Link href={`/sales/customers/${order.customerId}`} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
+                    {displayCustomer}
+                  </Link>
+                ) : (
+                  displayCustomer
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/production/requests" className={buttonStyles({ variant: "secondary" })}>
+                ← Pedidos
               </Link>
-            )}
-          </p>
-          {flowNarrative.nextRecommendedAction.blockedReason ? <p className="text-xs text-[var(--status-warning-text)]">{flowNarrative.nextRecommendedAction.blockedReason}</p> : null}
-          <p>Solicitado por: {order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}</p>
-          <p>Asignado a: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "--"}</p>
-          <p>Asignado el: {order.assignedAt ? new Date(order.assignedAt).toLocaleString("es-MX") : "--"}</p>
-          <p>Tomado el: {order.pulledAt ? new Date(order.pulledAt).toLocaleString("es-MX") : "--"}</p>
-          <p>Fecha compromiso: {formatDate(order.dueDate)}</p>
-          <p>Creado: {new Date(order.createdAt).toLocaleString("es-MX")}</p>
-          <p>Confirmado: {order.confirmedAt ? new Date(order.confirmedAt).toLocaleString("es-MX") : "--"}</p>
-          <p>Cancelado: {order.cancelledAt ? new Date(order.cancelledAt).toLocaleString("es-MX") : "--"}</p>
-          <p>Entregado al cliente: {order.deliveredToCustomerAt ? new Date(order.deliveredToCustomerAt).toLocaleString("es-MX") : "--"}</p>
-          <p>Entrega registrada por: {order.deliveredByUser?.name ?? order.deliveredByUser?.email ?? "--"}</p>
-          {order.notes ? <p className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3 text-[var(--text-secondary)]">{order.notes}</p> : null}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+              Siguiente acción
+            </p>
+            <p className="mt-2 text-[var(--text-primary)]">
+              {flowNarrative.nextRecommendedAction.blockedReason ? (
+                <span className="text-[var(--text-muted)]">
+                  {flowNarrative.nextRecommendedAction.label}
+                </span>
+              ) : (
+                <Link href={flowNarrative.nextRecommendedAction.href} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
+                  {flowNarrative.nextRecommendedAction.label}
+                </Link>
+              )}
+            </p>
+            {flowNarrative.nextRecommendedAction.blockedReason ? (
+              <p className="mt-1 text-xs text-[var(--status-warning-text)]">
+                {flowNarrative.nextRecommendedAction.blockedReason}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                Pedido
+              </p>
+              <p className="mt-1 text-[var(--text-primary)]">
+                {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                Fecha compromiso: {formatDate(order.dueDate)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                Asignación
+              </p>
+              <p className="mt-1 text-[var(--text-primary)]">
+                {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "--"}
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                Solicitado por: {order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}
+              </p>
+            </div>
+          </div>
+
+          {order.notes ? (
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 text-[var(--text-secondary)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                Notas
+              </p>
+              <p className="mt-2 text-sm">{order.notes}</p>
+            </div>
+          ) : null}
         </div>
 
         <div className="glass-card space-y-4">
@@ -673,7 +726,7 @@ export default async function ProductionRequestDetailPage({
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
         <div className="glass-card space-y-3">
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">Timeline operativo</h2>
           <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
@@ -688,23 +741,27 @@ export default async function ProductionRequestDetailPage({
           </ul>
         </div>
 
-        <div className="glass-card space-y-3">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Auditoria reciente</h2>
-          {recentAudit.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)]">Sin eventos de auditoria para este pedido.</p>
-          ) : (
-            <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
-              {recentAudit.map((entry, idx) => (
-                <li key={`${entry.action}-${entry.createdAt.toISOString()}-${idx}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2">
-                  <p className="text-[var(--text-primary)]">{entry.action}</p>
-                  <p className="text-xs text-[var(--text-muted)]">
-                    {entry.actorUser?.name ?? entry.actorUser?.email ?? entry.actor ?? "system"} · {formatDateTime(entry.createdAt)}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <details className="glass-card space-y-3">
+          <summary className="cursor-pointer text-lg font-semibold text-[var(--text-primary)]">
+            Auditoria reciente
+          </summary>
+          <div className="mt-3 space-y-2">
+            {recentAudit.length === 0 ? (
+              <p className="text-sm text-[var(--text-muted)]">Sin eventos de auditoria para este pedido.</p>
+            ) : (
+              <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+                {recentAudit.map((entry, idx) => (
+                  <li key={`${entry.action}-${entry.createdAt.toISOString()}-${idx}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2">
+                    <p className="text-[var(--text-primary)]">{entry.action}</p>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {entry.actorUser?.name ?? entry.actorUser?.email ?? entry.actor ?? "system"} · {formatDateTime(entry.createdAt)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
       </section>
 
       {order.status === "BORRADOR" ? (

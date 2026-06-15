@@ -20,7 +20,7 @@ export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navIt
   SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 8 },
   MANAGER: { name: "Manager WMS", email: "manager@scmayher.com", navItems: 7 },
   WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 4 },
-  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 3 },
+  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 2 },
 };
 
 export async function loginAs(

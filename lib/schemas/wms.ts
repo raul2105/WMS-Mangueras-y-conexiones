@@ -250,7 +250,6 @@ export const purchaseReceiptSchema = z.object({
   referenceDoc: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });
-
 export const purchaseReceiptOperationSchema = z.object({
   locationId: requiredText("Ubicación"),
   operatorName: requiredText("Operador"),

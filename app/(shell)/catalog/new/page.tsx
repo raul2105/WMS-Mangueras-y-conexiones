@@ -34,7 +34,8 @@ async function createProduct(formData: FormData) {
   const subcategoryRaw = String(formData.get("subcategory") ?? "").trim();
   const primarySupplierIdRaw = String(formData.get("primarySupplierId") ?? "").trim();
   const supplierBrandIdRaw = String(formData.get("supplierBrandId") ?? "").trim();
-  const baseCostRaw = String(formData.get("base_cost") ?? "").trim();
+    const baseCostRaw = String(formData.get("base_cost") ?? "").trim();
+    const purchaseMoqRaw = String(formData.get("purchaseMoq") ?? "").trim();
   const priceRaw = String(formData.get("price") ?? "").trim();
   const quantityRaw = String(formData.get("quantity") ?? "").trim();
   const locationRaw = String(formData.get("location") ?? "").trim();
@@ -51,6 +52,7 @@ async function createProduct(formData: FormData) {
 
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
   const price = priceRaw ? Number(priceRaw.replace(",", ".")) : null;
+  const purchaseMoq = purchaseMoqRaw ? Number(purchaseMoqRaw.replace(",", ".")) : null;
   const inventoryParsed = newCatalogInventorySchema.safeParse({
     locationCode: locationRaw,
     quantityRaw,
@@ -123,6 +125,7 @@ async function createProduct(formData: FormData) {
       subcategory: subcategoryRaw || null,
       base_cost: Number.isFinite(base_cost) ? base_cost : null,
       price: Number.isFinite(price) ? price : null,
+      purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
       attributes,
       categoryId: category?.id ?? null,
       primarySupplierId,
@@ -139,6 +142,7 @@ async function createProduct(formData: FormData) {
       subcategory: subcategoryRaw || null,
       base_cost: Number.isFinite(base_cost) ? base_cost : null,
       price: Number.isFinite(price) ? price : null,
+      purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
       attributes,
       categoryId: category?.id ?? null,
       primarySupplierId,
@@ -335,8 +339,9 @@ export default async function NewCatalogItemPage({
             <Input name="base_cost" label="Costo base" inputMode="decimal" placeholder="45.50" />
             <Input name="price" label="Precio" inputMode="decimal" placeholder="85.00" />
 
-            <Input name="quantity" label="Cantidad inicial" inputMode="decimal" placeholder="0" />
+              <Input name="purchaseMoq" label="MOQ de compra" inputMode="decimal" placeholder="0" hint="Cantidad mínima de compra (opcional, solo para órdenes de compra)" />
 
+            <Input name="quantity" label="Cantidad inicial" inputMode="decimal" placeholder="0" />
             <Select
               name="location"
               label="Ubicacion"

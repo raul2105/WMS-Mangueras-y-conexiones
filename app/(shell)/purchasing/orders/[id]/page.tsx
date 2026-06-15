@@ -221,10 +221,10 @@ async function updateDraftMetadata(orderId: string, formData: FormData) {
     redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Solo se pueden editar datos de OCs en Borrador")}`);
   }
 
-  const warehouse = await prisma.warehouse.findUnique({
-    where: { id: parsed.data.deliveryWarehouseId },
-    select: { id: true, address: true, isActive: true },
-  });
+      const warehouse = await prisma.warehouse.findUnique({
+      where: { id: parsed.data.deliveryWarehouseId },
+      select: { id: true, address: true, isActive: true },
+    });
   if (!warehouse || !warehouse.isActive) {
     redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Almacén destino no encontrado o inactivo")}`);
   }

@@ -19,14 +19,12 @@ model User {
 
 model Product {
   id            String    @id @default(uuid())
-  sku           String    @unique
-  referenceCode String    @unique
-  name          String
   description   String?
   type          ProductType
   brand         String?
   baseCost      Float     @default(0)
   price         Float     @default(0)
+    purchaseMoq   Float?    // Minimum order quantity for purchase ordering
   attributes    Json?
   categoryId    String?
   category      Category? @relation(fields: [categoryId], references: [id])
@@ -34,11 +32,10 @@ model Product {
   movements     InventoryMovement[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-}
+    purchaseMoq   Float? // Minimum order quantity
 
 model Category {
   id          String    @id @default(uuid())
-  name        String    @unique
   description String?
   products    Product[]
   createdAt   DateTime  @default(now())
@@ -56,8 +53,6 @@ model Inventory {
 
   @@unique([productId, location])
 }
-
-model InventoryMovement {
   id          String           @id @default(uuid())
   productId   String
   product     Product          @relation(fields: [productId], references: [id])
@@ -161,7 +156,6 @@ model UserRole {
   role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   assignedAt DateTime @default(now())
-
   @@id([userId, roleId])
   @@index([roleId])
 }
@@ -287,7 +281,6 @@ model Warehouse {
   name        String
   description String?
   address     String?
-  isActive    Boolean    @default(true)
   
   locations   Location[]
   productionOrders ProductionOrder[]
@@ -474,7 +467,6 @@ model TraceRecord {
   operatorUserId String?
   reference String?
 
-  quantity Float?
   unitLabel String?
   payloadJson String
 
@@ -567,8 +559,6 @@ model ProductionOrder {
   assemblyConfiguration AssemblyConfiguration?
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
   @@index([warehouseId])
   @@index([status])
   @@index([createdAt])
@@ -1048,7 +1038,6 @@ model PurchaseOrder {
   emailLastErrorCode String?
   emailLastErrorMessage String?
   expectedDate DateTime?
-  notes        String?
   deliveryAddressSnapshot String?
   paymentTermsSnapshot String?
   createdAt    DateTime            @default(now())

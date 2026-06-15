@@ -15,7 +15,6 @@ type CustomerRow = {
   phone: string | null;
   address: string | null;
   isActive: boolean;
-  createdAt: Date;
   updatedAt: Date;
 };
 
@@ -108,7 +107,6 @@ export type CustomerDetail = {
   phone: string | null;
   address: string | null;
   isActive: boolean;
-  createdAt: Date;
   updatedAt: Date;
 };
 
@@ -191,7 +189,6 @@ function toCustomerDetail(row: CustomerRow): CustomerDetail {
     phone: row.phone,
     address: row.address,
     isActive: row.isActive,
-    createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
@@ -303,7 +300,6 @@ export async function createCustomer(prisma: PrismaClient, input: CreateCustomer
             phone: true,
             address: true,
             isActive: true,
-            createdAt: true,
             updatedAt: true,
           },
         });
@@ -366,7 +362,6 @@ export async function updateCustomer(prisma: PrismaClient, input: UpdateCustomer
         phone: true,
         address: true,
         isActive: true,
-        createdAt: true,
         updatedAt: true,
       },
     });
@@ -428,7 +423,6 @@ export async function updateCustomer(prisma: PrismaClient, input: UpdateCustomer
           phone: true,
           address: true,
           isActive: true,
-          createdAt: true,
           updatedAt: true,
         },
       });
@@ -540,7 +534,6 @@ export async function searchCustomers(prisma: DbClient, options: SearchCustomers
         phone: true,
         address: true,
         isActive: true,
-        createdAt: true,
         updatedAt: true,
       },
     }),
@@ -565,21 +558,20 @@ export async function getCustomerById(prisma: DbClient, id: string): Promise<Cus
   const customer = getCustomerModel(prisma);
   const row = await customer.findUnique({
     where: { id: customerId },
-    select: {
-      id: true,
-      code: true,
+      select: {
+        id: true,
+        code: true,
       name: true,
       legalName: true,
       businessName: true,
       taxId: true,
-      email: true,
-      phone: true,
-      address: true,
-      isActive: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+        email: true,
+        phone: true,
+        address: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
 
   if (!row) {
     throw new CustomerServiceError("CUSTOMER_NOT_FOUND", "Cliente no encontrado");

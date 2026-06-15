@@ -178,16 +178,25 @@ test.describe.serial("product aware handoff", () => {
     await page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.baseName}`, "i") }).click();
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*productId=/);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.getByText("Contexto comercial", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
     await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
-    await expect(page.getByText(FIXTURE.baseSku)).toBeVisible();
-    await expect(page.getByText(/Origen:/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /Continuar con este producto/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Cambiar producto/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Quitar selección/i })).toBeVisible();
+    await expect(page.getByText(FIXTURE.baseSku).first()).toBeVisible();
+    await expect(page.getByText("Siguiente acción", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
+    await expect(page.getByLabel(/Cantidad sugerida/i)).toHaveValue("1");
+    await expect(page.getByLabel(/Notas de la línea/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Continuar con este producto/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Cambiar producto/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Quitar selección/i }).first()).toBeVisible();
+    const supportSummary = page.locator("summary").filter({ hasText: /Herramientas de apoyo/i });
+    await expect(supportSummary).toBeVisible();
+    await supportSummary.click();
+    await expect(page.getByRole("link", { name: /Buscar en catálogo/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver disponibilidad/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Revisar equivalencias/i }).first()).toBeVisible();
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
 
-    await page.getByRole("link", { name: /Quitar selección/i }).click();
+    await page.getByRole("link", { name: /Quitar selección/i }).first().click();
     await expect(page).toHaveURL(/\/production\/requests\/new(?:\?.*)?$/);
     await expect(page.getByText("Contexto comercial", { exact: true })).toHaveCount(0);
   });
@@ -203,9 +212,10 @@ test.describe.serial("product aware handoff", () => {
 
     await page.getByRole("link", { name: /Crear pedido/i }).first().click();
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*source=availability/);
-    await expect(page.getByText("Contexto comercial", { exact: true })).toBeVisible();
-    await expect(page.getByText(FIXTURE.baseSku)).toBeVisible();
-    await expect(page.getByText("Origen: Disponibilidad", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByText(FIXTURE.baseSku).first()).toBeVisible();
+    await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
 
     await page.goto(`/production/equivalences?q=${fixture.baseSku}&productId=${fixture.baseProductId}&sku=${fixture.baseSku}&source=catalog`);
     await expect(page.getByRole("heading", { name: /Alternativas y equivalencias/i })).toBeVisible();
@@ -213,9 +223,10 @@ test.describe.serial("product aware handoff", () => {
 
     await page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.equivalentName}`, "i") }).click();
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*source=equivalences/);
-    await expect(page.getByText("Contexto comercial", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
     await expect(page.getByText(/Sustituye a/i)).toBeVisible();
-    await expect(page.getByText(FIXTURE.baseSku)).toBeVisible();
+    await expect(page.getByText(FIXTURE.baseSku).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
   });
 
   test("invalid product context is safe and manual capture still works", async ({ page }) => {
@@ -224,9 +235,10 @@ test.describe.serial("product aware handoff", () => {
 
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByText(/No encontramos el producto seleccionado/i)).toBeVisible();
-    await expect(page.getByLabel(/1\. Selecciona o crea el cliente/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /Cambiar producto/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Quitar selección/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Cambiar producto/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Quitar selección/i }).first()).toBeVisible();
   });
 
   test("manager can use the handoff and mobile layout remains usable", async ({ page }) => {
@@ -239,7 +251,8 @@ test.describe.serial("product aware handoff", () => {
 
     await page.getByRole("link", { name: /Crear pedido con/i }).first().click();
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.getByText("Contexto comercial", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
 
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);

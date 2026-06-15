@@ -64,152 +64,185 @@ export default async function ProductDetailPage({ params }: PageProps) {
     const equivalents = await getEquivalentProducts(product.id, { limit: 6, inStockOnly: false });
 
     return (
-        <div className="max-w-5xl mx-auto space-y-6">
-            {/* Breadcrumb */}
+        <div className="mx-auto max-w-6xl space-y-6">
             <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Link href="/catalog" className="hover:text-white">Catálogo comercial</Link>
                 <span>/</span>
                 <span className="text-white">{product.name}</span>
             </div>
 
-            {/* Header Card */}
-            <div className="glass-card p-8 flex flex-col md:flex-row gap-8 items-start">
-                <div className="w-full md:w-1/3">
-                    <ProductImage
-                        sku={product.sku}
-                        imageUrl={product.imageUrl}
-                        name={product.name}
-                        size={400}
-                        className="w-full aspect-square"
-                    />
-                </div>
-
-                <div className="flex-1 space-y-4">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-300">
-                                {product.name}
-                            </h1>
-                            <div className="flex items-center gap-3 mt-2">
-                                <span className="bg-slate-700 px-2 py-1 rounded text-sm text-slate-300 font-mono">{product.sku}</span>
-                                <span className="text-slate-400">|</span>
-                                <span className="text-slate-300">{product.brand}</span>
-                                <span className="text-slate-400">|</span>
-                                <span className="px-2 py-1 rounded text-xs bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                                    {product.category?.name ?? "Sin categoría"}
-                                </span>
-                                {product.subcategory && (
-                                    <>
-                                        <span className="text-slate-400">|</span>
-                                        <span className="px-2 py-1 rounded text-xs bg-white/10 text-slate-200 border border-white/10">
-                                            {product.subcategory}
-                                        </span>
-                                    </>
-                                )}
-                            </div>
-                            <div className="mt-4 flex flex-wrap gap-2">
-                                <Link
-                                    href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })}
-                                    className={buttonStyles({ variant: "secondary", size: "sm" })}
-                                    aria-label={`Ver disponibilidad de ${product.name} (${product.sku})`}
-                                >
-                                    Ver disponibilidad
-                                </Link>
-                                <Link
-                                    href={buildCommercialSearchHref("/production/equivalences", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })}
-                                    className={buttonStyles({ variant: "secondary", size: "sm" })}
-                                    aria-label={`Revisar equivalencias de ${product.name} (${product.sku})`}
-                                >
-                                    Revisar equivalencias
-                                </Link>
-                                <Link
-                                    href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, source: "catalog" })}
-                                    className={buttonStyles({ size: "sm" })}
-                                    aria-label={`Crear pedido con ${product.name} (${product.sku})`}
-                                >
-                                    Crear pedido
-                                </Link>
-                            </div>
-                        </div>
-                        <div className="text-right space-y-2">
-                            <p className="text-3xl font-bold text-white">${product.price?.toFixed(2)}</p>
-                            <p className="text-xs text-slate-500">Precio de lista</p>
-                            {canEditCatalog ? (
-                                <Link href={`/catalog/${product.id}/edit`} className="inline-block px-3 py-1 glass rounded text-xs text-cyan-400 hover:text-white border border-cyan-500/30">
-                                    ✏️ Editar
-                                </Link>
-                            ) : null}
-                        </div>
+            <section className="glass-card grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                <div className="space-y-5">
+                    <div className="space-y-2">
+                        <p className="font-mono text-sm text-cyan-300">{product.sku}</p>
+                        <h1 className="text-3xl font-semibold text-white">{product.name}</h1>
+                        <p className="text-sm text-slate-300">
+                            {product.brand ?? "Sin marca"} · {product.category?.name ?? "Sin categoría"}
+                            {product.subcategory ? ` · ${product.subcategory}` : ""}
+                            {product.referenceCode ? ` · Ref. ${product.referenceCode}` : ""}
+                        </p>
                     </div>
 
-                    <p className="text-slate-300 leading-relaxed max-w-2xl">
+                    <p className="max-w-2xl text-sm leading-relaxed text-slate-300">
                         {product.description}
                     </p>
 
-                    <div className="grid grid-cols-2 gap-4 mt-6">
-                        <div className="glass p-4 rounded-lg bg-green-500/5 border-green-500/20">
-                            <p className="text-xs text-green-400 uppercase font-bold">Existencia disponible</p>
-                            <p className="text-2xl font-bold text-white">{stock} <span className="text-sm font-normal text-slate-400">unidades</span></p>
+                    <div className="flex flex-wrap gap-2">
+                        <Link
+                            href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, source: "catalog" })}
+                            className={buttonStyles({ size: "sm" })}
+                            aria-label={`Crear pedido con ${product.name} (${product.sku})`}
+                        >
+                            Crear pedido
+                        </Link>
+                        <Link
+                            href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })}
+                            className={buttonStyles({ variant: "secondary", size: "sm" })}
+                            aria-label={`Ver disponibilidad de ${product.name} (${product.sku})`}
+                        >
+                            Ver disponibilidad
+                        </Link>
+                        <Link
+                            href={buildCommercialSearchHref("/production/equivalences", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })}
+                            className={buttonStyles({ variant: "secondary", size: "sm" })}
+                            aria-label={`Revisar equivalencias de ${product.name} (${product.sku})`}
+                        >
+                            Revisar equivalencias
+                        </Link>
+                        {canEditCatalog ? (
+                            <Link href={`/catalog/${product.id}/edit`} className="text-sm text-cyan-300 underline-offset-4 hover:text-white hover:underline">
+                                Editar
+                            </Link>
+                        ) : null}
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">
+                                Existencia disponible
+                            </p>
+                            <p className="mt-2 text-2xl font-semibold text-white">
+                                {stock.toLocaleString("es-MX")}{" "}
+                                <span className="text-sm font-normal text-slate-400">
+                                    unidades
+                                </span>
+                            </p>
                         </div>
-                        <div className="glass p-4 rounded-lg">
-                            <p className="text-xs text-slate-400 uppercase font-bold">Ubicaciones</p>
-                            <p className="text-lg text-white">{locationCodes}</p>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Ubicaciones
+                            </p>
+                            <p className="mt-2 text-lg text-white">{locationCodes}</p>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            {/* Technical Specs & Details Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                        <ProductImage
+                            sku={product.sku}
+                            imageUrl={product.imageUrl}
+                            name={product.name}
+                            size={320}
+                            className="aspect-square w-full rounded-xl"
+                        />
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                            Decisión comercial
+                        </p>
+                        <p className="mt-2">
+                            Usa disponibilidad y equivalencias para decidir si
+                            avanzas al pedido o cambias el producto.
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
+                            <span>Tipo: {product.type}</span>
+                            <span>Marca: {product.brand ?? "--"}</span>
+                            {product.subcategory ? <span>Subcategoría: {product.subcategory}</span> : null}
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-                {/* Attributes Panel */}
-                <div className="glass-card">
-                    <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        <span className="text-cyan-400">⚡</span> Especificaciones Técnicas
-                    </h2>
-                    <div className="space-y-0 text-sm">
-                        {attributes && Object.entries(attributes).map(([key, val], idx) => (
-                            <div key={key} className={`flex justify-between py-3 px-2 border-b border-white/5 first:border-t ${idx % 2 === 0 ? 'bg-white/5' : ''}`}>
-                                <span className="text-slate-400 font-medium capitalize">{key.replaceAll('_', ' ')}</span>
-                                <span className="text-white font-mono text-right">{Array.isArray(val) ? val.join(', ') : String(val)}</span>
+            <section className="grid gap-6 lg:grid-cols-2">
+                <section className="glass-card space-y-4">
+                    <div className="space-y-1">
+                        <h2 className="text-lg font-semibold text-white">
+                            Especificaciones técnicas
+                        </h2>
+                        <p className="text-sm text-slate-400">
+                            Detalles de apoyo para validar el producto. La
+                            decisión comercial ya está arriba.
+                        </p>
+                    </div>
+                    {attributes && Object.keys(attributes).length > 0 ? (
+                        <div className="overflow-hidden rounded-xl border border-white/10">
+                            <div className="divide-y divide-white/5 text-sm">
+                                {Object.entries(attributes).map(([key, val], idx) => (
+                                    <div
+                                        key={key}
+                                        className={`flex items-center justify-between gap-4 px-4 py-3 ${idx % 2 === 0 ? "bg-white/5" : ""}`}
+                                    >
+                                        <span className="text-slate-400 font-medium capitalize">
+                                            {key.replaceAll("_", " ")}
+                                        </span>
+                                        <span className="text-right font-mono text-white">
+                                            {Array.isArray(val) ? val.join(", ") : String(val)}
+                                        </span>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
-                </div>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-slate-400">
+                            No hay especificaciones técnicas adicionales para
+                            este producto.
+                        </p>
+                    )}
+                </section>
 
-                {/* Related/Assembly Info (Placeholder) */}
-                <div className="glass-card">
-                    <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        <span className="text-purple-400">🔗</span> Alternativas y equivalencias
-                    </h2>
+                <section className="glass-card space-y-4">
+                    <div className="space-y-1">
+                        <h2 className="text-lg font-semibold text-white">
+                            Alternativas y equivalencias
+                        </h2>
+                        <p className="text-sm text-slate-400">
+                            Sustitutos registrados para decidir si conviene
+                            validar disponibilidad o crear el pedido comercial.
+                        </p>
+                    </div>
                     {equivalents.length > 0 ? (
                         <div className="space-y-3">
                             {equivalents.map((equivalent) => (
-                                <div key={equivalent.equivalenceId} className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-sm space-y-2">
+                                <div
+                                    key={equivalent.equivalenceId}
+                                    className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm space-y-3"
+                                >
                                     <div className="flex items-start justify-between gap-3">
                                         <div>
-                                            <p className="text-indigo-100 font-semibold">{equivalent.name}</p>
-                                            <p className="text-indigo-200/80 font-mono text-xs">{equivalent.sku}</p>
+                                            <p className="font-semibold text-white">
+                                                {equivalent.name}
+                                            </p>
+                                            <p className="font-mono text-xs text-cyan-200">
+                                                {equivalent.sku}
+                                            </p>
                                         </div>
-                                        <span className="text-xs text-indigo-200">{equivalent.totalAvailable} disp.</span>
+                                        <span className="text-xs text-emerald-200">
+                                            {equivalent.totalAvailable} disp.
+                                        </span>
                                     </div>
-                                    <div className="flex flex-wrap gap-2 text-xs">
-                                        {equivalent.brand && <span className="px-2 py-1 rounded bg-black/20 text-indigo-100">{equivalent.brand}</span>}
-                                        {equivalent.categoryName && <span className="px-2 py-1 rounded bg-black/20 text-indigo-100">{equivalent.categoryName}</span>}
-                                        {equivalent.basisNorm && <span className="px-2 py-1 rounded bg-black/20 text-indigo-100">{equivalent.basisNorm}</span>}
-                                        {typeof equivalent.basisDash === "number" && <span className="px-2 py-1 rounded bg-black/20 text-indigo-100">Dash {equivalent.basisDash}</span>}
+                                    <p className="text-xs text-slate-300">
+                                        {equivalent.locations.length > 0
+                                            ? `Disponible en ${equivalent.locations[0].code} (${equivalent.locations[0].warehouseCode}) con ${equivalent.locations[0].available} unidades.`
+                                            : "Equivalencia registrada sin stock disponible."}
+                                    </p>
+                                    <div className="flex flex-wrap gap-2 text-[11px] text-slate-200">
+                                        {equivalent.brand ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.brand}</span> : null}
+                                        {equivalent.categoryName ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.categoryName}</span> : null}
+                                        {equivalent.basisNorm ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.basisNorm}</span> : null}
+                                        {typeof equivalent.basisDash === "number" ? <span className="rounded bg-black/20 px-2 py-1">Dash {equivalent.basisDash}</span> : null}
                                     </div>
-                                    {equivalent.locations.length > 0 && (
-                                        <p className="text-indigo-100/80 text-xs">
-                                            Disponible en {equivalent.locations[0].code} ({equivalent.locations[0].warehouseCode}) con {equivalent.locations[0].available} unidades.
-                                        </p>
-                                    )}
-                                    {equivalent.locations.length === 0 && (
-                                        <p className="text-indigo-100/60 text-xs">
-                                            Equivalencia registrada sin stock disponible.
-                                        </p>
-                                    )}
-                                    <div className="flex flex-wrap gap-2 pt-1">
+                                    <div className="flex flex-wrap gap-2">
                                         <Link
                                             href={buildCommercialSearchHref("/production/availability", equivalent.sku, { productId: equivalent.productId, sku: equivalent.sku, source: "equivalences", equivalentProductId: product.id })}
                                             className={buttonStyles({ variant: "secondary", size: "sm" })}
@@ -227,13 +260,14 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             ))}
                         </div>
                     ) : (
-                        <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 text-sm">
-                            No hay equivalencias activas registradas para este producto. Puedes seguir con disponibilidad o crear un pedido comercial.
+                        <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                            No hay equivalencias activas registradas para este
+                            producto. Puedes seguir con disponibilidad o crear
+                            un pedido comercial.
                         </div>
                     )}
-                </div>
-
-            </div>
+                </section>
+            </section>
         </div>
     );
 }

@@ -36,7 +36,6 @@ function makePrismaMock(options: {
 }
 
 function row(overrides: AnyRecord = {}) {
-  const now = new Date("2026-04-21T00:00:00.000Z");
   return {
     id: "cust-1",
     code: "CLI-2026-0001",
@@ -48,8 +47,7 @@ function row(overrides: AnyRecord = {}) {
     phone: null,
     address: null,
     isActive: true,
-    createdAt: now,
-    updatedAt: now,
+    updatedAt: new Date("2026-04-21T00:00:00.000Z"),
     ...overrides,
   };
 }

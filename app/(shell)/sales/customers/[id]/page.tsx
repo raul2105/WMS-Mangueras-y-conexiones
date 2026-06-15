@@ -42,7 +42,6 @@ export default async function CustomerDetailPage({
         phone: true,
         address: true,
         isActive: true,
-        createdAt: true,
         updatedAt: true,
       },
     }),

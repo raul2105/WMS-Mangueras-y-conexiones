@@ -30,8 +30,9 @@ async function updateProduct(id: string, formData: FormData) {
   const subcategory = String(formData.get("subcategory") ?? "").trim() || null;
   const primarySupplierIdRaw = String(formData.get("primarySupplierId") ?? "").trim();
   const supplierBrandIdRaw = String(formData.get("supplierBrandId") ?? "").trim();
-  const baseCostRaw = String(formData.get("base_cost") ?? "").trim();
-  const priceRaw = String(formData.get("price") ?? "").trim();
+    const baseCostRaw = String(formData.get("base_cost") ?? "").trim();
+     const purchaseMoqRaw = String(formData.get("purchaseMoq") ?? "").trim();
+      const priceRaw = String(formData.get("price") ?? "").trim();
   const attributesRaw = String(formData.get("attributes") ?? "").trim() || null;
   const imageFile = formData.get("imageFile");
 
@@ -46,6 +47,7 @@ async function updateProduct(id: string, formData: FormData) {
   }
 
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
+    const purchaseMoq = purchaseMoqRaw ? Number(purchaseMoqRaw.replace(",", ".")) : null;
   const price = priceRaw ? Number(priceRaw.replace(",", ".")) : null;
 
   // Resolve brand snapshot from SupplierBrand
@@ -124,11 +126,11 @@ async function updateProduct(id: string, formData: FormData) {
 
   await syncProductTechnicalAttributes(prisma, id, attributesRaw);
 
-  await createAuditLogSafe({
+    await createAuditLogSafe({
     entityType: "PRODUCT",
     entityId: id,
-    action: "UPDATE_PRODUCT",
-    before,
+      before,
+      action: "UPDATE_PRODUCT",
     after: { name, type: normalizedType, brand, unitLabel, primarySupplierId, supplierBrandId },
     source: "catalog/edit",
     actor: "system",
@@ -153,7 +155,24 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
   const [product, suppliers] = await Promise.all([
     prisma.product.findUnique({
       where: { id },
-      include: { category: true },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        type: true,
+        description: true,
+        unitLabel: true,
+        referenceCode: true,
+        imageUrl: true,
+        category: true,
+        subcategory: true,
+        base_cost: true,
+        price: true,
+        purchaseMoq: true,
+        attributes: true,
+        primarySupplierId: true,
+        supplierBrandId: true,
+      },
     }),
     prisma.supplier.findMany({
       where: { isActive: true },
@@ -266,6 +285,12 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <span className="text-sm text-slate-400">Precio de lista</span>
             <input name="price" inputMode="decimal" defaultValue={product.price ?? ""} className="w-full px-4 py-3 glass rounded-lg" placeholder="0.00" />
           </label>
+
+            <label className="space-y-1">
+              <span className="text-sm text-slate-400">MOQ de compra</span>
+              <input name="purchaseMoq" inputMode="decimal" defaultValue={product.purchaseMoq ?? ""} className="w-full px-4 py-3 glass rounded-lg" placeholder="0.00" />
+              <p className="text-xs text-slate-500">Cantidad mínima de compra (opcional, solo para órdenes de compra)</p>
+            </label>
 
           <label className="space-y-1 md:col-span-2">
             <span className="text-sm text-slate-400">Atributos técnicos (JSON)</span>

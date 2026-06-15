@@ -215,7 +215,7 @@ test.describe.serial("product aware line capture", () => {
     await prisma.$disconnect();
   });
 
-  test("catalog handoff renders an editable line draft and persists it on submit", async ({ page }) => {
+  test("catalog handoff renders a commercial reference panel and allows manual submission", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE", `/catalog/${fixture.baseProductId}`);
     await page.goto(`/catalog/${fixture.baseProductId}`);
 
@@ -223,14 +223,11 @@ test.describe.serial("product aware line capture", () => {
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*productId=/);
     await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
     await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
-    await expect(page.getByLabel(/Cantidad sugerida/i)).toHaveValue("1");
-    await expect(page.getByLabel(/Notas de la línea/i)).toBeVisible();
     await expect(page.locator("form").getByText(FIXTURE.baseSku).first()).toBeVisible();
     await expect(page.getByText(/Acción sugerida:/i)).toBeVisible();
-
-    await page.getByLabel(/Cantidad sugerida/i).fill("3");
-    await page.getByLabel(/Notas de la línea/i).fill("Línea inicial persistida");
+    await expect(page.getByRole("link", { name: /Continuar con este producto/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Cambiar producto/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Quitar selección/i }).first()).toBeVisible();
 
     await page.getByLabel(/Selecciona o crea el cliente/i).fill(FIXTURE.customerName);
     await expect(page.getByRole("button", { name: new RegExp(FIXTURE.customerCode, "i") })).toBeVisible();
@@ -242,10 +239,7 @@ test.describe.serial("product aware line capture", () => {
 
     await page.getByRole("button", { name: /Crear pedido/i }).click();
     await expect(page).toHaveURL(/\/production\/requests\/.+\?ok=/);
-    await expect(page.getByRole("heading", { name: /Productos independientes/i })).toBeVisible();
-    await expect(page.getByText(FIXTURE.baseSku)).toBeVisible();
-    await expect(page.getByText("Línea inicial persistida")).toBeVisible();
-    await expect(page.getByText(/3\s+unidad/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
   });
 
   test("invalid product context keeps manual capture available", async ({ page }) => {
@@ -255,7 +249,6 @@ test.describe.serial("product aware line capture", () => {
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByText(/No encontramos el producto seleccionado/i)).toBeVisible();
     await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toHaveCount(0);
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
   });
 });

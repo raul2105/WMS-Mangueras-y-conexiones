@@ -44,13 +44,6 @@ function firstParam(value: string | string[] | undefined) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function parsePositiveDecimal(value: string) {
-  if (!value) return null;
-  const parsed = Number(value.replace(",", "."));
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed;
-}
-
 function getSourceLabel(source: string) {
   return SOURCE_LABELS[source] ?? "Contexto comercial";
 }
@@ -93,9 +86,6 @@ async function createSalesRequest(formData: FormData) {
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
-  const lineProductId = String(formData.get("lineProductId") ?? "").trim();
-  const lineRequestedQtyRaw = String(formData.get("lineRequestedQty") ?? "").trim();
-  const lineNotes = String(formData.get("lineNotes") ?? "").trim();
 
   const parsed = salesInternalOrderCreateSchema.safeParse({
     customerId: customerId ?? undefined,
@@ -129,31 +119,6 @@ async function createSalesRequest(formData: FormData) {
     );
   }
 
-  let initialProductLine:
-    | { productId: string; requestedQty: number; notes?: string | null }
-    | null = null;
-  if (lineProductId) {
-    const lineProduct = await getProductSearchSelection(prisma, lineProductId);
-    if (!lineProduct) {
-      redirect(
-        `/production/requests/new?error=${encodeURIComponent("No se pudo resolver el producto seleccionado")}`,
-      );
-    }
-
-    const requestedQty = parsePositiveDecimal(lineRequestedQtyRaw);
-    if (!requestedQty) {
-      redirect(
-        `/production/requests/new?error=${encodeURIComponent("La cantidad de la línea debe ser mayor que cero")}`,
-      );
-    }
-
-    initialProductLine = {
-      productId: lineProduct.id,
-      requestedQty,
-      notes: lineNotes || null,
-    };
-  }
-
   try {
     const createPerf = startPerf(
       "action.production.requests.new.create.service",
@@ -167,7 +132,6 @@ async function createSalesRequest(formData: FormData) {
       notes: notes || null,
       requestedByUserId: ctx.user?.id ?? null,
       requestedByRoles: ctx.roles,
-      initialProductLine,
     });
     createPerf.end({ orderId: created.id });
 
@@ -232,8 +196,6 @@ export default async function NewProductionRequestPage({
   const searchQuery = firstParam(sp.q);
   const source = firstParam(sp.source);
   const equivalentProductId = firstParam(sp.equivalentProductId);
-  const quantity = parsePositiveDecimal(firstParam(sp.quantity)) ?? 1;
-  const lineNotes = firstParam(sp.notes);
   const displayQuery = searchQuery || sku;
 
   const selectedProduct = productId
@@ -333,12 +295,6 @@ export default async function NewProductionRequestPage({
                           <span className="text-slate-400">Stock disponible:</span>{" "}
                           {selectedProduct.totalAvailable.toLocaleString("es-MX")}
                         </p>
-                        {selectedProduct.unitLabel ? (
-                          <p>
-                            <span className="text-slate-400">Unidad:</span>{" "}
-                            {selectedProduct.unitLabel}
-                          </p>
-                        ) : null}
                       </div>
                     </div>
                     <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
@@ -346,8 +302,8 @@ export default async function NewProductionRequestPage({
                         Siguiente acción
                       </p>
                       <p className="mt-2">
-                        Confirma el cliente y guarda esta referencia como la
-                        primera línea editable del pedido.
+                        Confirma el cliente y continúa el pedido con esta
+                        referencia comercial.
                       </p>
                     </div>
                   </div>
@@ -459,21 +415,15 @@ export default async function NewProductionRequestPage({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h2 className="text-lg font-semibold text-white">
-                      2. Línea sugerida
+                      2. Contexto del producto
                     </h2>
                     <p className="text-sm text-slate-300">
-                      El producto seleccionado puede guardarse como la primera
-                      línea editable del pedido.
+                      El producto seleccionado acompaña la captura comercial y
+                      sirve como referencia para continuar el pedido.
                     </p>
                   </div>
-                  <Badge variant="accent">Editable</Badge>
+                  <Badge variant="accent">Referencia</Badge>
                 </div>
-
-                <input
-                  type="hidden"
-                  name="lineProductId"
-                  value={selectedProduct.id}
-                />
 
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
                   <div className="rounded-xl border border-white/10 bg-white/5 p-4">
@@ -488,56 +438,17 @@ export default async function NewProductionRequestPage({
                         <span className="text-slate-400">SKU:</span>{" "}
                         <span className="font-mono">{selectedProduct.sku}</span>
                       </p>
-                      {selectedProduct.unitLabel ? (
-                        <p>
-                          <span className="text-slate-400">Unidad:</span>{" "}
-                          {selectedProduct.unitLabel}
-                        </p>
-                      ) : null}
                       <p>
                         <span className="text-slate-400">Fuente:</span>{" "}
                         {sourceLabel}
                       </p>
                       <p>
                         <span className="text-slate-400">Acción sugerida:</span>{" "}
-                        Guarda el pedido para continuar con el cliente y el
-                        detalle.
+                        Continúa con el cliente y el detalle del pedido.
                       </p>
                     </div>
                   </div>
-
-                  <label className="space-y-1">
-                    <span className="text-sm text-slate-400">
-                      Cantidad sugerida
-                    </span>
-                    <input
-                      name="lineRequestedQty"
-                      type="number"
-                      min="0.0001"
-                      step="0.0001"
-                      required
-                      defaultValue={quantity}
-                      className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-                    />
-                    <p className="text-xs text-slate-500">
-                      Se convertirá en la cantidad de la primera línea editable
-                      del pedido.
-                    </p>
-                  </label>
-
-                  <label className="space-y-1">
-                    <span className="text-sm text-slate-400">
-                      Notas de la línea
-                    </span>
-                    <textarea
-                      name="lineNotes"
-                      defaultValue={lineNotes}
-                      className="min-h-[120px] w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-                      placeholder="Opcional: especificaciones, urgencia o contexto comercial"
-                    />
-                  </label>
                 </div>
-
                 <div className="flex flex-wrap gap-2">
                   <Link
                     href="#captura-cliente"

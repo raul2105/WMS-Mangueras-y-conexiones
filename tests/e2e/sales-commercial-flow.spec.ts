@@ -197,12 +197,12 @@ test.describe("sales commercial flow", () => {
     await expect(
       page.getByRole("heading", { name: /Pedidos comerciales/i }),
     ).toBeVisible();
-    await expect(page.getByText(/Siguiente acción/i).first()).toBeVisible();
     await expect(
       page.getByTestId("requests-quick-filters").getByRole("link", {
         name: /^Mis pedidos$/,
       }),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ver detalle/i }).first()).toBeVisible();
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(410);
   });

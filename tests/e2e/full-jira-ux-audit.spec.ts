@@ -206,26 +206,37 @@ test.describe
       page.getByRole("heading", { name: /Pedidos comerciales/i }),
     ).toBeVisible();
     await expect(
-      page.getByText("Accesos comerciales", { exact: true }),
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Mis pedidos$/,
+      }),
     ).toBeVisible();
-    await expect(page.getByText("Mis pedidos", { exact: true })).toBeVisible();
     await expect(
       page.getByText("Disponibles para asignarme", { exact: true }),
     ).toBeVisible();
+    await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
+    await expect(
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Todos$/,
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Más filtros", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
+    await page.locator('[data-testid="requests-more-filters"] summary').click();
+    await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
     await expect(
       page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes/i }),
     ).toBeVisible();
     await expect(
       page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: /^Disponibilidad\s/i }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: /^Equivalencias\s/i }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
-      page.getByRole("link", { name: /^Nuevo pedido\s/i }),
+      page.getByRole("link", { name: /\+ Nuevo pedido/i }),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: /Inventario/i })).toHaveCount(
       0,
@@ -313,15 +324,11 @@ test.describe
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
-    await expect(page.getByText("Captura guiada", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Paso 1 de 3/i)).toBeVisible();
-    await expect(page.getByLabel(/1\. Selecciona o crea el cliente/i)).toBeVisible();
-    await expect(page.getByText(/Confirma almacén y fecha/i)).toBeVisible();
-    await expect(page.getByText(/Completa el pedido/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
+    await expect(page.getByText(/¿No encuentras al cliente\? Regístralo/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Crear pedido/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /← Pedidos/i })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: /Crear pedido/i }),
-    ).toBeVisible();
   });
 
   test("KAN-81 sales console keeps the commercial utility routes understandable", async ({

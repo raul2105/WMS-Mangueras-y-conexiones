@@ -11,15 +11,43 @@ test.describe("KAN-55/KAN-63/KAN-87 regression coverage", () => {
     await expect(
       page.getByRole("heading", { name: /Pedidos comerciales/i }),
     ).toBeVisible();
-    await expect(page.getByText("Mis pedidos", { exact: true })).toBeVisible();
+    await expect(
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Mis pedidos$/,
+      }),
+    ).toBeVisible();
     await expect(
       page.getByText("Disponibles para asignarme", { exact: true }),
     ).toBeVisible();
-    await expect(page.locator('a[href*="queue=overdue"]')).toBeVisible();
-    await expect(page.locator('a[href*="queue=today"]')).toBeVisible();
+    await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
     await expect(
-      page.locator('a[href*="queue=assembly_blocked"]'),
+      page.getByTestId("requests-quick-filters").getByRole("link", {
+        name: /^Todos$/,
+      }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /^Vencen hoy$/i }),
+    ).toHaveCount(1);
+    await expect(page.getByText("Más filtros", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
+    await page.locator('[data-testid="requests-more-filters"] summary').click();
+    await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
+    await expect(page.getByText("Riesgo / tiempo", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Vencidos$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^Sin movimiento$/i })).toBeVisible();
+    await expect(page.getByTestId("request-card").first()).toBeVisible();
+    await expect(
+      page.getByTestId("request-card").first().getByText(
+        "Ver seguimiento operativo",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("request-card").first().getByText(
+        "Resumen operativo persistente",
+        { exact: true },
+      ),
+    ).toBeHidden();
   });
 
   test("KAN-87 purchasing list preserves Jira presets and read-only behavior", async ({
@@ -29,7 +57,7 @@ test.describe("KAN-55/KAN-63/KAN-87 regression coverage", () => {
     await page.goto("/purchasing/orders");
 
     await expect(
-      page.getByRole("heading", { name: /Órdenes de Compra/i }),
+      page.getByRole("heading", { name: /^Órdenes de compra$/i }),
     ).toBeVisible();
     await expect(
       page.getByText(/Vista de solo lectura para tu rol/i),
@@ -57,7 +85,7 @@ test.describe("KAN-55/KAN-63/KAN-87 regression coverage", () => {
     await page.goto("/purchasing/orders");
 
     await expect(
-      page.getByRole("heading", { name: /Órdenes de Compra/i }),
+      page.getByRole("heading", { name: /^Órdenes de compra$/i }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /\+ Nueva OC/i }),

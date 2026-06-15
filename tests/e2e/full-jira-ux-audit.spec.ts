@@ -238,6 +238,19 @@ test.describe
     await expect(
       page.getByRole("link", { name: /\+ Nuevo pedido/i }),
     ).toBeVisible();
+    await expect(page.getByTestId("request-card").first()).toBeVisible();
+    await expect(
+      page.getByTestId("request-card").first().getByText(
+        "Ver seguimiento operativo",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("request-card").first().getByText(
+        "Seguimiento comercial",
+        { exact: true },
+      ),
+    ).toBeHidden();
     await expect(page.getByRole("link", { name: /Inventario/i })).toHaveCount(
       0,
     );

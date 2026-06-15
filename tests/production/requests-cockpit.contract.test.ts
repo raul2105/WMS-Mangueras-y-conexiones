@@ -17,17 +17,15 @@ describe("production requests cockpit contract", () => {
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(listContent).toContain("takeRequestFromList");
     expect(listContent).toContain("Pedidos comerciales");
-    expect(listContent).toContain("Accesos comerciales");
     expect(listContent).toContain("Mis pedidos");
     expect(listContent).toContain("Disponibles para asignarme");
     expect(listContent).toContain("Siguiente acción");
     expect(listContent).toContain("Seguimiento");
     expect(listContent).toContain("Seguimiento comercial");
+    expect(listContent).toContain("Ver seguimiento operativo");
     expect(listContent).toContain("Ver detalle");
     expect(listContent).toContain("Clientes");
-    expect(listContent).toContain("Catálogo");
-    expect(listContent).toContain("Disponibilidad");
-    expect(listContent).toContain("Equivalencias");
+    expect(listContent).toContain("+ Nuevo pedido");
     expect(listContent).toContain("buttonStyles");
     expect(listContent).toContain("Badge");
     expect(listContent).toContain("buildHref");
@@ -53,5 +51,20 @@ describe("production requests cockpit contract", () => {
     expect(detailContent).not.toContain("text-cyan-300");
     expect(detailContent).not.toContain("border-white/10");
     expect(detailContent).not.toContain("bg-white/5");
+  });
+
+  it("keeps the new request page on customer-first capture with an editable line draft", () => {
+    const newRequestContent = readWorkspaceFile(
+      "app/(shell)/production/requests/new/page.tsx",
+    );
+
+    expect(newRequestContent).toContain("Línea sugerida");
+    expect(newRequestContent).toContain("lineProductId");
+    expect(newRequestContent).toContain("lineRequestedQty");
+    expect(newRequestContent).toContain("lineNotes");
+    expect(newRequestContent).toContain("initialProductLine");
+    expect(newRequestContent).toContain("Producto seleccionado");
+    expect(newRequestContent).toContain("Quitar selección");
+    expect(newRequestContent).toContain("CustomerSearchField");
   });
 });

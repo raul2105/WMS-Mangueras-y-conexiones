@@ -96,26 +96,6 @@ function getChipClassName(active: boolean) {
 function getTextLinkClassName() {
   return "text-[var(--accent)] underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";
 }
-function getExecutionBadgeVariant(
-  status: string | null | undefined,
-): "neutral" | "accent" | "success" | "warning" | "danger" {
-  switch (status) {
-    case "COMPLETED":
-    case "COMPLETADA":
-      return "success";
-    case "PARTIAL":
-    case "IN_PROGRESS":
-    case "RELEASED":
-    case "ABIERTA":
-    case "EN_PROCESO":
-      return "warning";
-    case "CANCELLED":
-    case "CANCELADA":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
 function formatDate(value: Date | string | null | undefined) {
   if (!value) return "--";
   const date = value instanceof Date ? value : new Date(value);
@@ -141,17 +121,19 @@ function isNextRedirectError(error: unknown) {
     (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
   );
 }
-function buildReturnHref(args: {
+function buildRequestHref(args: {
+  page: number;
   status?: SalesInternalOrderStatus;
   customer?: string;
   queue?: FulfillmentQueueFilter;
+  stage?: SalesOrderFlowStage;
   preset?: OperationalPresetFilter;
-  page: number;
 }) {
   const params = new URLSearchParams();
   if (args.status) params.set("status", args.status);
   if (args.customer) params.set("customer", args.customer);
   if (args.queue) params.set("queue", args.queue);
+  if (args.stage) params.set("stage", args.stage);
   if (args.preset) params.set("preset", args.preset);
   if (args.page > 1) params.set("page", String(args.page));
   const qs = params.toString();
@@ -240,29 +222,9 @@ export default async function ProductionRequestsPage({
   const where: Prisma.SalesInternalOrderWhereInput = statusFilter
     ? { AND: [visibleWhere, { status: statusFilter }] }
     : visibleWhere;
-  const [totalCount, groupedStatuses, linkedAssemblyCount, directPickCount] =
-    await Promise.all([
-      prisma.salesInternalOrder.count({ where: visibleWhere }),
-      prisma.salesInternalOrder.groupBy({
-        by: ["status"],
-        _count: { status: true },
-        where: visibleWhere,
-      }),
-      prisma.salesInternalOrder.count({
-        where: {
-          AND: [
-            visibleWhere,
-            { lines: { some: { lineKind: "CONFIGURED_ASSEMBLY" } } },
-          ],
-        },
-      }),
-      prisma.salesInternalOrderPickList.count({
-        where: {
-          status: { in: ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] },
-          order: { is: visibleWhere },
-        },
-      }),
-    ]);
+  const totalCount = await prisma.salesInternalOrder.count({
+    where: visibleWhere,
+  });
   const orderSelect = {
     id: true,
     code: true,
@@ -562,9 +524,6 @@ export default async function ProductionRequestsPage({
       currentLinkedByOrder.set(orderId, [row]);
     }
   }
-  const statusCountMap = Object.fromEntries(
-    groupedStatuses.map((row) => [row.status, row._count.status]),
-  );
   const canRenderWriteActions = hasSalesWriteAccess({
     roles: sessionCtx.roles,
     permissions: sessionCtx.permissions,
@@ -582,20 +541,176 @@ export default async function ProductionRequestsPage({
     stage = stageFilter,
     preset = presetFilter,
   ) => {
-    const base = buildReturnHref({
+    return buildRequestHref({
+      page,
       status,
       customer: customerFilter || undefined,
       queue,
+      stage,
       preset,
-      page,
     });
-    if (!stage) return base;
-    const [path, query = ""] = base.split("?");
-    const params = new URLSearchParams(query);
-    params.set("stage", stage);
-    const qs = params.toString();
-    return qs ? `${path}?${qs}` : path;
   };
+  const activeFilters = [
+    statusFilter
+      ? {
+          label: `Estado: ${SALES_INTERNAL_ORDER_STATUS_LABELS[statusFilter]}`,
+          href: buildRequestHref({
+            page: 1,
+            customer: customerFilter || undefined,
+            queue: queueFilter,
+            stage: stageFilter,
+            preset: presetFilter,
+          }),
+        }
+      : null,
+    queueFilter
+      ? {
+          label: `Cola: ${QUEUE_LABELS[queueFilter]}`,
+          href: buildRequestHref({
+            page: 1,
+            status: statusFilter,
+            customer: customerFilter || undefined,
+            stage: stageFilter,
+            preset: presetFilter,
+          }),
+        }
+      : null,
+    stageFilter
+      ? {
+          label: `Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}`,
+          href: buildRequestHref({
+            page: 1,
+            status: statusFilter,
+            customer: customerFilter || undefined,
+            queue: queueFilter,
+            preset: presetFilter,
+          }),
+        }
+      : null,
+    presetFilter
+      ? {
+          label: `Filtro: ${PRESET_LABELS[presetFilter]}`,
+          href: buildRequestHref({
+            page: 1,
+            status: statusFilter,
+            customer: customerFilter || undefined,
+            queue: queueFilter,
+            stage: stageFilter,
+          }),
+        }
+      : null,
+    customerFilter
+      ? {
+          label: `Cliente: ${customerFilter}`,
+          href: buildRequestHref({
+            page: 1,
+            status: statusFilter,
+            queue: queueFilter,
+            stage: stageFilter,
+            preset: presetFilter,
+          }),
+        }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; href: string }>;
+  const quickFilters = [
+    {
+      label: "Todos",
+      href: buildHref(1, undefined, undefined, undefined, undefined),
+      active: !statusFilter && !queueFilter && !stageFilter && !presetFilter,
+    },
+    sessionCtx.user?.id
+      ? { label: "Mis pedidos", href: "#mis-pedidos", active: false }
+      : null,
+    {
+      label: "Urgentes",
+      href: buildHref(1, undefined, undefined, undefined, "urgentes"),
+      active: presetFilter === "urgentes",
+    },
+    {
+      label: "Vencen hoy",
+      href: buildHref(1, undefined, "today"),
+      active: queueFilter === "today",
+    },
+    {
+      label: "Sin asignar",
+      href: buildHref(1, undefined, undefined, undefined, "sin_asignar"),
+      active: presetFilter === "sin_asignar",
+    },
+    {
+      label: "Bloqueados",
+      href: buildHref(1, undefined, undefined, undefined, "bloqueados"),
+      active: presetFilter === "bloqueados",
+    },
+    {
+      label: "Listos para entrega",
+      href: buildHref(1, undefined, undefined, undefined, "listos_para_entrega"),
+      active: presetFilter === "listos_para_entrega",
+    },
+  ].filter(Boolean) as Array<{
+    label: string;
+    href: string;
+    active: boolean;
+  }>;
+  const advancedFilterGroups = [
+    {
+      title: "Estado comercial",
+      items: (Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS) as Array<
+        [SalesInternalOrderStatus, string]
+      >).map(([status, label]) => ({
+        label: `${label}`,
+        href: buildHref(1, status, undefined, undefined, undefined),
+        active: statusFilter === status,
+      })),
+    },
+    {
+      title: "Etapa",
+      items: SALES_CONSOLE_STAGE_FLOW.map((stage) => ({
+        label: SALES_ORDER_FLOW_STAGE_LABELS[stage],
+        href: buildHref(1, undefined, undefined, stage, undefined),
+        active: stageFilter === stage,
+      })),
+    },
+    {
+      title: "Riesgo / tiempo",
+      items: [
+        {
+          label: "Vencidos",
+          href: buildHref(1, undefined, "overdue"),
+          active: queueFilter === "overdue",
+        },
+        {
+          label: "Vencen hoy",
+          href: buildHref(1, undefined, "today"),
+          active: queueFilter === "today",
+        },
+        {
+          label: "Sin movimiento",
+          href: buildHref(1, undefined, "stale"),
+          active: queueFilter === "stale",
+        },
+      ],
+    },
+    {
+      title: "Operación",
+      items: [
+        {
+          label: "Sin liberar",
+          href: buildHref(1, undefined, "unreleased"),
+          active: queueFilter === "unreleased",
+        },
+        {
+          label: "Parciales",
+          href: buildHref(1, undefined, "partial"),
+          active: queueFilter === "partial",
+        },
+        {
+          label: "Ensamble bloqueado",
+          href: buildHref(1, undefined, "assembly_blocked"),
+          active: queueFilter === "assembly_blocked",
+        },
+      ],
+    },
+  ];
   const myOrders = sessionCtx.user?.id
     ? orders
         .filter(
@@ -617,47 +732,6 @@ export default async function ProductionRequestsPage({
       }).canTakeOrder;
     })
     .slice(0, 3);
-  const salesQuickActions = [
-    canViewCustomers
-      ? {
-          href: "/sales/customers",
-          label: "Clientes",
-          description:
-            "Busca cuentas, historial y acceso al catálogo comercial.",
-        }
-      : null,
-    sessionCtx.permissions.includes("catalog.view")
-      ? {
-          href: "/catalog",
-          label: "Catálogo",
-          description: "Consulta productos, familias y atributos para cotizar.",
-        }
-      : null,
-    sessionCtx.permissions.includes("sales.view")
-      ? {
-          href: "/production/availability",
-          label: "Disponibilidad",
-          description: "Revisa existencias y cobertura antes de prometer.",
-        }
-      : null,
-    sessionCtx.permissions.includes("sales.view")
-      ? {
-          href: "/production/equivalences",
-          label: "Equivalencias",
-          description: "Encuentra sustitutos compatibles para cerrar la venta.",
-        }
-      : null,
-    canRenderWriteActions
-      ? {
-          href: "/production/requests/new",
-          label: "Nuevo pedido",
-          description: "Captura un pedido comercial con cliente primero.",
-        }
-      : null,
-  ].filter(
-    (item): item is { href: string; label: string; description: string } =>
-      item !== null,
-  );
   return (
     <div className="space-y-6">
       {" "}
@@ -667,109 +741,35 @@ export default async function ProductionRequestsPage({
         meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Cola: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
-            <Link
-              href="/production/availability"
-              className={buttonStyles({ variant: "secondary", size: "sm" })}
-            >
-              Disponibilidad{" "}
-            </Link>{" "}
-            <Link
-              href="/production/equivalences"
-              className={buttonStyles({ variant: "secondary", size: "sm" })}
-            >
-              Equivalencias{" "}
-            </Link>{" "}
+            {canViewCustomers ? (
+              <Link
+                href="/sales/customers"
+                className={buttonStyles({ variant: "secondary", size: "sm" })}
+              >
+                Clientes
+              </Link>
+            ) : null}
             <Link
               href="/production/requests/new"
               className={buttonStyles({ variant: "primary", size: "sm" })}
             >
-              + Nuevo pedido{" "}
-            </Link>{" "}
+              + Nuevo pedido
+            </Link>
           </>
         }
-      />{" "}
-      <section className="glass-card space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[var(--text-primary)]">
-              Accesos comerciales
-            </p>
-            <p className="text-xs text-[var(--text-muted)]">
-              Clientes, catálogo, disponibilidad, equivalencias y captura de
-              pedidos.
-            </p>
-          </div>
-          {canRenderWriteActions ? (
-            <Badge variant="accent">Vista comercial</Badge>
-          ) : null}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {salesQuickActions.map((action) => (
-            <Link
-              key={action.href}
-              href={action.href}
-              className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
-            >
-              <p className="text-sm font-semibold text-[var(--text-primary)]">
-                {action.label}
-              </p>
-              <p className="mt-2 text-sm text-[var(--text-muted)]">
-                {action.description}
-              </p>
-            </Link>
-          ))}
-        </div>
-      </section>
+      />
       {sp.ok ? (
         <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--status-success-text)]">
-          {" "}
-          {sp.ok}{" "}
+          {sp.ok}
         </div>
-      ) : null}{" "}
+      ) : null}
       {sp.error ? (
         <div className="rounded-xl border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">
-          {" "}
-          {sp.error}{" "}
+          {sp.error}
         </div>
-      ) : null}{" "}
-      <section className="grid gap-4 md:grid-cols-4">
-        {" "}
-        {[
-          {
-            label: "Pedidos",
-            value: totalCount,
-            note: "Visibilidad total del filtro actual",
-          },
-          {
-            label: "Borrador",
-            value: statusCountMap.BORRADOR ?? 0,
-            note: "Pedidos todavía en captura",
-          },
-          {
-            label: "Ensamble ligado",
-            value: linkedAssemblyCount,
-            note: "Pedidos con líneas configuradas",
-          },
-          {
-            label: "Surtidos directos activos",
-            value: directPickCount,
-            note: "Pedidos con pick list activo",
-          },
-        ].map((stat) => (
-          <article key={stat.label} className="glass-card space-y-2">
-            {" "}
-            <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
-              {stat.label}
-            </p>{" "}
-            <p className="text-3xl font-semibold text-[var(--text-primary)]">
-              {stat.value}
-            </p>{" "}
-            <p className="text-sm text-[var(--text-muted)]">{stat.note}</p>{" "}
-          </article>
-        ))}{" "}
-      </section>{" "}
+      ) : null}
       <section className="grid gap-4 xl:grid-cols-2">
-        <article className="glass-card space-y-3">
+        <article id="mis-pedidos" className="glass-card space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-[var(--text-primary)]">
@@ -835,155 +835,137 @@ export default async function ProductionRequestsPage({
           )}
         </article>
       </section>
-      <form
-        method="get"
-        className="glass-card flex flex-col gap-3 md:flex-row md:items-end"
-      >
-        {" "}
-        {statusFilter ? (
-          <input type="hidden" name="status" value={statusFilter} />
-        ) : null}{" "}
-        {queueFilter ? (
-          <input type="hidden" name="queue" value={queueFilter} />
-        ) : null}{" "}
-        {presetFilter ? (
-          <input type="hidden" name="preset" value={presetFilter} />
-        ) : null}{" "}
-        {stageFilter ? (
-          <input type="hidden" name="stage" value={stageFilter} />
-        ) : null}{" "}
-        <label className="flex-1 space-y-1">
-          {" "}
-          <span className="text-sm text-[var(--text-muted)]">
-            Filtrar por cliente
-          </span>{" "}
-          <input
-            type="text"
-            name="customer"
-            defaultValue={customerFilter}
-            placeholder="Nombre o cuenta del cliente"
-            className="field"
-          />{" "}
-        </label>{" "}
-        <div className="flex flex-wrap gap-2">
-          {" "}
-          <button type="submit" className="btn-primary">
-            {" "}
-            Filtrar{" "}
-          </button>{" "}
-          <Link
-            href={buildHref(1, undefined, undefined, undefined, undefined)}
-            className={buttonStyles({ variant: "secondary" })}
-          >
-            {" "}
-            Limpiar{" "}
-          </Link>{" "}
-        </div>{" "}
-      </form>{" "}
       <section className="space-y-3">
-        {" "}
-        <div className="flex flex-wrap gap-2">
-          {" "}
-          <Link
-            href={buildHref(1, statusFilter, undefined, stageFilter)}
-            className={getChipClassName(!queueFilter)}
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
+          <div
+            className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            data-testid="requests-quick-filters"
           >
-            {" "}
-            Todos los pedidos{" "}
-          </Link>{" "}
-          {(Object.keys(QUEUE_LABELS) as FulfillmentQueueFilter[]).map(
-            (queue) => (
+            {quickFilters.map((filter) => (
               <Link
-                key={queue}
-                href={buildHref(1, statusFilter, queue, stageFilter)}
-                className={getChipClassName(queueFilter === queue)}
+                key={filter.label}
+                href={filter.href}
+                className={getChipClassName(filter.active)}
               >
-                {" "}
-                {QUEUE_LABELS[queue]}{" "}
+                {filter.label}
               </Link>
-            ),
-          )}{" "}
-        </div>{" "}
-        <div className="flex flex-wrap gap-2">
-          {" "}
-          <Link
-            href={buildHref(
-              1,
-              statusFilter,
-              queueFilter,
-              stageFilter,
-              undefined,
-            )}
-            className={getChipClassName(!presetFilter)}
-          >
-            {" "}
-            Todos los filtros{" "}
-          </Link>{" "}
-          {(Object.keys(PRESET_LABELS) as OperationalPresetFilter[]).map(
-            (preset) => (
-              <Link
-                key={preset}
-                href={buildHref(
-                  1,
-                  statusFilter,
-                  queueFilter,
-                  stageFilter,
-                  preset,
-                )}
-                className={getChipClassName(presetFilter === preset)}
-              >
-                {" "}
-                {PRESET_LABELS[preset]}{" "}
-              </Link>
-            ),
-          )}{" "}
-        </div>{" "}
-        <div className="flex flex-wrap gap-2">
-          {" "}
-          <Link
-            href={buildHref(1, statusFilter, queueFilter, undefined)}
-            className={getChipClassName(!stageFilter)}
-          >
-            {" "}
-            Todas las etapas{" "}
-          </Link>{" "}
-          {SALES_CONSOLE_STAGE_FLOW.map((stage) => (
-            <Link
-              key={stage}
-              href={buildHref(1, statusFilter, queueFilter, stage)}
-              className={getChipClassName(stageFilter === stage)}
+            ))}
+          </div>
+          {activeFilters.length > 0 ? (
+            <div
+              className="mt-3 flex flex-wrap items-center gap-2 text-sm"
+              data-testid="requests-active-filters"
             >
-              {" "}
-              {SALES_ORDER_FLOW_STAGE_LABELS[stage]}{" "}
-            </Link>
-          ))}{" "}
-        </div>{" "}
-        <div className="flex flex-wrap gap-2">
-          {" "}
-          <Link
-            href={buildHref(1, undefined, queueFilter)}
-            className={getChipClassName(!statusFilter)}
+              <span className="font-semibold text-[var(--text-muted)]">
+                Filtros activos:
+              </span>
+              {activeFilters.map((filter) => (
+                <Link
+                  key={filter.label}
+                  href={filter.href}
+                  className={getChipClassName(true)}
+                >
+                  {filter.label} ×
+                </Link>
+              ))}
+              {activeFilters.length > 1 ? (
+                <Link
+                  href={buildRequestHref({ page: 1 })}
+                  className={buttonStyles({ variant: "secondary", size: "sm" })}
+                >
+                  Limpiar todo
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
+          <details
+            className="group mt-3 rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2"
+            data-testid="requests-more-filters"
           >
-            {" "}
-            Todos ({totalCount}){" "}
-          </Link>{" "}
-          {Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS).map(
-            ([status, label]) => (
-              <Link
-                key={status}
-                href={buildHref(
-                  1,
-                  status as SalesInternalOrderStatus,
-                  queueFilter,
-                )}
-                className={getChipClassName(statusFilter === status)}
-              >
-                {" "}
-                {label} ({statusCountMap[status] ?? 0}){" "}
-              </Link>
-            ),
-          )}{" "}
-        </div>{" "}
+            <summary className="cursor-pointer list-none text-sm font-semibold text-[var(--text-primary)]">
+              Más filtros
+            </summary>
+            <div className="mt-3 space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Cliente
+                </p>
+                <form
+                  method="get"
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3"
+                  data-testid="requests-customer-filter"
+                >
+                  {" "}
+                  {statusFilter ? (
+                    <input type="hidden" name="status" value={statusFilter} />
+                  ) : null}{" "}
+                  {queueFilter ? (
+                    <input type="hidden" name="queue" value={queueFilter} />
+                  ) : null}{" "}
+                  {presetFilter ? (
+                    <input type="hidden" name="preset" value={presetFilter} />
+                  ) : null}{" "}
+                  {stageFilter ? (
+                    <input type="hidden" name="stage" value={stageFilter} />
+                  ) : null}{" "}
+                  <label className="block space-y-1">
+                    {" "}
+                    <span className="text-sm text-[var(--text-muted)]">
+                      Filtrar por cliente
+                    </span>{" "}
+                    <input
+                      type="text"
+                      name="customer"
+                      defaultValue={customerFilter}
+                      placeholder="Nombre o cuenta del cliente"
+                      className="field"
+                    />{" "}
+                  </label>{" "}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {" "}
+                    <button type="submit" className="btn-primary">
+                      {" "}
+                      Filtrar{" "}
+                    </button>{" "}
+                    <Link
+                      href={buildHref(
+                        1,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                      )}
+                      className={buttonStyles({ variant: "secondary" })}
+                    >
+                      {" "}
+                      Limpiar{" "}
+                    </Link>{" "}
+                  </div>{" "}
+                </form>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {advancedFilterGroups.map((group) => (
+                  <div key={group.title} className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                      {group.title}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {group.items.map((item) => (
+                        <Link
+                          key={item.label}
+                          href={item.href}
+                          className={getChipClassName(item.active)}
+                        >
+                          {item.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </details>
+        </div>
       </section>{" "}
       <section className="space-y-4">
         {" "}
@@ -999,6 +981,7 @@ export default async function ProductionRequestsPage({
               order.customerName?.trim() || order.customer?.name || "--";
             const createdByManager =
               (order.requestedByUser?.userRoles.length ?? 0) > 0;
+            const now = new Date();
             const productLines = (order.lines as any[]).filter(
               (line: any) => line.lineKind === "PRODUCT",
             );
@@ -1064,809 +1047,402 @@ export default async function ProductionRequestsPage({
               canExecuteSalesActions: canRenderWriteActions,
               canExecuteProductionActions: canOperateProductionActions,
             });
+            const dueDateMs = order.dueDate
+              ? new Date(order.dueDate).getTime()
+              : null;
+            const isOverdue =
+              dueDateMs !== null &&
+              dueDateMs < now.getTime() &&
+              orderStatus !== "CANCELADA";
+            const isUrgent =
+              !isOverdue &&
+              dueDateMs !== null &&
+              dueDateMs - now.getTime() <= 24 * 60 * 60 * 1000 &&
+              dueDateMs - now.getTime() >= 0;
+            const hasNoLines =
+              productLines.length === 0 && configuredLines.length === 0;
+            const attentionChips: Array<{
+              label: string;
+              variant: "neutral" | "accent" | "success" | "warning";
+            }> = [];
+            if (isOverdue) {
+              attentionChips.push({ label: "Vencido", variant: "warning" });
+            } else if (isUrgent) {
+              attentionChips.push({ label: "Urgente", variant: "warning" });
+            }
+            if (primaryActionState.state === "blocked") {
+              attentionChips.push({ label: "Bloqueado", variant: "warning" });
+            }
+            if (hasNoLines) {
+              attentionChips.push({ label: "Sin líneas", variant: "neutral" });
+            } else {
+              attentionChips.push({
+                label: `${productLines.length.toLocaleString("es-MX")} productos`,
+                variant: productLines.length > 0 ? "accent" : "neutral",
+              });
+              if (configuredLines.length > 0) {
+                attentionChips.push({
+                  label: `${configuredLines.length.toLocaleString("es-MX")} ensambles`,
+                  variant: "warning",
+                });
+              }
+            }
+            if (!deliveredEligibility.canMarkDelivered && orderStatus !== "CANCELADA") {
+              attentionChips.push({
+                label: "Entrega bloqueada",
+                variant: "warning",
+              });
+            }
+
             return (
-              <article key={order.id} className="glass-card space-y-5">
-                {" "}
-                <header className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-                  {" "}
+              <article
+                key={order.id}
+                data-testid="request-card"
+                className="glass-card space-y-4"
+              >
+                <header className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
                   <div className="space-y-4">
-                    {" "}
-                    <div className="space-y-2">
-                      {" "}
-                      <div className="flex flex-wrap items-center gap-2">
-                        {" "}
-                        <Link
-                          href={`/production/requests/${order.id}`}
-                          className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
-                        >
-                          {" "}
-                          {order.code}{" "}
-                        </Link>{" "}
-                        <Badge variant={getStatusBadgeVariant(orderStatus)}>
-                          {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
-                        </Badge>{" "}
-                        <Badge variant={flowNarrative.flowBadgeVariant}>
-                          {flowNarrative.flowStageLabel}
-                        </Badge>{" "}
-                        <Badge variant={workType.variant}>
-                          {workType.label}
-                        </Badge>{" "}
-                        {takeEligibility.canTakeOrder ? (
-                          <Badge variant="accent">Tomable</Badge>
-                        ) : null}{" "}
-                      </div>{" "}
-                      <p className="text-sm text-[var(--text-muted)]">
-                        {" "}
-                        Cliente:{" "}
-                        {order.customerId && canViewCustomers ? (
-                          <Link
-                            href={`/sales/customers/${order.customerId}`}
-                            className={getTextLinkClassName()}
-                          >
-                            {" "}
-                            {displayCustomer}{" "}
-                          </Link>
-                        ) : (
-                          displayCustomer
-                        )}{" "}
-                        {" · "}Almacen:{" "}
-                        {order.warehouse
-                          ? `${order.warehouse.code} - ${order.warehouse.name}`
-                          : "--"}{" "}
-                      </p>{" "}
-                    </div>{" "}
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {" "}
-                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                        {" "}
-                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Seguimiento
-                        </p>{" "}
-                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
-                          {workType.label}
-                        </p>{" "}
-                        <p className="mt-1 text-sm text-[var(--text-muted)]">
-                          {workType.detail}
-                        </p>{" "}
-                      </div>{" "}
-                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                        {" "}
-                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Siguiente acción
-                        </p>{" "}
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {" "}
-                          <Badge
-                            variant={
-                              productLines.length > 0 ? "accent" : "neutral"
-                            }
-                          >
-                            {productLines.length.toLocaleString("es-MX")}{" "}
-                            productos independientes
-                          </Badge>{" "}
-                          <Badge
-                            variant={
-                              configuredLines.length > 0 ? "warning" : "neutral"
-                            }
-                          >
-                            {configuredLines.length.toLocaleString("es-MX")}{" "}
-                            ensambles configurados
-                          </Badge>{" "}
-                        </div>{" "}
-                        <p className="mt-2 text-sm text-[var(--text-muted)]">
-                          {" "}
-                          {hasCompletedDirectPick
-                            ? "Surtido directo validado"
-                            : latestPickStatus
-                              ? summarizePickListStatus(latestPickStatus)
-                              : "Surtido directo pendiente"}{" "}
-                        </p>{" "}
-                      </div>{" "}
-                    </div>{" "}
-                  </div>{" "}
-                  <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
-                    {" "}
-                    <div className="flex items-center justify-between gap-3">
-                      {" "}
-                      <div>
-                        {" "}
-                        <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                          Siguiente acción
-                        </p>{" "}
-                        <p className="mt-1 text-base font-semibold text-[var(--text-primary)]">
-                          {primaryActionState.label}
-                        </p>{" "}
-                      </div>{" "}
-                      <Badge
-                        variant={
-                          primaryActionState.state === "allowed"
-                            ? "success"
-                            : primaryActionState.state === "blocked"
-                              ? "warning"
-                              : "neutral"
-                        }
-                      >
-                        {" "}
-                        {primaryActionState.state === "allowed"
-                          ? "Disponible"
-                          : primaryActionState.state === "blocked"
-                            ? "Bloqueada"
-                            : "Informativa"}{" "}
-                      </Badge>{" "}
-                    </div>{" "}
-                    <p className="mt-2 text-sm text-[var(--text-muted)]">
-                      {primaryActionState.blockedReason ??
-                        primaryActionState.reason}
-                    </p>{" "}
-                    <div className="mt-4 space-y-2">
-                      {" "}
-                      {primaryActionState.state === "allowed" &&
-                      primaryActionState.code === "TAKE_ORDER" ? (
-                        <form action={takeRequestFromList}>
-                          {" "}
-                          <input
-                            type="hidden"
-                            name="orderId"
-                            value={order.id}
-                          />{" "}
-                          <input
-                            type="hidden"
-                            name="returnTo"
-                            value={buildHref(safePage)}
-                          />{" "}
-                          <button
-                            type="submit"
-                            disabled={!takeEligibility.canTakeOrder}
-                            className={buttonStyles({
-                              variant: "primary",
-                              fullWidth: true,
-                              className: !takeEligibility.canTakeOrder
-                                ? "cursor-not-allowed opacity-55"
-                                : "",
-                            })}
-                          >
-                            {" "}
-                            {primaryActionState.label}{" "}
-                          </button>{" "}
-                        </form>
-                      ) : primaryActionState.state === "allowed" ? (
-                        <Link
-                          href={primaryActionState.href}
-                          className={buttonStyles({
-                            variant: "primary",
-                            fullWidth: true,
-                          })}
-                        >
-                          {" "}
-                          {primaryActionState.label}{" "}
-                        </Link>
-                      ) : (
-                        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
-                          {" "}
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            {" "}
-                            <p className="text-sm font-medium text-[var(--text-primary)]">
-                              {primaryActionState.label}
-                            </p>{" "}
-                            <Badge
-                              variant={
-                                primaryActionState.state === "blocked"
-                                  ? "warning"
-                                  : "neutral"
-                              }
-                              size="md"
-                            >
-                              {" "}
-                              {primaryActionState.state === "blocked"
-                                ? "Bloqueada"
-                                : "Informativa"}{" "}
-                            </Badge>{" "}
-                          </div>{" "}
-                          <p className="mt-1 text-xs text-[var(--text-muted)]">
-                            {primaryActionState.blockedReason ??
-                              primaryActionState.reason}
-                          </p>{" "}
-                        </div>
-                      )}{" "}
+                    <div className="flex flex-wrap items-center gap-2">
                       <Link
                         href={`/production/requests/${order.id}`}
+                        className="font-mono text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]"
+                      >
+                        {order.code}
+                      </Link>
+                      <Badge variant={getStatusBadgeVariant(orderStatus)}>
+                        {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
+                      </Badge>
+                      <Badge variant={flowNarrative.flowBadgeVariant}>
+                        {flowNarrative.flowStageLabel}
+                      </Badge>
+                      <Badge variant={primaryActionState.state === "blocked" ? "warning" : "neutral"}>
+                        {primaryActionState.label}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-[var(--text-muted)]">
+                      Cliente: {" "}
+                      {order.customerId && canViewCustomers ? (
+                        <Link
+                          href={`/sales/customers/${order.customerId}`}
+                          className={getTextLinkClassName()}
+                        >
+                          {displayCustomer}
+                        </Link>
+                      ) : (
+                        displayCustomer
+                      )}{" "}
+                      {" · "}Almacen: {" "}
+                      {order.warehouse
+                        ? `${order.warehouse.code} - ${order.warehouse.name}`
+                        : "--"}
+                    </p>
+                    <div className="space-y-2 md:hidden">
+                      <p className="text-sm font-medium text-[var(--text-primary)]">
+                        {flowNarrative.nextRecommendedAction.label} ·{" "}
+                        {formatDate(order.dueDate)} ·{" "}
+                        {order.assignedToUser
+                          ? (order.assignedToUser.name ??
+                            order.assignedToUser.email ??
+                            "--")
+                          : "Sin asignar"}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {flowNarrative.primaryCta.blockedReason ??
+                          flowNarrative.primaryCta.reason}
+                      </p>
+                    </div>
+                    <div className="hidden gap-3 md:grid sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Siguiente acción
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
+                          {flowNarrative.nextRecommendedAction.label}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--text-muted)]">
+                          {flowNarrative.primaryCta.blockedReason ??
+                            flowNarrative.primaryCta.reason}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Compromiso
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
+                          {formatDate(order.dueDate)}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--text-muted)]">
+                          {isOverdue
+                            ? "Vencido"
+                            : order.dueDate
+                              ? "Fecha compromiso"
+                              : "Sin fecha prometida"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Asignación
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
+                          {order.assignedToUser
+                            ? (order.assignedToUser.name ??
+                              order.assignedToUser.email ??
+                              "--")
+                            : "Sin asignar"}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--text-muted)]">
+                          {order.assignedAt
+                            ? `Asignado el ${formatDateTime(order.assignedAt)}`
+                            : "Pendiente de asignación"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Ultimo movimiento
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
+                          {formatDateTime(order.updatedAt)}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--text-muted)]">
+                          Actualizacion operativa mas reciente
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {attentionChips.map((chip) => (
+                        <Badge key={chip.label} variant={chip.variant}>
+                          {chip.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {primaryActionState.state === "allowed" &&
+                    primaryActionState.code === "TAKE_ORDER" ? (
+                      <form action={takeRequestFromList}>
+                        <input
+                          type="hidden"
+                          name="orderId"
+                          value={order.id}
+                        />
+                        <input
+                          type="hidden"
+                          name="returnTo"
+                          value={buildHref(safePage)}
+                        />
+                        <button
+                          type="submit"
+                          disabled={!takeEligibility.canTakeOrder}
+                          className={buttonStyles({
+                            variant: "secondary",
+                            fullWidth: true,
+                            className: !takeEligibility.canTakeOrder
+                              ? "cursor-not-allowed opacity-55"
+                              : "",
+                          })}
+                        >
+                          Tomar pedido
+                        </button>
+                      </form>
+                    ) : primaryActionState.state === "allowed" ? (
+                      <Link
+                        href={primaryActionState.href}
                         className={buttonStyles({
                           variant: "secondary",
                           fullWidth: true,
                         })}
                       >
-                        {" "}
-                        Ver detalle{" "}
-                      </Link>{" "}
-                    </div>{" "}
-                  </section>{" "}
-                </header>{" "}
-                <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                  {" "}
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    {" "}
+                        {primaryActionState.label}
+                      </Link>
+                    ) : (
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-[var(--text-primary)]">
+                            {primaryActionState.label}
+                          </p>
+                          <Badge
+                            variant={
+                              primaryActionState.state === "blocked"
+                                ? "warning"
+                                : "neutral"
+                            }
+                            size="md"
+                          >
+                            {primaryActionState.state === "blocked"
+                              ? "Bloqueada"
+                              : "Informativa"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">
+                          {primaryActionState.blockedReason ??
+                            primaryActionState.reason}
+                        </p>
+                      </div>
+                    )}
+                    <Link
+                      href={`/production/requests/${order.id}`}
+                      className={buttonStyles({
+                        variant: "primary",
+                        fullWidth: true,
+                      })}
+                    >
+                      Ver detalle
+                    </Link>
+                  </div>
+                </header>
+
+                <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
                     <div>
-                      {" "}
-                      <p className="text-sm font-medium text-[var(--text-primary)]">
-                        Seguimiento comercial
-                      </p>{" "}
+                      <p className="font-medium text-[var(--text-primary)]">
+                        Ver seguimiento operativo
+                      </p>
                       <p className="text-xs text-[var(--text-muted)]">
-                        {" "}
-                        Captura, asignación, surtido, entrega y cierre con
-                        estados visibles por etapa.{" "}
-                      </p>{" "}
-                    </div>{" "}
-                    <Badge variant={flowNarrative.flowBadgeVariant}>
-                      {flowNarrative.flowStageLabel}
-                    </Badge>{" "}
-                  </div>{" "}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {" "}
-                    {stageProgress.map((step) => (
-                      <Badge key={step.stage} variant={step.variant}>
-                        {" "}
-                        {step.step}. {step.label}{" "}
-                      </Badge>
-                    ))}{" "}
-                  </div>{" "}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {" "}
-                    <Badge
-                      variant={productLines.length > 0 ? "accent" : "neutral"}
-                    >
-                      {productLines.length.toLocaleString("es-MX")} productos
-                      independientes
-                    </Badge>{" "}
-                    <Badge
-                      variant={
-                        configuredLines.length > 0 ? "warning" : "neutral"
-                      }
-                    >
-                      {configuredLines.length.toLocaleString("es-MX")} ensambles
-                      configurados
-                    </Badge>{" "}
-                    <Badge
-                      variant={
-                        hasCompletedDirectPick
-                          ? "success"
-                          : latestPickStatus
-                            ? "warning"
-                            : "neutral"
-                      }
-                    >
-                      {" "}
-                      {hasCompletedDirectPick
-                        ? "Surtido directo validado"
-                        : latestPickStatus
-                          ? summarizePickListStatus(latestPickStatus)
-                          : "Surtido directo pendiente"}{" "}
-                    </Badge>{" "}
-                    <Badge
-                      variant={
-                        deliveredEligibility.canMarkDelivered
-                          ? "success"
-                          : "warning"
-                      }
-                    >
-                      {" "}
-                      {deliveredEligibility.canMarkDelivered
-                        ? "Entrega lista"
-                        : "Entrega bloqueada"}{" "}
-                    </Badge>{" "}
-                  </div>{" "}
-                </section>{" "}
-                <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {" "}
-                  {[
-                    {
-                      label: "Asignación",
-                      value: order.assignedToUser
-                        ? (order.assignedToUser.name ??
-                          order.assignedToUser.email ??
-                          "--")
-                        : "Sin asignar",
-                      note: order.assignedAt
-                        ? `Asignado el ${formatDateTime(order.assignedAt)}`
-                        : "Pendiente de asignación",
-                      badge: order.assignedToUser ? "success" : "neutral",
-                    },
-                    {
-                      label: "Compromiso",
-                      value: formatDate(order.dueDate),
-                      note: order.dueDate
-                        ? "Fecha compromiso"
-                        : "Sin fecha prometida",
-                      badge: order.dueDate ? "accent" : "neutral",
-                    },
-                    {
-                      label: "Ultimo movimiento",
-                      value: formatDateTime(order.updatedAt),
-                      note: "Actualizacion operativa mas reciente",
-                      badge: "neutral",
-                    },
-                    {
-                      label: "Validacion de surtido directo",
-                      value: hasCompletedDirectPick
-                        ? "Validado"
-                        : latestPickStatus
-                          ? summarizePickListStatus(latestPickStatus)
-                          : "Pendiente",
-                      note: latestPick
-                        ? `${latestPick.code} · ${latestPick.targetLocation.code} - ${latestPick.targetLocation.name}`
-                        : "Sin pick list activo",
-                      badge: hasCompletedDirectPick
-                        ? "success"
-                        : latestPickStatus
-                          ? "warning"
-                          : "neutral",
-                    },
-                    {
-                      label: "Validacion de ensamble",
-                      value: hasCompletedConfiguredAssembly
-                        ? "Validado"
-                        : configuredLines.length > 0
-                          ? "Pendiente"
-                          : "No aplica",
-                      note:
-                        configuredLines.length > 0
-                          ? `${configuredLines.length.toLocaleString("es-MX")} linea(s) configurada(s)`
-                          : "Sin ensambles configurados",
-                      badge: hasCompletedConfiguredAssembly
-                        ? "success"
-                        : configuredLines.length > 0
-                          ? "warning"
-                          : "neutral",
-                    },
-                    {
-                      label: "Validacion de entrega",
-                      value: deliveredEligibility.canMarkDelivered
-                        ? "Lista"
-                        : "Bloqueada",
-                      note: deliveredEligibility.canMarkDelivered
-                        ? "Elegible para marcar entrega"
-                        : (deliveredEligibility.deliveredBlockedReason ??
-                          "Pendiente"),
-                      badge: deliveredEligibility.canMarkDelivered
-                        ? "success"
-                        : "warning",
-                    },
-                  ].map((stat) => (
-                    <div
-                      key={stat.label}
-                      className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4"
-                    >
-                      {" "}
-                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                        {stat.label}
-                      </p>{" "}
-                      <div className="mt-2">
-                        {" "}
-                        <Badge
-                          variant={
-                            stat.badge as
-                              | "neutral"
-                              | "accent"
-                              | "success"
-                              | "warning"
-                          }
-                        >
-                          {stat.value}
-                        </Badge>{" "}
-                      </div>{" "}
-                      <p className="mt-2 text-sm text-[var(--text-muted)]">
-                        {stat.note}
-                      </p>{" "}
+                        Etapa comercial, validaciones y profundidad operativa.
+                      </p>
                     </div>
-                  ))}{" "}
-                </section>{" "}
-                <section className="grid gap-4 lg:grid-cols-2">
-                  {" "}
-                  <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">
-                    {" "}
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
-                      {" "}
-                      <div>
-                        {" "}
-                        <p className="font-medium text-[var(--text-primary)]">
-                          Productos independientes
-                        </p>{" "}
-                        <p className="text-xs text-[var(--text-muted)]">
-                          Surtido directo y validacion por pick list.
-                        </p>{" "}
-                      </div>{" "}
-                      <Badge
-                        variant={productLines.length ? "accent" : "neutral"}
-                      >
-                        {productLines.length.toLocaleString("es-MX")} lineas
-                      </Badge>{" "}
-                    </summary>{" "}
-                    <div className="border-t border-[var(--border-soft)] p-4">
-                      {" "}
-                      {productLines.length === 0 ? (
-                        <p className="text-sm text-[var(--text-muted)]">
-                          Todavia no hay productos independientes en este
-                          pedido.
-                        </p>
-                      ) : (
-                        <div className="space-y-3">
-                          {" "}
-                          {productLines.map((line: any) => {
-                            const reserved = line.pickTasks.reduce(
-                              (acc: number, task: any) =>
-                                acc + task.reservedQty,
-                              0,
-                            );
-                            const picked = line.pickTasks.reduce(
-                              (acc: number, task: any) => acc + task.pickedQty,
-                              0,
-                            );
-                            const shortQty = line.pickTasks.reduce(
-                              (acc: number, task: any) => acc + task.shortQty,
-                              0,
-                            );
-                            const currentPickList =
-                              line.pickTasks[0]?.pickList ?? null;
-                            const filteredInventory = order.warehouse
-                              ? (line.product?.inventory ?? []).filter(
-                                  (row: any) =>
-                                    row.location.warehouse.id ===
-                                    order.warehouse?.id,
-                                )
-                              : (line.product?.inventory ?? []);
-                            const available = filteredInventory.reduce(
-                              (acc: number, row: any) => acc + row.available,
-                              0,
-                            );
-                            return (
-                              <article
-                                key={line.id}
-                                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4"
-                              >
-                                {" "}
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                  {" "}
-                                  <div className="space-y-1">
-                                    {" "}
-                                    <p className="font-mono text-sm text-[var(--accent)]">
-                                      {line.product?.sku ?? "Sin SKU"}
-                                    </p>{" "}
-                                    <p className="font-medium text-[var(--text-primary)]">
-                                      {line.product?.name ??
-                                        "Producto sin nombre"}
-                                    </p>{" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      {" "}
-                                      {line.product?.referenceCode ??
-                                        line.product?.brand ??
-                                        "--"}{" "}
-                                      · {line.product?.type ?? "--"} ·{" "}
-                                      {line.product?.unitLabel ?? "unidad"}{" "}
-                                    </p>{" "}
-                                    {line.notes ? (
-                                      <p className="text-xs text-[var(--text-muted)]">
-                                        {line.notes}
-                                      </p>
-                                    ) : null}{" "}
-                                  </div>{" "}
-                                  <div className="flex flex-wrap gap-2">
-                                    {" "}
-                                    <Badge
-                                      variant={
-                                        currentPickList
-                                          ? getExecutionBadgeVariant(
-                                              currentPickList.status,
-                                            )
-                                          : "neutral"
-                                      }
-                                    >
-                                      {" "}
-                                      {currentPickList
-                                        ? summarizePickListStatus(
-                                            currentPickList.status,
-                                          )
-                                        : "Sin surtido"}{" "}
-                                    </Badge>{" "}
-                                    {currentPickList ? (
-                                      <Badge variant="accent">
-                                        {" "}
-                                        {currentPickList.code} ·{" "}
-                                        {
-                                          currentPickList.targetLocation.code
-                                        }{" "}
-                                      </Badge>
-                                    ) : null}{" "}
-                                  </div>{" "}
-                                </div>{" "}
-                                <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                                  {" "}
-                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
-                                    {" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      Solicitado
-                                    </p>{" "}
-                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                                      {" "}
-                                      {line.requestedQty.toLocaleString(
-                                        "es-MX",
-                                      )}{" "}
-                                      {line.product?.unitLabel ?? "unidad"}{" "}
-                                    </p>{" "}
-                                  </div>{" "}
-                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
-                                    {" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      Reservado
-                                    </p>{" "}
-                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                                      {reserved.toLocaleString("es-MX")}
-                                    </p>{" "}
-                                  </div>{" "}
-                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
-                                    {" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      Surtido
-                                    </p>{" "}
-                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                                      {picked.toLocaleString("es-MX")}
-                                    </p>{" "}
-                                  </div>{" "}
-                                  <div className="rounded-lg border border-[var(--border-soft)] bg-[var(--bg-surface)] p-3">
-                                    {" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      Disponible
-                                    </p>{" "}
-                                    <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                                      {available.toLocaleString("es-MX")}
-                                    </p>{" "}
-                                  </div>{" "}
-                                </div>{" "}
-                                <p className="mt-3 text-xs text-[var(--text-muted)]">
-                                  Faltante: {shortQty.toLocaleString("es-MX")}
-                                </p>{" "}
-                              </article>
-                            );
-                          })}{" "}
-                        </div>
-                      )}{" "}
-                    </div>{" "}
-                  </details>{" "}
-                  <details className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]">
-                    {" "}
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
-                      {" "}
-                      <div>
-                        {" "}
-                        <p className="font-medium text-[var(--text-primary)]">
-                          Ensambles configurados
-                        </p>{" "}
-                        <p className="text-xs text-[var(--text-muted)]">
-                          Componentes, estado y orden ligada.
-                        </p>{" "}
-                      </div>{" "}
-                      <Badge
-                        variant={configuredLines.length ? "warning" : "neutral"}
-                      >
-                        {configuredLines.length.toLocaleString("es-MX")} lineas
-                      </Badge>{" "}
-                    </summary>{" "}
-                    <div className="border-t border-[var(--border-soft)] p-4">
-                      {" "}
-                      {configuredLines.length === 0 ? (
-                        <p className="text-sm text-[var(--text-muted)]">
-                          Todavia no hay ensambles configurados en este pedido.
-                        </p>
-                      ) : (
-                        <div className="space-y-3">
-                          {" "}
-                          {configuredLines.map((line: any) => {
-                            const linkedProduction =
-                              linkedForOrder.find(
-                                (row) => row.sourceDocumentLineId === line.id,
-                              ) ?? null;
-                            const productionStatus =
-                              linkedProduction?.status ?? null;
-                            const productionPickStatus =
-                              linkedProduction?.assemblyWorkOrder?.pickStatus ??
-                              null;
-                            const configurationStateLabel = linkedProduction
-                              ? productionStatus === "COMPLETADA"
-                                ? "Completada"
-                                : productionStatus === "CANCELADA"
-                                  ? "Cancelada"
-                                  : "En proceso"
-                              : "Pendiente de generar";
-                            return (
-                              <article
-                                key={line.id}
-                                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4"
-                              >
-                                {" "}
-                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                  {" "}
-                                  <div className="space-y-1">
-                                    {" "}
-                                    <p className="font-semibold text-[var(--text-primary)]">
-                                      {" "}
-                                      {
-                                        line.assemblyConfiguration
-                                          ?.entryFittingProduct.sku
-                                      }{" "}
-                                      +{" "}
-                                      {
-                                        line.assemblyConfiguration?.hoseProduct
-                                          .sku
-                                      }{" "}
-                                      +{" "}
-                                      {
-                                        line.assemblyConfiguration
-                                          ?.exitFittingProduct.sku
-                                      }{" "}
-                                    </p>{" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      {" "}
-                                      Componentes:{" "}
-                                      {
-                                        line.assemblyConfiguration
-                                          ?.entryFittingProduct.name
-                                      }{" "}
-                                      ·{" "}
-                                      {
-                                        line.assemblyConfiguration?.hoseProduct
-                                          .name
-                                      }{" "}
-                                      ·{" "}
-                                      {
-                                        line.assemblyConfiguration
-                                          ?.exitFittingProduct.name
-                                      }{" "}
-                                    </p>{" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      {" "}
-                                      Cantidad solicitada/configurada:{" "}
-                                      {line.assemblyConfiguration
-                                        ?.assemblyQuantity ?? "--"}{" "}
-                                      · Longitud:{" "}
-                                      {line.assemblyConfiguration?.hoseLength ??
-                                        "--"}{" "}
-                                      · Total de manguera:{" "}
-                                      {line.assemblyConfiguration
-                                        ?.totalHoseRequired ?? "--"}{" "}
-                                    </p>{" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      Referencia de configuracion:{" "}
-                                      {line.assemblyConfiguration
-                                        ?.sourceDocumentRef ?? "--"}
-                                    </p>{" "}
-                                    <p className="text-xs text-[var(--text-muted)]">
-                                      Notas:{" "}
-                                      {line.assemblyConfiguration?.notes ??
-                                        line.notes ??
-                                        "Sin notas"}
-                                    </p>{" "}
-                                  </div>{" "}
-                                  <div className="flex flex-wrap gap-2">
-                                    {" "}
-                                    <Badge
-                                      variant={getExecutionBadgeVariant(
-                                        productionStatus,
-                                      )}
-                                    >
-                                      Orden {configurationStateLabel}
-                                    </Badge>{" "}
-                                    <Badge
-                                      variant={getExecutionBadgeVariant(
-                                        productionPickStatus,
-                                      )}
-                                    >
-                                      {productionPickStatus
-                                        ? `Pick ${productionPickStatus}`
-                                        : "Sin pick"}
-                                    </Badge>{" "}
-                                    {linkedProduction ? (
-                                      <Link
-                                        href={`/production/orders/${linkedProduction.id}`}
-                                        className={buttonStyles({
-                                          variant: "secondary",
-                                          size: "sm",
-                                        })}
-                                      >
-                                        {" "}
-                                        {linkedProduction.code}{" "}
-                                      </Link>
-                                    ) : (
-                                      <Badge variant="neutral">
-                                        Sin orden ligada
-                                      </Badge>
-                                    )}{" "}
-                                  </div>{" "}
-                                </div>{" "}
-                                {linkedProduction?.assemblyWorkOrder
-                                  ?.pickStatus ? (
-                                  <p className="mt-3 text-xs text-[var(--text-muted)]">
-                                    {" "}
-                                    Estado de pick de ensamble:{" "}
-                                    {
-                                      linkedProduction.assemblyWorkOrder
-                                        .pickStatus
-                                    }{" "}
-                                  </p>
-                                ) : null}{" "}
-                              </article>
-                            );
-                          })}{" "}
-                        </div>
-                      )}{" "}
-                    </div>{" "}
-                  </details>{" "}
-                </section>{" "}
-                <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                  {" "}
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    {" "}
-                    <div>
-                      {" "}
-                      <p className="text-sm font-medium text-[var(--text-primary)]">
-                        Resumen operativo persistente
-                      </p>{" "}
-                      <p className="text-xs text-[var(--text-muted)]">
-                        {" "}
-                        Asignacion, compromiso, ultimo movimiento y validaciones
-                        criticas del pedido.{" "}
-                      </p>{" "}
-                    </div>{" "}
                     <Badge variant={flowNarrative.flowBadgeVariant}>
                       {flowNarrative.flowStageLabel}
-                    </Badge>{" "}
-                  </div>{" "}
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {" "}
-                    <div>
-                      {" "}
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Asignacion
-                      </p>{" "}
-                      <p className="text-sm text-[var(--text-primary)]">
-                        {" "}
-                        {order.assignedToUser
-                          ? (order.assignedToUser.name ??
-                            order.assignedToUser.email ??
-                            "--")
-                          : "Sin asignar"}{" "}
-                      </p>{" "}
-                    </div>{" "}
-                    <div>
-                      {" "}
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Compromiso
-                      </p>{" "}
-                      <p className="text-sm text-[var(--text-primary)]">
-                        {formatDate(order.dueDate)}
-                      </p>{" "}
-                    </div>{" "}
-                    <div>
-                      {" "}
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Ultimo movimiento
-                      </p>{" "}
-                      <p className="text-sm text-[var(--text-primary)]">
-                        {formatDateTime(order.updatedAt)}
-                      </p>{" "}
-                    </div>{" "}
-                    <div>
-                      {" "}
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Entrega
-                      </p>{" "}
-                      <p className="text-sm text-[var(--text-primary)]">
-                        {" "}
-                        {deliveredEligibility.canMarkDelivered
-                          ? "Lista para entrega"
-                          : (deliveredEligibility.deliveredBlockedReason ??
-                            "Bloqueada")}{" "}
-                      </p>{" "}
-                    </div>{" "}
-                  </div>{" "}
-                </section>{" "}
+                    </Badge>
+                  </summary>
+                  <div className="border-t border-[var(--border-soft)] p-4">
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Seguimiento comercial
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {stageProgress.map((step) => (
+                            <Badge key={step.stage} variant={step.variant}>
+                              {step.step}. {step.label}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                            Validaciones
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Badge
+                              variant={
+                                hasCompletedDirectPick ? "success" : "warning"
+                              }
+                            >
+                              {hasCompletedDirectPick
+                                ? "Surtido directo validado"
+                                : latestPickStatus
+                                  ? summarizePickListStatus(latestPickStatus)
+                                  : "Surtido directo pendiente"}
+                            </Badge>
+                            <Badge
+                              variant={
+                                hasCompletedConfiguredAssembly
+                                  ? "success"
+                                  : configuredLines.length > 0
+                                    ? "warning"
+                                    : "neutral"
+                              }
+                            >
+                              {hasCompletedConfiguredAssembly
+                                ? "Ensamble validado"
+                                : configuredLines.length > 0
+                                  ? "Ensamble pendiente"
+                                  : "Sin ensamble"}
+                            </Badge>
+                            <Badge
+                              variant={
+                                deliveredEligibility.canMarkDelivered
+                                  ? "success"
+                                  : "warning"
+                              }
+                            >
+                              {deliveredEligibility.canMarkDelivered
+                                ? "Entrega lista"
+                                : "Entrega bloqueada"}
+                            </Badge>
+                          </div>
+                          <p className="mt-3 text-xs text-[var(--text-muted)]">
+                            {latestPick
+                              ? `${latestPick.code} · ${latestPick.targetLocation.code} - ${latestPick.targetLocation.name}`
+                              : "Sin pick list activo"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                            Profundidad operativa
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Badge
+                              variant={productLines.length > 0 ? "accent" : "neutral"}
+                            >
+                              {productLines.length.toLocaleString("es-MX")} productos
+                            </Badge>
+                            <Badge
+                              variant={
+                                configuredLines.length > 0 ? "warning" : "neutral"
+                              }
+                            >
+                              {configuredLines.length.toLocaleString("es-MX")} ensambles
+                            </Badge>
+                          </div>
+                          <p className="mt-3 text-sm text-[var(--text-muted)]">
+                            {hasNoLines
+                              ? "Sin líneas"
+                              : workType.detail}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                          Resumen operativo persistente
+                        </p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                          <div>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              Asignación
+                            </p>
+                            <p className="text-sm text-[var(--text-primary)]">
+                              {order.assignedToUser
+                                ? (order.assignedToUser.name ??
+                                  order.assignedToUser.email ??
+                                  "--")
+                                : "Sin asignar"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              Compromiso
+                            </p>
+                            <p className="text-sm text-[var(--text-primary)]">
+                              {formatDate(order.dueDate)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              Último movimiento
+                            </p>
+                            <p className="text-sm text-[var(--text-primary)]">
+                              {formatDateTime(order.updatedAt)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              Entrega
+                            </p>
+                            <p className="text-sm text-[var(--text-primary)]">
+                              {deliveredEligibility.canMarkDelivered
+                                ? "Lista para entrega"
+                                : (deliveredEligibility.deliveredBlockedReason ??
+                                  "Bloqueada")}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </details>
               </article>
             );
           })

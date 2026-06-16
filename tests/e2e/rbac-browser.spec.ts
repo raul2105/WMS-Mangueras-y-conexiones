@@ -26,6 +26,10 @@ test.describe("RBAC en navegador por rol", () => {
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectAllowed(page, "/audit", /Auditoria/i);
+    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expect(page.getByText("Vista administrativa", { exact: true })).toBeVisible();
+    await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
+    await expect(page.getByRole("table", { name: /Tabla administrativa de pedidos/i })).toBeVisible();
   });
 
   test("MANAGER puede acceder a inventario critico y auditoria", async ({
@@ -37,6 +41,10 @@ test.describe("RBAC en navegador por rol", () => {
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectAllowed(page, "/audit", /Auditoria/i);
+    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expect(page.getByText("Vista administrativa", { exact: true })).toBeVisible();
+    await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
+    await expect(page.getByRole("table", { name: /Tabla administrativa de pedidos/i })).toBeVisible();
   });
 
   test("WAREHOUSE_OPERATOR no accede a auditoria pero si a operaciones fisicas", async ({
@@ -48,7 +56,7 @@ test.describe("RBAC en navegador por rol", () => {
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectForbidden(page, "/audit");
-    await expectAllowed(page, "/purchasing/orders", /Órdenes de Compra/i);
+    await expectAllowed(page, "/purchasing/orders", /^Órdenes de compra$/i);
     await expect(page.getByRole("link", { name: /\+ Nueva OC/i })).toHaveCount(
       0,
     );
@@ -66,6 +74,8 @@ test.describe("RBAC en navegador por rol", () => {
     await expectForbidden(page, "/inventory/transfer");
     await expectForbidden(page, "/inventory/pick");
     await expectForbidden(page, "/audit");
+    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
   });
 
   test("KAN-55/KAN-63/KAN-81 SALES_EXECUTIVE opera el flujo nuevo de pedidos", async ({
@@ -101,13 +111,10 @@ test.describe("RBAC en navegador por rol", () => {
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /^Disponibilidad\s/i }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: /^Equivalencias\s/i }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /^Nuevo pedido\s/i }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Inventario/i })).toHaveCount(
       0,
     );

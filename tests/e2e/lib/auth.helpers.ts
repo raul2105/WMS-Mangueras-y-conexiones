@@ -20,7 +20,7 @@ export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navIt
   SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 8 },
   MANAGER: { name: "Manager WMS", email: "manager@scmayher.com", navItems: 7 },
   WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 4 },
-  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 2 },
+  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 3 },
 };
 
 export async function loginAs(
@@ -61,7 +61,7 @@ export async function expectAllowed(
 ) {
   await page.goto(route);
   await expect(page).toHaveURL(new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  await expect(page.getByRole("heading", { name: expectedHeading })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: expectedHeading })).toBeVisible();
 }
 
 export async function expectRedirectedAllowed(
@@ -72,7 +72,7 @@ export async function expectRedirectedAllowed(
 ) {
   await page.goto(route);
   await expect(page).toHaveURL(expectedUrl);
-  await expect(page.getByRole("heading", { name: expectedHeading })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: expectedHeading })).toBeVisible();
 }
 
 export async function expectForbidden(

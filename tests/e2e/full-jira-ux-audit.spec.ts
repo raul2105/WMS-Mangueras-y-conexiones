@@ -228,7 +228,7 @@ test.describe
     ).toBeVisible();
     await expect(
       page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i }),
-    ).toHaveCount(0);
+    ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /^Disponibilidad\s/i }),
     ).toHaveCount(0);
@@ -238,6 +238,7 @@ test.describe
     await expect(
       page.getByRole("link", { name: /\+ Nuevo pedido/i }),
     ).toBeVisible();
+    await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Inventario/i })).toHaveCount(
       0,
     );
@@ -326,7 +327,7 @@ test.describe
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
-    await expect(page.getByText(/¿No encuentras al cliente\? Regístralo/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Registrar cliente/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Crear pedido/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /← Pedidos/i })).toBeVisible();
   });

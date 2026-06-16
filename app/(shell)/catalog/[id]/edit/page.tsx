@@ -47,7 +47,7 @@ async function updateProduct(id: string, formData: FormData) {
   }
 
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
-    const purchaseMoq = purchaseMoqRaw ? Number(purchaseMoqRaw.replace(",", ".")) : null;
+  const purchaseMoq = purchaseMoqRaw ? Number(purchaseMoqRaw.replace(",", ".")) : null;
   const price = priceRaw ? Number(priceRaw.replace(",", ".")) : null;
 
   // Resolve brand snapshot from SupplierBrand
@@ -116,6 +116,7 @@ async function updateProduct(id: string, formData: FormData) {
       imageUrl: resolvedImageUrl || null,
       subcategory,
       base_cost: Number.isFinite(base_cost ?? NaN) ? base_cost : null,
+      purchaseMoq: Number.isFinite(purchaseMoq ?? NaN) ? purchaseMoq : null,
       price: Number.isFinite(price ?? NaN) ? price : null,
       attributes: attributesRaw,
       categoryId: categoryId ?? null,

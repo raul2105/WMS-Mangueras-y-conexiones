@@ -14,10 +14,21 @@ const FIXTURE = {
   equivalentSku: "E2E-HANDOFF-EQUIV-SKU",
   equivalentReference: "E2E-HANDOFF-EQUIV-REF",
   equivalentName: "Manguera Handoff Alterna",
+  customerCode: "E2E-HANDOFF-CUST",
+  customerName: "Cliente Handoff E2E",
 };
 
 async function cleanupFixtures() {
-  const [products, warehouses, locations] = await Promise.all([
+  const [customers, products, warehouses, locations] = await Promise.all([
+    prisma.customer.findMany({
+      where: {
+        OR: [
+          { code: FIXTURE.customerCode },
+          { name: FIXTURE.customerName },
+        ],
+      },
+      select: { id: true },
+    }),
     prisma.product.findMany({
       where: {
         sku: {
@@ -36,9 +47,17 @@ async function cleanupFixtures() {
     }),
   ]);
 
+  const customerIds = customers.map((customer) => customer.id);
   const productIds = products.map((product) => product.id);
   const warehouseIds = warehouses.map((warehouse) => warehouse.id);
   const locationIds = locations.map((location) => location.id);
+
+  if (customerIds.length > 0) {
+    await prisma.salesInternalOrder.deleteMany({
+      where: { customerId: { in: customerIds } },
+    });
+    await prisma.customer.deleteMany({ where: { id: { in: customerIds } } });
+  }
 
   if (productIds.length > 0) {
     await prisma.productEquivalence.deleteMany({
@@ -118,6 +137,15 @@ async function seedFixtures() {
     select: { id: true, sku: true },
   });
 
+  const customer = await prisma.customer.create({
+    data: {
+      code: FIXTURE.customerCode,
+      name: FIXTURE.customerName,
+      isActive: true,
+    },
+    select: { id: true },
+  });
+
   await prisma.inventory.createMany({
     data: [
       {
@@ -149,10 +177,12 @@ async function seedFixtures() {
   });
 
   return {
+    warehouseId: warehouse.id,
     baseProductId: baseProduct.id,
     baseSku: baseProduct.sku,
     equivalentProductId: equivalentProduct.id,
     equivalentSku: equivalentProduct.sku,
+    customerId: customer.id,
   };
 }
 
@@ -234,6 +264,30 @@ test.describe.serial("product aware handoff", () => {
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /Cambiar producto/i }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Quitar selección/i }).first()).toBeVisible();
+  });
+
+  test("a selected product can be removed before submit and the request still saves", async ({ page }) => {
+    await loginAs(page, "SALES_EXECUTIVE", `/catalog/${fixture.baseProductId}`);
+    await page.goto(`/catalog/${fixture.baseProductId}`);
+
+    await page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.baseName}`, "i") }).click();
+    await expect(page).toHaveURL(/\/production\/requests\/new\?.*productId=/);
+    await page.getByRole("link", { name: /Quitar selección/i }).first().click();
+    await expect(page).toHaveURL(/\/production\/requests\/new(?:\?.*)?$/);
+    await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toHaveCount(0);
+
+    await page.getByLabel(/Selecciona o crea el cliente/i).fill(FIXTURE.customerName);
+    await expect(page.getByRole("button", { name: new RegExp(FIXTURE.customerCode, "i") })).toBeVisible();
+    await page.getByRole("button", { name: new RegExp(FIXTURE.customerCode, "i") }).click();
+
+    await page.locator('select[name="warehouseId"]').selectOption(fixture.warehouseId);
+    await page.locator('input[name="dueDate"]').fill("2026-06-25");
+    await page.getByRole("button", { name: /Crear pedido/i }).click();
+
+    await expect(page).toHaveURL(/\/production\/requests\/.+\?ok=/);
+    await expect(page.getByRole("heading", { name: /Productos independientes/i })).toBeVisible();
+    await expect(page.getByText(FIXTURE.baseSku)).toHaveCount(0);
+    await expect(page.getByText(/Todavia no hay productos independientes en este pedido/i)).toBeVisible();
   });
 
   test("manager can use the handoff and mobile layout remains usable", async ({ page }) => {

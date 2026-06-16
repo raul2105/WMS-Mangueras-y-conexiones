@@ -10,10 +10,14 @@ describe("KAN-52 flow narrative contract", () => {
   it("uses shared flow narrative helper in requests list and detail", () => {
     const listContent = readWorkspaceFile("app/(shell)/production/requests/page.tsx");
     const detailContent = readWorkspaceFile("app/(shell)/production/requests/[id]/page.tsx");
+    const consoleContent = readWorkspaceFile("lib/sales/console.ts");
 
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(detailContent).toContain("getSalesOrderFlowNarrative");
-    expect(detailContent).toContain("Siguiente acción");
+    expect(detailContent).toContain("getSalesConsoleTimelineItems");
+    expect(detailContent).toContain("Timeline operativo");
+    expect(consoleContent).toContain("Surtido / fulfillment");
+    expect(consoleContent).toContain("Cancelación");
   });
 
   it("bridges dashboard queue with homologated flow stage labels", () => {
@@ -38,6 +42,7 @@ describe("KAN-52 flow narrative contract", () => {
     expect(detailContent).toContain("roles: sessionCtx.roles");
     expect(detailContent).toContain("getMarkDeliveredEligibility");
     expect(detailContent).toContain("pulledAt: order.pulledAt");
+    expect(detailContent).toContain("latestPickUpdatedAt");
     expect(detailContent).toContain("Siguiente acción");
   });
 });

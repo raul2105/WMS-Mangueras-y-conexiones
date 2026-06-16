@@ -3,7 +3,10 @@ import type {
   SalesOrderFlowStage,
   SalesOrderPrimaryCtaCode,
 } from "@/lib/sales/internal-orders";
-import { SALES_ORDER_FLOW_STAGE_LABELS } from "@/lib/sales/internal-orders";
+import {
+  SALES_ORDER_FLOW_STAGE_LABELS,
+  summarizePickListStatus,
+} from "@/lib/sales/internal-orders";
 
 export const SALES_CONSOLE_STAGE_FLOW: SalesOrderFlowStage[] = [
   "captura",
@@ -38,6 +41,21 @@ export type SalesConsolePrimaryActionState = {
   href: string;
   code: SalesOrderPrimaryCtaCode;
   requiresFormSubmit: boolean;
+};
+
+export type SalesConsoleTimelineStage =
+  | "captura"
+  | "asignacion"
+  | "surtido"
+  | "entrega"
+  | "cancelacion";
+
+export type SalesConsoleTimelineItem = {
+  stage: SalesConsoleTimelineStage;
+  label: string;
+  detail: string;
+  at: Date | string | null;
+  variant: SalesConsoleWorkTypeVariant;
 };
 
 export function getSalesConsoleWorkType(input: {
@@ -113,6 +131,72 @@ export function getSalesConsoleStageProgress(currentStage: SalesOrderFlowStage):
           : "neutral",
     isCurrent: stage === currentStage,
   }));
+}
+
+export function getSalesConsoleTimelineItems(input: {
+  createdAt: Date | string;
+  confirmedAt?: Date | string | null;
+  assignedAt?: Date | string | null;
+  pulledAt?: Date | string | null;
+  latestPickStatus?: string | null;
+  latestPickUpdatedAt?: Date | string | null;
+  deliveredAt?: Date | string | null;
+  cancelledAt?: Date | string | null;
+}): SalesConsoleTimelineItem[] {
+  const assignmentAt = input.assignedAt ?? input.confirmedAt ?? input.pulledAt ?? null;
+  const fulfillmentAt = input.latestPickUpdatedAt ?? input.pulledAt ?? null;
+  const fulfillmentDetail = input.latestPickStatus
+    ? `Surtido directo: ${summarizePickListStatus(input.latestPickStatus)}`
+    : "Sin surtido directo registrado";
+
+  return [
+    {
+      stage: "captura",
+      label: "Captura",
+      detail: "Pedido registrado en la cola comercial",
+      at: input.createdAt,
+      variant: "accent",
+    },
+    {
+      stage: "asignacion",
+      label: "Asignación",
+      detail: input.assignedAt
+        ? "Pedido tomado por un responsable"
+        : input.confirmedAt
+          ? "Pedido confirmado, pendiente de asignación"
+          : "Pendiente de confirmación y asignación",
+      at: assignmentAt,
+      variant: assignmentAt ? "warning" : "neutral",
+    },
+    {
+      stage: "surtido",
+      label: "Surtido / fulfillment",
+      detail: fulfillmentDetail,
+      at: fulfillmentAt,
+      variant:
+        input.latestPickStatus === "COMPLETED"
+          ? "success"
+          : input.latestPickStatus
+            ? "warning"
+            : "neutral",
+    },
+    {
+      stage: "entrega",
+      label: "Entrega",
+      detail: input.deliveredAt
+        ? "Entrega confirmada al cliente"
+        : "Pendiente de entrega",
+      at: input.deliveredAt ?? null,
+      variant: input.deliveredAt ? "success" : "neutral",
+    },
+    {
+      stage: "cancelacion",
+      label: "Cancelación",
+      detail: input.cancelledAt ? "Pedido cancelado" : "Solo aplica si se cancela",
+      at: input.cancelledAt ?? null,
+      variant: input.cancelledAt ? "danger" : "neutral",
+    },
+  ];
 }
 
 export function resolveSalesConsolePrimaryActionState(input: {

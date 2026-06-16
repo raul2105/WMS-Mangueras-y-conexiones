@@ -5,6 +5,7 @@ export type ProductSearchCandidate = {
   sku: string;
   referenceCode: string | null;
   name: string;
+  unitLabel?: string | null;
   brand: string | null;
   description: string | null;
   type: string;
@@ -108,6 +109,7 @@ function buildDefaultProductSearchSelect(warehouseId?: string) {
     sku: true,
     referenceCode: true,
     name: true,
+    unitLabel: true,
     brand: true,
     description: true,
     type: true,

@@ -23,7 +23,6 @@ const ROLE_CHECKS: Record<
       ["/inventory", /Inventario/i],
       ["/warehouse", /^Almacenes$/],
       ["/production", /Produccion/i],
-      ["/purchasing", /Compras/i],
       ["/audit", /Auditoria/i],
     ],
     blockedRoutes: [],
@@ -35,7 +34,6 @@ const ROLE_CHECKS: Record<
       ["/inventory", /Inventario/i],
       ["/warehouse", /^Almacenes$/],
       ["/production", /Produccion/i],
-      ["/purchasing", /Compras/i],
       ["/sales/customers", /Clientes/i],
       ["/audit", /Auditoria/i],
     ],
@@ -45,7 +43,6 @@ const ROLE_CHECKS: Record<
     home: "/inventory",
     visibleRoutes: [
       ["/inventory", /Inventario/i],
-      ["/purchasing/orders", /Órdenes de compra/i],
       ["/production", /Produccion/i],
     ],
     blockedRoutes: [
@@ -90,6 +87,18 @@ test.describe("full role matrix", () => {
 
       for (const [route, heading] of config.visibleRoutes) {
         await expectAllowed(page, route, heading);
+      }
+
+      if (role === "SYSTEM_ADMIN" || role === "MANAGER") {
+        await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+        await expect(page.getByText("Vista administrativa", { exact: true })).toBeVisible();
+        await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
+        await expect(page.getByRole("table", { name: /Tabla administrativa de pedidos/i })).toBeVisible();
+      }
+
+      if (role === "SALES_EXECUTIVE") {
+        await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+        await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
       }
 
       for (const route of config.blockedRoutes) {

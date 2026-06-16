@@ -104,12 +104,13 @@ test.describe("sales commercial flow", () => {
     await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
     await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Pedidos$/i })).toBeVisible();
     await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes/i })).toBeVisible();
-    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i })).toHaveCount(0);
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i })).toBeVisible();
     await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Disponibilidad/i })).toHaveCount(0);
     await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Equivalencias/i })).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: /\+ Nuevo pedido/i }),
     ).toBeVisible();
+    await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /Inventario/i })).toHaveCount(
       0,
     );
@@ -133,7 +134,7 @@ test.describe("sales commercial flow", () => {
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
-    await expect(page.getByText(/¿No encuentras al cliente\? Regístralo/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Registrar cliente/i })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: /2\. Datos del pedido/i })).toBeVisible();
     await expect(page.getByLabel(/Almacén/i)).toBeVisible();
     await expect(page.getByLabel(/Fecha compromiso/i)).toBeVisible();
@@ -197,12 +198,6 @@ test.describe("sales commercial flow", () => {
     await expect(
       page.getByRole("heading", { name: /Pedidos comerciales/i }),
     ).toBeVisible();
-    await expect(
-      page.getByTestId("requests-quick-filters").getByRole("link", {
-        name: /^Mis pedidos$/,
-      }),
-    ).toBeVisible();
-    await expect(page.getByRole("link", { name: /Ver detalle/i }).first()).toBeVisible();
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(410);
   });
@@ -218,6 +213,10 @@ test.describe("sales commercial flow", () => {
     ).toBeVisible();
     await expect(
       page.locator("summary").filter({ hasText: /Vista administrativa/i }),
+    ).toBeVisible();
+    await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
+    await expect(
+      page.getByRole("table", { name: /Tabla administrativa de pedidos/i }),
     ).toBeVisible();
 
     await page.goto("/sales");

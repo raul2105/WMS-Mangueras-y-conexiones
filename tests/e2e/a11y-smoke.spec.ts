@@ -31,6 +31,14 @@ const A11Y_ROUTES: A11yRoute[] = [
       await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
       await page.locator('[data-testid="requests-more-filters"] summary').click();
       await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
+      await expect(page.getByTestId("request-card").first()).toBeVisible();
+      await expect(
+        page.getByTestId("request-card").first().getByText(
+          "Ver seguimiento operativo",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
     },
   },
   {

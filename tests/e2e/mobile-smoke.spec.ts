@@ -52,10 +52,23 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
           await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
           await page.locator('[data-testid="requests-more-filters"] summary').click();
           await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
+          await expect(page.getByTestId("request-card").first()).toBeVisible();
+          await expect(
+            page.getByTestId("request-card").first().getByText(
+              "Ver seguimiento operativo",
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
           const quickFiltersHeight = await page
             .getByTestId("requests-quick-filters")
             .boundingBox();
           expect(quickFiltersHeight?.height ?? 0).toBeLessThan(120);
+          const firstCardHeight = await page
+            .getByTestId("request-card")
+            .first()
+            .boundingBox();
+          expect(firstCardHeight?.height ?? 0).toBeLessThan(520);
         }
         if (path === "/production/requests/new" && role === "SALES_EXECUTIVE") {
           await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();

@@ -17,6 +17,12 @@ type ProductLineInput = {
   notes?: string | null;
 };
 
+type InitialProductLineInput = {
+  productId: string;
+  requestedQty: number;
+  notes?: string | null;
+};
+
 type AssemblyLineInput = {
   orderId: string;
   warehouseId: string;
@@ -442,6 +448,84 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
   return pickList;
 }
 
+function assertValidRequestedQty(requestedQty: number) {
+  if (!Number.isFinite(requestedQty) || requestedQty <= 0) {
+    throw new InventoryServiceError("INVALID_QTY", "La cantidad solicitada debe ser mayor que cero");
+  }
+}
+
+function isInventoryServiceError(error: unknown, code: string) {
+  return error instanceof InventoryServiceError && error.code === code;
+}
+
+async function createSalesRequestProductLineInTx(
+  tx: Tx,
+  prisma: PrismaClient,
+  input: ProductLineInput,
+) {
+  const order = await ensureEditableOrder(tx, input.orderId);
+  assertValidRequestedQty(input.requestedQty);
+
+  const product = await tx.product.findUnique({
+    where: { id: input.productId },
+    select: { id: true, sku: true, name: true },
+  });
+  if (!product) {
+    throw new InventoryServiceError("PRODUCT_NOT_FOUND", "Producto no encontrado");
+  }
+
+  const line = await tx.salesInternalOrderLine.create({
+    data: {
+      orderId: order.id,
+      lineKind: "PRODUCT",
+      productId: product.id,
+      requestedQty: input.requestedQty,
+      notes: input.notes ?? null,
+    },
+    select: { id: true },
+  });
+
+  await rebuildDraftProductPickList(tx, prisma, order.id);
+
+  await createAuditLogSafeWithDb({
+    entityType: "SALES_INTERNAL_ORDER",
+    entityId: order.id,
+    action: "ADD_PRODUCT_LINE",
+    actor: "system",
+    source: "sales/request-service",
+    after: {
+      lineId: line.id,
+      productId: product.id,
+      productSku: product.sku,
+      productName: product.name,
+      requestedQty: input.requestedQty,
+    },
+  }, tx);
+
+  return line;
+}
+
+async function tryCreateInitialSalesRequestProductLineInTx(
+  tx: Tx,
+  prisma: PrismaClient,
+  orderId: string,
+  input: InitialProductLineInput,
+) {
+  try {
+    return await createSalesRequestProductLineInTx(tx, prisma, {
+      orderId,
+      productId: input.productId,
+      requestedQty: input.requestedQty,
+      notes: input.notes ?? null,
+    });
+  } catch (error) {
+    if (isInventoryServiceError(error, "PRODUCT_NOT_FOUND")) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function createSalesRequestDraftHeader(
   prisma: PrismaClient,
   args: {
@@ -453,6 +537,7 @@ export async function createSalesRequestDraftHeader(
     notes?: string | null;
     requestedByUserId?: string | null;
     requestedByRoles?: string[] | null;
+    initialProductLine?: InitialProductLineInput | null;
   }
 ) {
   const perf = startPerf("sales.create_request_draft_header");
@@ -510,6 +595,14 @@ export async function createSalesRequestDraftHeader(
     });
     createPerf.end({ orderId: created.id });
 
+    if (args.initialProductLine) {
+      await tryCreateInitialSalesRequestProductLineInTx(tx, prisma, created.id, {
+        productId: args.initialProductLine.productId,
+        requestedQty: args.initialProductLine.requestedQty,
+        notes: args.initialProductLine.notes ?? null,
+      });
+    }
+
     const auditPerf = startPerf("sales.create_request_draft_header.audit");
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
@@ -524,6 +617,12 @@ export async function createSalesRequestDraftHeader(
         warehouseId: args.warehouseId,
         dueDate: args.dueDate.toISOString(),
         assignedToUserId: shouldAutoAssignToRequester ? args.requestedByUserId : null,
+        initialProductLine: args.initialProductLine
+          ? {
+              productId: args.initialProductLine.productId,
+              requestedQty: args.initialProductLine.requestedQty,
+            }
+          : null,
       },
     }, tx);
     auditPerf.end();
@@ -535,35 +634,7 @@ export async function createSalesRequestDraftHeader(
 
 export async function addSalesRequestProductLine(prisma: PrismaClient, input: ProductLineInput) {
   return prisma.$transaction(async (tx) => {
-    const order = await ensureEditableOrder(tx, input.orderId);
-
-    const line = await tx.salesInternalOrderLine.create({
-      data: {
-        orderId: order.id,
-        lineKind: "PRODUCT",
-        productId: input.productId,
-        requestedQty: input.requestedQty,
-        notes: input.notes ?? null,
-      },
-      select: { id: true },
-    });
-
-    await rebuildDraftProductPickList(tx, prisma, order.id);
-
-    await createAuditLogSafeWithDb({
-      entityType: "SALES_INTERNAL_ORDER",
-      entityId: order.id,
-      action: "ADD_PRODUCT_LINE",
-      actor: "system",
-      source: "sales/request-service",
-      after: {
-        lineId: line.id,
-        productId: input.productId,
-        requestedQty: input.requestedQty,
-      },
-    }, tx);
-
-    return line;
+    return createSalesRequestProductLineInTx(tx, prisma, input);
   });
 }
 

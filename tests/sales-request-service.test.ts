@@ -220,6 +220,103 @@ describe("sales request service", () => {
     expect(inventoryB?.available).toBe(5);
   });
 
+  it("creates the request header and initial product line atomically when a product draft is provided", async () => {
+    const { warehouse, productA } = await createRequestFixture();
+
+    const created = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente con línea inicial",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      notes: "Pedido con línea sugerida",
+      initialProductLine: {
+        productId: productA.id,
+        requestedQty: 2,
+        notes: "Línea comercial inicial",
+      },
+    });
+
+    const saved = await prisma.salesInternalOrder.findUnique({
+      where: { id: created.id },
+      select: {
+        id: true,
+        lines: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            productId: true,
+            requestedQty: true,
+            notes: true,
+            product: { select: { sku: true } },
+          },
+        },
+      },
+    });
+
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: created.id },
+      select: { id: true, status: true },
+    });
+
+    expect(saved?.lines).toHaveLength(1);
+    expect(saved?.lines[0]?.productId).toBe(productA.id);
+    expect(saved?.lines[0]?.requestedQty).toBe(2);
+    expect(saved?.lines[0]?.notes).toBe("Línea comercial inicial");
+    expect(saved?.lines[0]?.product?.sku).toBe("SKU-SURT-01");
+    expect(pickList?.status).toBe("DRAFT");
+  });
+
+  it("keeps header-only creation valid when no initial product is provided", async () => {
+    const { warehouse } = await createRequestFixture();
+
+    const created = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente sin línea inicial",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      notes: "Pedido manual",
+    });
+
+    const saved = await prisma.salesInternalOrder.findUnique({
+      where: { id: created.id },
+      select: {
+        id: true,
+        lines: {
+          select: { id: true },
+        },
+      },
+    });
+
+    expect(saved?.id).toBe(created.id);
+    expect(saved?.lines).toHaveLength(0);
+  });
+
+  it("falls back to header-only creation when the initial product context cannot be resolved", async () => {
+    const { warehouse } = await createRequestFixture();
+
+    const created = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente con contexto inválido",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      notes: "Pedido con fallback seguro",
+      initialProductLine: {
+        productId: "missing-product-id",
+        requestedQty: 1,
+        notes: "No debe bloquear la captura manual",
+      },
+    });
+
+    const saved = await prisma.salesInternalOrder.findUnique({
+      where: { id: created.id },
+      select: {
+        id: true,
+        lines: {
+          select: { id: true },
+        },
+      },
+    });
+
+    expect(saved?.id).toBe(created.id);
+    expect(saved?.lines).toHaveLength(0);
+  });
+
   it("releases reserved shortfall when a direct pick task is confirmed as partial", async () => {
     const { order, productA, storageA, staging } = await createRequestFixture();
 

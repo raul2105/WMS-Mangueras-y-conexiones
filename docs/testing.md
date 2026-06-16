@@ -5,8 +5,8 @@ Este repositorio usa PostgreSQL como base canónica de pruebas de backend.
 ## Prerrequisitos locales
 
 - Node.js 22+
-- PostgreSQL local o contenedor en `127.0.0.1:5432`
 - `DATABASE_URL` con formato `postgres://` o `postgresql://`
+- AWS Postgres como objetivo canónico de validación
 
 Ejemplo:
 
@@ -26,6 +26,15 @@ npm run db:push
 
 `env:postgres:check` valida formato/campos de `DATABASE_URL`.  
 `env:postgres:tcp` valida además conectividad TCP real al host/puerto.
+
+Vitest usa AWS Postgres con aislamiento por esquema como ruta canónica de prueba:
+
+```bash
+npx vitest run tests/sales-request-service.test.ts
+npm run test:postgres -- tests/sales-request-service.test.ts
+```
+
+Ambos comandos resuelven el mismo backend Postgres aislado. El wrapper `npm run test:postgres` sigue siendo la ruta preferida para baterías grandes o ejecuciones repetibles.
 
 ## Suites principales
 
@@ -96,8 +105,8 @@ Si faltan credenciales de auth, `smoke:web` reporta `SKIPPED` explícito y no de
 
 ## Evidencia mínima reproducible
 
-- Local PostgreSQL:
-  - `env:postgres:check`, `env:postgres:tcp`, `prisma:*`, `db:push`, `test:regression:postgres`, `build`.
+- AWS Postgres:
+  - `env:postgres:check`, `env:postgres:tcp`, `prisma:*`, `db:push`, `test:postgres`, `test:regression:postgres`, `build`.
 - CI:
   - `Quality Gate (required)` con el orden definido en `.github/workflows/ci.yml`.
 - Deploy DEV web:
@@ -108,13 +117,16 @@ Nota de alcance: `mobile staging` es un entorno intermedio móvil útil para su 
 ## Troubleshooting
 
 - Error `DATABASE_URL es requerido`:
-  - Define `DATABASE_URL` antes de correr pruebas.
+  - Define `DATABASE_URL` antes de correr pruebas, o usa `npm run test:postgres` para dejar que el wrapper resuelva el backend autorizado.
 - Error `DATABASE_URL debe iniciar con postgres://`:
   - Corrige el scheme.
 - Error de conexión TCP:
   - Verifica que PostgreSQL esté activo y escuchando en `host:port` del `DATABASE_URL`.
 - Error de schema mismatch:
   - Ejecuta `npm run db:push` después de `prisma:generate`.
+- Si `npx vitest run ...` parece usar un esquema viejo:
+  - Verifica que no haya una ejecución manual apuntando a una base local.
+  - El setup de Vitest ahora resuelve el backend AWS Postgres y aplica aislamiento por esquema salvo que se pida SQLite explícitamente.
 
 ### Cobertura KAN-53 (regresión PostgreSQL)
 

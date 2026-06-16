@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 
@@ -23,6 +24,61 @@ function withSchema(url: string, schema: string): string {
   return parsed.toString();
 }
 
+function isPostgresUrl(value: string) {
+  return /^postgres(ql)?:\/\//i.test(value);
+}
+
+function readAuthoritativeDatabaseUrl(repoRoot: string) {
+  const envFilePath = path.join(repoRoot, ".env");
+  try {
+    const contents = readFileSync(envFilePath, "utf8");
+    for (const rawLine of contents.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      if (!/^DATABASE_URL\s*=/.test(line)) continue;
+      const [, rawValue = ""] = line.split("=", 2);
+      const normalized = rawValue.trim().replace(/^["']|["']$/g, "");
+      if (isPostgresUrl(normalized)) {
+        return normalized;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function bootstrapPostgresTestDefaults() {
+  if (process.env.RUN_SQLITE_TESTS === "1") {
+    return false;
+  }
+
+  if (process.env.RUN_POSTGRES_TESTS !== "1") {
+    process.env.RUN_POSTGRES_TESTS = "1";
+  }
+
+  if (process.env.WMS_TEST_ISOLATION !== "worker-schema") {
+    process.env.WMS_TEST_ISOLATION = "worker-schema";
+  }
+
+  const currentDatabaseUrl = String(process.env.DATABASE_URL ?? "").trim();
+  if (isPostgresUrl(currentDatabaseUrl)) {
+    return true;
+  }
+
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const authoritativeDatabaseUrl = readAuthoritativeDatabaseUrl(repoRoot);
+  if (!authoritativeDatabaseUrl) {
+    throw new Error(
+      "No se pudo resolver una DATABASE_URL PostgreSQL autorizada. Usa npm run test:postgres o define DATABASE_URL a AWS Postgres.",
+    );
+  }
+
+  process.env.DATABASE_URL = authoritativeDatabaseUrl;
+  return true;
+}
+
 async function ensureSchemaExists(adminUrl: string, schema: string) {
   const prisma = new PrismaClient({
     datasources: { db: { url: adminUrl } },
@@ -36,6 +92,7 @@ async function ensureSchemaExists(adminUrl: string, schema: string) {
 }
 
 async function setupWorkerSchemaIsolation() {
+  if (!bootstrapPostgresTestDefaults()) return;
   if (process.env.RUN_POSTGRES_TESTS !== "1") return;
   if (process.env.WMS_TEST_ISOLATION !== "worker-schema") return;
 

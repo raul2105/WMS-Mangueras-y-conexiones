@@ -23,12 +23,22 @@ export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navIt
   SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 3 },
 };
 
+function buildUrlExpectation(path: string) {
+  const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(path.includes("?") ? `${escapedPath}$` : `${escapedPath}(?:\\?.*)?$`);
+}
+
 export async function loginAs(
   page: Page,
   role: RoleKey,
-  callbackUrl = "/"
+  callbackUrl = "/",
+  expectedUrl = EXPECTED_HOME[role],
 ) {
   const user = USERS[role];
+  // Warm auth endpoints before the first browser login on a fresh dev server.
+  // This avoids flaky first-request failures while webpack compiles auth routes.
+  await page.request.get("/api/auth/session");
+  await page.request.get("/api/auth/csrf");
   await page.goto(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   if (await page.getByLabel("Email").isVisible()) {
     await page.getByLabel("Email").fill(user.email);
@@ -36,12 +46,13 @@ export async function loginAs(
     await page.getByRole("button", { name: "Iniciar sesion" }).click();
   }
   await expect(page).not.toHaveURL(/\/login/);
-  await expect(page).toHaveURL(new RegExp(`${EXPECTED_HOME[role]}(?:\\?.*)?$`));
+  await expect(page).toHaveURL(buildUrlExpectation(expectedUrl));
 
   const expectedUser = EXPECTED_USER[role];
   await expect(page.getByRole("banner")).toContainText(expectedUser.name);
   await expect(page.getByRole("banner")).toContainText(expectedUser.email);
   await expect(page.getByRole("banner")).not.toContainText("Usuario");
+  await page.waitForLoadState("networkidle");
     // Count nav links using data-testid to avoid desktop/mobile duplication
       // Count nav links; on mobile, open mobile nav first if needed
       const viewport = page.viewportSize();
@@ -49,6 +60,9 @@ export async function loginAs(
         // Mobile viewport - open mobile nav drawer
         await page.getByLabel("Abrir navegacion").click();
         await expect(page.locator('[data-testid="mobile-main-nav"] a')).toHaveCount(expectedUser.navItems);
+        const closeNavButton = page.getByLabel("Cerrar navegacion");
+        await closeNavButton.click();
+        await expect(closeNavButton).toBeHidden();
       } else {
         await expect(page.locator('[data-testid="desktop-main-nav"] a')).toHaveCount(expectedUser.navItems);
       }

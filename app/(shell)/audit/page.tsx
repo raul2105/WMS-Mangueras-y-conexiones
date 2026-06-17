@@ -11,6 +11,75 @@ export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
 
+function parseAuditPayload(value: string | null) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function formatActor(row: {
+  actor: string | null;
+  actorUser?: { name: string | null; email: string | null } | null;
+}) {
+  return row.actorUser?.name ?? row.actorUser?.email ?? row.actor ?? "Sistema";
+}
+
+function formatQuantity(value: unknown) {
+  return typeof value === "number" ? value.toLocaleString("es-MX") : null;
+}
+
+function describeAuditEvent(row: {
+  entityType: string;
+  entityId: string | null;
+  action: string;
+  actor: string | null;
+  source: string | null;
+  before: string | null;
+  after: string | null;
+  actorUser?: { name: string | null; email: string | null } | null;
+}) {
+  const before = parseAuditPayload(row.before);
+  const after = parseAuditPayload(row.after);
+  const actor = formatActor(row);
+
+  if (row.action === "RECEIVE_STOCK") {
+    const quantity = formatQuantity(after?.quantity) ?? formatQuantity(after?.delta) ?? "stock";
+    return `${actor} registró una recepción de inventario. Nuevo saldo: ${quantity}.`;
+  }
+
+  if (row.action === "PICK_STOCK") {
+    const quantity = formatQuantity(after?.quantity) ?? "stock";
+    return `${actor} registró una salida de inventario. Nuevo saldo: ${quantity}.`;
+  }
+
+  if (row.action === "ADJUST_STOCK") {
+    const previous = formatQuantity(before?.quantity) ?? "--";
+    const current = formatQuantity(after?.quantity) ?? "--";
+    return `${actor} ajustó inventario de ${previous} a ${current}. Motivo: ${String(after?.reason ?? before?.reason ?? "No capturado")}.`;
+  }
+
+  if (row.action === "TRANSFER_STOCK") {
+    const movedQty = formatQuantity(after?.quantity) ?? "stock";
+    return `${actor} transfirió ${movedQty} entre ubicaciones.`;
+  }
+
+  if (row.action === "CONFIRM_DIRECT_PICK") {
+    const taskCount = typeof after?.taskCount === "number" ? after.taskCount : null;
+    return `${actor} confirmó surtido directo${taskCount ? ` (${taskCount} tareas)` : ""}.`;
+  }
+
+  if (row.entityType === "PURCHASE_ORDER" && row.action === "RECEIVE") {
+    const referenceDoc = typeof after?.referenceDoc === "string" && after.referenceDoc ? ` Referencia: ${after.referenceDoc}.` : "";
+    const newStatus = typeof after?.newStatus === "string" ? ` Estado: ${after.newStatus}.` : "";
+    return `${actor} registró una recepción de compra.${referenceDoc}${newStatus}`;
+  }
+
+  return `${actor} ejecutó ${row.action} sobre ${row.entityType}${row.entityId ? ` (${row.entityId})` : ""}.`;
+}
+
 type SearchParams = {
   entityType?: string;
   action?: string;
@@ -63,6 +132,14 @@ export default async function AuditPage({
       orderBy: { createdAt: "desc" },
       take: PAGE_SIZE,
       skip: (page - 1) * PAGE_SIZE,
+      include: {
+        actorUser: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+      },
     }),
   ]);
 
@@ -123,6 +200,26 @@ export default async function AuditPage({
       </SectionCard>
 
       <SectionCard title="Eventos" description={`${total.toLocaleString("es-MX")} registros · pagina ${page} de ${totalPages || 1}`}>
+        <div className="mb-5 space-y-3">
+          {rows.slice(0, 10).map((row) => (
+            <article key={`summary-${row.id}`} className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+                <span>{new Date(row.createdAt).toLocaleString("es-MX")}</span>
+                <span>•</span>
+                <span>{row.entityType}</span>
+                <span>•</span>
+                <span>{row.action}</span>
+              </div>
+              <p className="mt-2 text-sm text-[var(--text-primary)]">{describeAuditEvent(row)}</p>
+              <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--text-secondary)]">
+                <span>Actor: {formatActor(row)}</span>
+                {row.entityId ? <span>Entidad: {row.entityId}</span> : null}
+                {row.source ? <span>Flujo: {row.source}</span> : null}
+              </div>
+            </article>
+          ))}
+        </div>
+
         <TableWrap striped>
           <Table>
             <thead>
@@ -144,10 +241,10 @@ export default async function AuditPage({
                   <Td className="font-semibold text-[var(--text-primary)]">{row.entityType}</Td>
                   <Td className="font-mono text-xs">{row.entityId ?? "--"}</Td>
                   <Td>{row.action}</Td>
-                  <Td>{row.actor ?? "--"}</Td>
+                  <Td>{formatActor(row)}</Td>
                   <Td>{row.source ?? "--"}</Td>
-                  <Td className="text-center">{row.before ? "Si" : "No"}</Td>
-                  <Td className="text-center">{row.after ? "Si" : "No"}</Td>
+                  <Td className="text-center">{row.before ? "Disponible" : "--"}</Td>
+                  <Td className="text-center">{row.after ? "Disponible" : "--"}</Td>
                 </TableRow>
               ))}
               {rows.length === 0 ? <TableEmptyRow colSpan={8}>No hay eventos para los filtros seleccionados.</TableEmptyRow> : null}

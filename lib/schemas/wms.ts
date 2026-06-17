@@ -20,7 +20,7 @@ export const receiveStockSchema = z.object({
   warehouseId: requiredText("Almacen"),
   locationId: requiredText("Ubicacion"),
   reference: requiredText("Referencia"),
-  operatorName: requiredText("Operador"),
+  operatorName: z.string().trim().optional(),
   notes: z.string().trim().optional(),
   quantityRaw: decimalText("Cantidad"),
 });
@@ -28,7 +28,7 @@ export const receiveStockSchema = z.object({
 export const pickStockSchema = z.object({
   code: requiredText("Codigo"),
   locationCode: requiredText("Ubicacion"),
-  operatorName: requiredText("Operador"),
+  operatorName: z.string().trim().optional(),
   reference: z.string().trim().optional(),
   notes: z.string().trim().optional(),
   quantityRaw: decimalText("Cantidad"),
@@ -92,7 +92,7 @@ export const assemblyConsumeSchema = z.object({
 export const inventoryAdjustmentSchema = z.object({
   code: requiredText("Codigo"),
   locationCode: requiredText("Ubicacion"),
-  operatorName: requiredText("Operador"),
+  operatorName: z.string().trim().optional(),
   reason: requiredText("Motivo"),
   deltaRaw: decimalText("Ajuste", true),
 });
@@ -252,7 +252,7 @@ export const purchaseReceiptSchema = z.object({
 });
 export const purchaseReceiptOperationSchema = z.object({
   locationId: requiredText("Ubicación"),
-  operatorName: requiredText("Operador"),
+  operatorName: z.string().trim().optional(),
   referenceDoc: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });
@@ -324,5 +324,5 @@ export const salesOrderPickListTransitionSchema = z.object({
 
 export const salesOrderPickConfirmSchema = z.object({
   orderId: requiredText("Pedido"),
-  operatorName: requiredText("Operador"),
+  operatorName: z.string().trim().optional(),
 });

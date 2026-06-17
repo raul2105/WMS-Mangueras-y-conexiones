@@ -307,4 +307,58 @@ describeSqlite("InventoryService integrity", () => {
     expect(fromInv?.quantity).toBe(6);
     expect(toInv?.quantity).toBe(4);
   });
+
+  it("transfer preserves operator attribution in movement and audit records", async () => {
+    const { product, warehouse, location } = await createBaseData();
+    const actorUser = await prisma.user.create({
+      data: {
+        email: "operator-qa@scmayher.com",
+        name: "Operador QA",
+        passwordHash: "hash",
+        isActive: true,
+      },
+    });
+    const location2 = await prisma.location.create({
+      data: {
+        code: "LOC-TEST-03",
+        name: "Location Test 3",
+        zone: "C",
+        isActive: true,
+        warehouseId: warehouse.id,
+      },
+    });
+    const service = new InventoryService(prisma);
+
+    await service.receiveStock(product.id, location.id, 7, "RCV-ATTR");
+    await service.transferStock(product.id, location.id, location2.id, 3, "TRF-ATTR", {
+      actor: "Operador QA",
+      actorUserId: actorUser.id,
+      operatorName: "Operador QA",
+      operatorUserId: actorUser.id,
+      source: "tests/inventory-integrity",
+    });
+
+    const [movement, audit] = await Promise.all([
+      prisma.inventoryMovement.findFirst({
+        where: { reference: "TRF-ATTR", type: "TRANSFER" },
+        orderBy: { createdAt: "desc" },
+        select: { operatorName: true, operatorUserId: true, fromLocationCode: true, toLocationCode: true },
+      }),
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "INVENTORY",
+          action: "TRANSFER_STOCK",
+          actor: "Operador QA",
+        },
+        orderBy: { createdAt: "desc" },
+        select: { actor: true, actorUserId: true, source: true },
+      }),
+    ]);
+
+    expect(movement?.operatorName).toBe("Operador QA");
+    expect(movement?.operatorUserId).toBe(actorUser.id);
+    expect(audit?.actor).toBe("Operador QA");
+    expect(audit?.actorUserId).toBe(actorUser.id);
+    expect(audit?.source).toBe("tests/inventory-integrity");
+  });
 });

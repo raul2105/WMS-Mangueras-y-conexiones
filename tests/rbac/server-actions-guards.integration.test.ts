@@ -16,11 +16,26 @@ describe("rbac guards in critical server actions/pages", () => {
   it("inventory transfer action enforces inventory.transfer", () => {
     const content = readWorkspaceFile("app/(shell)/inventory/transfer/page.tsx");
     expect(content).toContain('requirePermission("inventory.transfer")');
+    expect(content).toContain("getSessionContext()");
+    expect(content).toContain("actorUserId");
+    expect(content).toContain("operatorName: actor.operatorName");
   });
 
   it("inventory pick action enforces inventory.pick", () => {
     const content = readWorkspaceFile("app/(shell)/inventory/pick/page.tsx");
     expect(content).toContain('requirePermission("inventory.pick")');
+    expect(content).toContain("getSessionContext()");
+    expect(content).toContain("actorUserId");
+  });
+
+  it("inventory receive and adjust actions attribute the authenticated actor", () => {
+    const receiveContent = readWorkspaceFile("app/(shell)/inventory/receive/page.tsx");
+    const adjustContent = readWorkspaceFile("app/(shell)/inventory/adjust/page.tsx");
+
+    expect(receiveContent).toContain("getSessionContext()");
+    expect(receiveContent).toContain("actorUserId");
+    expect(adjustContent).toContain("getSessionContext()");
+    expect(adjustContent).toContain("actorUserId");
   });
 
   it("audit page is protected by audit.view page guard", () => {
@@ -61,9 +76,12 @@ describe("rbac guards in critical server actions/pages", () => {
   it("request write flows use write guard helper", () => {
     const newOrderContent = readWorkspaceFile("app/(shell)/production/requests/new/page.tsx");
     const detailContent = readWorkspaceFile("app/(shell)/production/requests/[id]/page.tsx");
+    const listContent = readWorkspaceFile("app/(shell)/production/requests/page.tsx");
 
     expect(newOrderContent).toContain("requireSalesWriteAccess()");
+    expect(listContent).toContain("hasProductionCockpitAccess");
     expect(detailContent).toContain("requireSalesWriteAccess()");
+    expect(detailContent).toContain("hasProductionCockpitAccess");
   });
 
   it("request detail uses selected product ids for direct product lines", () => {
@@ -88,8 +106,18 @@ describe("rbac guards in critical server actions/pages", () => {
     expect(detailContent).toContain('requirePermission("purchasing.manage")');
     expect(receiveContent).toContain('pageGuard("purchasing.receive")');
     expect(receiveContent).toContain('requirePermission("purchasing.receive")');
+    expect(receiveContent).toContain("getSessionContext()");
+    expect(receiveContent).toContain("actorUserId");
     expect(documentContent).toContain('pageGuard("purchasing.manage")');
     expect(pdfRouteContent).toContain('requirePermission("purchasing.manage")');
+  });
+
+  it("production fulfillment confirmation attributes the authenticated operator", () => {
+    const content = readWorkspaceFile("app/(shell)/production/fulfillment/[id]/page.tsx");
+
+    expect(content).toContain("getSessionContext()");
+    expect(content).toContain("operatorUserId");
+    expect(content).toContain("confirmSalesRequestPickTasksBatch");
   });
 
   it("product search wiring keeps direct request lines broad and assembly search typed", () => {

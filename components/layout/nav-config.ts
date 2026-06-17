@@ -121,7 +121,19 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
       description:
         "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
       match: "prefix",
-      requiredPermission: "sales.view",
+      requiredPermission: "production.cockpit.view",
+    };
+  }
+
+  if (productionIndex >= 0 && primaryRole === "WAREHOUSE_OPERATOR") {
+    items[productionIndex] = {
+      href: "/production/requests",
+      label: "Ejecución",
+      icon: "production",
+      description:
+        "Cockpit operativo para surtido directo y ensambles confirmados.",
+      match: "prefix",
+      requiredPermission: "production.cockpit.view",
     };
   }
 

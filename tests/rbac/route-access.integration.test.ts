@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { getRequiredPermissionForPath } from "@/lib/rbac/route-permissions";
 import { RBAC_ROLES, type RoleCode } from "@/lib/rbac/permissions";
+import { matchRouteAccessEntry } from "@/lib/rbac/route-access-map";
 import { getRolePermissions } from "@/tests/fixtures/rbac-fixtures";
 
 function canAccess(role: RoleCode, pathname: string) {
   if (role === "SYSTEM_ADMIN") return true;
-  const permission = getRequiredPermissionForPath(pathname);
-  if (!permission) return true;
-  return getRolePermissions(role).includes(permission);
+  const entry = matchRouteAccessEntry(pathname);
+  if (!entry) return false;
+  return entry.roles.includes(role);
 }
 
 describe("rbac role-route access matrix", () => {
@@ -47,7 +48,7 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/warehouse")).toBe("warehouse.manage");
     expect(getRequiredPermissionForPath("/warehouse/abc")).toBe("warehouse.manage");
     expect(getRequiredPermissionForPath("/audit")).toBe("audit.view");
-    expect(getRequiredPermissionForPath("/production/requests")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/production/requests")).toBe("production.cockpit.view");
     expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/orders")).toBe("production.view");
@@ -57,7 +58,7 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/purchasing/orders")).toBe("purchasing.view");
     expect(getRequiredPermissionForPath("/purchasing/orders/new")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/purchasing/orders/abc")).toBe("purchasing.manage");
-    expect(getRequiredPermissionForPath("/purchasing/orders/abc/receive")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/purchasing/orders/abc/receive")).toBe("purchasing.receive");
     expect(getRequiredPermissionForPath("/labels/document/PURCHASE_RECEIPT/abc")).toBe("labels.manage");
     expect(getRequiredPermissionForPath("/labels/jobs/abc")).toBe("labels.manage");
     expect(getRequiredPermissionForPath("/labels/location/abc")).toBe("labels.manage");
@@ -99,11 +100,16 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("SALES_EXECUTIVE", "/audit")).toBe(false);
   });
 
-  it("request routes are available for manager and sales executive", () => {
+  it("request routes are available for manager, sales executive, and operator cockpit execution", () => {
     expect(canAccess("MANAGER", "/production/requests")).toBe(true);
     expect(canAccess("MANAGER", "/production/requests/new")).toBe(true);
     expect(canAccess("MANAGER", "/production/availability")).toBe(true);
     expect(canAccess("MANAGER", "/production/equivalences")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests/abc")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests/new")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/availability")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/equivalences")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/production/requests")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/requests/new")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/availability")).toBe(true);
@@ -143,7 +149,7 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/new")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/abc")).toBe(false);
-    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/abc/receive")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/orders/abc/receive")).toBe(true);
 
     expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/purchasing/orders/new")).toBe(false);

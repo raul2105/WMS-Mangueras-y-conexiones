@@ -56,6 +56,10 @@ test.describe("RBAC en navegador por rol", () => {
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectForbidden(page, "/audit");
+    await expectAllowed(page, "/production/requests", /Cockpit de ejecución/i);
+    await expect(page.getByRole("link", { name: /\+ Nuevo pedido/i })).toHaveCount(
+      0,
+    );
     await expectAllowed(page, "/purchasing/orders", /^Órdenes de compra$/i);
     await expect(page.getByRole("link", { name: /\+ Nueva OC/i })).toHaveCount(
       0,

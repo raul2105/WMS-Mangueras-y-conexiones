@@ -16,6 +16,7 @@ export default async function TraceDetailPage({
     where: { traceId },
     include: {
       product: { select: { sku: true, name: true } },
+      operatorUser: { select: { name: true, email: true } },
       warehouse: { select: { code: true, name: true } },
       location: { select: { code: true, name: true } },
       originMovement: true,
@@ -32,6 +33,7 @@ export default async function TraceDetailPage({
     where: { traceId: trace.traceId },
     orderBy: { createdAt: "asc" },
     include: {
+      operatorUser: { select: { name: true, email: true } },
       location: { select: { code: true } },
       product: { select: { sku: true, name: true } },
     },
@@ -54,7 +56,7 @@ export default async function TraceDetailPage({
         <div><span className="text-slate-400">Cantidad:</span> {trace.quantity ?? "--"} {trace.unitLabel ?? ""}</div>
         <div><span className="text-slate-400">Almacen:</span> {trace.warehouse?.code ?? "--"}</div>
         <div><span className="text-slate-400">Ubicación:</span> {trace.location?.code ?? "--"}</div>
-        <div><span className="text-slate-400">Operador:</span> {trace.operatorName ?? "--"}</div>
+        <div><span className="text-slate-400">Operador:</span> {trace.operatorUser?.name ?? trace.operatorUser?.email ?? trace.operatorName ?? "--"}</div>
         <div><span className="text-slate-400">Referencia:</span> {trace.reference ?? "--"}</div>
         <div><span className="text-slate-400">Documento:</span> {trace.sourceDocumentType ?? "--"} {trace.sourceDocumentId ?? ""}</div>
         <div><span className="text-slate-400">Creado:</span> {new Date(trace.createdAt).toLocaleString("es-MX")}</div>
@@ -69,6 +71,7 @@ export default async function TraceDetailPage({
               <th className="text-left py-2">Tipo</th>
               <th className="text-left py-2">Ubicación</th>
               <th className="text-right py-2">Cantidad</th>
+              <th className="text-left py-2">Actor</th>
               <th className="text-left py-2">Documento</th>
             </tr>
           </thead>
@@ -79,11 +82,12 @@ export default async function TraceDetailPage({
                 <td className="py-2">{movement.type}</td>
                 <td className="py-2">{movement.location?.code ?? movement.fromLocationCode ?? "--"}</td>
                 <td className="py-2 text-right">{movement.quantity}</td>
+                <td className="py-2">{movement.operatorUser?.name ?? movement.operatorUser?.email ?? movement.operatorName ?? "--"}</td>
                 <td className="py-2">{movement.documentType ?? "--"} {movement.documentId ?? ""}</td>
               </tr>
             ))}
             {movements.length === 0 && (
-              <tr><td colSpan={5} className="py-4 text-slate-500 text-center">Sin movimientos vinculados.</td></tr>
+              <tr><td colSpan={6} className="py-4 text-slate-500 text-center">Sin movimientos vinculados.</td></tr>
             )}
           </tbody>
         </table>

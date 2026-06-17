@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { createReprintJob, ensureDefaultLabelTemplates, markLabelPrintJobStatus } from "@/lib/labeling-service";
 import LabelPrintClientActions from "@/components/LabelPrintClientActions";
+import { hasPermissionInSession } from "@/lib/auth/session-context";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,7 @@ export default async function LabelJobPage({
 
   const next = sp.next?.trim() || "";
   const backHref = next || "/inventory";
+  const canViewTrace = await hasPermissionInSession("audit.view");
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -113,9 +115,11 @@ export default async function LabelJobPage({
         <div className="flex flex-wrap items-center gap-4 text-sm text-slate-300 mb-3">
           <span>Estado: <strong>{job.status}</strong></span>
           <span>Tipo: <strong>{job.traceRecord.labelType}</strong></span>
-          <Link href={`/trace/${encodeURIComponent(job.traceRecord.traceId)}`} className="text-cyan-300 hover:underline">
-            Ver Trace
-          </Link>
+          {canViewTrace ? (
+            <Link href={`/trace/${encodeURIComponent(job.traceRecord.traceId)}`} className="text-cyan-300 hover:underline">
+              Ver Trace
+            </Link>
+          ) : null}
         </div>
         <iframe
           title={`Etiqueta ${job.id}`}

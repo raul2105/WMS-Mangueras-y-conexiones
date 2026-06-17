@@ -13,7 +13,7 @@ describe("production requests cockpit contract", () => {
     );
     const consoleContent = readWorkspaceFile("lib/sales/console.ts");
 
-    expect(listContent).toContain('pageGuard("sales.view")');
+    expect(listContent).toContain("hasProductionCockpitAccess");
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(listContent).toContain("takeRequestFromList");
     expect(listContent).toContain("Pedidos comerciales");
@@ -44,7 +44,7 @@ describe("production requests cockpit contract", () => {
       "app/(shell)/production/requests/[id]/page.tsx",
     );
 
-    expect(detailContent).toContain('pageGuard("sales.view")');
+    expect(detailContent).toContain("hasProductionCockpitAccess");
     expect(detailContent).toContain("requireSalesWriteAccess()");
     expect(detailContent).toContain("getSalesOrderFlowNarrative");
     expect(detailContent).toContain("buttonStyles");

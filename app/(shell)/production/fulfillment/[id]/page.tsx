@@ -5,6 +5,8 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { buttonStyles } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { InventoryServiceError } from "@/lib/inventory-service";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import { confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList } from "@/lib/sales/request-service";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 import { startPerf } from "@/lib/perf";
@@ -69,18 +71,24 @@ async function confirmDirectPick(formData: FormData) {
   const perf = startPerf("action.production.fulfillment.confirm_direct_pick");
   const requestId = await getRequestId();
   await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const sessionCtx = await getSessionContext();
 
   const orderIdRaw = String(formData.get("orderId") ?? "").trim();
-  const operatorNameRaw = String(formData.get("operatorName") ?? "").trim();
+  const operatorAlias = String(formData.get("operatorName") ?? "").trim();
+  const actor = resolveAuthenticatedActor(sessionCtx, operatorAlias);
+  if (!actor.actorName) {
+    if (!orderIdRaw) redirect("/production");
+    redirect(`/production/fulfillment/${orderIdRaw}?error=${encodeURIComponent("Sesion invalida para confirmar el surtido")}`);
+  }
   const parsedHeader = salesOrderPickConfirmSchema.safeParse({
     orderId: orderIdRaw,
-    operatorName: operatorNameRaw,
+    operatorName: operatorAlias,
   });
   if (!parsedHeader.success) {
     if (!orderIdRaw) redirect("/production");
     redirect(`/production/fulfillment/${orderIdRaw}?error=${encodeURIComponent(firstErrorMessage(parsedHeader.error))}`);
   }
-  const { orderId, operatorName } = parsedHeader.data;
+  const { orderId } = parsedHeader.data;
 
   const taskIds = formData
     .getAll("taskIds")
@@ -108,7 +116,8 @@ async function confirmDirectPick(formData: FormData) {
     const servicePerf = startPerf("action.production.fulfillment.confirm_direct_pick.service");
     const result = await confirmSalesRequestPickTasksBatch(prisma, {
       orderId,
-      operatorName,
+      operatorName: actor.operatorName ?? actor.actorName,
+      operatorUserId: actor.actorUserId,
       tasks,
     });
     servicePerf.end({ requestId, orderId, processedCount: result.processedCount });
@@ -135,6 +144,7 @@ export default async function ProductionFulfillmentPage({
   await pageGuard("production.execute");
   const { id } = await params;
   const sp = await searchParams;
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const order = await prisma.salesInternalOrder.findUnique({
     where: { id },
@@ -333,13 +343,14 @@ export default async function ProductionFulfillmentPage({
 
             <div className="grid grid-cols-1 gap-3 items-end md:grid-cols-[1fr_auto]">
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Operador surtido</span>
+                <span className="text-xs text-slate-400">Alias operativo</span>
                 <input
                   name="operatorName"
                   className="w-full px-3 py-2 glass rounded-lg"
-                  required
                   disabled={actionableTasks.length === 0 || activePickList.status === "DRAFT"}
+                  placeholder="Alias en piso, si aplica"
                 />
+                <span className="block text-[11px] text-slate-500">Usuario autenticado: {actor.actorName ?? "Usuario autenticado"}</span>
               </label>
               <button
                 type="submit"

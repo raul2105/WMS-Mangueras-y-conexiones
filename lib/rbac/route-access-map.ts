@@ -175,9 +175,9 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
   },
   {
     route: "/production/requests",
-    description: "Listado de pedidos de surtido y configuraciones ligadas a ensamble",
-    permission: "sales.view",
-    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+    description: "Cockpit compartido de pedidos y ejecución operativa de surtido",
+    permission: "production.cockpit.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR", "SALES_EXECUTIVE"],
   },
   {
     route: "/production/requests/new",
@@ -187,9 +187,9 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
   },
   {
     route: "/production/requests/[id]",
-    description: "Detalle del pedido mixto con líneas directas y configuradas",
-    permission: "sales.view",
-    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
+    description: "Detalle operativo/comercial del pedido de surtido",
+    permission: "production.cockpit.view",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR", "SALES_EXECUTIVE"],
   },
   {
     route: "/production/requests/[id]/assembly/new",
@@ -435,6 +435,20 @@ export function getRolesForPermission(permission: PermissionCode): RoleCode[] {
  */
 export function getRouteAccessEntry(route: string): RouteAccessEntry | undefined {
   return ROUTE_ACCESS_MAP.find((e) => e.route === route);
+}
+
+function routePatternToRegex(route: string) {
+  const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\\\[.+?\\\]/g, "[^/]+")}$`);
+}
+
+export function matchRouteAccessEntry(pathname: string): RouteAccessEntry | undefined {
+  const exactMatch = ROUTE_ACCESS_MAP.find((entry) => entry.route === pathname);
+  if (exactMatch) return exactMatch;
+
+  return ROUTE_ACCESS_MAP.find(
+    (entry) => entry.route.includes("[") && routePatternToRegex(entry.route).test(pathname),
+  );
 }
 
 /**

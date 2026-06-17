@@ -1401,6 +1401,7 @@ export async function confirmSalesRequestPickTasksBatch(
   args: {
     orderId: string;
     operatorName: string;
+    operatorUserId?: string | null;
     tasks: Array<{ taskId: string; pickedQty?: number | null; shortReason?: string | null }>;
   }
 ) {
@@ -1522,6 +1523,9 @@ export async function confirmSalesRequestPickTasksBatch(
         reference: item.reference,
         notes: "Surtido directo consolidado",
         operatorName: args.operatorName,
+        operatorUserId: args.operatorUserId ?? null,
+        actor: args.operatorName,
+        actorUserId: args.operatorUserId ?? null,
         documentType: "SALES_INTERNAL_ORDER",
         documentId: args.orderId,
       });
@@ -1532,6 +1536,9 @@ export async function confirmSalesRequestPickTasksBatch(
         reference: item.reference,
         notes: "Liberación consolidada por faltante",
         actor: args.operatorName,
+        actorUserId: args.operatorUserId ?? null,
+        operatorName: args.operatorName,
+        operatorUserId: args.operatorUserId ?? null,
         source: "sales/request-service",
         documentType: "SALES_INTERNAL_ORDER",
         documentId: args.orderId,
@@ -1588,6 +1595,7 @@ export async function confirmSalesRequestPickTasksBatch(
       entityId: args.orderId,
       action: "CONFIRM_DIRECT_PICK",
       actor: args.operatorName,
+      actorUserId: args.operatorUserId ?? null,
       source: "sales/request-service",
       after: {
         taskCount: args.tasks.length,

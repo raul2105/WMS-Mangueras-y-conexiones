@@ -2,6 +2,8 @@ import prisma from "@/lib/prisma";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, transferStockSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
@@ -19,6 +21,7 @@ export const dynamic = "force-dynamic";
 async function transferStock(formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("inventory.transfer");
+  const sessionCtx = await getSessionContext();
 
   const code = String(formData.get("code") ?? "").trim();
   const fromLocationCode = String(formData.get("fromLocation") ?? "").trim();
@@ -26,6 +29,11 @@ async function transferStock(formData: FormData) {
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
+  const actor = resolveAuthenticatedActor(sessionCtx);
+
+  if (!actor.actorName) {
+    redirect(`/inventory/transfer?error=${encodeURIComponent("Sesion invalida para registrar la transferencia")}`);
+  }
 
   const parsed = transferStockSchema.safeParse({
     code,
@@ -79,7 +87,10 @@ async function transferStock(formData: FormData) {
       notes,
       fromLocationCode,
       toLocationCode,
-      actor: "system",
+      operatorName: actor.operatorName,
+      operatorUserId: actor.actorUserId,
+      actor: actor.actorName,
+      actorUserId: actor.actorUserId,
       source: "inventory/transfer",
     });
 
@@ -89,7 +100,8 @@ async function transferStock(formData: FormData) {
       action: "TRANSFER_FORM_SUBMIT",
       after: { quantity: parsed.data.quantityRaw, fromLocationCode, toLocationCode, reference },
       source: "inventory/transfer",
-      actor: "system",
+      actor: actor.actorName,
+      actorUserId: actor.actorUserId,
     });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
@@ -115,6 +127,7 @@ export default async function TransferPage({
 }) {
   await pageGuard("inventory.transfer");
   const sp = await searchParams;
+  const actor = resolveAuthenticatedActor(await getSessionContext());
   const [locations, products, recentReferences] = await Promise.all([
     prisma.location.findMany({
       where: { isActive: true },
@@ -165,53 +178,69 @@ export default async function TransferPage({
         </div>
       )}
 
-      <SectionCard title="Formulario de transferencia" description="Define origen, destino y cantidad para mover inventario.">
+      <SectionCard title="Flujo de transferencia" description={`Usuario autenticado: ${actor.actorName ?? "Usuario autenticado"}. Confirma origen y destino antes de enviar.`}>
       <form action={transferStock} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <InventoryCodeField
-            name="code"
-            label="SKU o Referencia *"
-            placeholder="CON-R1AT-04"
-            required
-            suggestions={codeSuggestions}
-            showDetails
-          />
+        <div className="space-y-5">
+          <section className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Paso 1 · Identifica artículo y cantidad</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <InventoryCodeField
+                name="code"
+                label="SKU o Referencia *"
+                placeholder="CON-R1AT-04"
+                required
+                suggestions={codeSuggestions}
+                showDetails
+              />
 
-          <Input name="quantity" required inputMode="decimal" label="Cantidad *" placeholder="5" />
+              <Input name="quantity" required inputMode="decimal" label="Cantidad *" placeholder="5" />
+            </div>
+          </section>
 
-          <Select name="fromLocation" required label="Ubicacion origen *" placeholder="Selecciona ubicación origen">
-              <option value="">Selecciona ubicación origen</option>
-              {locations.map((location) => (
-                <option key={`from-${location.code}`} value={location.code}>
-                  {location.code} - {location.name} ({location.warehouse.code})
-                </option>
-              ))}
-          </Select>
+          <section className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Paso 2 · Confirma origen y destino</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Select name="fromLocation" required label="Ubicación origen *" placeholder="Selecciona ubicación origen">
+                  <option value="">Selecciona ubicación origen</option>
+                  {locations.map((location) => (
+                    <option key={`from-${location.code}`} value={location.code}>
+                      {location.code} - {location.name} ({location.warehouse.code})
+                    </option>
+                  ))}
+              </Select>
 
-          <Select name="toLocation" required label="Ubicacion destino *" placeholder="Selecciona ubicación destino">
-              <option value="">Selecciona ubicación destino</option>
-              {locations.map((location) => (
-                <option key={`to-${location.code}`} value={location.code}>
-                  {location.code} - {location.name} ({location.warehouse.code})
-                </option>
-              ))}
-          </Select>
+              <Select name="toLocation" required label="Ubicación destino *" placeholder="Selecciona ubicación destino">
+                  <option value="">Selecciona ubicación destino</option>
+                  {locations.map((location) => (
+                    <option key={`to-${location.code}`} value={location.code}>
+                      {location.code} - {location.name} ({location.warehouse.code})
+                    </option>
+                  ))}
+              </Select>
+            </div>
+          </section>
 
-          <Input
-            name="reference"
-            label="Referencia"
-            list={referenceSuggestions.length > 0 ? "transfer-reference-options" : undefined}
-            placeholder="TRF-0001"
-          />
-            {referenceSuggestions.length > 0 && (
-              <datalist id="transfer-reference-options">
-                {referenceSuggestions.map((reference) => (
-                  <option key={reference} value={reference} />
-                ))}
-              </datalist>
-            )}
+          <section className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Paso 3 · Referencia y revisión</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                name="reference"
+                label="Referencia"
+                list={referenceSuggestions.length > 0 ? "transfer-reference-options" : undefined}
+                placeholder="TRF-0001"
+              />
+              {referenceSuggestions.length > 0 && (
+                <datalist id="transfer-reference-options">
+                  {referenceSuggestions.map((reference) => (
+                    <option key={reference} value={reference} />
+                  ))}
+                </datalist>
+              )}
 
-          <Textarea name="notes" label="Notas" rootClassName="md:col-span-2" textareaClassName="min-h-[96px]" />
+              <Textarea name="notes" label="Notas operativas" rootClassName="md:col-span-2" textareaClassName="min-h-[96px]" />
+            </div>
+            <p className="mt-3 text-xs text-[var(--text-muted)]">El sistema bloqueará transferencias a la misma ubicación y guardará la atribución con tu usuario autenticado.</p>
+          </section>
         </div>
 
         <div className="flex items-center justify-end gap-3">

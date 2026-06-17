@@ -4,12 +4,15 @@ import { redirect } from "next/navigation";
 import type { SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
-import { pageGuard } from "@/components/rbac/PageGuard";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import RequestProductLineForm from "@/components/RequestProductLineForm";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
-import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
+import {
+  hasProductionCockpitAccess,
+  hasSalesWriteAccess,
+  requireSalesWriteAccess,
+} from "@/lib/rbac/sales";
 import {
   addSalesRequestProductLine,
   cancelSalesRequestOrder,
@@ -301,10 +304,20 @@ export default async function ProductionRequestDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
-  await pageGuard("sales.view");
   const { id } = await params;
   const sp = await searchParams;
   const sessionCtx = await getSessionContext();
+  if (!sessionCtx.isAuthenticated) {
+    redirect(`/login?callbackUrl=${encodeURIComponent(`/production/requests/${id}`)}`);
+  }
+  if (
+    !hasProductionCockpitAccess({
+      roles: sessionCtx.roles,
+      permissions: sessionCtx.permissions,
+    })
+  ) {
+    redirect(`/forbidden?from=${encodeURIComponent(`/production/requests/${id}`)}`);
+  }
   const visibilityWhere = buildSalesRequestVisibilityWhere({
     roles: sessionCtx.roles,
     userId: sessionCtx.user?.id ?? null,
@@ -481,6 +494,9 @@ export default async function ProductionRequestDetailPage({
 
   const canOperateDirectPick = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("production.execute");
   const canViewCustomers = sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");
+  const isOperatorView =
+    sessionCtx.roles.includes("WAREHOUSE_OPERATOR") &&
+    !sessionCtx.roles.includes("SALES_EXECUTIVE");
   const orderStatus = order.status as SalesInternalOrderStatus;
   const orderStatusBadgeVariant: "neutral" | "success" | "danger" =
     orderStatus === "BORRADOR" ? "neutral" : orderStatus === "CONFIRMADA" ? "success" : "danger";
@@ -542,7 +558,9 @@ export default async function ProductionRequestDetailPage({
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <p className="font-mono text-sm text-[var(--accent)]">{order.code}</p>
-          <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Pedido comercial</h1>
+          <h1 className="text-3xl font-semibold text-[var(--text-primary)]">
+            {isOperatorView ? "Pedido operativo" : "Pedido comercial"}
+          </h1>
           <p className="text-sm text-[var(--text-muted)]">
             Cliente:{" "}
             {order.customerId && canViewCustomers ? (
@@ -718,7 +736,9 @@ export default async function ProductionRequestDetailPage({
             ) : null}
           </div>
           <p className="text-sm text-[var(--text-muted)]">
-            La captura y el seguimiento viven en el pedido. La operación física directa y el ensamble exacto siguen en vistas separadas.
+            {isOperatorView
+              ? "Desde aquí puedes revisar el estado del pedido y saltar a surtido directo o al seguimiento del ensamble."
+              : "La captura y el seguimiento viven en el pedido. La operación física directa y el ensamble exacto siguen en vistas separadas."}
           </p>
           {latestPickList ? (
             <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">

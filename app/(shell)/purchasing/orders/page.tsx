@@ -38,6 +38,10 @@ const STATUS_BADGE_VARIANTS: Record<string, "neutral" | "accent" | "success" | "
 type SearchParams = { status?: string; page?: string };
 type PurchaseOrderSearchParams = SearchParams & { preset?: string };
 
+function canReceivePurchaseOrder(status: string) {
+  return status === "CONFIRMADA" || status === "EN_TRANSITO" || status === "PARCIAL";
+}
+
 function parsePage(value: string | undefined) {
   const parsed = Number.parseInt(value ?? "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
@@ -60,6 +64,8 @@ export default async function PurchaseOrdersPage({
   const sessionCtx = await getSessionContext();
   const canManagePurchasing =
     sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.manage");
+  const canReceivePurchasing =
+    sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.receive");
   const presetFilter = isPurchaseOrderPresetFilter(sp.preset) ? sp.preset : undefined;
   const statusFilter = !presetFilter ? (sp.status as
     | "BORRADOR"
@@ -179,7 +185,7 @@ export default async function PurchaseOrdersPage({
         </div>
         {!canManagePurchasing ? (
           <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-secondary)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-            Vista de solo lectura para tu rol. No se muestran enlaces de gestión ni rutas restringidas.
+            Vista operativa para tu rol. Solo se muestran acciones de recepción y se ocultan rutas de gestión.
           </div>
         ) : null}
       </SectionCard>
@@ -284,15 +290,21 @@ export default async function PurchaseOrdersPage({
                     </div>
                   </div>
 
-                  {canManagePurchasing ? (
-                    <div className="mt-4">
+                  <div className="mt-4 space-y-2">
+                    {canManagePurchasing ? (
                       <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "secondary", size: "sm", fullWidth: true })}>
                         Ver detalle
                       </Link>
-                    </div>
-                  ) : (
-                    <p className="mt-4 text-xs text-[var(--text-muted)]">Detalle no disponible para tu rol.</p>
-                  )}
+                    ) : null}
+                    {canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
+                      <Link href={`/purchasing/orders/${order.id}/receive`} className={buttonStyles({ size: "sm", fullWidth: true })}>
+                        Recibir mercancía
+                      </Link>
+                    ) : null}
+                    {!canManagePurchasing && !(canReceivePurchasing && canReceivePurchaseOrder(order.status)) ? (
+                      <p className="text-xs text-[var(--text-muted)]">Sin acciones operativas disponibles para tu rol en esta orden.</p>
+                    ) : null}
+                  </div>
                 </article>
               );
             })}
@@ -342,13 +354,21 @@ export default async function PurchaseOrdersPage({
                         <Td className="text-right font-semibold text-[var(--text-primary)]">{order._count.lines}</Td>
                         <Td className="text-right font-semibold text-[var(--status-info)]">{pct}%</Td>
                         <Td className="text-right">
-                          {canManagePurchasing ? (
-                            <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
-                              Ver detalle
-                            </Link>
-                          ) : (
-                            <span className="text-xs text-[var(--text-muted)]">Solo lectura</span>
-                          )}
+                          <div className="flex justify-end gap-2">
+                            {canManagePurchasing ? (
+                              <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
+                                Ver detalle
+                              </Link>
+                            ) : null}
+                            {canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
+                              <Link href={`/purchasing/orders/${order.id}/receive`} className={buttonStyles({ size: "sm" })}>
+                                Recibir mercancía
+                              </Link>
+                            ) : null}
+                            {!canManagePurchasing && !(canReceivePurchasing && canReceivePurchaseOrder(order.status)) ? (
+                              <span className="text-xs text-[var(--text-muted)]">Sin acción</span>
+                            ) : null}
+                          </div>
                         </Td>
                       </TableRow>
                     );

@@ -44,6 +44,7 @@ const ROLE_CHECKS: Record<
     visibleRoutes: [
       ["/inventory", /Inventario/i],
       ["/production", /Produccion/i],
+      ["/production/requests", /Cockpit de ejecución/i],
     ],
     blockedRoutes: [
       "/users",
@@ -98,6 +99,11 @@ test.describe("full role matrix", () => {
 
       if (role === "SALES_EXECUTIVE") {
         await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+        await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
+      }
+
+      if (role === "WAREHOUSE_OPERATOR") {
+        await expectAllowed(page, "/production/requests", /Cockpit de ejecución/i);
         await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
       }
 

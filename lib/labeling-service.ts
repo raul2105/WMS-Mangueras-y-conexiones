@@ -34,6 +34,7 @@ type CreateMovementTraceInput = {
   sourceEntityType: string;
   sourceEntityId: string;
   operatorName?: string | null;
+  operatorUserId?: string | null;
   templateCode?: string | null;
 };
 
@@ -242,6 +243,7 @@ export async function createMovementTraceAndLabelJob(db: Db, input: CreateMoveme
     where: { id: input.movementId },
     include: {
       product: { select: { id: true, sku: true, name: true, unitLabel: true } },
+      operatorUser: { select: { id: true, name: true, email: true } },
       location: {
         select: {
           id: true,
@@ -257,7 +259,14 @@ export async function createMovementTraceAndLabelJob(db: Db, input: CreateMoveme
   const traceUrl = `${APP_BASE_URL}/trace/${encodeURIComponent(traceId)}`;
   const template = await resolveTemplate(db, input.labelType, input.templateCode);
   const timestamp = new Date(movement.createdAt).toLocaleString("es-MX");
-  const operator = (input.operatorName || movement.operatorName || "system").trim();
+  const operator = (
+    input.operatorName ||
+    movement.operatorName ||
+    movement.operatorUser?.name ||
+    movement.operatorUser?.email ||
+    "system"
+  ).trim();
+  const operatorUserId = input.operatorUserId ?? movement.operatorUserId ?? null;
   const dataset: LabelDataset = {
     company: DEFAULT_COMPANY_NAME,
     movementType: movementTypeToLabel(movement.type, input.labelType),
@@ -276,10 +285,10 @@ export async function createMovementTraceAndLabelJob(db: Db, input: CreateMoveme
     sourceDocument: movement.documentType && movement.documentId ? `${movement.documentType}:${movement.documentId}` : "--",
   };
 
-  if (!movement.traceId || movement.operatorName !== operator) {
+  if (!movement.traceId || movement.operatorName !== operator || movement.operatorUserId !== operatorUserId) {
     await db.inventoryMovement.update({
       where: { id: movement.id },
-      data: { traceId, operatorName: operator },
+      data: { traceId, operatorName: operator, operatorUserId },
     });
   }
 
@@ -293,6 +302,7 @@ export async function createMovementTraceAndLabelJob(db: Db, input: CreateMoveme
     update: {
       traceId,
       operatorName: operator,
+      operatorUserId,
       reference: movement.reference,
       quantity: movement.quantity,
       unitLabel: movement.product.unitLabel || "unidad",
@@ -312,6 +322,7 @@ export async function createMovementTraceAndLabelJob(db: Db, input: CreateMoveme
       sourceEntityId: input.sourceEntityId,
       companyName: DEFAULT_COMPANY_NAME,
       operatorName: operator,
+      operatorUserId,
       reference: movement.reference,
       quantity: movement.quantity,
       unitLabel: movement.product.unitLabel || "unidad",

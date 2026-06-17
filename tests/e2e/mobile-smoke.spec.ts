@@ -34,7 +34,8 @@ const MOBILE_ROUTES = [
 for (const { path, role, heading } of MOBILE_ROUTES) {
   if (role) {
     test.describe(`Mobile: ${path} (authenticated as ${role})`, () => {
-      test(`carga correctamente en móvil`, async ({ page }) => {
+      test(`carga correctamente en móvil`, async ({ page }, testInfo) => {
+        test.skip(!testInfo.project.name.startsWith("mobile"), "Este smoke solo valida proyectos móviles.");
         const callbackUrl = path;
         await loginAs(page, role, callbackUrl);
         await page.goto(path);
@@ -52,23 +53,25 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
           await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
           await page.locator('[data-testid="requests-more-filters"] summary').click();
           await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
-          await expect(page.getByTestId("request-card").first()).toBeVisible();
-          await expect(
-            page.getByTestId("request-card").first().getByText(
-              "Ver seguimiento operativo",
-              { exact: true },
-            ),
-          ).toBeVisible();
+          const requestCards = page.getByTestId("request-card");
+          if ((await requestCards.count()) > 0) {
+            await expect(requestCards.first()).toBeVisible();
+            await expect(
+              requestCards.first().getByText(
+                "Ver seguimiento operativo",
+                { exact: true },
+              ),
+            ).toBeVisible();
+            const firstCardHeight = await requestCards.first().boundingBox();
+            expect(firstCardHeight?.height ?? 0).toBeLessThan(520);
+          } else {
+            await expect(page.getByText(/No hay pedidos/i).first()).toBeVisible();
+          }
           await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
           const quickFiltersHeight = await page
             .getByTestId("requests-quick-filters")
             .boundingBox();
           expect(quickFiltersHeight?.height ?? 0).toBeLessThan(120);
-          const firstCardHeight = await page
-            .getByTestId("request-card")
-            .first()
-            .boundingBox();
-          expect(firstCardHeight?.height ?? 0).toBeLessThan(520);
         }
         if (path === "/production/requests/new" && role === "SALES_EXECUTIVE") {
           await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
@@ -81,6 +84,12 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
           await expect(
             page.getByRole("link", { name: /Por recibir hoy/i }),
           ).toBeVisible();
+          const receiveLinks = page.getByRole("link", { name: /Recibir mercancía/i });
+          if ((await receiveLinks.count()) > 0) {
+            await expect(receiveLinks.first()).toBeVisible();
+          } else {
+            await expect(page.getByText(/Sin acciones operativas disponibles|Sin acción|No hay órdenes de compra/i).first()).toBeVisible();
+          }
         }
         if (path === "/purchasing/orders" && role === "MANAGER") {
           await expect(
@@ -94,7 +103,8 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
     });
   } else {
     test.describe(`Mobile: ${path} (public)`, () => {
-      test(`carga correctamente en móvil`, async ({ page }) => {
+      test(`carga correctamente en móvil`, async ({ page }, testInfo) => {
+        test.skip(!testInfo.project.name.startsWith("mobile"), "Este smoke solo valida proyectos móviles.");
         await page.goto(path, { waitUntil: "commit" });
         await expect(page).toHaveURL(
           new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),

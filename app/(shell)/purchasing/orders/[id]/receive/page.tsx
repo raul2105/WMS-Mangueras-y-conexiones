@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import InventoryService from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { firstErrorMessage, purchaseReceiptOperationSchema, purchaseReceiptLineDiscrepancySchema } from "@/lib/schemas/wms";
@@ -10,6 +12,7 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 async function receiveItems(orderId: string, formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("purchasing.receive");
+  const sessionCtx = await getSessionContext();
 
   const parsedHeader = purchaseReceiptOperationSchema.safeParse({
     locationId: String(formData.get("locationId") ?? "").trim(),
@@ -25,7 +28,10 @@ async function receiveItems(orderId: string, formData: FormData) {
   const locationId = parsedHeader.data.locationId;
   const referenceDoc = parsedHeader.data.referenceDoc?.trim() || null;
   const notes = parsedHeader.data.notes?.trim() || null;
-  const operatorName = parsedHeader.data.operatorName;
+  const actor = resolveAuthenticatedActor(sessionCtx, parsedHeader.data.operatorName);
+  if (!actor.actorName) {
+    redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Sesion invalida para registrar la recepcion")}`);
+  }
 
   const order = await prisma.purchaseOrder.findUnique({
     where: { id: orderId },
@@ -170,8 +176,10 @@ async function receiveItems(orderId: string, formData: FormData) {
         const movement = await inventory.receiveStock(item.productId, locationId, item.qtyReceived, order.folio, {
           tx,
           source: "purchasing/receive",
-          actor: operatorName,
-          operatorName,
+          actor: actor.actorName,
+          actorUserId: actor.actorUserId,
+          operatorName: actor.operatorName,
+          operatorUserId: actor.actorUserId,
           notes: referenceDoc ? `Recepción OC ${order.folio} — ${referenceDoc}` : `Recepción OC ${order.folio}`,
           documentType: "PURCHASE_RECEIPT",
           documentId: receipt.id,
@@ -187,7 +195,8 @@ async function receiveItems(orderId: string, formData: FormData) {
           labelType: "RECEIPT",
           sourceEntityType: "PURCHASE_RECEIPT_LINE",
           sourceEntityId: receiptLine.id,
-          operatorName,
+          operatorName: actor.operatorName,
+          operatorUserId: actor.actorUserId,
         });
       }
 
@@ -213,8 +222,10 @@ async function receiveItems(orderId: string, formData: FormData) {
           referenceDoc,
           lines: linesToReceive,
           newStatus,
-          operatorName,
+          operatorAlias: parsedHeader.data.operatorName?.trim() || null,
         },
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
       }, tx);
       return receipt.id;
     }, { timeout: 20000 });
@@ -238,6 +249,7 @@ export default async function ReceivePage({
   await pageGuard("purchasing.receive");
   const { id } = await params;
   const sp = await searchParams;
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const order = await prisma.purchaseOrder.findUnique({
     where: { id },
@@ -333,13 +345,14 @@ export default async function ReceivePage({
           </label>
 
           <label className="space-y-1">
-            <span className="text-sm text-slate-400">Operador *</span>
+            <span className="text-sm text-slate-400">Alias operativo</span>
             <input
               name="operatorName"
-              required
               maxLength={120}
+              placeholder="Alias en piso, si aplica"
               className="glass w-full rounded-lg px-4 py-3"
             />
+            <p className="text-xs text-slate-500">Usuario autenticado: {actor.actorName ?? "Usuario autenticado"}</p>
           </label>
         </div>
 

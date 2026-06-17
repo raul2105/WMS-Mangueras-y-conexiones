@@ -102,8 +102,8 @@ describe("inventoryAdjustmentSchema", () => {
     expect(inventoryAdjustmentSchema.safeParse({ ...base, reason: "" }).success).toBe(false);
   });
 
-  it("rejects missing operator", () => {
-    expect(inventoryAdjustmentSchema.safeParse({ ...base, operatorName: "" }).success).toBe(false);
+  it("accepts missing operator because authenticated attribution is automatic", () => {
+    expect(inventoryAdjustmentSchema.safeParse({ ...base, operatorName: "" }).success).toBe(true);
   });
 
   it("accepts comma as decimal separator", () => {
@@ -339,7 +339,7 @@ describe("sales pick schemas", () => {
         orderId: "ord-1",
         operatorName: "",
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

@@ -8,6 +8,8 @@ import { redirect } from "next/navigation";
 import ReceiveForm from "@/components/ReceiveForm";
 import { firstErrorMessage, receiveStockSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import { resolveProductInput } from "@/lib/product-search";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { pageGuard } from "@/components/rbac/PageGuard";
@@ -17,21 +19,27 @@ export const dynamic = "force-dynamic";
 async function receiveStock(formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("inventory.receive");
+  const sessionCtx = await getSessionContext();
 
   const code = String(formData.get("code") ?? "").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const locationId = String(formData.get("locationId") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim();
-  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  const operatorAlias = String(formData.get("operatorName") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const referenceFile = formData.get("referenceFile");
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
+  const actor = resolveAuthenticatedActor(sessionCtx, operatorAlias);
+  if (!actor.actorName) {
+    redirect(`/inventory/receive?error=${encodeURIComponent("Sesion invalida para registrar la recepcion")}`);
+  }
+
   const parsed = receiveStockSchema.safeParse({
     code,
     warehouseId,
     locationId,
     reference,
-    operatorName,
+    operatorName: operatorAlias,
     notes,
     quantityRaw: qtyRaw,
   });
@@ -141,8 +149,10 @@ async function receiveStock(formData: FormData) {
       const result = await service.receiveStock(product.id, location.id, quantity, reference, {
         tx,
         notes,
-        actor: operatorName,
-        operatorName,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
         source: "inventory/receive",
         referenceFilePath: referenceFileMeta?.path ?? null,
         referenceFileName: referenceFileMeta?.name ?? null,
@@ -159,16 +169,18 @@ async function receiveStock(formData: FormData) {
         labelType: "RECEIPT",
         sourceEntityType: "INVENTORY_MOVEMENT",
         sourceEntityId: result.movementId,
-        operatorName,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
       });
 
       await createAuditLogSafeWithDb({
         entityType: "INVENTORY_MOVEMENT",
         entityId: `${product.id}:${location.id}`,
         action: "RECEIVE_FORM_SUBMIT",
-        after: { quantity, reference, warehouseId, locationId },
+        after: { quantity, reference, warehouseId, locationId, operatorAlias: operatorAlias || null },
         source: "inventory/receive",
-        actor: operatorName,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
       }, tx);
 
       return job.id;
@@ -193,6 +205,8 @@ export default async function ReceivePage({
 }) {
   await pageGuard("inventory.receive");
   const sp = await searchParams;
+  const sessionCtx = await getSessionContext();
+  const actor = resolveAuthenticatedActor(sessionCtx);
   const warehouses = await prisma.warehouse.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },
@@ -224,6 +238,7 @@ export default async function ReceivePage({
       <ReceiveForm
         action={receiveStock}
         warehouses={warehouses}
+        actorName={actor.actorName ?? "Usuario autenticado"}
       />
     </div>
   );

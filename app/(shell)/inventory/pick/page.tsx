@@ -2,6 +2,8 @@ import prisma from "@/lib/prisma";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, pickStockSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
@@ -21,17 +23,22 @@ export const dynamic = "force-dynamic";
 async function pickStock(formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("inventory.pick");
+  const sessionCtx = await getSessionContext();
 
   const code = String(formData.get("code") ?? "").trim();
   const locationCode = String(formData.get("location") ?? "").trim();
-  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  const operatorAlias = String(formData.get("operatorName") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
+  const actor = resolveAuthenticatedActor(sessionCtx, operatorAlias);
+  if (!actor.actorName) {
+    redirect(`/inventory/pick?error=${encodeURIComponent("Sesion invalida para registrar la salida")}`);
+  }
   const qtyRaw = String(formData.get("quantity") ?? "").trim();
   const parsed = pickStockSchema.safeParse({
     code,
     locationCode,
-    operatorName,
+    operatorName: operatorAlias,
     reference: reference ?? undefined,
     notes: notes ?? undefined,
     quantityRaw: qtyRaw,
@@ -88,8 +95,10 @@ async function pickStock(formData: FormData) {
       const result = await service.pickStock(product.id, location.id, quantity, reference, {
         tx,
         notes,
-        actor: operatorName,
-        operatorName,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
         source: "inventory/pick",
       });
       if (!result.movementId) {
@@ -100,16 +109,18 @@ async function pickStock(formData: FormData) {
         labelType: "PICKING",
         sourceEntityType: "INVENTORY_MOVEMENT",
         sourceEntityId: result.movementId,
-        operatorName,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
       });
 
       await createAuditLogSafeWithDb({
         entityType: "INVENTORY_MOVEMENT",
         entityId: `${product.id}:${location.id}`,
         action: "PICK_FORM_SUBMIT",
-        after: { quantity, reference, locationCode },
+        after: { quantity, reference, locationCode, operatorAlias: operatorAlias || null },
         source: "inventory/pick",
-        actor: operatorName,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
       }, tx);
 
       return job.id;
@@ -158,6 +169,7 @@ export default async function PickPage({
 }) {
   await pageGuard("inventory.pick");
   const sp = await searchParams;
+  const actor = resolveAuthenticatedActor(await getSessionContext());
   const locations = await prisma.location.findMany({
     where: { isActive: true },
     orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
@@ -197,7 +209,7 @@ export default async function PickPage({
         </div>
       )}
 
-      <SectionCard title="Formulario de salida" description="Completa los datos operativos para registrar picking.">
+      <SectionCard title="Formulario de salida" description={`Usuario autenticado: ${actor.actorName ?? "Usuario autenticado"}. Puedes guardar un alias operativo opcional sin reemplazar la atribución real.`}>
       <form action={pickStock} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <InventoryCodeField
@@ -220,7 +232,7 @@ export default async function PickPage({
           </Select>
           <p className="-mt-2 text-xs text-[var(--text-muted)] md:col-span-1">Obligatorio para garantizar integridad de inventario.</p>
 
-          <Input name="operatorName" required label="Operador *" placeholder="Nombre del operador" />
+          <Input name="operatorName" label="Alias operativo" placeholder="Alias en piso, si aplica" />
 
           <Input
             name="reference"

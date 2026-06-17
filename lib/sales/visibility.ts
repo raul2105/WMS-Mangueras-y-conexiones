@@ -15,6 +15,20 @@ export function buildSalesRequestVisibilityWhere(args: {
     return baseWhere ?? {};
   }
 
+  if (roles.includes("WAREHOUSE_OPERATOR")) {
+    return {
+      AND: [
+        baseWhere ?? {},
+        {
+          status: "CONFIRMADA",
+        },
+        {
+          deliveredToCustomerAt: null,
+        },
+      ],
+    };
+  }
+
   if (!roles.includes("SALES_EXECUTIVE") || !userId) {
     return {
       AND: [

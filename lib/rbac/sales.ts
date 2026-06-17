@@ -6,6 +6,17 @@ export function hasSalesWriteAccess(args: { roles: string[]; permissions: string
   return isSystemAdmin(args.roles) || args.roles.includes("MANAGER") || args.permissions.includes("sales.create_order");
 }
 
+export function hasProductionCockpitAccess(args: {
+  roles: string[];
+  permissions: string[];
+}) {
+  return (
+    isSystemAdmin(args.roles) ||
+    args.roles.includes("MANAGER") ||
+    args.permissions.includes("production.cockpit.view")
+  );
+}
+
 export async function requireSalesWriteAccess() {
   const ctx = await getSessionContext();
   if (!ctx.isAuthenticated || !ctx.session?.user) {

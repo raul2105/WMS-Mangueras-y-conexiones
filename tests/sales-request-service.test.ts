@@ -319,6 +319,11 @@ describe("sales request service", () => {
 
   it("releases reserved shortfall when a direct pick task is confirmed as partial", async () => {
     const { order, productA, storageA, staging } = await createRequestFixture();
+    const operator = await createUserWithRole({
+      email: "operator-partial-pick@scmayher.com",
+      name: "Operador surtido",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     await addSalesRequestProductLine(prisma, {
       orderId: order.id,
@@ -342,6 +347,7 @@ describe("sales request service", () => {
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador surtido",
+      operatorUserId: operator.id,
       tasks: [
         {
           taskId: pickList!.tasks[0].id,
@@ -351,7 +357,7 @@ describe("sales request service", () => {
       ],
     });
 
-    const [sourceInventory, targetInventory, taskAfter, pickListAfter] = await Promise.all([
+    const [sourceInventory, targetInventory, taskAfter, pickListAfter, movement, audit] = await Promise.all([
       prisma.inventory.findUnique({
         where: { productId_locationId: { productId: productA.id, locationId: storageA.id } },
       }),
@@ -363,6 +369,24 @@ describe("sales request service", () => {
       }),
       prisma.salesInternalOrderPickList.findUnique({
         where: { id: pickList!.id },
+      }),
+      prisma.inventoryMovement.findFirst({
+        where: {
+          type: "TRANSFER",
+          documentType: "SALES_INTERNAL_ORDER",
+          documentId: order.id,
+        },
+        orderBy: { createdAt: "desc" },
+        select: { operatorName: true, operatorUserId: true },
+      }),
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: order.id,
+          action: "CONFIRM_DIRECT_PICK",
+        },
+        orderBy: { createdAt: "desc" },
+        select: { actor: true, actorUserId: true },
       }),
     ]);
 
@@ -376,6 +400,10 @@ describe("sales request service", () => {
     expect(taskAfter?.shortQty).toBe(2);
     expect(taskAfter?.status).toBe("PARTIAL");
     expect(pickListAfter?.status).toBe("PARTIAL");
+    expect(movement?.operatorName).toBe("Operador surtido");
+    expect(movement?.operatorUserId).toBe(operator.id);
+    expect(audit?.actor).toBe("Operador surtido");
+    expect(audit?.actorUserId).toBe(operator.id);
   });
 
   it("filters orders by customer and visibility for sales executive", async () => {

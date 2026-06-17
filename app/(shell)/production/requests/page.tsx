@@ -3,12 +3,15 @@ import { redirect } from "next/navigation";
 import type { Prisma, SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
-import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
-import { hasSalesWriteAccess, requireSalesWriteAccess } from "@/lib/rbac/sales";
+import {
+  hasProductionCockpitAccess,
+  hasSalesWriteAccess,
+  requireSalesWriteAccess,
+} from "@/lib/rbac/sales";
 import { pullSalesRequestOrder } from "@/lib/sales/request-service";
 import {
   firstErrorMessage,
@@ -190,11 +193,21 @@ export default async function ProductionRequestsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await pageGuard("sales.view");
   const [sp, sessionCtx] = await Promise.all([
     searchParams,
     getSessionContext(),
   ]);
+  if (!sessionCtx.isAuthenticated) {
+    redirect(`/login?callbackUrl=${encodeURIComponent("/production/requests")}`);
+  }
+  if (
+    !hasProductionCockpitAccess({
+      roles: sessionCtx.roles,
+      permissions: sessionCtx.permissions,
+    })
+  ) {
+    redirect("/forbidden?from=%2Fproduction%2Frequests");
+  }
   const currentPage = parsePage(sp.page);
   const statusFilter: SalesInternalOrderStatus | undefined =
     sp.status === "BORRADOR" ||
@@ -528,9 +541,14 @@ export default async function ProductionRequestsPage({
     roles: sessionCtx.roles,
     permissions: sessionCtx.permissions,
   });
+  const isOperatorView =
+    sessionCtx.roles.includes("WAREHOUSE_OPERATOR") &&
+    !sessionCtx.roles.includes("SALES_EXECUTIVE");
   const canOperateProductionActions =
     isSystemAdmin(sessionCtx.roles) ||
     sessionCtx.permissions.includes("production.execute");
+  const canViewAdministrativeTable =
+    canOperateProductionActions && !isOperatorView;
   const canViewCustomers =
     sessionCtx.isSystemAdmin ||
     sessionCtx.permissions.includes("customers.view");
@@ -736,12 +754,16 @@ export default async function ProductionRequestsPage({
     <div className="space-y-6">
       {" "}
       <PageHeader
-        title="Pedidos comerciales"
-        description="Cola comercial para captura, seguimiento, asignación, surtido y entrega."
+        title={isOperatorView ? "Cockpit de ejecución" : "Pedidos comerciales"}
+        description={
+          isOperatorView
+            ? "Pedidos confirmados listos para surtido directo y seguimiento de ensambles."
+            : "Cola comercial para captura, seguimiento, asignación, surtido y entrega."
+        }
         meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Cola: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
-            {canViewCustomers ? (
+            {canViewCustomers && !isOperatorView ? (
               <Link
                 href="/sales/customers"
                 className={buttonStyles({ variant: "secondary", size: "sm" })}
@@ -749,12 +771,14 @@ export default async function ProductionRequestsPage({
                 Clientes
               </Link>
             ) : null}
-            <Link
-              href="/production/requests/new"
-              className={buttonStyles({ variant: "primary", size: "sm" })}
-            >
-              + Nuevo pedido
-            </Link>
+            {canRenderWriteActions ? (
+              <Link
+                href="/production/requests/new"
+                className={buttonStyles({ variant: "primary", size: "sm" })}
+              >
+                + Nuevo pedido
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -801,6 +825,7 @@ export default async function ProductionRequestsPage({
             </div>
           )}
         </article>
+        {!isOperatorView ? (
         <article className="glass-card space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -834,6 +859,7 @@ export default async function ProductionRequestsPage({
             </div>
           )}
         </article>
+        ) : null}
       </section>
       <section className="space-y-3">
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
@@ -886,68 +912,67 @@ export default async function ProductionRequestsPage({
               Más filtros
             </summary>
             <div className="mt-3 space-y-4">
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  Cliente
-                </p>
-                <form
-                  method="get"
-                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3"
-                  data-testid="requests-customer-filter"
-                >
-                  {" "}
-                  {statusFilter ? (
-                    <input type="hidden" name="status" value={statusFilter} />
-                  ) : null}{" "}
-                  {queueFilter ? (
-                    <input type="hidden" name="queue" value={queueFilter} />
-                  ) : null}{" "}
-                  {presetFilter ? (
-                    <input type="hidden" name="preset" value={presetFilter} />
-                  ) : null}{" "}
-                  {stageFilter ? (
-                    <input type="hidden" name="stage" value={stageFilter} />
-                  ) : null}{" "}
-                  <label className="block space-y-1">
-                    {" "}
-                    <span className="text-sm text-[var(--text-muted)]">
-                      Filtrar por cliente
-                    </span>{" "}
-                    <input
-                      type="text"
-                      name="customer"
-                      defaultValue={customerFilter}
-                      placeholder="Nombre o cuenta del cliente"
-                      className="field"
-                    />{" "}
-                  </label>{" "}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {" "}
-                    <button type="submit" className="btn-primary">
-                      {" "}
-                      Filtrar{" "}
-                    </button>{" "}
-                    <Link
-                      href={buildHref(
-                        1,
-                        undefined,
-                        undefined,
-                        undefined,
-                        undefined,
-                      )}
-                      className={buttonStyles({ variant: "secondary" })}
-                    >
-                      {" "}
-                      Limpiar{" "}
-                    </Link>{" "}
-                  </div>{" "}
-                </form>
-              </div>
+              {!isOperatorView ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Cliente
+                  </p>
+                  <form
+                    method="get"
+                    className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3"
+                    data-testid="requests-customer-filter"
+                  >
+                    {statusFilter ? (
+                      <input type="hidden" name="status" value={statusFilter} />
+                    ) : null}
+                    {queueFilter ? (
+                      <input type="hidden" name="queue" value={queueFilter} />
+                    ) : null}
+                    {presetFilter ? (
+                      <input type="hidden" name="preset" value={presetFilter} />
+                    ) : null}
+                    {stageFilter ? (
+                      <input type="hidden" name="stage" value={stageFilter} />
+                    ) : null}
+                    <label className="block space-y-1">
+                      <span className="text-sm text-[var(--text-muted)]">
+                        Filtrar por cliente
+                      </span>
+                      <input
+                        type="text"
+                        name="customer"
+                        defaultValue={customerFilter}
+                        placeholder="Nombre o cuenta del cliente"
+                        className="field"
+                      />
+                    </label>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="submit" className="btn-primary">
+                        Filtrar
+                      </button>
+                      <Link
+                        href={buildHref(
+                          1,
+                          undefined,
+                          undefined,
+                          undefined,
+                          undefined,
+                        )}
+                        className={buttonStyles({ variant: "secondary" })}
+                      >
+                        Limpiar
+                      </Link>
+                    </div>
+                  </form>
+                </div>
+              ) : null}
               <div className="grid gap-4 lg:grid-cols-2">
                 {advancedFilterGroups.map((group) => (
                   <div key={group.title} className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                      {group.title}
+                      {isOperatorView && group.title === "Estado comercial"
+                        ? "Estado del pedido"
+                        : group.title}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {group.items.map((item) => (
@@ -1298,7 +1323,9 @@ export default async function ProductionRequestsPage({
                         Ver seguimiento operativo
                       </p>
                       <p className="text-xs text-[var(--text-muted)]">
-                        Etapa comercial, validaciones y profundidad operativa.
+                        {isOperatorView
+                          ? "Estado del pedido, validaciones y profundidad operativa."
+                          : "Etapa comercial, validaciones y profundidad operativa."}
                       </p>
                     </div>
                     <Badge variant={flowNarrative.flowBadgeVariant}>
@@ -1309,7 +1336,7 @@ export default async function ProductionRequestsPage({
                     <div className="space-y-4">
                       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
                         <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Seguimiento comercial
+                          {isOperatorView ? "Seguimiento del pedido" : "Seguimiento comercial"}
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {stageProgress.map((step) => (
@@ -1448,7 +1475,7 @@ export default async function ProductionRequestsPage({
           })
         )}{" "}
       </section>{" "}
-      {canOperateProductionActions ? (
+      {canViewAdministrativeTable ? (
         <details className="glass-card space-y-4">
           <summary className="cursor-pointer list-none">
             <div className="flex flex-col gap-1">

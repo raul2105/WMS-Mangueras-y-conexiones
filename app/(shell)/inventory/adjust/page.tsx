@@ -2,6 +2,8 @@ import prisma from "@/lib/prisma";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, inventoryAdjustmentSchema } from "@/lib/schemas/wms";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
@@ -19,17 +21,22 @@ export const dynamic = "force-dynamic";
 async function adjustStock(formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("inventory.adjust");
+  const sessionCtx = await getSessionContext();
 
   const code = String(formData.get("code") ?? "").trim();
   const locationCode = String(formData.get("location") ?? "").trim();
-  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  const operatorAlias = String(formData.get("operatorName") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
   const deltaRaw = String(formData.get("delta") ?? "").trim();
+  const actor = resolveAuthenticatedActor(sessionCtx, operatorAlias);
+  if (!actor.actorName) {
+    redirect(`/inventory/adjust?error=${encodeURIComponent("Sesion invalida para registrar el ajuste")}`);
+  }
 
   const parsed = inventoryAdjustmentSchema.safeParse({
     code,
     locationCode,
-    operatorName,
+    operatorName: operatorAlias,
     reason,
     deltaRaw,
   });
@@ -77,8 +84,10 @@ async function adjustStock(formData: FormData) {
     createdJobId = await prisma.$transaction(async (tx) => {
       const result = await service.adjustStock(product.id, location.id, parsed.data.deltaRaw, reason, {
         tx,
-        operatorName,
-        actor: operatorName,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
         source: "inventory/adjust",
       });
       if (!result.movementId) {
@@ -89,16 +98,18 @@ async function adjustStock(formData: FormData) {
         labelType: "ADJUSTMENT",
         sourceEntityType: "INVENTORY_MOVEMENT",
         sourceEntityId: result.movementId,
-        operatorName,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
       });
 
       await createAuditLogSafeWithDb({
         entityType: "INVENTORY_MOVEMENT",
         entityId: `${product.id}:${location.id}`,
         action: "ADJUST_FORM_SUBMIT",
-        after: { delta: parsed.data.deltaRaw, reason },
+        after: { delta: parsed.data.deltaRaw, reason, operatorAlias: operatorAlias || null },
         source: "inventory/adjust",
-        actor: operatorName,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
       }, tx);
 
       return job.id;
@@ -130,6 +141,7 @@ export default async function AdjustPage({
 }) {
   await pageGuard("inventory.adjust");
   const sp = await searchParams;
+  const actor = resolveAuthenticatedActor(await getSessionContext());
   const [locations, products] = await Promise.all([
     prisma.location.findMany({
       where: { isActive: true },
@@ -171,7 +183,7 @@ export default async function AdjustPage({
         </div>
       )}
 
-      <SectionCard title="Formulario de ajuste" description="Define cantidad de ajuste, ubicación y motivo de operación.">
+      <SectionCard title="Formulario de ajuste" description={`Usuario autenticado: ${actor.actorName ?? "Usuario autenticado"}. El alias operativo es opcional.`}>
       <form action={adjustStock} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <InventoryCodeField
@@ -194,7 +206,7 @@ export default async function AdjustPage({
               ))}
           </Select>
 
-          <Input name="operatorName" required label="Operador *" placeholder="Nombre del operador" />
+          <Input name="operatorName" label="Alias operativo" placeholder="Alias en piso, si aplica" />
 
           <Select name="reason" required label="Motivo *" rootClassName="md:col-span-2" placeholder="Selecciona un motivo">
               <option value="">Selecciona un motivo</option>

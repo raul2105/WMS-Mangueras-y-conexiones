@@ -21,6 +21,7 @@ export const RBAC_PERMISSIONS = [
   "warehouse.manage",
   "location.manage",
   "production.view",
+  "production.cockpit.view",
   "production.execute",
   "purchasing.view",
   "purchasing.receive",

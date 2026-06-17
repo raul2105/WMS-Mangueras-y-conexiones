@@ -29,6 +29,8 @@ interface ReceiveOptions {
   documentId?: string | null;
   documentLineId?: string | null;
   actor?: string | null;
+  actorUserId?: string | null;
+  operatorUserId?: string | null;
   source?: string | null;
 }
 
@@ -41,6 +43,8 @@ interface PickOptions {
   documentId?: string | null;
   documentLineId?: string | null;
   actor?: string | null;
+  actorUserId?: string | null;
+  operatorUserId?: string | null;
   source?: string | null;
 }
 
@@ -55,6 +59,8 @@ interface TransferOptions {
   documentId?: string | null;
   documentLineId?: string | null;
   actor?: string | null;
+  actorUserId?: string | null;
+  operatorUserId?: string | null;
   source?: string | null;
 }
 
@@ -67,6 +73,9 @@ interface ReservationOptions {
   documentId?: string | null;
   documentLineId?: string | null;
   reference?: string | null;
+  actorUserId?: string | null;
+  operatorUserId?: string | null;
+  operatorName?: string | null;
 }
 
 interface AuditData {
@@ -76,6 +85,7 @@ interface AuditData {
   before?: string | null;
   after?: string | null;
   actor?: string | null;
+  actorUserId?: string | null;
   source?: string | null;
 }
 
@@ -177,6 +187,7 @@ export class InventoryService {
           type: "IN",
           traceId: options.traceId ?? null,
           operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: qty,
           reference: referenceValue,
           notes: options.notes ?? null,
@@ -197,6 +208,7 @@ export class InventoryService {
         before: JSON.stringify({ quantity: existing?.quantity ?? 0, reserved, available: existing?.available ?? 0 }),
         after: JSON.stringify({ quantity: newQty, reserved, available }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -261,6 +273,7 @@ export class InventoryService {
           type: "OUT",
           traceId: options.traceId ?? null,
           operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: qty,
           reference: referenceValue,
           notes: options.notes ?? null,
@@ -277,6 +290,7 @@ export class InventoryService {
         before: JSON.stringify({ quantity: existing.quantity, reserved: existing.reserved, available: existing.available }),
         after: JSON.stringify({ quantity: newQty, reserved: existing.reserved, available }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -349,6 +363,7 @@ export class InventoryService {
           type: "ADJUSTMENT",
           traceId: options.traceId ?? null,
           operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: deltaQty,
           notes: reason,
           documentType: options.documentType ?? null,
@@ -364,6 +379,7 @@ export class InventoryService {
         before: JSON.stringify({ quantity: currentQty, reserved, available: currentQty - reserved }),
         after: JSON.stringify({ quantity: newQty, reserved, available }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -444,6 +460,7 @@ export class InventoryService {
           type: "TRANSFER",
           traceId: options.traceId ?? null,
           operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: qty,
           reference: referenceValue,
           notes: options.notes ?? null,
@@ -469,6 +486,7 @@ export class InventoryService {
           quantity: qty,
         }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -542,6 +560,8 @@ export class InventoryService {
           productId,
           locationId,
           type: "ADJUSTMENT",
+          operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: 0,
           reference: options.reference ?? null,
           notes: options.notes ?? "Reserva para orden operativa",
@@ -558,6 +578,7 @@ export class InventoryService {
         before: JSON.stringify({ quantity: existing.quantity, reserved: existing.reserved, available: existing.available }),
         after: JSON.stringify({ quantity: existing.quantity, reserved: newReserved, available: newAvailable }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -621,6 +642,8 @@ export class InventoryService {
           productId,
           locationId,
           type: "ADJUSTMENT",
+          operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: 0,
           reference: options.reference ?? null,
           notes: options.notes ?? "Liberacion de reserva operativa",
@@ -637,6 +660,7 @@ export class InventoryService {
         before: JSON.stringify({ quantity: existing.quantity, reserved: existing.reserved, available: existing.available }),
         after: JSON.stringify({ quantity: existing.quantity, reserved: newReserved, available: newAvailable }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -717,6 +741,9 @@ export class InventoryService {
           productId,
           locationId: fromLocationId,
           type: "TRANSFER",
+          traceId: options.traceId ?? null,
+          operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: qty,
           reference: options.reference ?? null,
           notes: options.notes ?? null,
@@ -742,6 +769,7 @@ export class InventoryService {
           quantity: qty,
         }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 
@@ -809,6 +837,7 @@ export class InventoryService {
           type: "OUT",
           traceId: options.traceId ?? null,
           operatorName: options.operatorName ?? options.actor ?? null,
+          operatorUserId: options.operatorUserId ?? options.actorUserId ?? null,
           quantity: qty,
           reference: referenceValue,
           notes: options.notes ?? "Consumo operativo",
@@ -825,6 +854,7 @@ export class InventoryService {
         before: JSON.stringify({ quantity: existing.quantity, reserved: existing.reserved, available: existing.available }),
         after: JSON.stringify({ quantity: newQty, reserved: existing.reserved, available: newAvailable }),
         actor: options.actor ?? null,
+        actorUserId: options.actorUserId ?? options.operatorUserId ?? null,
         source: options.source ?? "inventory-service",
       });
 

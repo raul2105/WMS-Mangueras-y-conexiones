@@ -27,6 +27,7 @@ import {
   summarizePickListStatus,
   summarizeProductionStatus,
 } from "@/lib/sales/internal-orders";
+import { getSalesConsoleTimelineItems } from "@/lib/sales/console";
 import {
   firstErrorMessage,
   salesInternalOrderProductLineCreateSchema,
@@ -360,6 +361,7 @@ export default async function ProductionRequestDetailPage({
           id: true,
           code: true,
           status: true,
+          updatedAt: true,
           targetLocation: { select: { code: true, name: true } },
         },
       },
@@ -524,13 +526,16 @@ export default async function ProductionRequestDetailPage({
     takeEligibility,
     deliveredEligibility,
   });
-  const timeline = [
-    { label: "Captura", at: order.createdAt },
-    { label: "Confirmación", at: order.confirmedAt },
-    { label: "Asignación", at: order.assignedAt ?? order.pulledAt },
-    { label: "Surtido directo", at: latestPickList?.status === "COMPLETED" || latestPickList?.status === "PARTIAL" ? latestPickList?.code : null },
-    { label: "Entrega cliente", at: order.deliveredToCustomerAt },
-  ] as const;
+  const timeline = getSalesConsoleTimelineItems({
+    createdAt: order.createdAt,
+    confirmedAt: order.confirmedAt,
+    assignedAt: order.assignedAt,
+    pulledAt: order.pulledAt,
+    latestPickStatus: latestPickList?.status ?? null,
+    latestPickUpdatedAt: latestPickList?.updatedAt ?? null,
+    deliveredAt: order.deliveredToCustomerAt,
+    cancelledAt: order.cancelledAt,
+  });
 
   return (
     <div className="space-y-6">
@@ -732,10 +737,15 @@ export default async function ProductionRequestDetailPage({
           <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
             {timeline.map((item) => (
               <li key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2">
-                <p className="text-[var(--text-primary)]">{item.label}</p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  {typeof item.at === "string" && item.label === "Surtido directo" ? item.at : formatDateTime(item.at as Date | string | null)}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[var(--text-primary)]">{item.label}</p>
+                    <p className="text-xs text-[var(--text-muted)]">{item.detail}</p>
+                  </div>
+                  <Badge variant={item.variant} size="sm">
+                    {item.at ? formatDateTime(item.at) : "Pendiente"}
+                  </Badge>
+                </div>
               </li>
             ))}
           </ul>

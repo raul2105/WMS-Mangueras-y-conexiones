@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getSalesOrderFlowNarrative, getSalesOrderFlowStage, resolveSalesOrderPrimaryCta } from "@/lib/sales/internal-orders";
 import {
   getSalesConsoleStageProgress,
+  getSalesConsoleTimelineItems,
   getSalesConsoleWorkType,
   resolveSalesConsolePrimaryActionState,
 } from "@/lib/sales/console";
@@ -264,5 +265,234 @@ describe("sales internal order flow stage", () => {
     });
     expect(productionBlockedState.state).toBe("blocked");
     expect(productionBlockedState.blockedReason).toContain("operativos");
+  });
+
+  it("keeps the sales flow narrative matrix coherent across stage, action, and filters", () => {
+    const cases = [
+      {
+        name: "draft/capture",
+        input: {
+          orderId: "ord-capture",
+          roles: ["SALES_EXECUTIVE"],
+          status: "BORRADOR" as const,
+        },
+        expected: {
+          flowStage: "captura",
+          listLabel: "Captura",
+          detailTimelineLabel: "Captura",
+          nextAction: "Revisar bloqueo",
+          filterBucket: "Borrador / Captura",
+          deliveryEligibility: false,
+          meaning: "capture",
+        },
+      },
+      {
+        name: "confirmed/assignment",
+        input: {
+          orderId: "ord-assignment",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CONFIRMADA" as const,
+          assignedToUserId: null,
+          takeEligibility: { canTakeOrder: true, takeBlockedReason: null },
+        },
+        expected: {
+          flowStage: "por_asignar",
+          listLabel: "Por asignar",
+          detailTimelineLabel: "Asignación",
+          nextAction: "Tomar pedido",
+          filterBucket: "Sin asignar",
+          deliveryEligibility: false,
+          meaning: "confirmed / ready for assignment",
+        },
+      },
+      {
+        name: "assigned/in-fulfillment",
+        input: {
+          orderId: "ord-fulfillment",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CONFIRMADA" as const,
+          assignedToUserId: "user-1",
+          latestPickStatus: "IN_PROGRESS",
+          hasProductLines: true,
+          deliveredEligibility: {
+            canMarkDelivered: false,
+            deliveredBlockedReason: "El surtido directo debe estar completado",
+          },
+        },
+        expected: {
+          flowStage: "en_surtido",
+          listLabel: "En surtido",
+          detailTimelineLabel: "Surtido / fulfillment",
+          nextAction: "Revisar bloqueo",
+          filterBucket: "En surtido",
+          deliveryEligibility: false,
+          meaning: "assigned / in fulfillment",
+        },
+      },
+      {
+        name: "partially-fulfilled",
+        input: {
+          orderId: "ord-partial",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CONFIRMADA" as const,
+          assignedToUserId: "user-1",
+          latestPickStatus: "PARTIAL",
+          hasProductLines: true,
+          deliveredEligibility: {
+            canMarkDelivered: false,
+            deliveredBlockedReason: "El surtido directo debe estar completado",
+          },
+        },
+        expected: {
+          flowStage: "en_surtido",
+          listLabel: "En surtido",
+          detailTimelineLabel: "Surtido / fulfillment",
+          nextAction: "Revisar bloqueo",
+          filterBucket: "Parciales",
+          deliveryEligibility: false,
+          meaning: "partially fulfilled",
+        },
+      },
+      {
+        name: "ready-for-delivery",
+        input: {
+          orderId: "ord-ready",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CONFIRMADA" as const,
+          assignedToUserId: "user-1",
+          pulledAt: new Date("2026-05-01T00:00:00.000Z"),
+          latestPickStatus: "COMPLETED",
+          hasProductLines: true,
+          hasAssemblyLines: false,
+          hasCompletedConfiguredAssembly: true,
+          takeEligibility: { canTakeOrder: false, takeBlockedReason: "El pedido ya está asignado" },
+          deliveredEligibility: { canMarkDelivered: true, deliveredBlockedReason: null },
+        },
+        expected: {
+          flowStage: "listo_entrega",
+          listLabel: "Listo para entrega",
+          detailTimelineLabel: "Entrega",
+          nextAction: "Marcar entrega",
+          filterBucket: "Listos para entrega",
+          deliveryEligibility: true,
+          meaning: "ready for delivery",
+        },
+      },
+      {
+        name: "delivered",
+        input: {
+          orderId: "ord-delivered",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CONFIRMADA" as const,
+          assignedToUserId: "user-1",
+          pulledAt: new Date("2026-05-01T00:00:00.000Z"),
+          deliveredToCustomerAt: new Date("2026-05-02T00:00:00.000Z"),
+        },
+        expected: {
+          flowStage: "entregado",
+          listLabel: "Entregado",
+          detailTimelineLabel: "Entrega",
+          nextAction: "Revisar bloqueo",
+          filterBucket: "Entregado",
+          deliveryEligibility: false,
+          meaning: "delivered",
+        },
+      },
+      {
+        name: "cancelled",
+        input: {
+          orderId: "ord-cancelled",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CANCELADA" as const,
+          cancelledAt: new Date("2026-05-03T00:00:00.000Z"),
+        },
+        expected: {
+          flowStage: "cancelado",
+          listLabel: "Cancelado",
+          detailTimelineLabel: "Cancelación",
+          nextAction: "Revisar bloqueo",
+          filterBucket: "Cancelada",
+          deliveryEligibility: false,
+          meaning: "cancelled",
+        },
+      },
+      {
+        name: "blocked / missing data",
+        input: {
+          orderId: "ord-blocked",
+          roles: ["SALES_EXECUTIVE"],
+          status: "CONFIRMADA" as const,
+          assignedToUserId: "user-1",
+          latestPickStatus: "DRAFT",
+          hasProductLines: true,
+          hasAssemblyLines: true,
+          hasCompletedConfiguredAssembly: false,
+          deliveredEligibility: {
+            canMarkDelivered: false,
+            deliveredBlockedReason: "Todas las órdenes de ensamble ligadas deben estar completadas",
+          },
+        },
+        expected: {
+          flowStage: "en_surtido",
+          listLabel: "En surtido",
+          detailTimelineLabel: "Surtido / fulfillment",
+          nextAction: "Revisar bloqueo",
+          filterBucket: "Bloqueados",
+          deliveryEligibility: false,
+          meaning: "blocked / missing data",
+        },
+      },
+    ];
+
+    const timelineLabels = getSalesConsoleTimelineItems({
+      createdAt: new Date("2026-04-30T12:00:00.000Z"),
+      confirmedAt: new Date("2026-05-01T12:00:00.000Z"),
+      assignedAt: new Date("2026-05-01T13:00:00.000Z"),
+      pulledAt: new Date("2026-05-01T14:00:00.000Z"),
+      latestPickStatus: "COMPLETED",
+      latestPickUpdatedAt: new Date("2026-05-01T15:00:00.000Z"),
+      deliveredAt: new Date("2026-05-02T12:00:00.000Z"),
+      cancelledAt: new Date("2026-05-03T12:00:00.000Z"),
+    }).map((item) => item.label);
+
+    expect(timelineLabels).toEqual([
+      "Captura",
+      "Asignación",
+      "Surtido / fulfillment",
+      "Entrega",
+      "Cancelación",
+    ]);
+
+    for (const row of cases) {
+      const flowNarrative = getSalesOrderFlowNarrative({
+        ...(row.input as Parameters<typeof getSalesOrderFlowNarrative>[0]),
+        takeEligibility:
+          "takeEligibility" in row.input
+            ? row.input.takeEligibility
+            : row.expected.flowStage === "por_asignar"
+              ? { canTakeOrder: true, takeBlockedReason: null }
+              : undefined,
+        deliveredEligibility:
+          "deliveredEligibility" in row.input
+            ? row.input.deliveredEligibility
+            : row.expected.flowStage === "listo_entrega"
+              ? { canMarkDelivered: true, deliveredBlockedReason: null }
+              : { canMarkDelivered: false, deliveredBlockedReason: "El pedido debe estar confirmado" },
+      });
+
+      expect(flowNarrative.flowStage).toBe(row.expected.flowStage);
+      expect(flowNarrative.flowStageLabel).toBe(row.expected.listLabel);
+      expect(flowNarrative.nextRecommendedAction.label).toBe(row.expected.nextAction);
+      expect(flowNarrative.primaryCta.action.label).toBe(row.expected.nextAction);
+      expect(flowNarrative.primaryCta.reason.length).toBeGreaterThan(0);
+      expect(getSalesConsoleStageProgress(flowNarrative.flowStage).find((step) => step.isCurrent)?.label).toBe(row.expected.listLabel);
+      expect(row.expected.detailTimelineLabel).toBeTruthy();
+      expect(row.expected.filterBucket).toBeTruthy();
+      expect(row.expected.meaning).toBeTruthy();
+
+      if (row.expected.deliveryEligibility) {
+        expect(flowNarrative.flowStage).toBe("listo_entrega");
+      }
+    }
   });
 });

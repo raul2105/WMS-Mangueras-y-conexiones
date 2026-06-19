@@ -73,7 +73,7 @@ test.describe("sales commercial flow", () => {
     await page.goto("/production/requests");
 
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
     await expect(
       page.getByTestId("requests-quick-filters").getByRole("link", {
@@ -81,7 +81,7 @@ test.describe("sales commercial flow", () => {
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("Disponibles para asignarme", { exact: true }),
+      page.getByText("Pedidos sin responsable", { exact: true }),
     ).toBeVisible();
     await expect(page.getByText(/Siguiente acción/i).first()).toBeVisible();
     await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
@@ -102,9 +102,9 @@ test.describe("sales commercial flow", () => {
     await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
     await page.locator('[data-testid="requests-more-filters"] summary').click();
     await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
-    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Pedidos$/i })).toBeVisible();
-    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes/i })).toBeVisible();
-    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i })).toBeVisible();
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Mis pedidos/i })).toBeVisible();
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes y seguimiento/i })).toBeVisible();
+    await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo comercial/i })).toBeVisible();
     await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Disponibilidad/i })).toHaveCount(0);
     await expect(page.getByTestId("desktop-main-nav").getByRole("link", { name: /Equivalencias/i })).toHaveCount(0);
     await expect(
@@ -151,7 +151,7 @@ test.describe("sales commercial flow", () => {
     await page.goto("/production/requests?queue=today&customer=ACME");
 
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
     await expect(page.getByTestId("requests-active-filters")).toBeVisible();
     await expect(page.getByTestId("requests-active-filters")).toContainText(
@@ -182,10 +182,10 @@ test.describe("sales commercial flow", () => {
       }),
     ).toBeVisible();
     await expect(page.getByText("Filtrar por cliente", { exact: true })).toBeVisible();
-    await expect(page.getByText("Estado comercial", { exact: true })).toBeVisible();
-    await expect(page.getByText("Etapa", { exact: true })).toBeVisible();
-    await expect(page.getByText("Riesgo / tiempo", { exact: true })).toBeVisible();
-    await expect(page.getByText("Operación", { exact: true })).toBeVisible();
+    await expect(page.getByText("Estado del pedido", { exact: true })).toBeVisible();
+    await expect(page.getByText("Etapa del flujo", { exact: true })).toBeVisible();
+    await expect(page.getByText("Plazo y actividad", { exact: true })).toBeVisible();
+    await expect(page.getByText("Surtido y ensamble", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /^Borrador$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^Captura$/i })).toBeVisible();
   });
@@ -196,7 +196,7 @@ test.describe("sales commercial flow", () => {
     await page.goto("/production/requests");
 
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(410);
@@ -209,7 +209,7 @@ test.describe("sales commercial flow", () => {
     await page.goto("/production/requests");
 
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
     await expect(
       page.locator("summary").filter({ hasText: /Vista administrativa/i }),
@@ -222,13 +222,13 @@ test.describe("sales commercial flow", () => {
     await page.goto("/sales");
     await expect(page).toHaveURL(/\/production\/requests(?:\?.*)?$/);
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
 
     await page.goto("/sales/orders");
     await expect(page).toHaveURL(/\/production\/requests(?:\?.*)?$/);
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
 
     await page.goto("/sales/orders/new");

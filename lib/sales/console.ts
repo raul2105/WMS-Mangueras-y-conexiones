@@ -67,43 +67,43 @@ export function getSalesConsoleWorkType(input: {
     case "captura":
       return input.hasProductLines || input.hasAssemblyLines
         ? {
-            label: "Oportunidad activa",
-            detail: "Pedido en captura con líneas comerciales abiertas.",
+            label: "En captura",
+            detail: "Pedido en borrador con líneas comerciales abiertas.",
             variant: "accent",
           }
         : {
-            label: "Cotización pendiente",
-            detail: "Aún no tiene líneas para avanzar a confirmación.",
+            label: "Captura sin líneas",
+            detail: "Aún no tiene productos ni ensambles para confirmar.",
             variant: "warning",
           };
     case "por_asignar":
       return {
-        label: "Seguimiento cliente",
+        label: "Por asignar",
         detail: "Pedido confirmado sin responsable asignado.",
         variant: "warning",
       };
     case "en_surtido":
       return {
-        label: "Orden confirmada",
-        detail: "Handoff a producción en curso.",
+        label: "En surtido",
+        detail: "Asignado a almacén, surtido en proceso.",
         variant: "success",
       };
     case "listo_entrega":
       return {
-        label: "Entrega pendiente",
-        detail: "Listo para cerrar con entrega.",
+        label: "Listo para entregar",
+        detail: "Surtido y ensambles completados, pendiente entrega.",
         variant: "success",
       };
     case "entregado":
       return {
-        label: "Cierre comercial",
-        detail: "Pedido entregado y cerrado.",
+        label: "Entregado",
+        detail: "Pedido entregado al cliente y cerrado.",
         variant: "neutral",
       };
     case "cancelado":
       return {
         label: "Cancelado",
-        detail: "Sin acción operativa activa.",
+        detail: "Pedido cancelado, sin acción operativa.",
         variant: "danger",
       };
   }

@@ -28,23 +28,23 @@ export type NavItem = {
 const BASE_NAV_ITEMS: NavItem[] = [
   {
     href: "/",
-    label: "Dashboard",
+    label: "Inicio",
     icon: "dashboard",
     description: "Resumen operativo de inventario, abastecimiento y ensamble.",
     match: "exact",
   },
   {
     href: "/users",
-    label: "Usuarios",
+    label: "Usuarios y accesos",
     icon: "users",
     description:
-      "Administracion de usuarios, roles y estado de acceso al sistema.",
+      "Administración de usuarios, roles y estado de acceso al sistema.",
     match: "prefix",
     requiredPermission: "users.manage",
   },
   {
     href: "/catalog",
-    label: "Catálogo",
+    label: "Catálogo comercial",
     icon: "catalog",
     description:
       "Catálogo comercial, atributos técnicos y estructura de producto.",
@@ -53,15 +53,15 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/warehouse",
-    label: "Almacenes",
+    label: "Almacenes y ubicaciones",
     icon: "warehouse",
-    description: "Gestion de almacenes, ubicaciones y capacidad operativa.",
+    description: "Gestión de almacenes, ubicaciones y capacidad operativa.",
     match: "prefix",
     requiredPermission: "warehouse.manage",
   },
   {
     href: "/inventory",
-    label: "Inventario",
+    label: "Inventario y stock",
     icon: "inventory",
     description:
       "Control de stock, movimientos, trazabilidad y disponibilidad.",
@@ -70,26 +70,26 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/purchasing",
-    label: "Compras",
+    label: "Compras y recepciones",
     icon: "purchasing",
-    description: "Proveedores, ordenes de compra y recepciones en transito.",
+    description: "Proveedores, órdenes de compra y recepciones en tránsito.",
     match: "prefix",
     requiredPermission: "purchasing.view",
   },
   {
     href: "/production",
-    label: "Ensamble",
+    label: "Ensamble y surtido",
     icon: "production",
-    description: "Ordenes de trabajo y ejecucion de procesos de ensamble.",
+    description: "Órdenes de trabajo y ejecución de procesos de ensamble.",
     match: "prefix",
     requiredPermission: "production.view",
   },
   {
     href: "/audit",
-    label: "Auditoria",
+    label: "Auditoría",
     icon: "audit",
     description:
-      "Bitacora de eventos criticos del sistema por entidad y accion.",
+      "Bitácora de eventos críticos del sistema por entidad y acción.",
     match: "prefix",
     requiredPermission: "audit.view",
   },
@@ -102,7 +102,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (primaryRole === "SALES_EXECUTIVE") {
     items.splice(1, 0, {
       href: "/sales/customers",
-      label: "Clientes",
+      label: "Clientes y seguimiento",
       icon: "users",
       description: "Clientes, cuentas y seguimiento comercial.",
       match: "prefix",
@@ -116,7 +116,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Pedidos",
+      label: "Pedidos y surtidos",
       icon: "production",
       description:
         "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
@@ -128,7 +128,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "WAREHOUSE_OPERATOR") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Ejecución",
+      label: "Surtido y ensamble",
       icon: "production",
       description:
         "Cockpit operativo para surtido directo y ensambles confirmados.",
@@ -178,10 +178,10 @@ export function getVisibleNavItems(
   const homeItem: NavItem = {
     ...navItems[0],
     href: homeHref,
-    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : "Inicio",
+    label: primaryRole === "SALES_EXECUTIVE" ? "Mis pedidos" : "Inicio",
     description:
       primaryRole === "SALES_EXECUTIVE"
-        ? "Acceso principal a tus pedidos de surtido."
+        ? "Acceso principal a tus pedidos de surtido y configuración."
         : "Acceso principal de tu rol.",
     match: "prefix",
   };

@@ -6,7 +6,7 @@ const MOBILE_ROUTES = [
   {
     path: "/production/requests",
     role: "SALES_EXECUTIVE" as RoleKey,
-    heading: /Pedidos comerciales/i,
+    heading: /Pedidos y surtidos/i,
   },
   {
     path: "/production/requests/new",

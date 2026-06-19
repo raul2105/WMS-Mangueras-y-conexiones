@@ -203,7 +203,7 @@ test.describe
     await page.goto("/production/requests");
 
     await expect(
-      page.getByRole("heading", { name: /Pedidos comerciales/i }),
+      page.getByRole("heading", { name: /Pedidos y surtidos/i }),
     ).toBeVisible();
     await expect(
       page.getByTestId("requests-quick-filters").getByRole("link", {
@@ -211,7 +211,7 @@ test.describe
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("Disponibles para asignarme", { exact: true }),
+      page.getByText("Pedidos sin responsable", { exact: true }),
     ).toBeVisible();
     await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
     await expect(
@@ -224,10 +224,10 @@ test.describe
     await page.locator('[data-testid="requests-more-filters"] summary').click();
     await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes y seguimiento/i }),
     ).toBeVisible();
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo comercial/i }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /^Disponibilidad\s/i }),

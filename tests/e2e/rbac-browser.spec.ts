@@ -26,7 +26,7 @@ test.describe("RBAC en navegador por rol", () => {
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectAllowed(page, "/audit", /Auditoria/i);
-    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expectAllowed(page, "/production/requests", /Pedidos y surtidos/i);
     await expect(page.getByText("Vista administrativa", { exact: true })).toBeVisible();
     await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
     await expect(page.getByRole("table", { name: /Tabla administrativa de pedidos/i })).toBeVisible();
@@ -41,7 +41,7 @@ test.describe("RBAC en navegador por rol", () => {
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectAllowed(page, "/audit", /Auditoria/i);
-    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expectAllowed(page, "/production/requests", /Pedidos y surtidos/i);
     await expect(page.getByText("Vista administrativa", { exact: true })).toBeVisible();
     await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
     await expect(page.getByRole("table", { name: /Tabla administrativa de pedidos/i })).toBeVisible();
@@ -78,7 +78,7 @@ test.describe("RBAC en navegador por rol", () => {
     await expectForbidden(page, "/inventory/transfer");
     await expectForbidden(page, "/inventory/pick");
     await expectForbidden(page, "/audit");
-    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expectAllowed(page, "/production/requests", /Pedidos y surtidos/i);
     await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
   });
 
@@ -86,7 +86,7 @@ test.describe("RBAC en navegador por rol", () => {
     page,
   }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+    await expectAllowed(page, "/production/requests", /Pedidos y surtidos/i);
     await expectAllowed(
       page,
       "/production/requests/new",
@@ -105,13 +105,13 @@ test.describe("RBAC en navegador por rol", () => {
     );
     await page.goto("/production/requests");
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Pedidos$/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Mis pedidos/i }),
     ).toBeVisible();
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes y seguimiento/i }),
     ).toBeVisible();
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo comercial/i }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /^Disponibilidad\s/i }),
@@ -131,13 +131,13 @@ test.describe("RBAC en navegador por rol", () => {
       page,
       "/sales",
       /\/production\/requests(?:\?.*)?$/,
-      /Pedidos comerciales/i,
+      /Pedidos y surtidos/i,
     );
     await expectRedirectedAllowed(
       page,
       "/sales/orders",
       /\/production\/requests(?:\?.*)?$/,
-      /Pedidos comerciales/i,
+      /Pedidos y surtidos/i,
     );
     await expectRedirectedAllowed(
       page,

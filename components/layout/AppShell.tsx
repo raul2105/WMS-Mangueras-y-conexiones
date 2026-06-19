@@ -77,7 +77,7 @@ export default function AppShell({
           <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
             {sidebarCollapsed ? "SCM" : "SCMAYHER"}
           </p>
-          {!sidebarCollapsed ? <p className="text-sm font-semibold text-[var(--text-primary)]">WMS ERP</p> : null}
+          {!sidebarCollapsed ? <p className="text-sm font-semibold text-[var(--text-primary)]">WMS Mangueras y Conexiones</p> : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">

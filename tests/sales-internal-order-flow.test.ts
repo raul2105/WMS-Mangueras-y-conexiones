@@ -199,14 +199,14 @@ describe("sales internal order flow stage", () => {
         hasProductLines: false,
         hasAssemblyLines: false,
       }).label,
-    ).toBe("Cotización pendiente");
+    ).toBe("Captura sin líneas");
     expect(
       getSalesConsoleWorkType({
         flowStage: "en_surtido",
         hasProductLines: true,
         hasAssemblyLines: false,
       }).label,
-    ).toBe("Orden confirmada");
+    ).toBe("En surtido");
 
     const stageProgress = getSalesConsoleStageProgress("listo_entrega");
     expect(stageProgress.find((step) => step.isCurrent)?.stage).toBe("listo_entrega");

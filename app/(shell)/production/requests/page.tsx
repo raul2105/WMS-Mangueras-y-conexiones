@@ -57,9 +57,9 @@ const BUSINESS_TIMEZONE = "America/Mexico_City";
 const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
   overdue: "Vencidos",
   today: "Vencen hoy",
-  partial: "Parciales",
-  stale: "Sin movimiento",
-  unreleased: "Sin liberar",
+  partial: "Surtidos parciales",
+  stale: "Sin actividad reciente",
+  unreleased: "Sin surtido liberado",
   assembly_blocked: "Ensamble bloqueado",
 };
 const PRESET_LABELS: Record<OperationalPresetFilter, string> = {
@@ -650,7 +650,7 @@ export default async function ProductionRequestsPage({
       active: queueFilter === "today",
     },
     {
-      label: "Sin asignar",
+      label: "Sin responsable",
       href: buildHref(1, undefined, undefined, undefined, "sin_asignar"),
       active: presetFilter === "sin_asignar",
     },
@@ -671,7 +671,7 @@ export default async function ProductionRequestsPage({
   }>;
   const advancedFilterGroups = [
     {
-      title: "Estado comercial",
+      title: "Estado del pedido",
       items: (Object.entries(SALES_INTERNAL_ORDER_STATUS_LABELS) as Array<
         [SalesInternalOrderStatus, string]
       >).map(([status, label]) => ({
@@ -681,7 +681,7 @@ export default async function ProductionRequestsPage({
       })),
     },
     {
-      title: "Etapa",
+      title: "Etapa del flujo",
       items: SALES_CONSOLE_STAGE_FLOW.map((stage) => ({
         label: SALES_ORDER_FLOW_STAGE_LABELS[stage],
         href: buildHref(1, undefined, undefined, stage, undefined),
@@ -689,7 +689,7 @@ export default async function ProductionRequestsPage({
       })),
     },
     {
-      title: "Riesgo / tiempo",
+      title: "Plazo y actividad",
       items: [
         {
           label: "Vencidos",
@@ -702,22 +702,22 @@ export default async function ProductionRequestsPage({
           active: queueFilter === "today",
         },
         {
-          label: "Sin movimiento",
+          label: "Sin actividad reciente",
           href: buildHref(1, undefined, "stale"),
           active: queueFilter === "stale",
         },
       ],
     },
     {
-      title: "Operación",
+      title: "Surtido y ensamble",
       items: [
         {
-          label: "Sin liberar",
+          label: "Sin surtido liberado",
           href: buildHref(1, undefined, "unreleased"),
           active: queueFilter === "unreleased",
         },
         {
-          label: "Parciales",
+          label: "Surtidos parciales",
           href: buildHref(1, undefined, "partial"),
           active: queueFilter === "partial",
         },
@@ -754,7 +754,7 @@ export default async function ProductionRequestsPage({
     <div className="space-y-6">
       {" "}
       <PageHeader
-        title={isOperatorView ? "Cockpit de ejecución" : "Pedidos comerciales"}
+        title={isOperatorView ? "Cockpit de ejecución" : "Pedidos y surtidos"}
         description={
           isOperatorView
             ? "Pedidos confirmados listos para surtido directo y seguimiento de ensambles."
@@ -830,11 +830,10 @@ export default async function ProductionRequestsPage({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-[var(--text-primary)]">
-                Disponibles para asignarme
+                Pedidos sin responsable
               </p>
               <p className="text-xs text-[var(--text-muted)]">
-                Pedidos confirmados y sin responsable que puedes tomar desde la
-                lista.
+                Pedidos confirmados sin asignar que puedes tomar.
               </p>
             </div>
             <Badge variant="warning">
@@ -843,7 +842,7 @@ export default async function ProductionRequestsPage({
           </div>
           {claimableOrders.length === 0 ? (
             <p className="text-sm text-[var(--text-muted)]">
-              No hay pedidos elegibles para asignarte en la vista actual.
+              No hay pedidos disponibles para tomar en la vista actual.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">

@@ -21,9 +21,9 @@ const ROLE_CHECKS: Record<
       ["/users", /Usuarios/i],
       ["/catalog", /Cat[aá]logo comercial/i],
       ["/inventory", /Inventario/i],
-      ["/warehouse", /^Almacenes$/],
-      ["/production", /Produccion/i],
-      ["/audit", /Auditoria/i],
+      ["/warehouse", /Almacenes y ubicaciones/i],
+      ["/production", /Ensamble y surtido/i],
+      ["/audit", /Auditoría/i],
     ],
     blockedRoutes: [],
   },
@@ -32,10 +32,10 @@ const ROLE_CHECKS: Record<
     visibleRoutes: [
       ["/catalog", /Cat[aá]logo comercial/i],
       ["/inventory", /Inventario/i],
-      ["/warehouse", /^Almacenes$/],
-      ["/production", /Produccion/i],
-      ["/sales/customers", /Clientes/i],
-      ["/audit", /Auditoria/i],
+      ["/warehouse", /Almacenes y ubicaciones/i],
+      ["/production", /Ensamble y surtido/i],
+      ["/sales/customers", /Clientes y seguimiento/i],
+      ["/audit", /Auditoría/i],
     ],
     blockedRoutes: ["/users"],
   },
@@ -43,7 +43,7 @@ const ROLE_CHECKS: Record<
     home: "/inventory",
     visibleRoutes: [
       ["/inventory", /Inventario/i],
-      ["/production", /Produccion/i],
+      ["/production", /Ensamble y surtido/i],
       ["/production/requests", /Cockpit de ejecución/i],
     ],
     blockedRoutes: [
@@ -57,12 +57,12 @@ const ROLE_CHECKS: Record<
   SALES_EXECUTIVE: {
     home: "/production/requests",
     visibleRoutes: [
-      ["/production/requests", /Pedidos comerciales/i],
+      ["/production/requests", /Pedidos y surtidos/i],
       ["/production/requests/new", /Nuevo pedido comercial/i],
       ["/catalog", /Cat[aá]logo comercial/i],
       ["/production/availability", /Disponibilidad comercial/i],
       ["/production/equivalences", /Alternativas y equivalencias/i],
-      ["/sales/customers", /Clientes/i],
+      ["/sales/customers", /Clientes y seguimiento/i],
     ],
     blockedRoutes: [
       "/users",
@@ -91,14 +91,14 @@ test.describe("full role matrix", () => {
       }
 
       if (role === "SYSTEM_ADMIN" || role === "MANAGER") {
-        await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+        await expectAllowed(page, "/production/requests", /Pedidos y surtidos/i);
         await expect(page.getByText("Vista administrativa", { exact: true })).toBeVisible();
         await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
         await expect(page.getByRole("table", { name: /Tabla administrativa de pedidos/i })).toBeVisible();
       }
 
       if (role === "SALES_EXECUTIVE") {
-        await expectAllowed(page, "/production/requests", /Pedidos comerciales/i);
+        await expectAllowed(page, "/production/requests", /Pedidos y surtidos/i);
         await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
       }
 

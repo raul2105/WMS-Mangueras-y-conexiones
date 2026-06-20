@@ -404,6 +404,32 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
   },
 
+  // ── Role-specific homes ──────────────────────────────────────────────
+  {
+    route: "/home/sales",
+    description: "Inicio comercial: pedidos, clientes, cotizaciones y seguimiento",
+    permission: null,
+    roles: ["SALES_EXECUTIVE"],
+  },
+  {
+    route: "/home/warehouse",
+    description: "Inicio almacén: picking, recepción, ensamble y envíos asignados",
+    permission: null,
+    roles: ["WAREHOUSE_OPERATOR"],
+  },
+  {
+    route: "/home/manager",
+    description: "Inicio gerencial: backlog, bloqueos, trabajo sin asignar y eficiencia",
+    permission: null,
+    roles: ["MANAGER", "SYSTEM_ADMIN"],
+  },
+  {
+    route: "/home/admin",
+    description: "Inicio administración: salud del sistema, usuarios, auditoría y configuración",
+    permission: null,
+    roles: ["SYSTEM_ADMIN"],
+  },
+
   // ── Público / sistema ────────────────────────────────────────────────
   {
     route: "/login",
@@ -455,8 +481,8 @@ export function matchRouteAccessEntry(pathname: string): RouteAccessEntry | unde
  * The default landing page per role after login.
  */
 export const ROLE_HOME: Record<RoleCode, string> = {
-  SYSTEM_ADMIN: "/",
-  MANAGER: "/",
-  WAREHOUSE_OPERATOR: "/inventory",
-  SALES_EXECUTIVE: "/production/requests",
+  SYSTEM_ADMIN: "/home/admin",
+  MANAGER: "/home/manager",
+  WAREHOUSE_OPERATOR: "/home/warehouse",
+  SALES_EXECUTIVE: "/home/sales",
 };

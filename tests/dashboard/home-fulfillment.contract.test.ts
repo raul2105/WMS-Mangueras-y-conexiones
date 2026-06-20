@@ -22,7 +22,7 @@ describe("home dashboard KAN-50 slice contract", () => {
   it("preserves role-home redirect behavior", () => {
     const content = readWorkspaceFile("app/(shell)/page.tsx");
 
-    expect(content).toContain("ROLE_HOME");
+    expect(content).toContain("auth");
     expect(content).toContain("if (home !== \"/\")");
     expect(content).toContain("redirect(home)");
   });

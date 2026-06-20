@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getSessionContext } from "@/lib/auth/session-context";
-import { ROLE_HOME } from "@/lib/rbac/route-access-map";
-import type { RoleCode } from "@/lib/rbac/permissions";
+import { auth } from "@/lib/auth";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
 import { buttonStyles } from "@/components/ui/button";
@@ -12,16 +10,17 @@ import { FulfillmentPriorityQueue } from "@/components/dashboard/fulfillment-pri
 import { FulfillmentAlertList } from "@/components/dashboard/fulfillment-alert-list";
 import { FulfillmentAnalyticsPanels } from "@/components/dashboard/fulfillment-analytics-panels";
 import { getFulfillmentDashboardSnapshot } from "@/lib/dashboard/fulfillment-dashboard";
+import type { RoleCode } from "@/lib/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const perf = startPerf("page.dashboard.fulfillment");
   const requestId = await getRequestId();
-  const sessionCtx = await getSessionContext();
-  const roles = sessionCtx.roles;
+  const session = await auth();
+  const roles = session?.user?.roles ?? [];
   const primaryRole = (roles[0] as RoleCode) ?? "MANAGER";
-  const home = ROLE_HOME[primaryRole] ?? "/";
+  const home = primaryRole !== "MANAGER" ? `/home/${primaryRole.toLowerCase().replace("_", "")}` : "/";
 
   if (home !== "/") {
     perf.end({ requestId, redirected: true, home });

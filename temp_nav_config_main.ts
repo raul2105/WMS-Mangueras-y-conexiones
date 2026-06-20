@@ -38,7 +38,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
     label: "Usuarios",
     icon: "users",
     description:
-      "Administración de usuarios, roles y estado de acceso al sistema.",
+      "Administracion de usuarios, roles y estado de acceso al sistema.",
     match: "prefix",
     requiredPermission: "users.manage",
   },
@@ -47,7 +47,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
     label: "Catálogo",
     icon: "catalog",
     description:
-      "Catálogo, atributos técnicos y estructura de producto.",
+      "Catálogo comercial, atributos técnicos y estructura de producto.",
     match: "prefix",
     requiredPermission: "catalog.view",
   },
@@ -55,7 +55,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/warehouse",
     label: "Almacenes",
     icon: "warehouse",
-    description: "Gestión de almacenes, ubicaciones y capacidad operativa.",
+    description: "Gestion de almacenes, ubicaciones y capacidad operativa.",
     match: "prefix",
     requiredPermission: "warehouse.manage",
   },
@@ -72,7 +72,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/purchasing",
     label: "Compras",
     icon: "purchasing",
-    description: "Proveedores, órdenes de compra y recepciones en tránsito.",
+    description: "Proveedores, ordenes de compra y recepciones en transito.",
     match: "prefix",
     requiredPermission: "purchasing.view",
   },
@@ -80,16 +80,16 @@ const BASE_NAV_ITEMS: NavItem[] = [
     href: "/production",
     label: "Ensamble",
     icon: "production",
-    description: "Órdenes de trabajo y ejecución de procesos de ensamble.",
+    description: "Ordenes de trabajo y ejecucion de procesos de ensamble.",
     match: "prefix",
     requiredPermission: "production.view",
   },
   {
     href: "/audit",
-    label: "Auditoría",
+    label: "Auditoria",
     icon: "audit",
     description:
-      "Bitácora de eventos críticos del sistema por entidad y acción.",
+      "Bitacora de eventos criticos del sistema por entidad y accion.",
     match: "prefix",
     requiredPermission: "audit.view",
   },
@@ -178,7 +178,7 @@ export function getVisibleNavItems(
   const homeItem: NavItem = {
     ...navItems[0],
     href: homeHref,
-    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : "Dashboard",
+    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : "Inicio",
     description:
       primaryRole === "SALES_EXECUTIVE"
         ? "Acceso principal a tus pedidos de surtido."

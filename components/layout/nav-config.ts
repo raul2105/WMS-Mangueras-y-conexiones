@@ -28,14 +28,14 @@ export type NavItem = {
 const BASE_NAV_ITEMS: NavItem[] = [
   {
     href: "/",
-    label: "Inicio",
+    label: "Dashboard",
     icon: "dashboard",
     description: "Resumen operativo de inventario, abastecimiento y ensamble.",
     match: "exact",
   },
   {
     href: "/users",
-    label: "Usuarios y accesos",
+    label: "Usuarios",
     icon: "users",
     description:
       "Administración de usuarios, roles y estado de acceso al sistema.",
@@ -44,16 +44,16 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/catalog",
-    label: "Catálogo comercial",
+    label: "Catálogo",
     icon: "catalog",
     description:
-      "Catálogo comercial, atributos técnicos y estructura de producto.",
+      "Catálogo, atributos técnicos y estructura de producto.",
     match: "prefix",
     requiredPermission: "catalog.view",
   },
   {
     href: "/warehouse",
-    label: "Almacenes y ubicaciones",
+    label: "Almacenes",
     icon: "warehouse",
     description: "Gestión de almacenes, ubicaciones y capacidad operativa.",
     match: "prefix",
@@ -61,7 +61,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/inventory",
-    label: "Inventario y stock",
+    label: "Inventario",
     icon: "inventory",
     description:
       "Control de stock, movimientos, trazabilidad y disponibilidad.",
@@ -70,7 +70,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/purchasing",
-    label: "Compras y recepciones",
+    label: "Compras",
     icon: "purchasing",
     description: "Proveedores, órdenes de compra y recepciones en tránsito.",
     match: "prefix",
@@ -78,7 +78,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/production",
-    label: "Ensamble y surtido",
+    label: "Ensamble",
     icon: "production",
     description: "Órdenes de trabajo y ejecución de procesos de ensamble.",
     match: "prefix",
@@ -102,7 +102,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (primaryRole === "SALES_EXECUTIVE") {
     items.splice(1, 0, {
       href: "/sales/customers",
-      label: "Clientes y seguimiento",
+      label: "Clientes",
       icon: "users",
       description: "Clientes, cuentas y seguimiento comercial.",
       match: "prefix",
@@ -116,7 +116,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Pedidos y surtidos",
+      label: "Pedidos",
       icon: "production",
       description:
         "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
@@ -128,7 +128,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "WAREHOUSE_OPERATOR") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Surtido y ensamble",
+      label: "Ejecución",
       icon: "production",
       description:
         "Cockpit operativo para surtido directo y ensambles confirmados.",
@@ -178,10 +178,10 @@ export function getVisibleNavItems(
   const homeItem: NavItem = {
     ...navItems[0],
     href: homeHref,
-    label: primaryRole === "SALES_EXECUTIVE" ? "Mis pedidos" : "Inicio",
+    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : "Dashboard",
     description:
       primaryRole === "SALES_EXECUTIVE"
-        ? "Acceso principal a tus pedidos de surtido y configuración."
+        ? "Acceso principal a tus pedidos de surtido."
         : "Acceso principal de tu rol.",
     match: "prefix",
   };

@@ -24,7 +24,7 @@ function fileToRoute(filePath: string) {
     .filter((segment) => segment && segment !== "page.tsx" && segment !== "layout.tsx" && segment !== "loading.tsx" && segment !== "error.tsx");
 
   const routeSegments = segments
-    .filter((segment) => !segment.startsWith("("))
+    .filter((segment) => !segment.startsWith("(") && !segment.startsWith(")"))
     .map((segment) => segment.replace(/^\[(.+)\]$/, "[$1]"));
 
   return `/${routeSegments.join("/")}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
@@ -39,7 +39,7 @@ describe("route access map coverage", () => {
       .sort();
 
     const routes = pageFiles.map(fileToRoute);
-    expect(routes).toHaveLength(61);
+    expect(routes).toHaveLength(66);
 
     const missing = routes.filter((route) => !getRouteAccessEntry(route));
     expect(missing).toEqual([]);

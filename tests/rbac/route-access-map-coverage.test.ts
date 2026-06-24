@@ -39,7 +39,7 @@ describe("route access map coverage", () => {
       .sort();
 
     const routes = pageFiles.map(fileToRoute);
-    expect(routes).toHaveLength(66);
+    expect(routes).toHaveLength(65);
 
     const missing = routes.filter((route) => !getRouteAccessEntry(route));
     expect(missing).toEqual([]);

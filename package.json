@@ -6,7 +6,7 @@
     "node": ">=22 <25"
   },
   "scripts": {
-    "dev": "next dev -p 3005",
+    "dev": "next dev -p 3002",
     "dev:webpack": "next dev --webpack -p 3002",
     "build": "next build --webpack",
     "start": "next start -p 3002",

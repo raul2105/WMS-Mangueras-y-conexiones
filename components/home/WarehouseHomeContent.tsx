@@ -2,35 +2,30 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Package, Truck, Box, ScanLine } from 'lucide-react';
+import { Package, Truck, Box } from 'lucide-react';
 import Link from 'next/link';
 
-export function WarehouseHomeContent() {
+interface WarehouseHomeContentProps {
+  pendingPicking: number;
+  todaysReceptions: number;
+  activeAssemblies: number;
+}
+
+export function WarehouseHomeContent({ 
+  pendingPicking, 
+  todaysReceptions, 
+  activeAssemblies
+}: WarehouseHomeContentProps) {
   const stats = [
-    { label: 'Picking Pendiente', value: '23', icon: Package, color: 'text-blue-600', href: '/warehouse/picking?status=pending' },
-    { label: 'Recepciones Hoy', value: '5', icon: Truck, color: 'text-green-600', href: '/warehouse/receiving?date=today' },
-    { label: 'Ensambles Activos', value: '8', icon: Box, color: 'text-purple-600', href: '/warehouse/assembly?status=active' },
-    { label: 'Envíos Preparados', value: '12', icon: ScanLine, color: 'text-orange-600', href: '/warehouse/shipping?status=ready' },
-  ];
-
-  const myTasks = [
-    { id: 'PICK-001', type: 'Picking', order: 'ORD-2024-001', location: 'A-12-04', priority: 'high' },
-    { id: 'PICK-002', type: 'Picking', order: 'ORD-2024-002', location: 'B-01-01', priority: 'medium' },
-    { id: 'ASM-001', type: 'Ensamble', order: 'ORD-2024-003', location: 'ENS-01', priority: 'high' },
-    { id: 'RCV-001', type: 'Recepción', order: 'PO-2024-001', location: 'RECV-01', priority: 'medium' },
-  ];
-
-  const priorityActions = [
-    { label: 'Iniciar Picking', href: '/warehouse/picking/start', icon: Package, primary: true },
-    { label: 'Registrar Recepción', href: '/warehouse/receiving/new', icon: Truck, primary: false },
-    { label: 'Continuar Ensamble', href: '/warehouse/assembly/active', icon: Box, primary: false },
-    { label: 'Preparar Envío', href: '/warehouse/shipping/prepare', icon: ScanLine, primary: false },
+    { label: 'Picking Pendiente', value: String(pendingPicking), icon: Package, color: 'text-blue-600', href: '/inventory/pick?status=pending' },
+    { label: 'Recepciones Hoy', value: String(todaysReceptions), icon: Truck, color: 'text-green-600', href: '/inventory/receive?date=today' },
+    { label: 'Ensambles Activos', value: String(activeAssemblies), icon: Box, color: 'text-purple-600', href: '/production/fulfillment?status=active' },
   ];
 
   return (
     <div className="space-y-6">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {stats.map((stat) => (
           <Link key={stat.label} href={stat.href} className="block">
             <Card className="hover:shadow-md transition-shadow cursor-pointer">
@@ -44,41 +39,14 @@ export function WarehouseHomeContent() {
                     <stat.icon size={24} />
                   </div>
                 </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                </div>
               </CardContent>
             </Card>
           </Link>
         ))}
       </div>
-
-      {/* My Assigned Tasks */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package size={20} />
-            Mis Tareas Asignadas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {myTasks.map((task) => (
-              <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${task.priority === 'high' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                    {task.type === 'Picking' && <Package size={18} />}
-                    {task.type === 'Ensamble' && <Box size={18} />}
-                    {task.type === 'Recepción' && <Truck size={18} />}
-                  </div>
-                  <div>
-                    <p className="font-medium">{task.id} - {task.type}</p>
-                    <p className="text-sm text-gray-500">{task.order} · {task.location}</p>
-                  </div>
-                </div>
-                <Button variant="primary" size="sm">Iniciar</Button>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Priority Actions */}
       <Card>
@@ -89,8 +57,12 @@ export function WarehouseHomeContent() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {priorityActions.map((action) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[
+              { label: 'Iniciar Picking', href: '/inventory/pick/new', icon: Package, primary: true },
+              { label: 'Registrar Recepción', href: '/inventory/receive/new', icon: Truck, primary: false },
+              { label: 'Continuar Ensamble', href: '/production/fulfillment', icon: Box, primary: false },
+            ].map((action) => (
               <Link key={action.label} href={action.href}>
                 <Button
                   variant={action.primary ? 'primary' : 'secondary'}

@@ -23,7 +23,7 @@ export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navIt
   SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 4 },
 };
 
-function buildUrlExpectation(path: string) {
+export function buildUrlExpectation(path: string) {
   const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(path.includes("?") ? `${escapedPath}$` : `${escapedPath}(?:\\?.*)?$`);
 }

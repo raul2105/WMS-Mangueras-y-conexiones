@@ -2,28 +2,40 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, Shield, Database, Activity, Settings, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Users, Shield, Database, AlertTriangle, Settings } from 'lucide-react';
 import Link from 'next/link';
 
-export function AdminHomeContent() {
+interface AdminHomeContentProps {
+  activeUsersCount: number;
+  auditPendingCount: number;
+  tracesRecentCount: number;
+  recentAudits?: Array<{ id: string; action: string; actor: string | null; createdAt: Date | string; entityType?: string }>;
+}
+
+function formatTimeAgo(date: Date | string): string {
+  const d = new Date(date);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return 'hace un momento';
+  if (diffMins < 60) return `hace ${diffMins} min`;
+  if (diffHours < 24) return `hace ${diffHours} h`;
+  return `hace ${diffDays} d`;
+}
+
+export function AdminHomeContent({ 
+  activeUsersCount, 
+  auditPendingCount, 
+  tracesRecentCount,
+  recentAudits = []
+}: AdminHomeContentProps) {
   const stats = [
-    { label: 'Usuarios Activos', value: '24', icon: Users, color: 'text-blue-600', href: '/admin/users' },
-    { label: 'Salud del Sistema', value: '99.9%', icon: Activity, color: 'text-green-600', href: '/admin/health' },
-    { label: 'Auditoría Pendiente', value: '3', icon: AlertTriangle, color: 'text-orange-600', href: '/admin/audit?status=pending' },
-    { label: 'Backups Recientes', value: '5', icon: Database, color: 'text-purple-600', href: '/admin/backups' },
-  ];
-
-  const systemHealth = [
-    { name: 'Base de Datos', status: 'healthy', latency: '12ms' },
-    { name: 'API Externa', status: 'healthy', latency: '45ms' },
-    { name: 'Procesos Background', status: 'warning', latency: '2.3s' },
-    { name: 'Almacenamiento', status: 'healthy', usage: '67%' },
-  ];
-
-  const recentAudit = [
-    { id: 'AUD-001', action: 'Cambio permisos rol', user: 'admin@wms.com', time: '15 min', status: 'review' },
-    { id: 'AUD-002', action: 'Eliminación usuario', user: 'manager@wms.com', time: '1 hora', status: 'approved' },
-    { id: 'AUD-003', action: 'Configuración webhook', user: 'dev@wms.com', time: '3 horas', status: 'pending' },
+    { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
+    { label: 'Auditoría Pendiente', value: String(auditPendingCount), icon: AlertTriangle, color: 'text-orange-600', href: '/audit?status=pending', live: true },
+    { label: 'Rastros Recientes', value: String(tracesRecentCount), icon: Database, color: 'text-purple-600', href: '/trace', live: true },
   ];
 
   return (
@@ -43,47 +55,14 @@ export function AdminHomeContent() {
                     <stat.icon size={24} />
                   </div>
                 </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                </div>
               </CardContent>
             </Card>
           </Link>
         ))}
       </div>
-
-      {/* System Health */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity size={20} className="text-green-600" />
-            Salud del Sistema
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {systemHealth.map((service) => (
-              <div key={service.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-full ${service.status === 'healthy' ? 'bg-green-100' : 'bg-yellow-100'}`}>
-                    <CheckCircle size={16} className={service.status === 'healthy' ? 'text-green-700' : 'text-yellow-700'} />
-                  </div>
-                  <div>
-                    <p className="font-medium">{service.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {service.latency ? `Latencia: ${service.latency}` : `Uso: ${service.usage}`}
-                    </p>
-                  </div>
-                </div>
-                <span
-                  className={`px-2 py-1 text-xs rounded-full ${
-                    service.status === 'healthy' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                  }`}
-                >
-                  {service.status === 'healthy' ? 'Operativo' : 'Atención'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Recent Audit */}
       <Card>
@@ -93,27 +72,21 @@ export function AdminHomeContent() {
               <Shield size={20} className="text-purple-600" />
               Auditoría Reciente
             </CardTitle>
-            <Link href="/admin/audit">
-              <Button variant="ghost" size="sm">Ver todos</Button>
-            </Link>
+            <Link href="/audit" className="text-sm text-blue-600 hover:underline">Ver todos</Link>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {recentAudit.map((audit) => (
+            {(recentAudits && recentAudits.length > 0 ? recentAudits : []).map((audit) => (
               <div key={audit.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div>
                   <p className="font-medium">{audit.action}</p>
-                  <p className="text-sm text-gray-500">{audit.user} · {audit.time}</p>
+                  <p className="text-sm text-gray-500">
+                    {audit.actor ?? 'Sistema'} · {formatTimeAgo(audit.createdAt)}
+                  </p>
                 </div>
-                <span
-                  className={`px-2 py-1 text-xs rounded-full ${
-                    audit.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                    audit.status === 'review' ? 'bg-blue-100 text-blue-700' :
-                    'bg-green-100 text-green-700'
-                  }`}
-                >
-                  {audit.status}
+                <span className="px-2 py-1 text-xs rounded-full text-gray-700 bg-gray-100">
+                  {audit.entityType ?? 'N/A'}
                 </span>
               </div>
             ))}
@@ -133,10 +106,10 @@ export function AdminHomeContent() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {
               [
-                { label: 'Gestionar Usuarios', href: '/admin/users', icon: Users },
-                { label: 'Roles y Permisos', href: '/admin/roles', icon: Shield },
-                { label: 'Configuración', href: '/admin/settings', icon: Settings },
-                { label: 'Respaldos', href: '/admin/backups', icon: Database },
+                { label: 'Gestionar Usuarios', href: '/users', icon: Users },
+                { label: 'Auditoría', href: '/audit', icon: Shield },
+                { label: 'Rastros', href: '/trace', icon: Settings },
+                { label: 'Etiquetas', href: '/labels', icon: Database },
               ].map((action) => (
                 <Link key={action.label} href={action.href}>
                   <Button variant="secondary" className="w-full justify-start gap-2 h-auto py-3">

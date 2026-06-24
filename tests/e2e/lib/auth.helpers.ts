@@ -10,17 +10,17 @@ export const USERS = {
 export type RoleKey = keyof typeof USERS;
 
 export const EXPECTED_HOME: Record<RoleKey, string> = {
-  SYSTEM_ADMIN: "/",
-  MANAGER: "/",
-  WAREHOUSE_OPERATOR: "/inventory",
-  SALES_EXECUTIVE: "/production/requests",
+  SYSTEM_ADMIN: "/home/admin",
+  MANAGER: "/home/manager",
+  WAREHOUSE_OPERATOR: "/home/warehouse",
+  SALES_EXECUTIVE: "/home/sales",
 };
 
 export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navItems: number }> = {
   SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 8 },
   MANAGER: { name: "Manager WMS", email: "manager@scmayher.com", navItems: 7 },
-  WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 4 },
-  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 3 },
+  WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 5 },
+  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 4 },
 };
 
 function buildUrlExpectation(path: string) {

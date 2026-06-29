@@ -14,7 +14,7 @@ export default async function AdminHomePage() {
   }
 
   // Fetch real data
-  const [usersResult, traceCount, auditTotalCount, recentAudits] = await Promise.all([
+  const [usersResult, traceCount, auditPendingCountResult, recentAudits] = await Promise.all([
     listUsers({ isActive: "active", pageSize: 1 }),
     prisma.traceRecord.count(),
     prisma.auditLog.count(),
@@ -27,7 +27,7 @@ export default async function AdminHomePage() {
 
   const activeUsersCount = usersResult.total;
   const tracesRecentCount = traceCount;
-  const auditPendingCount = auditTotalCount; // Total audit log count as proxy for "pending review"
+  const auditTotalCount = auditPendingCountResult;
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -35,7 +35,7 @@ export default async function AdminHomePage() {
       <Suspense fallback={<AdminHomeSkeleton />}>
         <AdminHomeContent 
           activeUsersCount={activeUsersCount}
-          auditPendingCount={auditPendingCount}
+          auditTotalCount={auditTotalCount}
           tracesRecentCount={tracesRecentCount}
           recentAudits={recentAudits}
         />

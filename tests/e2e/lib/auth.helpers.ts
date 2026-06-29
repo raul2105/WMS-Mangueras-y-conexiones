@@ -12,7 +12,7 @@ export type RoleKey = keyof typeof USERS;
 export const EXPECTED_HOME: Record<RoleKey, string> = {
   SYSTEM_ADMIN: "/home/admin",
   MANAGER: "/home/manager",
-  WAREHOUSE_OPERATOR: "/home/warehouse",
+  WAREHOUSE_OPERATOR: "/home/warehouse", // Note: redirect happens from /home/warehouse
   SALES_EXECUTIVE: "/home/sales",
 };
 
@@ -23,7 +23,7 @@ export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navIt
   SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 4 },
 };
 
-function buildUrlExpectation(path: string) {
+export function buildUrlExpectation(path: string) {
   const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(path.includes("?") ? `${escapedPath}$` : `${escapedPath}(?:\\?.*)?$`);
 }

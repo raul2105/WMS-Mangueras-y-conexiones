@@ -15,8 +15,8 @@ export function ManagerHomeContent({
   activeBlockers
 }: ManagerHomeContentProps) {
   const stats = [
-    { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-red-600', href: '/sales/orders?status=overdue', live: true },
-    { label: 'Bloqueos Activos', value: String(activeBlockers), icon: Flag, color: 'text-purple-600', href: '/production/fulfillment?blocked=true', live: true },
+    { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-red-600', href: '/production/requests?queue=overdue', live: true },
+    { label: 'Bloqueos Activos', value: String(activeBlockers), icon: Flag, color: 'text-purple-600', href: '/production/requests?queue=assembly_blocked', live: true },
   ];
 
   return (
@@ -56,7 +56,7 @@ export function ManagerHomeContent({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { label: 'Reasignar Trabajo', href: '/warehouse?reassign=true', icon: Users },
-              { label: 'Resolver Bloqueos', href: '/production/fulfillment?blocked=true', icon: Flag },
+              { label: 'Resolver Bloqueos', href: '/production/requests?queue=assembly_blocked', icon: Flag },
               { label: 'Ver Reportes', href: '/audit', icon: Flag },
             ].map((action) => (
               <Link key={action.label} href={action.href}>

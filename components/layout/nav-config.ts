@@ -116,7 +116,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Pedidos",
+      label: "Todos los Pedidos",
       icon: "production",
       description:
         "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",

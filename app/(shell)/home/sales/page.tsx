@@ -1,9 +1,9 @@
-import { Suspense } from 'react';
 import { getSessionContext } from '@/lib/auth/session-context';
 import { redirect } from 'next/navigation';
+import prisma from '@/lib/prisma';
 import { SalesHomeContent } from '@/components/home/SalesHomeContent';
 import { SalesHomeSkeleton } from '@/components/home/SalesHomeSkeleton';
-import prisma from '@/lib/prisma';
+import { Suspense } from 'react';
 
 export default async function SalesHomePage() {
   const ctx = await getSessionContext();
@@ -20,22 +20,19 @@ export default async function SalesHomePage() {
 
   const userId = user?.id ?? '';
 
-  const [pendingOrdersResult, activeCustomers, recentOrdersData] = await Promise.all([
-    // Pending orders count
+  const [pendingOrders, activeCustomers, recentOrdersData] = await Promise.all([
     prisma.salesInternalOrder.count({
       where: {
         status: 'CONFIRMADA',
-        assignedToUserId: userId
-      }
+        assignedToUserId: userId,
+      },
     }),
-    // Active customers count
     prisma.customer.count({
-      where: { isActive: true }
+      where: { isActive: true },
     }),
-    // Recent orders
     prisma.salesInternalOrder.findMany({
       where: {
-        assignedToUserId: userId
+        assignedToUserId: userId,
       },
       orderBy: { createdAt: 'desc' },
       take: 5,
@@ -44,19 +41,17 @@ export default async function SalesHomePage() {
         code: true,
         customerName: true,
         status: true,
-        createdAt: true
-      }
-    })
+        createdAt: true,
+      },
+    }),
   ]);
   
-  const pendingOrders = pendingOrdersResult;
-  
   // Format recent orders for the component
-  const recentOrders = recentOrdersData.map(order => ({
+  const recentOrders = recentOrdersData.map((order) => ({
     id: order.code,
     client: order.customerName ?? 'Cliente desconocido',
-    status: order.status?.toLowerCase() ?? 'confirmed',
-    total: '$0' // SalesInternalOrder doesn't have total field in current schema
+    status: order.status?.toLowerCase() ?? 'confirmada',
+    total: 'N/D'
   }));
 
   return (

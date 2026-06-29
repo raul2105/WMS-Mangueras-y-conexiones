@@ -38,7 +38,7 @@ async function pickStock(formData: FormData) {
   const parsed = pickStockSchema.safeParse({
     code,
     locationCode,
-    operatorName: operatorAlias,
+    operatorName: actor.operatorName ?? "",
     reference: reference ?? undefined,
     notes: notes ?? undefined,
     quantityRaw: qtyRaw,

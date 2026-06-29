@@ -16,7 +16,7 @@ const ROLE_CHECKS: Record<
   }
 > = {
   SYSTEM_ADMIN: {
-    home: "/",
+    home: "/home/admin",
     visibleRoutes: [
       ["/users", /Usuarios/i],
       ["/catalog", /Cat[aá]logo comercial/i],
@@ -28,7 +28,7 @@ const ROLE_CHECKS: Record<
     blockedRoutes: [],
   },
   MANAGER: {
-    home: "/",
+    home: "/home/manager",
     visibleRoutes: [
       ["/catalog", /Cat[aá]logo comercial/i],
       ["/inventory", /Inventario/i],
@@ -40,11 +40,11 @@ const ROLE_CHECKS: Record<
     blockedRoutes: ["/users"],
   },
   WAREHOUSE_OPERATOR: {
-    home: "/inventory",
+    home: "/home/warehouse",
     visibleRoutes: [
       ["/inventory", /Inventario/i],
       ["/production", /Produccion de ensambles/i],
-      ["/production/requests", /Cockpit de ejecución/i],
+      ["/production/requests", /Cockpit de ejecuci[oó]n/i],
     ],
     blockedRoutes: [
       "/users",
@@ -55,7 +55,7 @@ const ROLE_CHECKS: Record<
     ],
   },
   SALES_EXECUTIVE: {
-    home: "/production/requests",
+    home: "/home/sales",
     visibleRoutes: [
       ["/production/requests", /Pedidos y surtidos/i],
       ["/production/requests/new", /Nuevo pedido comercial/i],

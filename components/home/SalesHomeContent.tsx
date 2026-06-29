@@ -17,18 +17,17 @@ export function SalesHomeContent({
   recentOrders = []
 }: SalesHomeContentProps) {
   const stats = [
-    { label: 'Pedidos Pendientes', value: String(pendingOrders), icon: Package, color: 'bg-status-processing', href: '/sales/orders?status=pending', live: true },
+    { label: 'Pedidos Pendientes', value: String(pendingOrders), icon: Package, color: 'bg-status-processing', href: '/production/requests?status=CONFIRMADA', live: true },
     { label: 'Clientes Activos', value: String(activeCustomers), icon: Users, color: 'bg-status-available', href: '/sales/customers', live: true },
   ];
 
   const priorityActions = [
-    { label: 'Nuevo Pedido', href: '/sales/orders/new', icon: Package, primary: true },
-    { label: 'Seguimiento Pedidos', href: '/sales/orders?status=processing', icon: Clock, primary: false },
+    { label: 'Nuevo Pedido', href: '/production/requests/new', icon: Package, primary: true },
+    { label: 'Seguimiento Pedidos', href: '/production/requests?status=processing', icon: Clock, primary: false },
     { label: 'Clientes por Contactar', href: '/sales/customers', icon: Users, primary: false },
-    { label: 'Equivalencias', href: '/sales/equivalences', icon: TrendingUp, primary: false },
+    { label: 'Equivalencias', href: '/production/equivalences', icon: TrendingUp, primary: false },
   ];
 
-  
   
 
   return (
@@ -84,12 +83,15 @@ export function SalesHomeContent({
       {/* Recent Orders */}
       <Card>
         <CardHeader>
-          <Link href="/sales/orders" className="w-full">
+          <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <Package size={20} />
               Pedidos Recientes
             </CardTitle>
-          </Link>
+            <Link href="/sales/orders">
+              <Button variant="ghost" size="sm">Ver todos</Button>
+            </Link>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">

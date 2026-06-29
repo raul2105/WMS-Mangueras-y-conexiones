@@ -92,9 +92,9 @@ Notas del launcher AWS local:
 
 ```bash
 npm run dev              # Servidor de desarrollo puerto 3002
-npm run dev:webpack      # Fallback de diagnostico con webpack
+npm run dev:webpack      # Fallback de diagnostico con webpack (puerto 3002)
 npm run build            # Build de produccion
-npm run start            # Servidor de produccion
+npm run start            # Servidor de produccion (puerto 3002)
 npm run lint             # Linter ESLint
 npm run typecheck        # Next typegen + TypeScript check
 npm run test             # Pruebas con PostgreSQL obligatorio

@@ -17,9 +17,9 @@ export function WarehouseHomeContent({
   activeAssemblies
 }: WarehouseHomeContentProps) {
   const stats = [
-    { label: 'Picking Pendiente', value: String(pendingPicking), icon: Package, color: 'text-blue-600', href: '/inventory/pick?status=pending' },
-    { label: 'Recepciones Hoy', value: String(todaysReceptions), icon: Truck, color: 'text-green-600', href: '/inventory/receive?date=today' },
-    { label: 'Ensambles Activos', value: String(activeAssemblies), icon: Box, color: 'text-purple-600', href: '/production/fulfillment?status=active' },
+    { label: 'Picking Pendiente', value: String(pendingPicking), icon: Package, color: 'text-blue-600', href: '/inventory/pick?status=pending', live: true },
+    { label: 'Recepciones Hoy', value: String(todaysReceptions), icon: Truck, color: 'text-green-600', href: '/inventory/receive?date=today', live: true },
+    { label: 'Ensambles Activos', value: String(activeAssemblies), icon: Box, color: 'text-purple-600', href: '/production?ops=assembly_open', live: true },
   ];
 
   return (
@@ -33,14 +33,18 @@ export function WarehouseHomeContent({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-500">{stat.label}</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
+                    <p className="text-3xl font-bold text-gray-900 mt-1">{stat.value}</p>
                   </div>
                   <div className={`p-3 bg-gray-100 rounded-lg ${stat.color}`}>
                     <stat.icon size={24} />
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                  {stat.live ? (
+                    <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Demo</span>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -48,7 +52,7 @@ export function WarehouseHomeContent({
         ))}
       </div>
 
-      {/* Priority Actions */}
+      {/* Priority Actions - use existing routes only */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -59,9 +63,9 @@ export function WarehouseHomeContent({
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[
-              { label: 'Iniciar Picking', href: '/inventory/pick/new', icon: Package, primary: true },
-              { label: 'Registrar Recepción', href: '/inventory/receive/new', icon: Truck, primary: false },
-              { label: 'Continuar Ensamble', href: '/production/fulfillment', icon: Box, primary: false },
+              { label: 'Ver Picking', href: '/inventory/pick?status=pending', icon: Package, primary: true },
+              { label: 'Ver Recepciones', href: '/inventory/receive?date=today', icon: Truck, primary: false },
+              { label: 'Ver Ensambles', href: '/production?ops=assembly_open', icon: Box, primary: false },
             ].map((action) => (
               <Link key={action.label} href={action.href}>
                 <Button

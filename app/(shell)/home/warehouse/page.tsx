@@ -1,9 +1,8 @@
-import { Suspense } from 'react';
 import { getSessionContext } from '@/lib/auth/session-context';
 import { redirect } from 'next/navigation';
-import { WarehouseHomeContent } from '@/components/home/WarehouseHomeContent';
-import { WarehouseHomeSkeleton } from '@/components/home/WarehouseHomeSkeleton';
 import prisma from '@/lib/prisma';
+import { WarehouseHomeContent } from '@/components/home/WarehouseHomeContent';
+import { Suspense } from 'react';
 
 export default async function WarehouseHomePage() {
   const ctx = await getSessionContext();
@@ -12,23 +11,24 @@ export default async function WarehouseHomePage() {
     redirect('/forbidden');
   }
 
+  // Fetch real warehouse data
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
 
-  // Fetch real warehouse data using WarehouseHomeContent component
   const [pendingPicking, todaysReceptions, activeAssemblies] = await Promise.all([
-    // Pending picking count - pick lists in active status
-    prisma.pickList.count({
+    // Pending picking count
+    prisma.inventory.count({
       where: {
-        status: { in: ['DRAFT', 'RELEASED', 'IN_PROGRESS', 'PARTIAL'] }
+        reserved: { gt: 0 }
       }
     }),
     // Today's receptions
     prisma.inventoryMovement.count({
       where: {
         type: 'IN',
-        createdAt: { gte: today, lt: todayEnd }
+        createdAt: { gte: today, lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) }
       }
     }),
     // Active assemblies (production orders in progress)
@@ -49,6 +49,22 @@ export default async function WarehouseHomePage() {
           activeAssemblies={activeAssemblies}
         />
       </Suspense>
+    </div>
+  );
+}
+
+// Simple skeleton component
+function WarehouseHomeSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="p-6 bg-white rounded-lg shadow-sm border border-gray-200 animate-pulse">
+            <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+            <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

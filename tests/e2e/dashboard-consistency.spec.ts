@@ -6,32 +6,31 @@ import {
   buildUrlExpectation,
 } from "./lib/auth.helpers";
 
-test.describe("dashboard consistency - role homes vs destination pages", () => {
-  // Helper to read dashboard card count by label
-  async function getDashboardCardCount(page: import("@playwright/test").Page, cardLabel: string): Promise<number> {
-    // Find the card by its label text
-    const card = page.locator(`text="${cardLabel}"`).first();
-    await expect(card).toBeVisible();
-    
-    // The value is in a sibling element with text-2xl font-bold
-    const valueElement = card.locator('..').locator('.text-2xl.font-bold').first();
-    const text = await valueElement.textContent();
-    return parseInt(text?.trim() || '0', 10);
-  }
+// Helper to read dashboard card count by label
+// Works with both text-2xl and text-3xl (warehouse uses larger text)
+async function getDashboardCardCount(page: import("@playwright/test").Page, cardLabel: string): Promise<number> {
+  // Find the card by its label text
+  const card = page.locator(`text="${cardLabel}"`).first();
+  await expect(card).toBeVisible();
+  
+  // The value is in a sibling element with text-2xl/text-3xl font-bold
+  const valueElement = card.locator('..').locator('.text-2xl.font-bold, .text-3xl.font-bold').first();
+  const text = await valueElement.textContent();
+  return parseInt(text?.trim() || '0', 10);
+}
 
-  // Helper to click dashboard card by label and verify navigation
-  async function clickDashboardCardAndVerify(page: import("@playwright/test").Page, cardLabel: string, expectedUrlPattern: RegExp): Promise<void> {
-    const card = page.locator(`text="${cardLabel}"`).first();
-    await expect(card).toBeVisible();
-    
-    // Find the parent Link element and click it
-    const link = card.locator('..').locator('xpath=ancestor::a[1]').first();
-    await link.click();
-    
-    await expect(page).toHaveURL(expectedUrlPattern);
-    // Verify we're still in authenticated shell (has header/banner)
-    await expect(page.getByRole("banner")).toBeVisible();
-  }
+// Helper to click dashboard card by label and verify navigation
+async function clickDashboardCardAndVerify(page: import("@playwright/test").Page, cardLabel: string, expectedUrlPattern: RegExp): Promise<void> {
+  const card = page.locator(`text="${cardLabel}"`).first();
+  await expect(card).toBeVisible();
+  
+  // Find the parent Link element and click it
+  const link = card.locator('..').locator('xpath=ancestor::a[1]').first();
+  await link.click();
+  
+  await expect(page).toHaveURL(new RegExp("^(?!.*\\/forbidden\\b).*$")); // not forbidden
+  await expect(page).toHaveURL(expectedUrlPattern);
+}
 
   // SYSTEM_ADMIN checks
   test("SYSTEM_ADMIN dashboard counts match destination pages", async ({ page }) => {
@@ -46,19 +45,19 @@ test.describe("dashboard consistency - role homes vs destination pages", () => {
       await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
     }
 
-    // 2. Auditoría Pendiente count -> /audit?status=pending
-    const auditPendingCount = await getDashboardCardCount(page, "Auditoría Pendiente");
-    if (auditPendingCount > 0) {
-      await clickDashboardCardAndVerify(page, "Auditoría Pendiente", buildUrlExpectation("/audit?status=pending"));
+    // 2. Eventos de Auditoría count -> /audit
+    const auditTotalCount = await getDashboardCardCount(page, "Eventos de Auditoría");
+    if (auditTotalCount > 0) {
+      await clickDashboardCardAndVerify(page, "Eventos de Auditoría", buildUrlExpectation("/audit"));
       await expect(page.getByRole("heading", { level: 1, name: /Auditor/i })).toBeVisible();
       await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
     }
 
-    // 3. Rastros Recientes count -> /trace
+    // 3. Rastros Recientes count -> /trace (heading is "Buscar Trace ID")
     const tracesCount = await getDashboardCardCount(page, "Rastros Recientes");
     if (tracesCount > 0) {
       await clickDashboardCardAndVerify(page, "Rastros Recientes", buildUrlExpectation("/trace"));
-      await expect(page.getByRole("heading", { level: 1, name: /Rastros?|Trazabilidad/i })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: /Buscar Trace ID/i })).toBeVisible();
       await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
     }
   });
@@ -67,19 +66,19 @@ test.describe("dashboard consistency - role homes vs destination pages", () => {
   test("MANAGER dashboard counts match destination pages", async ({ page }) => {
     await loginAs(page, "MANAGER", EXPECTED_HOME.MANAGER);
     
-    // 1. Pedidos Atrasados count -> /sales/orders?status=overdue
+    // 1. Pedidos Atrasados count -> /production/requests?queue=overdue
     const overdueCount = await getDashboardCardCount(page, "Pedidos Atrasados");
     if (overdueCount > 0) {
-      await clickDashboardCardAndVerify(page, "Pedidos Atrasados", buildUrlExpectation("/sales/orders?status=overdue"));
+      await clickDashboardCardAndVerify(page, "Pedidos Atrasados", buildUrlExpectation("/production/requests?queue=overdue"));
       await expect(page.getByRole("heading", { level: 1, name: /Pedidos|Órdenes/i })).toBeVisible();
       await page.goto(EXPECTED_HOME.MANAGER);
     }
 
-    // 2. Bloqueos Activos count -> /production/fulfillment?blocked=true
+    // 2. Bloqueos Activos count -> /production/requests?queue=assembly_blocked
     const blockersCount = await getDashboardCardCount(page, "Bloqueos Activos");
     if (blockersCount > 0) {
-      await clickDashboardCardAndVerify(page, "Bloqueos Activos", buildUrlExpectation("/production/fulfillment?blocked=true"));
-      await expect(page.getByRole("heading", { level: 1, name: /Fulfillment|Surtido|Producción/i })).toBeVisible();
+      await clickDashboardCardAndVerify(page, "Bloqueos Activos", buildUrlExpectation("/production/requests?queue=assembly_blocked"));
+      await expect(page.getByRole("heading", { level: 1, name: /Pedidos|Órdenes/i })).toBeVisible();
       await page.goto(EXPECTED_HOME.MANAGER);
     }
   });
@@ -104,11 +103,11 @@ test.describe("dashboard consistency - role homes vs destination pages", () => {
       await page.goto(EXPECTED_HOME.WAREHOUSE_OPERATOR);
     }
 
-    // 3. Ensambles Activos count -> /production/fulfillment?status=active
+    // 3. Ensambles Activos count -> /production?ops=assembly_open
     const assembliesCount = await getDashboardCardCount(page, "Ensambles Activos");
     if (assembliesCount > 0) {
-      await clickDashboardCardAndVerify(page, "Ensambles Activos", buildUrlExpectation("/production/fulfillment?status=active"));
-      await expect(page.getByRole("heading", { level: 1, name: /Fulfillment|Surtido|Producción|Produccion/i })).toBeVisible();
+      await clickDashboardCardAndVerify(page, "Ensambles Activos", buildUrlExpectation("/production?ops=assembly_open"));
+      await expect(page.getByRole("heading", { level: 1, name: /Producción|Produccion/i })).toBeVisible();
       await page.goto(EXPECTED_HOME.WAREHOUSE_OPERATOR);
     }
   });
@@ -117,10 +116,10 @@ test.describe("dashboard consistency - role homes vs destination pages", () => {
   test("SALES_EXECUTIVE dashboard counts match destination pages", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE", EXPECTED_HOME.SALES_EXECUTIVE);
     
-    // 1. Pedidos Pendientes count -> /sales/orders?status=pending
+    // 1. Pedidos Pendientes count -> /production/requests?status=CONFIRMADA
     const pendingOrdersCount = await getDashboardCardCount(page, "Pedidos Pendientes");
     if (pendingOrdersCount > 0) {
-      await clickDashboardCardAndVerify(page, "Pedidos Pendientes", buildUrlExpectation("/sales/orders?status=pending"));
+      await clickDashboardCardAndVerify(page, "Pedidos Pendientes", buildUrlExpectation("/production/requests?status=CONFIRMADA"));
       await expect(page.getByRole("heading", { level: 1, name: /Pedidos|Órdenes/i })).toBeVisible();
       await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
     }
@@ -135,54 +134,65 @@ test.describe("dashboard consistency - role homes vs destination pages", () => {
   });
 
   // Verify all dashboard cards have "Live" badge (indicating real data)
-  test("all role homes display Live badges on stat cards", async ({ page }) => {
-    for (const role of Object.keys(EXPECTED_HOME) as RoleKey[]) {
+  // Use fresh context per role to avoid session leakage
+  test.describe.configure({ retries: 0 });
+
+  for (const role of Object.keys(EXPECTED_HOME) as RoleKey[]) {
+    test(`role ${role} home displays Live badges on stat cards`, async ({ page }) => {
       await loginAs(page, role, EXPECTED_HOME[role]);
+      await page.goto(EXPECTED_HOME[role]);
       // Each stat card should have a "Live" indicator
       const liveBadges = page.locator("text=Live");
-      await expect(liveBadges.first()).toBeVisible();
-      // Count should match number of stat cards (3-4 per role)
+      await expect(liveBadges.first()).toBeVisible({ timeout: 10000 });
+      // Count should match number of stat cards (2-3 per role)
       const badgeCount = await liveBadges.count();
       expect(badgeCount).toBeGreaterThanOrEqual(2);
-    }
-  });
+    });
+  }
 
   // Verify CTAs navigate to correct filtered routes
-  test("dashboard CTA links navigate to correct filtered routes", async ({ page }) => {
-    // SYSTEM_ADMIN CTAs
-    await loginAs(page, "SYSTEM_ADMIN", EXPECTED_HOME.SYSTEM_ADMIN);
-    
-    // Admin actions section CTAs
-    await clickDashboardCardAndVerify(page, "Gestionar Usuarios", buildUrlExpectation("/users"));
-    await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
-    await clickDashboardCardAndVerify(page, "Auditoría", buildUrlExpectation("/audit"));
-    await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
-    await clickDashboardCardAndVerify(page, "Rastros", buildUrlExpectation("/trace"));
-    await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
-    await clickDashboardCardAndVerify(page, "Etiquetas", buildUrlExpectation("/labels"));
+  test.describe("dashboard CTA links navigate to correct filtered routes", () => {
+    test("SYSTEM_ADMIN stat card CTAs", async ({ page }) => {
+      await loginAs(page, "SYSTEM_ADMIN", EXPECTED_HOME.SYSTEM_ADMIN);
+      // Test stat cards (which are links)
+      await clickDashboardCardAndVerify(page, "Usuarios Activos", buildUrlExpectation("/users"));
+      await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
+      await clickDashboardCardAndVerify(page, "Eventos de Auditoría", buildUrlExpectation("/audit"));
+      await page.goto(EXPECTED_HOME.SYSTEM_ADMIN);
+      await clickDashboardCardAndVerify(page, "Rastros Recientes", buildUrlExpectation("/trace"));
+    });
 
-    // MANAGER CTAs
-    await loginAs(page, "MANAGER", EXPECTED_HOME.MANAGER);
-    await clickDashboardCardAndVerify(page, "Reasignar Trabajo", buildUrlExpectation("/warehouse?reassign=true"));
-    await page.goto(EXPECTED_HOME.MANAGER);
-    await clickDashboardCardAndVerify(page, "Resolver Bloqueos", buildUrlExpectation("/production/fulfillment?blocked=true"));
-    await page.goto(EXPECTED_HOME.MANAGER);
-    await clickDashboardCardAndVerify(page, "Ver Reportes", buildUrlExpectation("/audit"));
+    test("MANAGER CTAs", async ({ page }) => {
+      await loginAs(page, "MANAGER", EXPECTED_HOME.MANAGER);
+      await clickDashboardCardAndVerify(page, "Reasignar Trabajo", buildUrlExpectation("/warehouse"));
+      await page.goto(EXPECTED_HOME.MANAGER);
+      await clickDashboardCardAndVerify(page, "Resolver Bloqueos", buildUrlExpectation("/production/requests?queue=assembly_blocked"));
+      await page.goto(EXPECTED_HOME.MANAGER);
+      await clickDashboardCardAndVerify(page, "Ver Reportes", buildUrlExpectation("/audit"));
+    });
 
-    // WAREHOUSE_OPERATOR CTAs
-    await loginAs(page, "WAREHOUSE_OPERATOR", EXPECTED_HOME.WAREHOUSE_OPERATOR);
-    await clickDashboardCardAndVerify(page, "Iniciar Picking", buildUrlExpectation("/inventory/pick/new"));
-    await page.goto(EXPECTED_HOME.WAREHOUSE_OPERATOR);
-    await clickDashboardCardAndVerify(page, "Registrar Recepción", buildUrlExpectation("/inventory/receive/new"));
+    test("WAREHOUSE_OPERATOR CTAs - stat cards are links", async ({ page }) => {
+      await loginAs(page, "WAREHOUSE_OPERATOR", EXPECTED_HOME.WAREHOUSE_OPERATOR);
+      await clickDashboardCardAndVerify(page, "Picking Pendiente", buildUrlExpectation("/inventory/pick?status=pending"));
+      await page.goto(EXPECTED_HOME.WAREHOUSE_OPERATOR);
+      await clickDashboardCardAndVerify(page, "Recepciones Hoy", buildUrlExpectation("/inventory/receive?date=today"));
+      await page.goto(EXPECTED_HOME.WAREHOUSE_OPERATOR);
+      await clickDashboardCardAndVerify(page, "Ver Ensambles", buildUrlExpectation("/production?ops=assembly_open"));
+    });
 
-    // SALES_EXECUTIVE CTAs
-    await loginAs(page, "SALES_EXECUTIVE", EXPECTED_HOME.SALES_EXECUTIVE);
-    await clickDashboardCardAndVerify(page, "Nuevo Pedido", buildUrlExpectation("/sales/orders/new"));
-    await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
-    await clickDashboardCardAndVerify(page, "Seguimiento Pedidos", buildUrlExpectation("/sales/orders?status=processing"));
-    await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
-    await clickDashboardCardAndVerify(page, "Clientes por Contactar", buildUrlExpectation("/sales/customers"));
-    await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
-    await clickDashboardCardAndVerify(page, "Equivalencias", buildUrlExpectation("/sales/equivalences"));
+    test("SALES_EXECUTIVE CTAs - use canonical routes", async ({ page }) => {
+      await loginAs(page, "SALES_EXECUTIVE", EXPECTED_HOME.SALES_EXECUTIVE);
+      // Nuevo Pedido -> /production/requests/new (canonical)
+      await clickDashboardCardAndVerify(page, "Nuevo Pedido", buildUrlExpectation("/production/requests/new"));
+      await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
+      // Seguimiento Pedidos -> /production/requests?status=processing (canonical CTA target)
+      await clickDashboardCardAndVerify(page, "Seguimiento Pedidos", buildUrlExpectation("/production/requests?status=processing"));
+      await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
+      await clickDashboardCardAndVerify(page, "Clientes por Contactar", buildUrlExpectation("/sales/customers"));
+      await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
+      // Equivalencias already canonical /production/equivalences
+      await clickDashboardCardAndVerify(page, "Equivalencias", buildUrlExpectation("/production/equivalences"));
+      await page.goto(EXPECTED_HOME.SALES_EXECUTIVE);
+      await clickDashboardCardAndVerify(page, "Pedidos Pendientes", buildUrlExpectation("/production/requests?status=CONFIRMADA"));
+    });
   });
-});

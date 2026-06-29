@@ -7,7 +7,7 @@ import Link from 'next/link';
 
 interface AdminHomeContentProps {
   activeUsersCount: number;
-  auditPendingCount: number;
+  auditTotalCount: number;
   tracesRecentCount: number;
   recentAudits?: Array<{ id: string; action: string; actor: string | null; createdAt: Date | string; entityType?: string }>;
 }
@@ -28,13 +28,13 @@ function formatTimeAgo(date: Date | string): string {
 
 export function AdminHomeContent({ 
   activeUsersCount, 
-  auditPendingCount, 
+  auditTotalCount, 
   tracesRecentCount,
   recentAudits = []
 }: AdminHomeContentProps) {
   const stats = [
     { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
-    { label: 'Auditoría Pendiente', value: String(auditPendingCount), icon: AlertTriangle, color: 'text-orange-600', href: '/audit?status=pending', live: true },
+    { label: 'Eventos de Auditoría', value: String(auditTotalCount), icon: AlertTriangle, color: 'text-orange-600', href: '/audit', live: true },
     { label: 'Rastros Recientes', value: String(tracesRecentCount), icon: Database, color: 'text-purple-600', href: '/trace', live: true },
   ];
 
@@ -56,7 +56,11 @@ export function AdminHomeContent({
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                  {stat.live ? (
+                    <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Demo</span>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -72,7 +76,9 @@ export function AdminHomeContent({
               <Shield size={20} className="text-purple-600" />
               Auditoría Reciente
             </CardTitle>
-            <Link href="/audit" className="text-sm text-blue-600 hover:underline">Ver todos</Link>
+            <Link href="/audit">
+              <Button variant="ghost" size="sm">Ver todos</Button>
+            </Link>
           </div>
         </CardHeader>
         <CardContent>
@@ -85,9 +91,6 @@ export function AdminHomeContent({
                     {audit.actor ?? 'Sistema'} · {formatTimeAgo(audit.createdAt)}
                   </p>
                 </div>
-                <span className="px-2 py-1 text-xs rounded-full text-gray-700 bg-gray-100">
-                  {audit.entityType ?? 'N/A'}
-                </span>
               </div>
             ))}
           </div>
@@ -103,13 +106,12 @@ export function AdminHomeContent({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {
               [
                 { label: 'Gestionar Usuarios', href: '/users', icon: Users },
                 { label: 'Auditoría', href: '/audit', icon: Shield },
                 { label: 'Rastros', href: '/trace', icon: Settings },
-                { label: 'Etiquetas', href: '/labels', icon: Database },
               ].map((action) => (
                 <Link key={action.label} href={action.href}>
                   <Button variant="secondary" className="w-full justify-start gap-2 h-auto py-3">

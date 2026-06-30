@@ -210,6 +210,12 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
   },
   {
+    route: "/production/fulfillment",
+    description: "Landing de compatibilidad para surtido directo y ensambles abiertos",
+    permission: "production.execute",
+    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
     route: "/production/fulfillment/[id]",
     description: "Ejecución del surtido directo del pedido hacia staging",
     permission: "production.execute",

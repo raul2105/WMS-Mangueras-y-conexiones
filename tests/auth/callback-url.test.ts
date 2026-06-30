@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeCallbackUrl } from "@/lib/auth/callback-url";
+import { resolvePostLoginRedirect, sanitizeCallbackUrl } from "@/lib/auth/callback-url";
 
 describe("sanitizeCallbackUrl", () => {
   it("acepta rutas internas", () => {
@@ -16,5 +16,34 @@ describe("sanitizeCallbackUrl", () => {
 
   it("normaliza vacio a root", () => {
     expect(sanitizeCallbackUrl(" ")).toBe("/");
+  });
+
+  it("preserva querystrings internos", () => {
+    expect(sanitizeCallbackUrl("/production/requests?queue=assembly_blocked")).toBe("/production/requests?queue=assembly_blocked");
+  });
+});
+
+describe("resolvePostLoginRedirect", () => {
+  it("envia al callback permitido para el rol", () => {
+    expect(resolvePostLoginRedirect("/production/requests?queue=assembly_blocked", ["MANAGER"]))
+      .toBe("/production/requests?queue=assembly_blocked");
+  });
+
+  it("usa home del rol cuando falta callback", () => {
+    expect(resolvePostLoginRedirect("/", ["MANAGER"])).toBe("/home/manager");
+  });
+
+  it("rechaza callbacks externos y vuelve al home del rol", () => {
+    expect(resolvePostLoginRedirect("https://evil.example/steal", ["MANAGER"])).toBe("/home/manager");
+    expect(resolvePostLoginRedirect("//evil.example/steal", ["MANAGER"])).toBe("/home/manager");
+  });
+
+  it("rechaza callbacks no autorizados para el rol", () => {
+    expect(resolvePostLoginRedirect("/users", ["MANAGER"])).toBe("/home/manager");
+    expect(resolvePostLoginRedirect("/production/fulfillment", ["SALES_EXECUTIVE"])).toBe("/home/sales");
+  });
+
+  it("permite callback al home propio del rol", () => {
+    expect(resolvePostLoginRedirect("/home/sales", ["SALES_EXECUTIVE"])).toBe("/home/sales");
   });
 });

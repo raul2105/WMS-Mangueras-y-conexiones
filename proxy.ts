@@ -18,7 +18,7 @@ function isPublicPath(pathname: string) {
   );
 }
 
-function unauthorizedResponse(pathname: string, requestUrl: string, requestId: string) {
+function unauthorizedResponse(pathname: string, callbackUrl: string, requestUrl: string, requestId: string) {
   if (pathname.startsWith("/api/")) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     response.headers.set("x-request-id", requestId);
@@ -26,14 +26,15 @@ function unauthorizedResponse(pathname: string, requestUrl: string, requestId: s
   }
 
   const loginUrl = new URL("/login", requestUrl);
-  loginUrl.searchParams.set("callbackUrl", sanitizeCallbackUrl(pathname));
+  loginUrl.searchParams.set("callbackUrl", sanitizeCallbackUrl(callbackUrl));
   const response = NextResponse.redirect(loginUrl);
   response.headers.set("x-request-id", requestId);
   return response;
 }
 
 export default auth((request: NextAuthRequest) => {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+  const callbackUrl = `${pathname}${search}`;
   const startedAt = Date.now();
   const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
   const requestHeaders = new Headers(request.headers);
@@ -44,7 +45,7 @@ export default auth((request: NextAuthRequest) => {
       headers: requestHeaders,
     },
   });
-  response.headers.set("x-pathname", pathname);
+  response.headers.set("x-pathname", callbackUrl);
   response.headers.set("x-request-id", requestId);
 
   if (isPublicPath(pathname)) {
@@ -65,7 +66,7 @@ export default auth((request: NextAuthRequest) => {
       authorized: false,
       durationMs: Date.now() - startedAt,
     });
-    return unauthorizedResponse(pathname, request.url, requestId);
+    return unauthorizedResponse(pathname, callbackUrl, request.url, requestId);
   }
 
   console.info("[perf] proxy.auth_check", {

@@ -31,6 +31,7 @@ describe("rbac role-route access matrix", () => {
     "/production/requests/new",
     "/production/availability",
     "/production/equivalences",
+    "/production/fulfillment",
     "/sales/customers",
     "/sales/customers/new",
     "/sales/customers/abc",
@@ -51,6 +52,8 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/production/requests")).toBe("production.cockpit.view");
     expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/production/fulfillment")).toBe("production.execute");
+    expect(getRequiredPermissionForPath("/production/fulfillment/abc")).toBe("production.execute");
     expect(getRequiredPermissionForPath("/production/orders")).toBe("production.view");
     expect(getRequiredPermissionForPath("/production/orders/new")).toBe("production.execute");
     expect(getRequiredPermissionForPath("/production/orders/abc")).toBe("production.view");
@@ -105,8 +108,12 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/production/requests/new")).toBe(true);
     expect(canAccess("MANAGER", "/production/availability")).toBe(true);
     expect(canAccess("MANAGER", "/production/equivalences")).toBe(true);
+    expect(canAccess("MANAGER", "/production/fulfillment")).toBe(true);
+    expect(canAccess("MANAGER", "/production/fulfillment/abc")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests/abc")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/fulfillment")).toBe(true);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/fulfillment/abc")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests/new")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/availability")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/equivalences")).toBe(false);
@@ -114,6 +121,7 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("SALES_EXECUTIVE", "/production/requests/new")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/availability")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/equivalences")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/production/fulfillment")).toBe(false);
   });
 
   it("customer routes respect view/manage split", () => {

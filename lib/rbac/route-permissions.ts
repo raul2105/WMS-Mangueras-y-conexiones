@@ -30,6 +30,7 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
   { prefix: "/production/requests", permission: "production.cockpit.view" },
   { prefix: "/production/availability", permission: "sales.view" },
   { prefix: "/production/equivalences", permission: "sales.view" },
+  { prefix: "/production/fulfillment", permission: "production.execute" },
   { prefix: "/production/fulfillment/", permission: "production.execute" },
   { prefix: "/production/orders/new", permission: "production.execute" },
   { prefix: "/production/orders/", permission: "production.view" },

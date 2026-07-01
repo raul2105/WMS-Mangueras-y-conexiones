@@ -45,6 +45,7 @@ function describeAuditEvent(row: {
   const after = parseAuditPayload(row.after);
   const actor = formatActor(row);
 
+  // ── Inventario (existente) ─────────────────────────────────────────
   if (row.action === "RECEIVE_STOCK") {
     const quantity = formatQuantity(after?.quantity) ?? formatQuantity(after?.delta) ?? "stock";
     return `${actor} registró una recepción de inventario. Nuevo saldo: ${quantity}.`;
@@ -75,6 +76,67 @@ function describeAuditEvent(row: {
     const referenceDoc = typeof after?.referenceDoc === "string" && after.referenceDoc ? ` Referencia: ${after.referenceDoc}.` : "";
     const newStatus = typeof after?.newStatus === "string" ? ` Estado: ${after.newStatus}.` : "";
     return `${actor} registró una recepción de compra.${referenceDoc}${newStatus}`;
+  }
+
+  // ── Pedidos de surtido (operacional crítico) ──────────────────────
+  if (row.entityType === "SALES_INTERNAL_ORDER") {
+    const orderCode = typeof after?.code === "string" ? after.code : row.entityId ?? "";
+    const codePrefix = orderCode ? ` ${orderCode}` : "";
+
+    if (row.action === "CREATE_REQUEST_DRAFT") {
+      const customer = typeof after?.customerName === "string" ? after.customerName : "sin cliente";
+      return `${actor} creó borrador de pedido${codePrefix} para ${customer}.`;
+    }
+
+    if (row.action === "CONFIRM_REQUEST") {
+      return `${actor} confirmó pedido${codePrefix} → pasó a CONFIRMADA.`;
+    }
+
+    if (row.action === "PULL_REQUEST") {
+      const warehouse = typeof after?.warehouseCode === "string" ? ` (${after.warehouseCode})` : "";
+      return `${actor} tomó pedido${codePrefix}${warehouse} → asignado a su ejecución.`;
+    }
+
+    if (row.action === "RELEASE_DIRECT_PICKLIST") {
+      const listCode = typeof after?.pickListCode === "string" ? ` lista ${after.pickListCode}` : "";
+      const taskCount = typeof after?.taskCount === "number" ? ` (${after.taskCount} tareas)` : "";
+      return `${actor} liberó lista de picking directo${codePrefix}${listCode}${taskCount}.`;
+    }
+
+    if (row.action === "CONFIRM_DIRECT_PICK") {
+      const pickListCode = typeof after?.pickListCode === "string" ? ` lista ${after.pickListCode}` : "";
+      const taskCount = typeof after?.taskCount === "number" ? ` (${after.taskCount} tareas confirmadas)` : "";
+      return `${actor} confirmó picking directo${codePrefix}${pickListCode}${taskCount}.`;
+    }
+
+    if (row.action === "MARK_DELIVERED_TO_CUSTOMER") {
+      const deliveredAt = typeof after?.deliveredAt === "string" ? ` el ${after.deliveredAt}` : "";
+      return `${actor} marcó pedido${codePrefix} como ENTREGADO AL CLIENTE${deliveredAt}.`;
+    }
+
+    if (row.action === "CANCEL_REQUEST") {
+      const reason = typeof after?.reason === "string" ? ` (${after.reason})` : "";
+      return `${actor} canceló pedido${codePrefix}${reason}.`;
+    }
+
+    if (row.action === "ADD_PRODUCT_LINE" || row.action === "ADD_CONFIGURED_ASSEMBLY_LINE") {
+      const product = typeof after?.productSku === "string" ? after.productSku : "producto";
+      const qty = typeof after?.requestedQty === "number" ? after.requestedQty : 0;
+      const kind = row.action === "ADD_CONFIGURED_ASSEMBLY_LINE" ? "ensamble" : "producto";
+      return `${actor} agregó ${kind} ${product} (x${qty}) a pedido${codePrefix}.`;
+    }
+
+    if (row.action === "DELETE_REQUEST_LINE") {
+      const product = typeof before?.productSku === "string" ? before.productSku : "línea";
+      return `${actor} eliminó línea ${product} de pedido${codePrefix}.`;
+    }
+
+    if (row.action === "REBUILD_DIRECT_PICKLIST") {
+      const listCode = typeof after?.pickListCode === "string" ? ` lista ${after.pickListCode}` : "";
+      const taskCount = typeof after?.taskCount === "number" ? ` (${after.taskCount} tareas)` : "";
+      const targetLoc = typeof after?.targetLocation === "string" ? ` → ${after.targetLocation}` : "";
+      return `${actor} regeneró picking directo${codePrefix}${listCode}${targetLoc}${taskCount}.`;
+    }
   }
 
   return `${actor} ejecutó ${row.action} sobre ${row.entityType}${row.entityId ? ` (${row.entityId})` : ""}.`;

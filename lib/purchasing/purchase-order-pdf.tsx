@@ -1,6 +1,24 @@
 import React from "react";
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { renderToBuffer } from "@react-pdf/renderer";
 import type { PurchaseOrderDocumentSnapshot } from "@/lib/purchasing/purchase-order-document-service";
+
+/**
+ * Generate a PO PDF from the frozen document snapshot and return the raw bytes as ArrayBuffer
+ */
+export async function buildPurchaseOrderPdf(input: {
+  documentSnapshot: PurchaseOrderDocumentSnapshot;
+  purchaseOrderFolio: string;
+}): Promise<{ pdfArrayBuffer: ArrayBuffer; filename: string }> {
+  const { documentSnapshot, purchaseOrderFolio } = input;
+  const pdfBuffer = await renderToBuffer(
+    React.createElement(PurchaseOrderPdfDocument, { snapshot: documentSnapshot }) as React.ReactElement<Record<string, unknown>>,
+  );
+  const filename = buildPurchaseOrderPdfFilename(purchaseOrderFolio);
+  // Convert Buffer to ArrayBuffer properly
+  const arrayBuffer = pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength);
+  return { pdfArrayBuffer: arrayBuffer as ArrayBuffer, filename };
+}
 
 export function buildPurchaseOrderPdfFilename(folio: string): string {
   const normalizedFolio = String(folio ?? "").trim();

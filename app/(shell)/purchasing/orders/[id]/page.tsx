@@ -16,6 +16,7 @@ import {
   buildPurchaseOrderEmailContract,
   PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS,
 } from "@/lib/purchasing/purchase-order-email-contract";
+import { getEmailProvider } from "@/lib/email/provider";
 
 const ORDER_TIMELINE = [
   { status: "BORRADOR", label: "Borrador" },
@@ -268,6 +269,37 @@ async function removeLine(orderId: string, formData: FormData) {
   redirect(`/purchasing/orders/${orderId}`);
 }
 
+async function sendPurchaseOrderEmailAction(orderId: string) {
+  "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+
+  const { sendPurchaseOrderEmail } = await import("@/lib/purchasing/purchase-order-email-service");
+  const { getEmailProvider } = await import("@/lib/email/provider");
+  const { getSessionContext } = await import("@/lib/auth/session-context");
+  
+  const sessionContext = await getSessionContext();
+  const userId = sessionContext.user?.id;
+  if (!userId) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Usuario no autenticado")}`);
+  }
+  
+  const provider = getEmailProvider();
+  if (!provider) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Proveedor de correo no configurado")}`);
+  }
+  
+  const result = await sendPurchaseOrderEmail(
+    { purchaseOrderId: orderId, triggeredByUserId: userId },
+    { provider }
+  );
+
+  if (!result.success) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(result.errorMessage ?? "Error enviando correo")}`);
+  }
+
+  redirect(`/purchasing/orders/${orderId}?ok=1&emailSent=1`);
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function PurchaseOrderDetailPage({
@@ -359,11 +391,12 @@ export default async function PurchaseOrderDetailPage({
       documentSnapshot = null;
     }
   }
+  const emailProvider = getEmailProvider();
   const emailContract = buildPurchaseOrderEmailContract({
     purchaseOrder: order,
     documentRecord,
     documentSnapshot,
-    providerConfigured: false,
+    providerConfigured: !!emailProvider,
   });
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
@@ -673,17 +706,33 @@ export default async function PurchaseOrderDetailPage({
           <pre className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${mutedText}`}>{emailContract.body}</pre>
         </details>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            disabled
-            className={buttonStyles({ variant: "secondary", size: "md" })}
-            title={`${emailContract.providerNote} Envío deshabilitado en esta versión.`}
-          >
-            Envío por correo deshabilitado
-          </button>
-          <p className={`text-xs ${softText}`}>{emailContract.providerNote}</p>
-        </div>
+        {emailContract.canSend ? (
+          <form action={sendPurchaseOrderEmailAction.bind(null, id)} className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              className={buttonStyles({ variant: "primary", size: "md" })}
+            >
+              Enviar OC por correo
+            </button>
+            <p className={`text-xs ${softText}`}>
+              Se enviará a <strong>{emailContract.recipientEmail}</strong> con el PDF oficial adjunto.
+            </p>
+          </form>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled
+                className={buttonStyles({ variant: "secondary", size: "md" })}
+                title={emailContract.providerConfigured ? "Complete los bloqueos para habilitar el envío" : emailContract.providerNote}
+              >
+                {emailContract.providerConfigured ? "Enviar OC por correo (bloqueado)" : "Envío por correo deshabilitado"}
+              </button>
+              {!emailContract.providerConfigured && <p className={`text-xs ${softText}`}>{emailContract.providerNote}</p>}
+            </div>
+          </>
+        )}
 
         {emailContract.blockedReasons.length > 0 ? (
           <div className={`space-y-1 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm ${warningText}`}>

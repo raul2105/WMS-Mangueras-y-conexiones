@@ -359,6 +359,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         subcategories={subcategories.length > 0 ? subcategories : TAXONOMY_SUBCATEGORIES.map((value) => ({ value, count: 0 }))}
         attributeKeys={attributeKeys}
         attributeValues={attributeValues}
+        isSalesExecutive={sessionCtx.roles.includes("SALES_EXECUTIVE")}
       />
 
       <SectionCard

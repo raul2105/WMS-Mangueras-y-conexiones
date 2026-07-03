@@ -4,7 +4,6 @@ import prisma from "@/lib/prisma";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { SectionCard } from "@/components/ui/section-card";
 import { buttonStyles } from "@/components/ui/button";
 import { buildProductSearchWhere } from "@/lib/product-search";
 import {
@@ -140,40 +139,14 @@ export default async function ProductionAvailabilityPage({
         equivalentProductId: equivalentProductId || undefined,
       })
     : "/production/requests/new";
-  const equivalenceHref = query || sku
-    ? buildCommercialSearchHref("/production/equivalences", query || sku, {
-        productId: productId || undefined,
-        sku: sku || undefined,
-        source: "availability",
-        equivalentProductId: equivalentProductId || undefined,
-      })
-    : "/production/equivalences";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Disponibilidad comercial"
-        description="Consulta existencia disponible para decidir si avanzas al pedido o revisas equivalencias. Sin ruido operativo."
+        description="Consulta existencia disponible por producto y almacén."
         meta={`${totalRows.toLocaleString("es-MX")} productos con disponibilidad`}
-        actions={<Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link>}
       />
-
-      <SectionCard
-        title="Siguiente acción"
-        description="Si la existencia disponible no cubre el pedido, sigue con equivalencias o captura el pedido comercial."
-      >
-        <div className="flex flex-wrap gap-2">
-          <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-            Buscar en catálogo
-          </Link>
-          <Link href={equivalenceHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-            Revisar equivalencias
-          </Link>
-          <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
-            Crear pedido
-          </Link>
-        </div>
-      </SectionCard>
 
       <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
         <label className="space-y-1">

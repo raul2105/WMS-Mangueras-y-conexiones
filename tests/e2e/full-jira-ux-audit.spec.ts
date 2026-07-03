@@ -347,6 +347,11 @@ test.describe
     await expect(
       page.getByRole("link", { name: /Limpiar filtros/i }),
     ).toBeVisible();
+    await expect(page.getByText("Siguiente acción", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("columnheader", { name: /Disponible para vender/i })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: /Estado comercial/i })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: /^Total$/i })).toHaveCount(0);
+    await expect(page.getByRole("columnheader", { name: /^Reservado$/i })).toHaveCount(0);
 
     await page.goto("/production/equivalences");
     await expect(

@@ -221,13 +221,13 @@ test.describe.serial("product aware line capture", () => {
 
     await page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.baseName}`, "i") }).click();
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*productId=/);
-    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
-    await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
+    await expect(page.getByText("Línea sugerida", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
-    await expect(page.getByLabel(/Cantidad sugerida/i)).toHaveValue("1");
+    await expect(page.getByLabel(/Cantidad/i)).toHaveValue("1");
     await expect(page.getByLabel(/Notas de la línea/i)).toBeVisible();
     await expect(page.locator("form").getByText(FIXTURE.baseSku).first()).toBeVisible();
-    await expect(page.getByText(/Acción sugerida:/i)).toBeVisible();
+    await expect(page.getByText(/Acción sugerida:/i)).toHaveCount(0);
 
     await page.getByLabel(/Notas de la línea/i).fill("Línea inicial persistida");
 
@@ -275,7 +275,7 @@ test.describe.serial("product aware line capture", () => {
 
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByText(/No encontramos el producto seleccionado/i)).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toHaveCount(0);
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
   });

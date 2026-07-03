@@ -325,7 +325,7 @@ test.describe
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /Registrar cliente/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Crear pedido/i })).toBeVisible();

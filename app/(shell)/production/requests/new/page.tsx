@@ -262,15 +262,10 @@ export default async function NewProductionRequestPage({
     ? buildCommercialSearchHref("/production/equivalences", catalogQuery, requestContext)
     : buildCommercialSearchHref("/production/equivalences", undefined, requestContext);
 
-  const hasCommercialContext = Boolean(
-    selectedProduct || displayQuery || invalidProductContext || originalProduct,
-  );
-
   return (
     <div className="space-y-6">
       <PageHeader
         title="Nuevo pedido comercial"
-        description="Captura primero al cliente, confirma almacén, fecha compromiso y notas. Si llegas desde catálogo, disponibilidad o equivalencias, el producto aparecerá arriba como contexto comercial."
         actions={
           <Link
             href="/production/requests"
@@ -283,8 +278,7 @@ export default async function NewProductionRequestPage({
 
       <form action={createSalesRequest} className="space-y-6">
         <SectionCard
-          title="Captura comercial"
-          description="Empieza por el cliente, agrega contexto de producto solo si existe y termina el pedido sin abrir otra pantalla."
+          title="Pedido comercial"
         >
           <div className="space-y-5">
             {error ? (
@@ -293,113 +287,15 @@ export default async function NewProductionRequestPage({
               </div>
             ) : null}
 
-            {hasCommercialContext ? (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                    {selectedProduct ? "Producto de referencia" : "Contexto comercial"}
-                  </p>
-                  <Badge variant="accent">{sourceLabel}</Badge>
-                </div>
-
-                {invalidProductContext ? (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-                    No encontramos el producto seleccionado. Puedes corregir la
-                    selección o seguir con la captura manual sin perder el
-                    pedido.
-                  </div>
-                ) : selectedProduct ? (
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.7fr)]">
-                    <div className="space-y-2">
-                      <p className="text-lg font-semibold text-white">
-                        {selectedProduct.name}
-                      </p>
-                      <div className="grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
-                        <p>
-                          <span className="text-slate-400">SKU:</span>{" "}
-                          <span className="font-mono">{selectedProduct.sku}</span>
-                        </p>
-                        {selectedProduct.referenceCode ? (
-                          <p>
-                            <span className="text-slate-400">Referencia:</span>{" "}
-                            <span className="font-mono">
-                              {selectedProduct.referenceCode}
-                            </span>
-                          </p>
-                        ) : null}
-                        <p>
-                          <span className="text-slate-400">Stock disponible:</span>{" "}
-                          {selectedProduct.totalAvailable.toLocaleString("es-MX")}
-                        </p>
-                        {selectedProduct.unitLabel ? (
-                          <p>
-                            <span className="text-slate-400">Unidad:</span>{" "}
-                            {selectedProduct.unitLabel}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                        Siguiente acción
-                      </p>
-                      <p className="mt-2">
-                        Confirma el cliente y guarda esta referencia como la
-                        primera línea editable del pedido.
-                      </p>
-                    </div>
-                  </div>
-                ) : displayQuery ? (
-                  <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                      Contexto comercial
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-white">
-                      Búsqueda comercial: {displayQuery}
-                    </p>
-                    <p className="mt-2 text-sm text-slate-300">
-                      No hay un producto resuelto todavía. La búsqueda se
-                      mantiene como referencia para continuar el pedido manual.
-                    </p>
-                  </div>
-                ) : null}
-
-                {originalProduct ? (
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                      Sustituye a
-                    </p>
-                    <p className="mt-1 font-semibold text-white">
-                      {originalProduct.name}
-                    </p>
-                    <p className="font-mono text-xs text-slate-400">
-                      {originalProduct.sku}
-                    </p>
-                  </div>
-                ) : null}
-
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    href="#captura-cliente"
-                    className={buttonStyles({ size: "sm" })}
-                  >
-                    {selectedProduct
-                      ? "Continuar con este producto"
-                      : "Continuar con la captura"}
-                  </Link>
-                  <Link
-                    href={catalogHref}
-                    className={buttonStyles({ variant: "secondary", size: "sm" })}
-                  >
-                    Cambiar producto
-                  </Link>
-                  <Link
-                    href="/production/requests/new"
-                    className={buttonStyles({ variant: "secondary", size: "sm" })}
-                  >
-                    Quitar selección
-                  </Link>
-                </div>
+            {invalidProductContext ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                No encontramos el producto seleccionado. Puedes corregir la
+                selección o seguir con la captura manual.
+              </div>
+            ) : !selectedProduct && displayQuery ? (
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-[var(--text-primary)]">
+                <span className="font-semibold">Búsqueda comercial:</span>{" "}
+                {displayQuery}
               </div>
             ) : null}
 
@@ -407,10 +303,6 @@ export default async function NewProductionRequestPage({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <h2 className="text-lg font-semibold text-white">1. Cliente</h2>
-                  <p className="text-sm text-slate-400">
-                    Empieza por la cuenta comercial. Si no existe, usa el alta
-                    rápida para continuar sin bloquear el pedido.
-                  </p>
                 </div>
                 {canManageCustomers ? (
                   <Link
@@ -447,24 +339,43 @@ export default async function NewProductionRequestPage({
               )}
               {canViewCustomers && canManageCustomers ? (
                 <p className="text-xs text-slate-400">
-                  ¿No encuentras al cliente? Regístralo para continuar con el pedido.
+                  ¿No encuentras al cliente? Regístralo sin salir de la captura.
                 </p>
               ) : null}
             </section>
 
             {selectedProduct ? (
-              <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 space-y-4">
+              <section className="space-y-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h2 className="text-lg font-semibold text-white">
+                    <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                       2. Línea sugerida
                     </h2>
-                    <p className="text-sm text-slate-300">
-                      El producto seleccionado puede guardarse como la primera
-                      línea editable del pedido.
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[var(--text-primary)]">
+                      <Badge variant="accent">{sourceLabel}</Badge>
+                      <span className="font-semibold">{selectedProduct.name}</span>
+                      <span className="font-mono text-xs text-[var(--text-secondary)]">
+                        {selectedProduct.sku}
+                      </span>
+                      <span className="text-[var(--text-secondary)]">
+                        Stock {selectedProduct.totalAvailable.toLocaleString("es-MX")}
+                      </span>
+                    </div>
                   </div>
-                  <Badge variant="accent">Editable</Badge>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={catalogHref}
+                      className={buttonStyles({ variant: "secondary", size: "sm" })}
+                    >
+                      Cambiar producto
+                    </Link>
+                    <Link
+                      href="/production/requests/new"
+                      className={buttonStyles({ variant: "secondary", size: "sm" })}
+                    >
+                      Quitar selección
+                    </Link>
+                  </div>
                 </div>
 
                 <input
@@ -473,40 +384,10 @@ export default async function NewProductionRequestPage({
                   value={selectedProduct.id}
                 />
 
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                      Producto seleccionado
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-white">
-                      {selectedProduct.name}
-                    </p>
-                    <div className="mt-3 space-y-2 text-sm text-slate-300">
-                      <p>
-                        <span className="text-slate-400">SKU:</span>{" "}
-                        <span className="font-mono">{selectedProduct.sku}</span>
-                      </p>
-                      {selectedProduct.unitLabel ? (
-                        <p>
-                          <span className="text-slate-400">Unidad:</span>{" "}
-                          {selectedProduct.unitLabel}
-                        </p>
-                      ) : null}
-                      <p>
-                        <span className="text-slate-400">Fuente:</span>{" "}
-                        {sourceLabel}
-                      </p>
-                      <p>
-                        <span className="text-slate-400">Acción sugerida:</span>{" "}
-                        Guarda el pedido para continuar con el cliente y el
-                        detalle.
-                      </p>
-                    </div>
-                  </div>
-
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,1fr)]">
                   <label className="space-y-1">
                     <span className="text-sm text-slate-400">
-                      Cantidad sugerida
+                      Cantidad
                     </span>
                     <input
                       name="lineRequestedQty"
@@ -517,10 +398,6 @@ export default async function NewProductionRequestPage({
                       defaultValue={quantity}
                       className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
                     />
-                    <p className="text-xs text-slate-500">
-                      Se convertirá en la cantidad de la primera línea editable
-                      del pedido.
-                    </p>
                   </label>
 
                   <label className="space-y-1">
@@ -536,26 +413,17 @@ export default async function NewProductionRequestPage({
                   </label>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    href="#captura-cliente"
-                    className={buttonStyles({ size: "sm" })}
-                  >
-                    Continuar con este producto
-                  </Link>
-                  <Link
-                    href={catalogHref}
-                    className={buttonStyles({ variant: "secondary", size: "sm" })}
-                  >
-                    Cambiar producto
-                  </Link>
-                  <Link
-                    href="/production/requests/new"
-                    className={buttonStyles({ variant: "secondary", size: "sm" })}
-                  >
-                    Quitar selección
-                  </Link>
-                </div>
+                {originalProduct ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300">
+                    Sustituye a{" "}
+                    <span className="font-semibold text-white">
+                      {originalProduct.name}
+                    </span>{" "}
+                    <span className="font-mono text-xs text-slate-400">
+                      {originalProduct.sku}
+                    </span>
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
@@ -564,9 +432,6 @@ export default async function NewProductionRequestPage({
                 <h2 className="text-lg font-semibold text-white">
                   {selectedProduct ? "3. Datos del pedido" : "2. Datos del pedido"}
                 </h2>
-                <p className="text-sm text-slate-400">
-                  Confirma almacén, fecha compromiso y notas del pedido.
-                </p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">

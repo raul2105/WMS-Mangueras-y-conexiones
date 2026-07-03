@@ -205,7 +205,7 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
     const supportSummary = page.locator("summary").filter({ hasText: /Herramientas de apoyo/i });
     await expect(supportSummary).toBeVisible();
@@ -250,8 +250,8 @@ test.describe.serial("commercial toolkit flow", () => {
       await expect(
         page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
       ).toBeVisible();
-      await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
-      await expect(page.getByText("Producto de referencia", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
+      await expect(page.getByText("Línea sugerida", { exact: true })).toBeVisible();
       await expect(page.getByRole("heading", { name: /Línea sugerida/i })).toBeVisible();
     }
   });
@@ -280,7 +280,7 @@ test.describe.serial("commercial toolkit flow", () => {
     await expect(
       page.getByRole("heading", { name: /Nuevo pedido comercial/i }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
   });
 
   test("mobile layout remains usable for the commercial toolkit", async ({ page }) => {

@@ -72,7 +72,7 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
           expect(quickFiltersHeight?.height ?? 0).toBeLessThan(120);
         }
         if (path === "/production/requests/new" && role === "SALES_EXECUTIVE") {
-          await expect(routePage.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+          await expect(routePage.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
           await expect(routePage.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
         }
         if (path === "/purchasing/orders" && role === "WAREHOUSE_OPERATOR") {

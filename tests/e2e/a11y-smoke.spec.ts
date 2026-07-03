@@ -47,7 +47,7 @@ const A11Y_ROUTES: A11yRoute[] = [
     heading: /Nuevo pedido comercial/i,
     tags: TAGS,
     extraChecks: async (page: import("@playwright/test").Page) => {
-      await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Pedido comercial/i })).toBeVisible();
       await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
     },
   },

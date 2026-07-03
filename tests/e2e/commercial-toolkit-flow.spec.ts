@@ -229,9 +229,15 @@ test.describe.serial("commercial toolkit flow", () => {
         page.getByRole("heading", { name: /Disponibilidad comercial/i }),
       ).toBeVisible();
       await expect(page.getByLabel(/Producto requerido/i)).toHaveValue(fixture.baseSku);
-      await expect(page.getByRole("link", { name: /Ver equivalencias/i }).first()).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: /Disponible para vender/i })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: /Estado comercial/i })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: /^Acción$/i })).toBeVisible();
+      await expect(page.getByText("Siguiente acción", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("columnheader", { name: /^Total$/i })).toHaveCount(0);
+      await expect(page.getByRole("columnheader", { name: /^Reservado$/i })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: /Revisar equivalencias/i }).first()).toBeVisible();
 
-      await page.getByRole("link", { name: /Ver equivalencias/i }).first().click();
+      await page.getByRole("link", { name: /Revisar equivalencias/i }).first().click();
       await expect(page).toHaveURL(/\/production\/equivalences(?:\?.*)?$/);
       await expect(
         page.getByRole("heading", { name: /Alternativas y equivalencias/i }),

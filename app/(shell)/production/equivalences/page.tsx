@@ -1,6 +1,7 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
@@ -29,6 +30,8 @@ export default async function ProductionEquivalencesPage({
   searchParams: Promise<SearchParams>;
 }) {
   await pageGuard("sales.view");
+  const sessionContext = await getSessionContext();
+  const isSalesExecutive = sessionContext.roles.includes("SALES_EXECUTIVE");
   const sp = await searchParams;
   const query = sp.q?.trim() ?? "";
   const warehouseId = sp.warehouseId?.trim() ?? "";
@@ -80,22 +83,24 @@ export default async function ProductionEquivalencesPage({
         actions={<Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link>}
       />
 
-      <SectionCard
-        title="Siguiente acción"
-        description="Usa equivalencias para encontrar un sustituto y continuar con disponibilidad o captura de pedido."
-      >
-        <div className="flex flex-wrap gap-2">
-          <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-            Buscar en catálogo
-          </Link>
-          <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-            Ver disponibilidad
-          </Link>
-          <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
-            Crear pedido
-          </Link>
-        </div>
-      </SectionCard>
+      {!isSalesExecutive && (
+        <SectionCard
+          title="Siguiente acción"
+          description="Usa equivalencias para encontrar un sustituto y continuar con disponibilidad o captura de pedido."
+        >
+          <div className="flex flex-wrap gap-2">
+            <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+              Buscar en catálogo
+            </Link>
+            <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+              Ver disponibilidad
+            </Link>
+            <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
+              Crear pedido
+            </Link>
+          </div>
+        </SectionCard>
+      )}
 
       <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
         <label className="space-y-1">

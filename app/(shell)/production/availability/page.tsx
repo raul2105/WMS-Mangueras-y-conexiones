@@ -46,12 +46,14 @@ export default async function ProductionAvailabilityPage({
   const source = sp.source?.trim() ?? "";
   const equivalentProductId = sp.equivalentProductId?.trim() ?? "";
 
+  // For sales view: only show available stock (no operational noise)
+  // We still need to query quantity/reserved for filtering but only expose available
   const inventoryWhere: Prisma.InventoryWhereInput = selectedWarehouse
     ? { location: { warehouse: { code: selectedWarehouse } } }
     : {};
   const where: Prisma.ProductWhereInput = {
     ...(query ? buildProductSearchWhere(query) : {}),
-    inventory: { some: inventoryWhere },
+    inventory: { some: { ...inventoryWhere, available: { gt: 0 } } },
   };
 
   const [totalRows, products, warehouses] = await Promise.all([
@@ -71,8 +73,6 @@ export default async function ProductionAvailabilityPage({
         inventory: {
           where: inventoryWhere,
           select: {
-            quantity: true,
-            reserved: true,
             available: true,
             location: {
               select: {
@@ -92,20 +92,16 @@ export default async function ProductionAvailabilityPage({
   ]);
 
   const rows = products.map((product) => {
-    const total = product.inventory.reduce((acc, row) => acc + row.quantity, 0);
-    const reserved = product.inventory.reduce((acc, row) => acc + row.reserved, 0);
     const available = product.inventory.reduce((acc, row) => acc + row.available, 0);
     const byWarehouse = Object.values(
-      product.inventory.reduce<Record<string, { warehouseCode: string; quantity: number; reserved: number; available: number }>>((acc, row) => {
+      product.inventory.reduce<Record<string, { warehouseCode: string; warehouseName: string; available: number }>>((acc, row) => {
         const warehouseCode = row.location.warehouse.code;
+        const warehouseName = row.location.warehouse.name;
         const current = acc[warehouseCode] ?? {
           warehouseCode,
-          quantity: 0,
-          reserved: 0,
+          warehouseName,
           available: 0,
         };
-        current.quantity += row.quantity;
-        current.reserved += row.reserved;
         current.available += row.available;
         acc[warehouseCode] = current;
         return acc;
@@ -114,8 +110,6 @@ export default async function ProductionAvailabilityPage({
 
     return {
       ...product,
-      total,
-      reserved,
       available,
       byWarehouse,
     };
@@ -159,8 +153,8 @@ export default async function ProductionAvailabilityPage({
     <div className="space-y-6">
       <PageHeader
         title="Disponibilidad comercial"
-        description="Consulta existencia disponible, reservada y total para decidir si avanzas al pedido o revisas equivalencias."
-        meta={`${totalRows.toLocaleString("es-MX")} productos con inventario`}
+        description="Consulta existencia disponible para decidir si avanzas al pedido o revisas equivalencias. Sin ruido operativo."
+        meta={`${totalRows.toLocaleString("es-MX")} productos con disponibilidad`}
         actions={<Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link>}
       />
 
@@ -239,8 +233,6 @@ export default async function ProductionAvailabilityPage({
               <tr className="border-b border-white/10 text-slate-400">
                 <th className="py-3 text-left">SKU</th>
                 <th className="py-3 text-left">Producto</th>
-                <th className="py-3 text-right">Total</th>
-                <th className="py-3 text-right">Reservado</th>
                 <th className="py-3 text-right">Disponible</th>
                 <th className="py-3 text-left">Por almacén</th>
                 <th className="py-3 text-left">Siguiente acción</th>
@@ -257,14 +249,12 @@ export default async function ProductionAvailabilityPage({
                     <p>{row.name}</p>
                     <p className="text-xs text-slate-500">{row.brand ?? row.type}</p>
                   </td>
-                  <td className="py-3 text-right text-slate-200">{row.total.toLocaleString("es-MX")}</td>
-                  <td className="py-3 text-right text-amber-300">{row.reserved.toLocaleString("es-MX")}</td>
                   <td className="py-3 text-right text-emerald-300">{row.available.toLocaleString("es-MX")}</td>
                   <td className="py-3 text-xs text-slate-400">
                     <div className="space-y-1">
                       {row.byWarehouse.map((warehouse) => (
                         <p key={warehouse.warehouseCode}>
-                          {warehouse.warehouseCode}: T {warehouse.quantity.toLocaleString("es-MX")} / R {warehouse.reserved.toLocaleString("es-MX")} / D {warehouse.available.toLocaleString("es-MX")}
+                          {warehouse.warehouseCode}: D {warehouse.available.toLocaleString("es-MX")}
                         </p>
                       ))}
                     </div>

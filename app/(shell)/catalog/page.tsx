@@ -113,6 +113,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         getSessionContext(),
     ]);
     const currentPage = parsePositiveInt(params.page, 1);
+    const isSalesExecutive = sessionCtx.roles.includes("SALES_EXECUTIVE");
     const canEditCatalog =
         sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("catalog.edit");
 
@@ -332,25 +333,27 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         }
       />
 
-      <SectionCard
-        title="Flujo comercial"
-        description="Producto requerido → disponibilidad → equivalencias → pedido."
-      >
-        <div className="flex flex-wrap gap-2">
-          {commercialToolkitLinks.map((action) => (
-            <Link
-              key={action.label}
-              href={action.href}
-              className={buttonStyles({
-                variant: action.variant ?? "secondary",
-                size: "sm",
-              })}
-            >
-              {action.label}
-            </Link>
-          ))}
-        </div>
-      </SectionCard>
+      {!isSalesExecutive ? (
+        <SectionCard
+          title="Flujo comercial"
+          description="Producto requerido → disponibilidad → equivalencias → pedido."
+        >
+          <div className="flex flex-wrap gap-2">
+            {commercialToolkitLinks.map((action) => (
+              <Link
+                key={action.label}
+                href={action.href}
+                className={buttonStyles({
+                  variant: action.variant ?? "secondary",
+                  size: "sm",
+                })}
+              >
+                {action.label}
+              </Link>
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
 
       <CatalogFilters
         counts={counts}
@@ -359,7 +362,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         subcategories={subcategories.length > 0 ? subcategories : TAXONOMY_SUBCATEGORIES.map((value) => ({ value, count: 0 }))}
         attributeKeys={attributeKeys}
         attributeValues={attributeValues}
-        isSalesExecutive={sessionCtx.roles.includes("SALES_EXECUTIVE")}
+        isSalesExecutive={isSalesExecutive}
       />
 
       <SectionCard

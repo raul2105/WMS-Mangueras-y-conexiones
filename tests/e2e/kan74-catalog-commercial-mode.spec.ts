@@ -11,6 +11,8 @@ test.describe("KAN-74: Commercial catalog mode for SALES_EXECUTIVE", () => {
 
     // Should land on catalog page with commercial heading
     await expect(page.getByRole("heading", { name: /Catálogo comercial/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Flujo comercial/i })).toHaveCount(0);
+    await expect(page.getByText(/Producto requerido → disponibilidad/i)).toHaveCount(0);
 
     // Primary search input should be prominent and accessible
     const searchInput = page.getByLabel("Buscar producto");
@@ -46,8 +48,7 @@ test.describe("KAN-74: Commercial catalog mode for SALES_EXECUTIVE", () => {
     await expect(page.getByRole("button", { name: /Aplicar/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Limpiar todo/i })).toBeVisible();
 
-    // Commercial flow shortcuts should be visible (disponibilidad, equivalencias, crear pedido)
-    // Use .first() since there are multiple per product row
+    // Commercial actions stay attached to product/result context.
     await expect(page.getByRole("link", { name: /Ver disponibilidad/i }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Revisar equivalencias/i }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Crear pedido/i }).first()).toBeVisible();
@@ -115,6 +116,7 @@ test.describe("KAN-74: Commercial catalog mode for SALES_EXECUTIVE", () => {
 
     // Should NOT see "Más filtros" button (it's only for SALES_EXECUTIVE)
     await expect(page.getByRole("button", { name: /Más filtros/i })).toBeHidden();
+    await expect(page.getByRole("heading", { name: /Flujo comercial/i })).toBeVisible();
 
     // Should see "Limpiar" and "Aplicar filtros" buttons (use .first() since there are two of each)
     await expect(page.getByRole("button", { name: /Limpiar/i }).first()).toBeVisible();

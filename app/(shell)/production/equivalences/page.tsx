@@ -56,7 +56,8 @@ export default async function ProductionEquivalencesPage({
     })),
   );
 
-  const requestHref = query || sku
+  const hasProductContext = query || sku || productId || equivalentProductId;
+  const requestHref = hasProductContext
     ? buildCommercialRequestHref({
         productId: productId || undefined,
         sku: sku || undefined,
@@ -65,7 +66,7 @@ export default async function ProductionEquivalencesPage({
         equivalentProductId: equivalentProductId || undefined,
       })
     : "/production/requests/new";
-  const availabilityHref = query || sku
+  const availabilityHref = hasProductContext
     ? buildCommercialSearchHref("/production/availability", query || sku, {
         productId: productId || undefined,
         sku: sku || undefined,
@@ -74,16 +75,18 @@ export default async function ProductionEquivalencesPage({
       })
     : "/production/availability";
 
+  const showHeaderActions = hasProductContext && !isSalesExecutive;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Alternativas y equivalencias"
         description="Revisa sustitutos registrados para decidir si conviene validar disponibilidad o crear un pedido comercial."
         meta={query ? `${groups.length} productos analizados` : "Busca un SKU o referencia para explorar equivalencias"}
-        actions={<Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link>}
+        actions={showHeaderActions ? <Link href={requestHref} className="btn-primary">+ Nuevo pedido</Link> : null}
       />
 
-      {!isSalesExecutive && (
+      {!isSalesExecutive && hasProductContext && (
         <SectionCard
           title="Siguiente acción"
           description="Usa equivalencias para encontrar un sustituto y continuar con disponibilidad o captura de pedido."
@@ -140,6 +143,13 @@ export default async function ProductionEquivalencesPage({
           title="Busca un producto requerido"
           description="Ingresa un SKU, referencia o nombre para ver alternativas disponibles y decidir si validas existencia o creas el pedido comercial."
           actions={
+            isSalesExecutive ? (
+              <>
+                <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Ir al catálogo
+                </Link>
+              </>
+            ) : (
               <>
                 <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
                   Ir al catálogo
@@ -151,24 +161,38 @@ export default async function ProductionEquivalencesPage({
                   Crear pedido
                 </Link>
               </>
-            }
-          />
+            )
+          }
+        />
       ) : groups.length === 0 ? (
         <EmptyState
           title="Sin resultados"
           description="No se encontraron productos base para esa búsqueda. Prueba con otro SKU, referencia o vuelve al catálogo para buscar el producto requerido."
           actions={
-            <>
-              <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                Buscar en catálogo
-              </Link>
-              <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                Ver disponibilidad
-              </Link>
-              <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
-                Crear pedido
-              </Link>
-            </>
+            isSalesExecutive ? (
+              <>
+                <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Buscar en catálogo
+                </Link>
+                {hasProductContext && (
+                  <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                    Ver disponibilidad
+                  </Link>
+                )}
+              </>
+            ) : (
+              <>
+                <Link href="/catalog" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Buscar en catálogo
+                </Link>
+                <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Ver disponibilidad
+                </Link>
+                <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
+                  Crear pedido
+                </Link>
+              </>
+            )
           }
         />
       ) : (

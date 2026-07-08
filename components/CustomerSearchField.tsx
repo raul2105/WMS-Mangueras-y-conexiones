@@ -26,6 +26,8 @@ type Props = {
   minChars?: number;
   allowQuickCreate?: boolean;
   quickCreateLabel?: string;
+  value?: string;
+  onChange?: (value: string) => void;
 };
 
 function customerLabel(customer: CustomerSearchMatch) {
@@ -41,9 +43,11 @@ export default function CustomerSearchField({
   minChars = 2,
   allowQuickCreate = false,
   quickCreateLabel = "Crear cliente rápido",
+  value,
+  onChange,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(value || "");
   const [selected, setSelected] = useState<CustomerSearchMatch | null>(null);
   const [results, setResults] = useState<CustomerSearchMatch[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -251,8 +255,9 @@ export default function CustomerSearchField({
           value={query}
           disabled={disabled}
           onChange={(event) => {
-            const value = event.target.value;
-            setQuery(value);
+            const newValue = event.target.value;
+            setQuery(newValue);
+            onChange?.(selectedId); // keep selectedId in sync
             setIsOpen(true);
             setCursor(null);
             setNextCursor(null);

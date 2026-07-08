@@ -732,8 +732,6 @@ export default async function NewProductionRequestPage({
       missingFields={missingFields}
       hasCommercialContext={hasCommercialContext}
       displayQuery={displayQuery}
-      source={source}
-      invalidProductContext={invalidProductContext}
     />
   </div>
 </>

@@ -29,8 +29,6 @@ interface OrderSummaryProps {
   missingFields?: string[];
   hasCommercialContext?: boolean;
   displayQuery?: string;
-  source?: string;
-  invalidProductContext?: boolean;
 }
 
 const STEPS = [
@@ -56,8 +54,6 @@ export function OrderSummary({
   missingFields = [],
   hasCommercialContext = false,
   displayQuery,
-  source,
-  invalidProductContext,
 }: OrderSummaryProps) {
   return (
     <aside className="hidden lg:block w-96 shrink-0" aria-label="Resumen del pedido">

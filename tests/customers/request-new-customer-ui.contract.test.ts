@@ -7,10 +7,19 @@ function readWorkspaceFile(relativePath: string) {
 }
 
 describe("new request customer selector UI contract", () => {
-  it("uses CustomerSearchField for catalog users and keeps manual fallback", () => {
+  it("page.tsx renders NewOrderForm and passes canViewCustomers/canManageCustomers", () => {
     const content = readWorkspaceFile("app/(shell)/production/requests/new/page.tsx");
+    expect(content).toContain("NewOrderForm");
+    expect(content).toContain("canViewCustomers");
+    expect(content).toContain("canManageCustomers");
+    expect(content).toContain("canViewCustomers={canViewCustomers}");
+    expect(content).toContain("canManageCustomers={canManageCustomers}");
+  });
+
+  it("NewOrderForm uses CustomerSearchField for catalog users and keeps manual fallback", () => {
+    const content = readWorkspaceFile("components/NewOrderForm.tsx");
     expect(content).toContain("CustomerSearchField");
-    expect(content).toContain("canViewCustomers ? (");
+    expect(content).toContain("canViewCustomers");
     expect(content).toContain("canManageCustomers");
     expect(content).toContain('name="customerId"');
     expect(content).toContain('name="customerName"');

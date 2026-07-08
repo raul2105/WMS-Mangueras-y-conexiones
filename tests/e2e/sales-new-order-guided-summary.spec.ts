@@ -18,25 +18,33 @@ test.describe("KAN-129: Guided Nuevo Pedido Summary and Progress", () => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto("/production/requests/new");
     
-    // Check progress steps are visible (Progress steps in OrderSummary)
-    await expect(page.getByText("Cliente")).toBeVisible();
-    await expect(page.getByText("Productos")).toBeVisible();
-    await expect(page.getByText("Disponibilidad")).toBeVisible();
-    await expect(page.getByText("Compromiso")).toBeVisible();
-    await expect(page.getByText("Confirmación")).toBeVisible();
+    // Check progress steps are visible using data-testid
+    await expect(page.locator('[data-testid="guided-progress"]')).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-customer"]')).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-products"]')).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-availability"]')).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-commitment"]')).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-confirmation"]')).toBeVisible();
+    
+    // Verify labels
+    await expect(page.locator('[data-testid="progress-step-customer"]').getByText("Cliente", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-products"]').getByText("Productos", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-availability"]').getByText("Disponibilidad", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-commitment"]').getByText("Compromiso", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="progress-step-confirmation"]').getByText("Confirmación", { exact: true })).toBeVisible();
   });
 
   test("empty/new order shows first missing action clearly", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto("/production/requests/new");
     
-    // Check that readiness state shows "Pendiente de captura" or similar
-    await expect(page.getByText(/Pendiente|pendiente/i)).toBeVisible();
+    // Check that readiness state shows "Pendiente de captura" or similar 
+    await expect(page.locator('[data-testid="readiness-badge"]').first()).toBeVisible();
     
-    // Check that missing required fields are indicated
-    await expect(page.getByText(/Cliente pendiente/i)).toBeVisible();
-    await expect(page.getByText(/Almac.n pendiente/i)).toBeVisible();
-    await expect(page.getByText(/Fecha pendiente/i)).toBeVisible();
+    // Check that missing required fields are indicated (use desktop summary)
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Cliente pendiente")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Almacén pendiente")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Fecha pendiente")).toBeVisible();
   });
 
   test("persistent summary shows pending customer, product, warehouse/date states", async ({ page }) => {
@@ -44,13 +52,13 @@ test.describe("KAN-129: Guided Nuevo Pedido Summary and Progress", () => {
     await page.goto("/production/requests/new");
     
     // Check persistent summary sidebar is visible
-    await expect(page.getByText("Resumen del pedido")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
     
     // Check pending states
-    await expect(page.getByText("Cliente pendiente")).toBeVisible();
-    await expect(page.getByText("Almacén pendiente")).toBeVisible();
-    await expect(page.getByText("Fecha pendiente")).toBeVisible();
-    await expect(page.getByText("Sin líneas seleccionadas")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Cliente pendiente")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Almacén pendiente")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Fecha pendiente")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Sin líneas seleccionadas")).toBeVisible();
   });
 
   test("MANAGER can access the flow", async ({ page }) => {
@@ -58,7 +66,7 @@ test.describe("KAN-129: Guided Nuevo Pedido Summary and Progress", () => {
     await page.goto("/production/requests/new");
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.getByText("Resumen del pedido")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
   });
 
   test("SYSTEM_ADMIN can access the flow", async ({ page }) => {
@@ -66,7 +74,7 @@ test.describe("KAN-129: Guided Nuevo Pedido Summary and Progress", () => {
     await page.goto("/production/requests/new");
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.getByText("Resumen del pedido")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
   });
 
   test("warehouse-only actions are not exposed in the sales order builder", async ({ page }) => {
@@ -112,7 +120,7 @@ test.describe("KAN-129: Guided Nuevo Pedido Summary and Progress", () => {
     const bodyWidth = await body.evaluate(el => el.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(390);
     
-    // Check summary is collapsible on mobile
-    await expect(page.getByText("Resumen del pedido")).toBeVisible();
+    // Check summary is collapsible on mobile (use mobile test-id)
+    await expect(page.locator('[data-testid="order-summary-mobile"]').getByText("Resumen del pedido")).toBeVisible();
   });
 });

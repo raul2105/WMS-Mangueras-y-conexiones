@@ -18,6 +18,8 @@ import {
 import { startPerf } from "@/lib/perf";
 import { getProductSearchSelection, resolveProductInput } from "@/lib/product-search";
 import { buildCommercialSearchHref } from "@/lib/commercial-toolkit";
+import { OrderSummary } from "@/components/OrderSummary";
+import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
 
@@ -266,8 +268,39 @@ export default async function NewProductionRequestPage({
     selectedProduct || displayQuery || invalidProductContext || originalProduct,
   );
 
+  // Determine readiness state and missing fields
+  const missingFields: string[] = [];
+
+  if (canViewCustomers && !firstParam(sp.customerId)) {
+    missingFields.push("customerId");
+  } else if (!canViewCustomers && !firstParam(sp.customerName)) {
+    missingFields.push("customerName");
+  }
+
+  if (!firstParam(sp.warehouseId)) {
+    missingFields.push("warehouseId");
+  }
+
+  const dueDateRaw = firstParam(sp.dueDate);
+  if (!dueDateRaw) {
+    missingFields.push("dueDate");
+  } else if (!parseDueDate(dueDateRaw)) {
+    missingFields.push("dueDate");
+  }
+
+  // Has product context if selectedProduct or hasCommercialContext
+  const hasProductContext = Boolean(selectedProduct || (hasCommercialContext && !invalidProductContext));
+
+  // Determine readiness state
+  let readinessState: "not_ready" | "missing_required" | "ready" = "not_ready";
+  if (missingFields.length === 0 && hasProductContext) {
+    readinessState = "ready";
+  } else if (missingFields.length > 0) {
+    readinessState = "missing_required";
+  }
+
   return (
-    <div className="space-y-6">
+    <>
       <PageHeader
         title="Nuevo pedido comercial"
         description="Captura primero al cliente, confirma almacén, fecha compromiso y notas. Si llegas desde catálogo, disponibilidad o equivalencias, el producto aparecerá arriba como contexto comercial."
@@ -281,20 +314,23 @@ export default async function NewProductionRequestPage({
         }
       />
 
-      <form action={createSalesRequest} className="space-y-6">
-        <SectionCard
-          title="Captura comercial"
-          description="Empieza por el cliente, agrega contexto de producto solo si existe y termina el pedido sin abrir otra pantalla."
-        >
-          <div className="space-y-5">
-            {error ? (
-              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                {error}
-              </div>
-            ) : null}
+      <div className="grid gap-6 lg:grid-cols-[1fr_384px]">
+        {/* Main form column */}
+        <div className="space-y-6">
+          <form action={createSalesRequest} className="space-y-6">
+            <SectionCard
+              title="Captura comercial"
+              description="Empieza por el cliente, agrega contexto de producto solo si existe y termina el pedido sin abrir otra pantalla."
+            >
+              <div className="space-y-5">
+                {error ? (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                    {error}
+                  </div>
+                ) : null}
 
-            {hasCommercialContext ? (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+                {hasCommercialContext ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
                     {selectedProduct ? "Producto de referencia" : "Contexto comercial"}
@@ -422,28 +458,42 @@ export default async function NewProductionRequestPage({
                 ) : null}
               </div>
               {canViewCustomers ? (
-                <CustomerSearchField
-                  name="customerId"
-                  label="Selecciona o crea el cliente"
-                  required
-                  allowQuickCreate={canManageCustomers}
-                />
-              ) : (
-                <label className="space-y-1">
-                  <span className="text-sm text-slate-400">
-                    Cliente comercial
-                  </span>
-                  <input
-                    name="customerName"
+                <div className="space-y-1">
+                  <CustomerSearchField
+                    name="customerId"
+                    label="Selecciona o crea el cliente"
                     required
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
-                    placeholder="Cliente, cuenta o razón social"
+                    allowQuickCreate={canManageCustomers}
                   />
-                  <p className="text-xs text-slate-500">
-                    No tienes acceso al catálogo de clientes. Captura el nombre
-                    comercial para continuar con el pedido.
-                  </p>
-                </label>
+                  {missingFields.includes("customerId") && (
+                    <p className="text-xs text-amber-300" role="alert">
+                      Selecciona un cliente del catálogo para continuar
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="space-y-1">
+                    <span className="text-sm text-slate-400">
+                      Cliente comercial
+                    </span>
+                    <input
+                      name="customerName"
+                      required
+                      className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                      placeholder="Cliente, cuenta o razón social"
+                    />
+                    <p className="text-xs text-slate-500">
+                      No tienes acceso al catálogo de clientes. Captura el nombre
+                      comercial para continuar con el pedido.
+                    </p>
+                  </label>
+                  {missingFields.includes("customerName") && (
+                    <p className="text-xs text-amber-300" role="alert">
+                      El nombre del cliente es obligatorio
+                    </p>
+                  )}
+                </div>
               )}
               {canViewCustomers && canManageCustomers ? (
                 <p className="text-xs text-slate-400">
@@ -584,6 +634,11 @@ export default async function NewProductionRequestPage({
                       </option>
                     ))}
                   </select>
+                  {missingFields.includes("warehouseId") && (
+                    <p className="text-xs text-amber-300" role="alert">
+                      Selecciona un almacén para continuar
+                    </p>
+                  )}
                 </label>
 
                 <label className="space-y-1">
@@ -594,13 +649,18 @@ export default async function NewProductionRequestPage({
                     required
                     className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
                   />
+                  {missingFields.includes("dueDate") && (
+                    <p className="text-xs text-amber-300" role="alert">
+                      Selecciona una fecha de compromiso válida
+                    </p>
+                  )}
                 </label>
 
                 <label className="space-y-1 md:col-span-2">
                   <span className="text-sm text-slate-400">Notas del pedido</span>
                   <textarea
                     name="notes"
-                    className="min-h-[96px] w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+                    className="min-h-24 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
                     placeholder="Contexto comercial, prioridad o consideraciones del cliente"
                   />
                 </label>
@@ -640,13 +700,42 @@ export default async function NewProductionRequestPage({
               >
                 Cancelar
               </Link>
-              <button type="submit" className="btn-primary">
-                Crear pedido
+              <button
+                type="submit"
+                disabled={readinessState !== "ready"}
+                className={cn(
+                  "btn-primary",
+                  readinessState !== "ready" && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                {readinessState === "ready" ? "Crear pedido" : "Completa los campos requeridos"}
               </button>
             </div>
           </div>
         </SectionCard>
       </form>
     </div>
+
+    {/* Order Summary Sidebar */}
+    <OrderSummary
+      customerName={canViewCustomers ? undefined : firstParam(sp.customerName)}
+      customerId={canViewCustomers ? firstParam(sp.customerId) : undefined}
+      warehouseCode={warehouses.find((w) => w.id === firstParam(sp.warehouseId))?.code ?? null}
+      warehouseName={warehouses.find((w) => w.id === firstParam(sp.warehouseId))?.name ?? null}
+      dueDate={firstParam(sp.dueDate)}
+      selectedProduct={selectedProduct}
+      sourceLabel={sourceLabel}
+      equivalentProduct={originalProduct}
+      quantity={selectedProduct ? quantity : undefined}
+      lineNotes={lineNotes}
+      readinessState={readinessState}
+      missingFields={missingFields}
+      hasCommercialContext={hasCommercialContext}
+      displayQuery={displayQuery}
+      source={source}
+      invalidProductContext={invalidProductContext}
+    />
+  </div>
+</>
   );
 }

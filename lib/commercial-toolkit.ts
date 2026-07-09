@@ -21,13 +21,27 @@ export function buildCommercialSearchHref(
   return qs ? `${basePath}?${qs}` : basePath;
 }
 
+interface CommercialRequestParams {
+  productId?: string;
+  sku?: string;
+  q?: string;
+  source?: string;
+  equivalentProductId?: string;
+  warehouseId?: string;
+  warehouseCode?: string;
+  warehouseName?: string;
+  quantity?: number | string;
+  promiseCheckedAt?: string;
+  promiseAvailableQty?: number | string;
+}
+
 export function buildCommercialRequestHref(
-  params: Record<string, string | undefined> = {},
+  params: CommercialRequestParams = {},
 ) {
   const searchParams = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
-    const normalizedValue = value?.trim();
+    const normalizedValue = value?.toString().trim();
     if (normalizedValue) {
       searchParams.set(key, normalizedValue);
     }

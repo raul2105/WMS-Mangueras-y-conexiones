@@ -29,6 +29,7 @@ interface SalesHomeClientProps {
     activeCustomers: number;
   };
   recentOrders: Array<{
+    id: string;
     code: string;
     customerName: string;
     status: string;
@@ -234,8 +235,8 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
               <div className="divide-y divide-gray-200">
                 {recentOrders.map((order) => (
                   <Link
-                    key={order.code}
-                    href={`/production/requests/${order.code}`}
+                    key={order.id}
+                    href={`/production/requests/${order.id}`}
                     className="block hover:bg-gray-50 transition-colors"
                   >
                     <div className="p-4 flex items-center justify-between gap-4">

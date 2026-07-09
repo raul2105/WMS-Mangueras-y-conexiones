@@ -16,6 +16,10 @@ import { createSalesRequestDraftHeader } from "@/lib/sales/request-service";
 import { requireSalesWriteAccess } from "@/lib/rbac/sales";
 import { OrderSummary } from "@/components/OrderSummary";
 import { NewOrderForm } from "@/components/NewOrderForm";
+import { 
+  buildCommercialPromiseFromSearchParams,
+  computePromiseStatus,
+} from "@/lib/sales/availability-promise";
 
 export const dynamic = "force-dynamic";
 
@@ -210,11 +214,11 @@ export default async function NewProductionRequestPage({
   searchParams: Promise<SearchParams>;
 }) {
   await pageGuard("sales.view");
-  const [sp, ctx] = await Promise.all([searchParams, getSessionContext()]);
+  const [sp, sessionCtx] = await Promise.all([searchParams, getSessionContext()]);
   const canViewCustomers =
-    ctx.isSystemAdmin || ctx.permissions.includes("customers.view");
+    sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.view");
   const canManageCustomers =
-    ctx.isSystemAdmin || ctx.permissions.includes("customers.manage");
+    sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.manage");
 
   const warehouses = await prisma.warehouse.findMany({
     where: { isActive: true },
@@ -231,6 +235,17 @@ export default async function NewProductionRequestPage({
   const quantity = parsePositiveDecimal(firstParam(sp.quantity)) ?? 1;
   const lineNotes = firstParam(sp.notes);
   const displayQuery = searchQuery || sku;
+
+  // Parse commercial availability promise from search params - KAN-128
+  const searchParamsForPromise = new URLSearchParams();
+  Object.entries(sp).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach(v => searchParamsForPromise.append(key, v));
+    } else if (value) {
+      searchParamsForPromise.set(key, value);
+    }
+  });
+  const commercialPromise = buildCommercialPromiseFromSearchParams(searchParamsForPromise);
 
   const selectedProduct = productId
     ? await getProductSearchSelection(prisma, productId)
@@ -263,6 +278,20 @@ export default async function NewProductionRequestPage({
   const hasCommercialContext = Boolean(
     selectedProduct || displayQuery || invalidProductContext || originalProduct,
   );
+
+  // Convert to display format for OrderSummary
+  const commercialPromiseDisplay = commercialPromise ? {
+    status: computePromiseStatus(commercialPromise, { requestedQuantity: quantity }),
+    warehouseCode: commercialPromise.warehouseCode,
+    warehouseName: commercialPromise.warehouseName,
+    availableQuantity: commercialPromise.availableQuantity,
+    checkedAt: commercialPromise.checkedAt,
+    isSubstitute: commercialPromise.isSubstitute,
+    originalProductName: originalProduct?.name,
+    originalProductSku: originalProduct?.sku,
+  } : null;
+
+  // Pass commercialPromiseDisplay to OrderSummary
 
   // Determine readiness state and missing fields
   const missingFields: string[] = [];
@@ -352,6 +381,16 @@ export default async function NewProductionRequestPage({
           missingFields={missingFields}
           hasCommercialContext={hasCommercialContext}
           displayQuery={displayQuery}
+          commercialPromise={commercialPromise ? {
+            status: computePromiseStatus(commercialPromise, { requestedQuantity: quantity }),
+            warehouseCode: commercialPromise.warehouseCode,
+            warehouseName: commercialPromise.warehouseName,
+            availableQuantity: commercialPromise.availableQuantity,
+            checkedAt: commercialPromise.checkedAt,
+            isSubstitute: commercialPromise.isSubstitute,
+            originalProductName: originalProduct?.name,
+            originalProductSku: originalProduct?.sku,
+          } : null}
         />
       </div>
     </>

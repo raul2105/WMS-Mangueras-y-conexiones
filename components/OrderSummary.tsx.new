@@ -473,7 +473,7 @@ function OrderSummaryMobileContent({
   hasCommercialContext = false,
   displayQuery,
   missingFields = [],
-}: Omit<OrderSummaryProps, "commercialPromise">) {
+}: OrderSummaryProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-3">
@@ -487,7 +487,7 @@ function OrderSummaryMobileContent({
           <div>
             <p className="text-xs text-slate-400">Almacén</p>
             <p className={cn("text-sm font-medium", !warehouseCode ? "text-slate-400" : "text-white")}>
-              {warehouseCode && warehouseName ? `${warehouseCode} - {warehouseName}` : "Almacén pendiente"}
+              {warehouseCode && warehouseName ? `${warehouseCode} - ${warehouseName}` : "Almacén pendiente"}
             </p>
           </div>
           <div>

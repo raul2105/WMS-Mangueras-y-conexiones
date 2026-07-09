@@ -31,8 +31,18 @@ interface CommercialRequestParams {
   warehouseCode?: string;
   warehouseName?: string;
   quantity?: number | string;
-  promiseCheckedAt?: string;
+  promiseProductId?: string;
+  promiseSku?: string;
+  promiseWarehouseId?: string;
+  promiseWarehouseCode?: string;
+  promiseWarehouseName?: string;
+  promiseRequestedQty?: number | string;
   promiseAvailableQty?: number | string;
+  promiseCheckedAt?: string;
+  promiseSource?: string;
+  promiseIsSubstitute?: boolean | string;
+  promiseOriginalProductId?: string;
+  promiseOriginalProductSku?: string;
 }
 
 export function buildCommercialRequestHref(

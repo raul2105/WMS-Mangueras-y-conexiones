@@ -287,6 +287,48 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     expect(page.url()).toContain("promiseSource=availability");
   });
 
+  test("Direct URL with promise params renders commercial promise summary", async ({ page }) => {
+    await loginAs(page, "SALES_EXECUTIVE");
+    // Use warehouse CODE for promiseWarehouseId as availability page link generation uses warehouse CODE
+    await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=availability&promiseProductId=${fixture.baseProductId}&promiseSku=${fixture.baseProductSku}&promiseWarehouseId=${fixture.warehouseCode}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName).replace(/%20/g, '+')}&promiseRequestedQty=1&promiseAvailableQty=20&promiseCheckedAt=${new Date().toISOString()}&promiseSource=availability&promiseIsSubstitute=false`);
+    
+    await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    
+    // Check if order-summary-desktop is there
+    const summary = page.locator('[data-testid="order-summary-desktop"]');
+    await expect(summary).toBeVisible({ timeout: 15000 });
+    
+    // Check if commercialPromise section exists
+    const promiseSection = page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa de disponibilidad");
+    await expect(promiseSection).toBeVisible({ timeout: 10000 });
+  });
+
+  test("Click-through from availability page renders commercial promise summary", async ({ page }) => {
+    await loginAs(page, "SALES_EXECUTIVE");
+    await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
+    
+    const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
+    await crearPedidoLink.click();
+    
+    await expect(page).toHaveURL(/\/production\/requests\/new/);
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(3000);
+    
+    await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
+    
+    // Check promise state section in OrderSummary
+    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(2000);
+    
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa de disponibilidad")).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa segura")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(fixture.warehouseCode)).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("20")).toBeVisible();
+    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(/Verificado:/i)).toBeVisible();
+  });
+
   test("Nuevo Pedido summary shows promise state and checked availability", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     // Use the same flow as test #3 which passes - click through from availability page

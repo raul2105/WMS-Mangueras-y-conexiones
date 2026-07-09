@@ -239,7 +239,7 @@ function OrderSummaryContent({
 
       {/* Commercial Availability Promise - KAN-128 */}
       {commercialPromise && (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3" data-testid="commercial-promise-section">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
               <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,11 +255,12 @@ function OrderSummaryContent({
               <Badge
                 variant={COMMERCIAL_PROMISE_STATUS_VARIANTS[commercialPromise.status]}
                 className="text-xs"
+                data-testid="commercial-promise-status"
               >
                 {COMMERCIAL_PROMISE_STATUS_LABELS[commercialPromise.status]}
               </Badge>
               {commercialPromise.warehouseCode && (
-                <span className="text-xs text-slate-400 font-mono">
+                <span className="text-xs text-slate-400 font-mono" data-testid="commercial-promise-warehouse">
                   {commercialPromise.warehouseCode}
                   {commercialPromise.warehouseName && ` - ${commercialPromise.warehouseName}`}
                 </span>
@@ -268,7 +269,7 @@ function OrderSummaryContent({
             {commercialPromise.availableQuantity !== undefined && (
               <p className="text-sm text-white">
                 <span className="text-slate-400">Disponible al verificar: </span>
-                <span className="font-semibold">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span>
+                <span className="font-semibold" data-testid="commercial-promise-available-qty">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span>
                 {commercialPromise.isSubstitute && (
                   <Badge variant="accent" className="ml-2 text-xs">Sustituto</Badge>
                 )}

@@ -3,14 +3,11 @@ import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { SalesHomeClient } from "./sales-home-client";
 import { Suspense } from "react";
+import { getSalesOrderFlowStage } from "@/lib/sales/internal-orders";
 
 export const dynamic = "force-dynamic";
 
 export default async function SalesPage() {
-  // Compute date threshold using a stable reference
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
   const ctx = await getSessionContext();
 
   if (
@@ -30,56 +27,79 @@ export default async function SalesPage() {
 
   const userId = user?.id ?? "";
 
-  // Fetch orders grouped by flow stage for the sales user
-  const [
-    capturaOrders,
-    porAsignarOrders,
-    enSurtidoOrders,
-    listoEntregaOrders,
-    entregadoOrders,
-    activeCustomers,
-  ] = await Promise.all([
-    prisma.salesInternalOrder.count({
-      where: {
-        status: "CONFIRMADA",
-        assignedToUserId: null,
-        updatedAt: { gte: thirtyDaysAgo },
+  // Fetch orders with all needed fields for canonical stage calculation
+  const orders = await prisma.salesInternalOrder.findMany({
+    where: {
+      OR: [
+        { requestedByUserId: userId },
+        { assignedToUserId: userId },
+      ],
+    },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      assignedToUserId: true,
+      pulledAt: true,
+      deliveredToCustomerAt: true,
+      cancelledAt: true,
+      updatedAt: true,
+      customerName: true,
+      lines: {
+        select: { id: true },
+        take: 1,
       },
-    }),
-    prisma.salesInternalOrder.count({
-      where: {
-        status: "CONFIRMADA",
-        assignedToUserId: userId,
-        pulledAt: null,
-        deliveredToCustomerAt: null,
+      pickLists: {
+        select: { status: true },
+        take: 1,
+        orderBy: { updatedAt: "desc" },
       },
-    }),
-    prisma.salesInternalOrder.count({
-      where: {
-        status: "CONFIRMADA",
-        assignedToUserId: userId,
-        pulledAt: { not: null },
-        deliveredToCustomerAt: null,
-      },
-    }),
-    prisma.salesInternalOrder.count({
-      where: {
-        status: "CONFIRMADA",
-        assignedToUserId: userId,
-        deliveredToCustomerAt: { not: null },
-        updatedAt: { gte: thirtyDaysAgo },
-      },
-    }),
-    prisma.salesInternalOrder.count({
-      where: {
-        status: "CONFIRMADA",
-        assignedToUserId: userId,
-        deliveredToCustomerAt: { not: null },
-        updatedAt: { gte: thirtyDaysAgo },
-      },
-    }),
-    prisma.customer.count({ where: { isActive: true } }),
-  ]);
+    },
+  });
+
+  // Count orders by canonical flow stage using shared helper
+  let capturaOrders = 0;
+  let porAsignarOrders = 0;
+  let enSurtidoOrders = 0;
+  let listoEntregaOrders = 0;
+  let entregadoOrders = 0;
+
+  for (const order of orders) {
+    const hasProductLines = order.lines.length > 0;
+    const hasAssemblyLines = false; // Assembly configs are on order lines, not directly on order
+    const latestPickStatus = order.pickLists[0]?.status ?? null;
+    const hasCompletedConfiguredAssembly = false; // Assembly completion tracked elsewhere
+
+    const stage = getSalesOrderFlowStage({
+      status: order.status,
+      assignedToUserId: order.assignedToUserId,
+      deliveredToCustomerAt: order.deliveredToCustomerAt,
+      latestPickStatus,
+      hasProductLines,
+      hasAssemblyLines,
+      hasCompletedConfiguredAssembly,
+    });
+
+    switch (stage) {
+      case "captura":
+        capturaOrders++;
+        break;
+      case "por_asignar":
+        porAsignarOrders++;
+        break;
+      case "en_surtido":
+        enSurtidoOrders++;
+        break;
+      case "listo_entrega":
+        listoEntregaOrders++;
+        break;
+      case "entregado":
+        entregadoOrders++;
+        break;
+    }
+  }
+
+  const activeCustomers = await prisma.customer.count({ where: { isActive: true } });
 
   // Fetch recent orders for the "Recent Orders" section
   const recentOrdersData = await prisma.salesInternalOrder.findMany({
@@ -96,16 +116,40 @@ export default async function SalesPage() {
       code: true,
       customerName: true,
       status: true,
-      assignedAt: true,
+      assignedToUserId: true,
       pulledAt: true,
       deliveredToCustomerAt: true,
+      cancelledAt: true,
       updatedAt: true,
+      lines: {
+        select: { id: true },
+        take: 1,
+      },
+      pickLists: {
+        select: { status: true },
+        take: 1,
+        orderBy: { updatedAt: "desc" },
+      },
     },
   });
 
   const recentOrders = recentOrdersData.map((order) => {
-    const flowStage = computeFlowStage(order);
+    const hasProductLines = order.lines.length > 0;
+    const hasAssemblyLines = false;
+    const latestPickStatus = order.pickLists[0]?.status ?? null;
+    const hasCompletedConfiguredAssembly = false;
+
+    const flowStage = getSalesOrderFlowStage({
+      status: order.status,
+      assignedToUserId: order.assignedToUserId,
+      deliveredToCustomerAt: order.deliveredToCustomerAt,
+      latestPickStatus,
+      hasProductLines,
+      hasAssemblyLines,
+      hasCompletedConfiguredAssembly,
+    });
     return {
+      id: order.id,
       code: order.code,
       customerName: order.customerName ?? "Cliente desconocido",
       status: flowStage,
@@ -167,19 +211,4 @@ function getNextAction(flowStage: string): string {
     default:
       return "Ver detalles";
   }
-}
-
-function computeFlowStage(order: {
-  status: string;
-  assignedAt: Date | null;
-  pulledAt: Date | null;
-  deliveredToCustomerAt: Date | null;
-  cancelledAt?: Date | null;
-}): string {
-  if (order.status === "BORRADOR") return "captura";
-  if (order.status === "CANCELADA") return "cancelado";
-  if (order.deliveredToCustomerAt) return "entregado";
-  if (order.pulledAt) return "en_surtido";
-  if (order.assignedAt) return "por_asignar";
-  return "captura";
 }

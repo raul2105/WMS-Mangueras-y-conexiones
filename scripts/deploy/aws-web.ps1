@@ -220,6 +220,27 @@ function Restore-DefaultPrismaClient {
     Invoke-Checked -Command "node scripts/db/generate-default-prisma-client.cjs" -FailureMessage "prisma generate para el schema SQLite por defecto falló"
 }
 
+function Repair-OpenNextWindowsDependencies {
+    if (-not $IsWindows) {
+        return
+    }
+
+    $imageOptimizationDir = Join-Path $openNextDir "image-optimization-function"
+    $sharpPackageJson = Join-Path $imageOptimizationDir "node_modules\sharp\package.json"
+    if (Test-Path $sharpPackageJson) {
+        return
+    }
+
+    Write-Warning "OpenNext no instaló dependencias Linux para image-optimization-function en Windows; aplicando reparación local."
+    Invoke-Checked `
+        -Command "node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir `"$imageOptimizationDir`" --packages sharp@0.32.6 --os linux --arch arm64 --target 18 --libc glibc" `
+        -FailureMessage "No se pudieron instalar dependencias del bundle OpenNext"
+
+    if (-not (Test-Path $sharpPackageJson)) {
+        throw "La reparación de dependencias OpenNext no creó node_modules/sharp en $imageOptimizationDir"
+    }
+}
+
 function Invoke-Migrations {
     param(
         [string]$DatabaseUrl,
@@ -622,6 +643,7 @@ try {
     if ($webRuntimeEnabled) {
         if (-not $SkipBuild) {
             Invoke-Checked -Command "npx @opennextjs/aws build" -FailureMessage "OpenNext build failed"
+            Repair-OpenNextWindowsDependencies
         } else {
             Write-Host "  Skipping build (using existing .open-next/)"
             if (-not (Test-Path $openNextDir)) {

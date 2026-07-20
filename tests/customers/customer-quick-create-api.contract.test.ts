@@ -7,9 +7,11 @@ function readWorkspaceFile(relativePath: string) {
 }
 
 describe("customer quick-create api contract", () => {
-  it("enforces customers.manage permission", () => {
+  it("allows the limited quick-create permission without customer management", () => {
     const content = readWorkspaceFile("app/api/customers/route.ts");
-    expect(content).toContain('requirePermission("customers.manage")');
+    expect(content).toContain('"customers.quick_create_sales"');
+    expect(content).toContain("canManageCustomers");
+    expect(content).toContain("sales-quick-create");
   });
 
   it("validates input with customerQuickCreateInlineSchema", () => {

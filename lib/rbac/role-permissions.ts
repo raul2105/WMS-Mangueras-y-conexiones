@@ -54,11 +54,9 @@ const ROLE_PERMISSION_MAP: Record<RoleCode, PermissionCode[]> = {
   WAREHOUSE_OPERATOR: [
     "catalog.view",
     "inventory.view",
-    "inventory.adjust",
     "inventory.transfer",
     "inventory.receive",
     "inventory.pick",
-    "kardex.view",
     "production.view",
     "production.cockpit.view",
     "production.execute",
@@ -73,6 +71,7 @@ const ROLE_PERMISSION_MAP: Record<RoleCode, PermissionCode[]> = {
     "sales.view",
     "sales.create_order",
     "customers.view",
+    "customers.quick_create_sales",
   ],
 };
 

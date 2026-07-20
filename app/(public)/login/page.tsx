@@ -22,6 +22,16 @@ type SearchParams = {
   error?: string;
 };
 
+function isNextRedirectError(error: unknown) {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "digest" in error
+    && typeof (error as { digest?: unknown }).digest === "string"
+    && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
+
 async function loginAction(formData: FormData) {
   "use server";
 
@@ -39,6 +49,10 @@ async function loginAction(formData: FormData) {
     });
     perf.end({ requestId, ok: true, callbackUrl });
   } catch (error) {
+    // Auth.js completes a successful credential login by throwing Next's
+    // redirect sentinel. It must continue to the requested route instead of
+    // being converted into a visible login error.
+    if (isNextRedirectError(error)) throw error;
     perf.end({ requestId, ok: false, callbackUrl });
     const message = error instanceof Error ? error.message : "No se pudo iniciar sesion";
     const normalized = message.toLowerCase().includes("credential") ? "Credenciales invalidas" : "No se pudo iniciar sesion";

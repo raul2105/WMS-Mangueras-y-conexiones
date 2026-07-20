@@ -248,8 +248,8 @@ export default function AssemblyConfiguratorForm({
             value={hoseLength}
             required
             type="number"
-            min={0.0001}
-            step="0.0001"
+            min={0.01}
+            step="0.01"
             onChange={(event) => setHoseLength(event.target.value)}
             className="w-full px-4 py-3 glass rounded-lg"
           />
@@ -262,8 +262,8 @@ export default function AssemblyConfiguratorForm({
             value={assemblyQuantity}
             required
             type="number"
-            min={0.0001}
-            step="0.0001"
+            min={1}
+            step="1"
             onChange={(event) => setAssemblyQuantity(event.target.value)}
             className="w-full px-4 py-3 glass rounded-lg"
           />

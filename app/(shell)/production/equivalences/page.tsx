@@ -105,13 +105,13 @@ export default async function ProductionEquivalencesPage({
         </SectionCard>
       )}
 
-      <form className="glass-card grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
+      <form className="op-panel grid gap-4 md:grid-cols-[1.5fr_1fr_auto]">
         <label className="space-y-1">
-          <span className="text-sm text-slate-400">Producto requerido</span>
+          <span className="op-label">Producto requerido</span>
           <input
             name="q"
             defaultValue={query}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white"
+            className="op-field px-4 py-3"
             placeholder="SKU, referencia, nombre..."
           />
           <input type="hidden" name="productId" value={productId} />
@@ -120,8 +120,8 @@ export default async function ProductionEquivalencesPage({
           <input type="hidden" name="equivalentProductId" value={equivalentProductId} />
         </label>
         <label className="space-y-1">
-          <span className="text-sm text-slate-400">Almacén</span>
-          <select name="warehouseId" defaultValue={warehouseId} className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white">
+          <span className="op-label">Almacén</span>
+          <select name="warehouseId" defaultValue={warehouseId} className="op-field px-4 py-3">
             <option value="">Todos</option>
             {warehouses.map((warehouse) => (
               <option key={warehouse.id} value={warehouse.id}>
@@ -132,7 +132,7 @@ export default async function ProductionEquivalencesPage({
         </label>
         <div className="flex items-end gap-2">
           <button type="submit" className="btn-primary">Revisar equivalencias</button>
-          <Link href="/production/equivalences" className="rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-300 hover:text-white">
+          <Link href="/production/equivalences" className="op-link rounded-[var(--radius-md)] border border-[var(--border-default)] px-4 py-3 text-sm">
             Limpiar filtros
           </Link>
         </div>
@@ -198,26 +198,26 @@ export default async function ProductionEquivalencesPage({
       ) : (
         <div className="space-y-4">
           {groups.map(({ product, equivalents }) => (
-            <section key={product.id} className="glass-card space-y-4">
+            <section key={product.id} className="op-panel space-y-4">
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="font-mono text-sm text-cyan-300">{product.sku}</p>
-                  <h2 className="text-lg font-semibold text-white">{product.name}</h2>
-                  <p className="text-sm text-slate-400">Existencia disponible: {product.totalAvailable.toLocaleString("es-MX")}</p>
+                  <h2 className="text-lg font-semibold text-[var(--text-primary)]">{product.name}</h2>
+                  <p className="text-sm text-[var(--text-muted)]">Existencia disponible: {product.totalAvailable.toLocaleString("es-MX")}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link href={`/catalog/${product.id}`} className="text-sm text-cyan-300 hover:text-white">Ver producto</Link>
-                  <Link href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "equivalences", equivalentProductId: productId || undefined })} className="text-sm text-cyan-300 hover:text-white">
+                  <Link href={`/catalog/${product.id}`} className="op-link text-sm">Ver producto</Link>
+                  <Link href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "equivalences", equivalentProductId: productId || undefined })} className="op-link text-sm">
                     Ver disponibilidad
                   </Link>
-                  <Link href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, q: query || sku || product.sku, source: "equivalences", equivalentProductId: productId || undefined })} className="text-sm text-cyan-300 hover:text-white">
+                  <Link href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, q: query || sku || product.sku, source: "equivalences", equivalentProductId: productId || undefined })} className="op-link text-sm">
                     Crear pedido
                   </Link>
                 </div>
               </div>
 
               {equivalents.length === 0 ? (
-                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
+                <div className="op-surface-muted px-4 py-6 text-sm">
                   No hay equivalencias registradas para este producto. Puedes seguir con disponibilidad o crear el pedido comercial.
                 </div>
               ) : (

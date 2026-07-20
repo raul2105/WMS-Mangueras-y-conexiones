@@ -28,6 +28,8 @@ async function createProduct(formData: FormData) {
 
   const descriptionRaw = String(formData.get("description") ?? "").trim();
   const unitLabelRaw = String(formData.get("unitLabel") ?? "").trim();
+  const purchaseUnitLabelRaw = String(formData.get("purchaseUnitLabel") ?? "").trim();
+  const purchaseUnitFactorRaw = String(formData.get("purchaseUnitFactor") ?? "").trim();
   const referenceCodeRaw = String(formData.get("referenceCode") ?? "").trim();
   const imageUrlRaw = String(formData.get("imageUrl") ?? "").trim();
   const categoryRaw = String(formData.get("category") ?? "").trim();
@@ -53,6 +55,10 @@ async function createProduct(formData: FormData) {
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
   const price = priceRaw ? Number(priceRaw.replace(",", ".")) : null;
   const purchaseMoq = purchaseMoqRaw ? Number(purchaseMoqRaw.replace(",", ".")) : null;
+  const purchaseUnitFactor = purchaseUnitFactorRaw ? Number(purchaseUnitFactorRaw.replace(",", ".")) : 1;
+  if (!Number.isFinite(purchaseUnitFactor) || purchaseUnitFactor <= 0) {
+    redirect(`/catalog/new?error=${encodeURIComponent("El factor de compra debe ser mayor que cero")}`);
+  }
   const inventoryParsed = newCatalogInventorySchema.safeParse({
     locationCode: locationRaw,
     quantityRaw,
@@ -120,6 +126,8 @@ async function createProduct(formData: FormData) {
       name,
       type: normalizedType,
       unitLabel: unitLabelRaw || "unidad",
+      purchaseUnitLabel: purchaseUnitLabelRaw || unitLabelRaw || "unidad",
+      purchaseUnitFactor,
       description: descriptionRaw || null,
       brand: brandRaw,
       subcategory: subcategoryRaw || null,
@@ -135,6 +143,8 @@ async function createProduct(formData: FormData) {
       name,
       type: normalizedType,
       unitLabel: unitLabelRaw || "unidad",
+      purchaseUnitLabel: purchaseUnitLabelRaw || unitLabelRaw || "unidad",
+      purchaseUnitFactor,
       description: descriptionRaw || null,
       brand: brandRaw,
       referenceCode: referenceCodeRaw || null,
@@ -305,6 +315,8 @@ export default async function NewCatalogItemPage({
                 <option key={u} value={u}>{u}</option>
               ))}
             </Select>
+            <Input name="purchaseUnitLabel" label="Unidad de compra" placeholder="Ej. rollo o m" hint="Cómo el proveedor factura este artículo." />
+            <Input name="purchaseUnitFactor" label="Equivalencia a unidad base" inputMode="decimal" defaultValue="1" placeholder="Ej. 50" hint="Un rollo de 50 m equivale a 50." />
 
             <Input
               name="referenceCode"

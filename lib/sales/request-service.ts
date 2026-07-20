@@ -4,6 +4,7 @@ import { getCustomerById, resolveCustomerSnapshot } from "@/lib/customers/custom
 import { cancelAssemblyWorkOrder, configureAssemblyOrderExact, createAssemblyOrderDraftHeader } from "@/lib/assembly/work-order-service";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import { startPerf } from "@/lib/perf";
+import { getAssemblyQuantityPolicy, getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 import { getNextSalesInternalOrderCode, getNextSalesPickListCode } from "@/lib/sales/internal-orders";
 
 type Tx = Prisma.TransactionClient;
@@ -35,6 +36,35 @@ type AssemblyLineInput = {
   notes?: string | null;
 };
 
+export type CreateSalesRequestDraftArgs = {
+  customerId?: string | null;
+  customerName?: string | null;
+  requireFormalCustomer?: boolean;
+  warehouseId: string;
+  dueDate: Date;
+  notes?: string | null;
+  requestedByUserId?: string | null;
+  requestedByRoles?: string[] | null;
+  initialProductLine?: InitialProductLineInput | null;
+};
+
+export type CreateSalesRequestAssemblyArgs = CreateSalesRequestDraftArgs & {
+  assembly: Omit<AssemblyLineInput, "orderId">;
+};
+
+export type CreateSalesRequestLineInput =
+  | { kind: "PRODUCT"; productId: string; requestedQty: number; notes?: string | null }
+  | {
+      kind: "ASSEMBLY";
+      entryFittingProductId: string;
+      hoseProductId: string;
+      exitFittingProductId: string;
+      hoseLength: number;
+      assemblyQuantity: number;
+      sourceDocumentRef?: string | null;
+      notes?: string | null;
+    };
+
 type ProductAllocation = {
   lineId: string;
   productId: string;
@@ -58,6 +88,10 @@ function isPrismaUniqueViolation(error: unknown): boolean {
 export type MarkSalesRequestDeliveredResult =
   | { delivered: true; alreadyDelivered: false; warning: null; movementIds: string[] }
   | { delivered: true; alreadyDelivered: true; warning: string; movementIds: string[] };
+
+export type MarkSalesRequestPreparedForDeliveryResult =
+  | { prepared: true; alreadyPrepared: false; preparedAt: Date }
+  | { prepared: true; alreadyPrepared: true; preparedAt: Date; warning: string };
 
 function getInventoryService(prisma: PrismaClient) {
   const scoped = prisma as PrismaClient & { [inventoryServiceSymbol]?: InventoryService };
@@ -468,10 +502,14 @@ async function createSalesRequestProductLineInTx(
 
   const product = await tx.product.findUnique({
     where: { id: input.productId },
-    select: { id: true, sku: true, name: true },
+    select: { id: true, sku: true, name: true, type: true, unitLabel: true, attributes: true },
   });
   if (!product) {
     throw new InventoryServiceError("PRODUCT_NOT_FOUND", "Producto no encontrado");
+  }
+  const quantityError = quantityValidationMessage(input.requestedQty, getQuantityPolicy(product));
+  if (quantityError) {
+    throw new InventoryServiceError("INVALID_QTY", quantityError);
   }
 
   const line = await tx.salesInternalOrderLine.create({
@@ -526,55 +564,45 @@ async function tryCreateInitialSalesRequestProductLineInTx(
   }
 }
 
-export async function createSalesRequestDraftHeader(
+async function createSalesRequestDraftHeaderInTx(
+  tx: Tx,
   prisma: PrismaClient,
-  args: {
-    customerId?: string | null;
-    customerName?: string | null;
-    requireFormalCustomer?: boolean;
-    warehouseId: string;
-    dueDate: Date;
-    notes?: string | null;
-    requestedByUserId?: string | null;
-    requestedByRoles?: string[] | null;
-    initialProductLine?: InitialProductLineInput | null;
-  }
+  args: CreateSalesRequestDraftArgs,
 ) {
   const perf = startPerf("sales.create_request_draft_header");
-  return prisma.$transaction(async (tx) => {
-    if (args.requireFormalCustomer && !args.customerId) {
-      throw new InventoryServiceError("CUSTOMER_ID_REQUIRED", "Selecciona un cliente formal del catálogo");
-    }
+  if (args.requireFormalCustomer && !args.customerId) {
+    throw new InventoryServiceError("CUSTOMER_ID_REQUIRED", "Selecciona un cliente formal del catálogo");
+  }
 
-    let snapshot = resolveCustomerSnapshot(null);
-    if (args.customerId) {
-      const selectedCustomer = await getCustomerById(tx, args.customerId);
-      if (!selectedCustomer.isActive) {
-        throw new InventoryServiceError("CUSTOMER_INACTIVE", "El cliente seleccionado está inactivo");
-      }
-      snapshot = resolveCustomerSnapshot(selectedCustomer);
-    } else {
-      snapshot = {
-        customerId: null,
-        customerName: String(args.customerName ?? "").trim() || null,
-      };
+  let snapshot = resolveCustomerSnapshot(null);
+  if (args.customerId) {
+    const selectedCustomer = await getCustomerById(tx, args.customerId);
+    if (!selectedCustomer.isActive) {
+      throw new InventoryServiceError("CUSTOMER_INACTIVE", "El cliente seleccionado está inactivo");
     }
+    snapshot = resolveCustomerSnapshot(selectedCustomer);
+  } else {
+    snapshot = {
+      customerId: null,
+      customerName: String(args.customerName ?? "").trim() || null,
+    };
+  }
 
-    if (!snapshot.customerName) {
-      throw new InventoryServiceError("CUSTOMER_REQUIRED", "El pedido requiere un cliente");
-    }
+  if (!snapshot.customerName) {
+    throw new InventoryServiceError("CUSTOMER_REQUIRED", "El pedido requiere un cliente");
+  }
 
-    const codePerf = startPerf("sales.create_request_draft_header.next_code");
-    const code = await getNextSalesInternalOrderCode(tx);
-    codePerf.end({ code });
-    const createPerf = startPerf("sales.create_request_draft_header.insert_order");
-    const shouldAutoAssignToRequester = Boolean(
-      args.requestedByUserId
-      && args.requestedByRoles?.includes("SALES_EXECUTIVE")
-      && !args.requestedByRoles?.includes("MANAGER")
-      && !args.requestedByRoles?.includes("SYSTEM_ADMIN")
-    );
-    const createData: Record<string, unknown> = {
+  const codePerf = startPerf("sales.create_request_draft_header.next_code");
+  const code = await getNextSalesInternalOrderCode(tx);
+  codePerf.end({ code });
+  const createPerf = startPerf("sales.create_request_draft_header.insert_order");
+  const shouldAutoAssignToRequester = Boolean(
+    args.requestedByUserId
+    && args.requestedByRoles?.includes("SALES_EXECUTIVE")
+    && !args.requestedByRoles?.includes("MANAGER")
+    && !args.requestedByRoles?.includes("SYSTEM_ADMIN")
+  );
+  const createData: Record<string, unknown> = {
         code,
         customerName: snapshot.customerName,
         warehouseId: args.warehouseId,
@@ -585,26 +613,26 @@ export async function createSalesRequestDraftHeader(
         assignedAt: shouldAutoAssignToRequester ? new Date() : null,
     };
 
-    if (snapshot.customerId) {
-      createData.customerId = snapshot.customerId;
-    }
+  if (snapshot.customerId) {
+    createData.customerId = snapshot.customerId;
+  }
 
-    const created = await tx.salesInternalOrder.create({
+  const created = await tx.salesInternalOrder.create({
       data: createData as Prisma.SalesInternalOrderCreateInput,
       select: { id: true, code: true },
     });
-    createPerf.end({ orderId: created.id });
+  createPerf.end({ orderId: created.id });
 
-    if (args.initialProductLine) {
-      await tryCreateInitialSalesRequestProductLineInTx(tx, prisma, created.id, {
-        productId: args.initialProductLine.productId,
-        requestedQty: args.initialProductLine.requestedQty,
-        notes: args.initialProductLine.notes ?? null,
-      });
-    }
+  if (args.initialProductLine) {
+    await tryCreateInitialSalesRequestProductLineInTx(tx, prisma, created.id, {
+      productId: args.initialProductLine.productId,
+      requestedQty: args.initialProductLine.requestedQty,
+      notes: args.initialProductLine.notes ?? null,
+    });
+  }
 
-    const auditPerf = startPerf("sales.create_request_draft_header.audit");
-    await createAuditLogSafeWithDb({
+  const auditPerf = startPerf("sales.create_request_draft_header.audit");
+  await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
       entityId: created.id,
       action: "CREATE_REQUEST_DRAFT",
@@ -624,12 +652,18 @@ export async function createSalesRequestDraftHeader(
             }
           : null,
       },
-    }, tx);
-    auditPerf.end();
-    perf.end({ orderId: created.id });
+  }, tx);
+  auditPerf.end();
+  perf.end({ orderId: created.id });
 
-    return created;
-  });
+  return created;
+}
+
+export async function createSalesRequestDraftHeader(
+  prisma: PrismaClient,
+  args: CreateSalesRequestDraftArgs,
+) {
+  return prisma.$transaction((tx) => createSalesRequestDraftHeaderInTx(tx, prisma, args));
 }
 
 export async function addSalesRequestProductLine(prisma: PrismaClient, input: ProductLineInput) {
@@ -638,8 +672,7 @@ export async function addSalesRequestProductLine(prisma: PrismaClient, input: Pr
   });
 }
 
-export async function addSalesRequestAssemblyLine(prisma: PrismaClient, input: AssemblyLineInput) {
-  return prisma.$transaction(async (tx) => {
+async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput) {
     const order = await ensureEditableOrder(tx, input.orderId);
 
     if (order.warehouseId !== input.warehouseId) {
@@ -647,6 +680,29 @@ export async function addSalesRequestAssemblyLine(prisma: PrismaClient, input: A
     }
     if (!order.customerName || !order.dueDate) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido requiere cliente y fecha compromiso para agregar ensamble");
+    }
+
+    const assemblyQuantityError = quantityValidationMessage(
+      input.assemblyQuantity,
+      getAssemblyQuantityPolicy(),
+    );
+    if (assemblyQuantityError) {
+      throw new InventoryServiceError("INVALID_QTY", assemblyQuantityError);
+    }
+
+    const [entryFitting, hose, exitFitting] = await Promise.all([
+      tx.product.findUnique({ where: { id: input.entryFittingProductId }, select: { type: true, unitLabel: true, attributes: true } }),
+      tx.product.findUnique({ where: { id: input.hoseProductId }, select: { type: true, unitLabel: true, attributes: true } }),
+      tx.product.findUnique({ where: { id: input.exitFittingProductId }, select: { type: true, unitLabel: true, attributes: true } }),
+    ]);
+    if (!entryFitting || !hose || !exitFitting) {
+      throw new InventoryServiceError("PRODUCT_NOT_FOUND", "Uno de los componentes del ensamble ya no existe");
+    }
+    const fittingQuantityError = quantityValidationMessage(input.assemblyQuantity, getQuantityPolicy(entryFitting))
+      ?? quantityValidationMessage(input.assemblyQuantity, getQuantityPolicy(exitFitting));
+    const hoseLengthError = quantityValidationMessage(input.hoseLength, getQuantityPolicy(hose));
+    if (fittingQuantityError || hoseLengthError) {
+      throw new InventoryServiceError("INVALID_QTY", fittingQuantityError ?? hoseLengthError ?? "Cantidad inválida");
     }
 
     const line = await tx.salesInternalOrderLine.create({
@@ -715,11 +771,69 @@ export async function addSalesRequestAssemblyLine(prisma: PrismaClient, input: A
       },
     }, tx);
 
-    return {
-      lineId: line.id,
-      productionOrderId: productionOrder.orderId,
-    };
-  });
+  return {
+    lineId: line.id,
+    productionOrderId: productionOrder.orderId,
+  };
+}
+
+export async function addSalesRequestAssemblyLine(prisma: PrismaClient, input: AssemblyLineInput) {
+  return prisma.$transaction((tx) => addSalesRequestAssemblyLineInTx(tx, input));
+}
+
+export async function createSalesRequestWithAssembly(
+  prisma: PrismaClient,
+  args: CreateSalesRequestAssemblyArgs,
+) {
+  return prisma.$transaction(async (tx) => {
+    const created = await createSalesRequestDraftHeaderInTx(tx, prisma, {
+      ...args,
+      initialProductLine: null,
+    });
+    const assembly = await addSalesRequestAssemblyLineInTx(tx, {
+      ...args.assembly,
+      orderId: created.id,
+    });
+
+    return { ...created, assemblyLineId: assembly.lineId, productionOrderId: assembly.productionOrderId };
+  }, { timeout: 20000 });
+}
+
+export async function createSalesRequestWithLines(
+  prisma: PrismaClient,
+  args: CreateSalesRequestDraftArgs & { lines: CreateSalesRequestLineInput[] },
+) {
+  return prisma.$transaction(async (tx) => {
+    const created = await createSalesRequestDraftHeaderInTx(tx, prisma, {
+      ...args,
+      initialProductLine: null,
+    });
+
+    for (const line of args.lines) {
+      if (line.kind === "PRODUCT") {
+        await createSalesRequestProductLineInTx(tx, prisma, {
+          orderId: created.id,
+          productId: line.productId,
+          requestedQty: line.requestedQty,
+          notes: line.notes ?? null,
+        });
+      } else {
+        await addSalesRequestAssemblyLineInTx(tx, {
+          orderId: created.id,
+          warehouseId: args.warehouseId,
+          entryFittingProductId: line.entryFittingProductId,
+          hoseProductId: line.hoseProductId,
+          exitFittingProductId: line.exitFittingProductId,
+          hoseLength: line.hoseLength,
+          assemblyQuantity: line.assemblyQuantity,
+          sourceDocumentRef: line.sourceDocumentRef ?? null,
+          notes: line.notes ?? null,
+        });
+      }
+    }
+
+    return created;
+  }, { timeout: 20000 });
 }
 
 export async function deleteSalesRequestLine(
@@ -811,6 +925,7 @@ export async function pullSalesRequestOrder(
           code: true,
           status: true,
           assignedToUserId: true,
+          pulledAt: true,
           requestedByUser: {
             select: {
               id: true,
@@ -851,13 +966,17 @@ export async function pullSalesRequestOrder(
     if (order.status === "CANCELADA") {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede tomar un pedido cancelado");
     }
-    if (order.assignedToUserId) {
-      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya está asignado");
-    }
     if (!assignee || !assignee.isActive || assignee.userRoles.length === 0) {
       throw new InventoryServiceError("INVALID_ASSIGNEE", "Solo un ejecutivo de ventas activo puede tomar el pedido");
     }
-    if ((order.requestedByUser?.userRoles.length ?? 0) === 0) {
+    const isAssignedToCurrentSales = order.assignedToUserId === args.assignedToUserId;
+    if (order.assignedToUserId && !isAssignedToCurrentSales) {
+      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya tiene responsable");
+    }
+    if (isAssignedToCurrentSales && order.pulledAt) {
+      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya fue tomado");
+    }
+    if (!isAssignedToCurrentSales && (order.requestedByUser?.userRoles.length ?? 0) === 0) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se pueden tomar pedidos no asignados creados por manager");
     }
 
@@ -865,17 +984,18 @@ export async function pullSalesRequestOrder(
     const updated = await tx.salesInternalOrder.updateMany({
       where: {
         id: order.id,
-        assignedToUserId: null,
+        ...(isAssignedToCurrentSales
+          ? { assignedToUserId: args.assignedToUserId, pulledAt: null }
+          : { assignedToUserId: null }),
         status: { not: "CANCELADA" },
       },
       data: {
-        assignedToUserId: args.assignedToUserId,
-        assignedAt: now,
+        ...(isAssignedToCurrentSales ? {} : { assignedToUserId: args.assignedToUserId, assignedAt: now }),
         pulledAt: now,
       },
     });
     if (updated.count !== 1) {
-      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya fue tomado por otro usuario");
+      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido ya fue tomado o actualizado por otro usuario");
     }
 
     await createAuditLogSafeWithDb({
@@ -888,9 +1008,230 @@ export async function pullSalesRequestOrder(
       after: {
         orderCode: order.code,
         assignedToUserId: args.assignedToUserId,
+        ...(isAssignedToCurrentSales ? { pulledAt: now.toISOString(), action: "acknowledged" } : { assignedAt: now.toISOString(), pulledAt: now.toISOString(), action: "assigned" }),
+      },
+    }, tx);
+  });
+}
+
+export async function assignSalesRequestOrder(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    assigneeUserId: string;
+    assignedByUserId: string;
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const [order, assignee] = await Promise.all([
+      tx.salesInternalOrder.findUnique({
+        where: { id: args.orderId },
+        select: {
+          id: true,
+          code: true,
+          status: true,
+          assignedToUserId: true,
+          pulledAt: true,
+          deliveredToCustomerAt: true,
+        },
+      }),
+      tx.user.findUnique({
+        where: { id: args.assigneeUserId },
+        select: {
+          id: true,
+          isActive: true,
+          userRoles: {
+            where: { role: { code: "SALES_EXECUTIVE", isActive: true } },
+            select: { roleId: true },
+          },
+        },
+      }),
+    ]);
+
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (order.status !== "CONFIRMADA" || order.deliveredToCustomerAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se puede asignar un pedido confirmado pendiente de entrega");
+    }
+    if (order.pulledAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya fue tomado; la reasignación requiere una excepción operativa");
+    }
+    if (!assignee || !assignee.isActive || assignee.userRoles.length === 0) {
+      throw new InventoryServiceError("INVALID_ASSIGNEE", "Selecciona un ejecutivo de ventas activo");
+    }
+
+    if (order.assignedToUserId === assignee.id) {
+      return { alreadyAssigned: true, orderCode: order.code };
+    }
+
+    const now = new Date();
+    const updated = await tx.salesInternalOrder.updateMany({
+      where: {
+        id: order.id,
+        status: "CONFIRMADA",
+        pulledAt: null,
+        deliveredToCustomerAt: null,
+      },
+      data: { assignedToUserId: assignee.id, assignedAt: now, pulledAt: null },
+    });
+    if (updated.count !== 1) {
+      throw new InventoryServiceError("ORDER_ALREADY_ASSIGNED", "El pedido cambió mientras se asignaba; actualiza la pantalla");
+    }
+
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "ASSIGN_SALES_REQUEST",
+      actor: "system",
+      actorUserId: args.assignedByUserId,
+      source: "sales/request-service",
+      before: { assignedToUserId: order.assignedToUserId },
+      after: {
+        orderCode: order.code,
+        assignedToUserId: assignee.id,
         assignedAt: now.toISOString(),
       },
     }, tx);
+
+    return { alreadyAssigned: false, orderCode: order.code };
+  });
+}
+
+export async function markSalesRequestPreparedForDelivery(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    preparedByUserId: string;
+    preparedLocationId: string;
+    notes?: string | null;
+  },
+): Promise<MarkSalesRequestPreparedForDeliveryResult> {
+  const idempotentWarning = "Pedido ya preparado para entrega; operación idempotente";
+
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        warehouseId: true,
+        assignedToUserId: true,
+        pulledAt: true,
+        deliveredToCustomerAt: true,
+        preparedForDeliveryAt: true,
+        lines: { select: { id: true, lineKind: true } },
+        pickLists: {
+          where: { status: { not: "CANCELLED" } },
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 1,
+          select: { status: true },
+        },
+      },
+    });
+
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (order.status !== "CONFIRMADA" || order.deliveredToCustomerAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no está disponible para preparar entrega");
+    }
+    if (!order.assignedToUserId || !order.pulledAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido debe estar tomado y asignado antes de prepararlo");
+    }
+    if (!order.warehouseId) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no tiene almacén asignado");
+    }
+
+    const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");
+    if (hasProductLines && order.pickLists[0]?.status !== "COMPLETED") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Completa el surtido directo antes de preparar el pedido");
+    }
+
+    const assemblyLineIds = order.lines
+      .filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY")
+      .map((line) => line.id);
+    if (assemblyLineIds.length > 0) {
+      const productionOrders = await tx.productionOrder.findMany({
+        where: {
+          sourceDocumentType: "SalesInternalOrder",
+          sourceDocumentId: order.id,
+          sourceDocumentLineId: { in: assemblyLineIds },
+        },
+        select: { status: true },
+      });
+      if (productionOrders.length !== assemblyLineIds.length || productionOrders.some((row) => row.status !== "COMPLETADA")) {
+        throw new InventoryServiceError("INVALID_ORDER_STATE", "Completa todos los ensambles antes de preparar el pedido");
+      }
+    }
+
+    const preparedLocation = await tx.location.findFirst({
+      where: {
+        id: args.preparedLocationId,
+        isActive: true,
+        warehouseId: order.warehouseId,
+        usageType: { in: ["STAGING", "SHIPPING"] },
+      },
+      select: { id: true, code: true, name: true },
+    });
+    if (!preparedLocation) {
+      throw new InventoryServiceError("INVALID_LOCATION", "Selecciona un área de entrega activa del almacén del pedido");
+    }
+
+    if (order.preparedForDeliveryAt) {
+      return {
+        prepared: true,
+        alreadyPrepared: true,
+        preparedAt: order.preparedForDeliveryAt,
+        warning: idempotentWarning,
+      };
+    }
+
+    const preparedAt = new Date();
+    const claim = await tx.salesInternalOrder.updateMany({
+      where: {
+        id: order.id,
+        status: "CONFIRMADA",
+        assignedToUserId: { not: null },
+        pulledAt: { not: null },
+        deliveredToCustomerAt: null,
+        preparedForDeliveryAt: null,
+      },
+      data: {
+        preparedForDeliveryAt: preparedAt,
+        preparedForDeliveryByUserId: args.preparedByUserId,
+        preparedForDeliveryLocationId: preparedLocation.id,
+        preparedForDeliveryNotes: args.notes?.trim() || null,
+      },
+    });
+    if (claim.count !== 1) {
+      const concurrent = await tx.salesInternalOrder.findUnique({
+        where: { id: order.id },
+        select: { preparedForDeliveryAt: true },
+      });
+      if (concurrent?.preparedForDeliveryAt) {
+        return {
+          prepared: true,
+          alreadyPrepared: true,
+          preparedAt: concurrent.preparedForDeliveryAt,
+          warning: idempotentWarning,
+        };
+      }
+      throw new InventoryServiceError("ORDER_PREPARATION_CONFLICT", "El pedido cambió de estado mientras se preparaba");
+    }
+
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "MARK_PREPARED_FOR_DELIVERY",
+      actorUserId: args.preparedByUserId,
+      after: {
+        preparedForDeliveryAt: preparedAt.toISOString(),
+        preparedForDeliveryByUserId: args.preparedByUserId,
+        preparedForDeliveryLocationId: preparedLocation.id,
+        preparedForDeliveryLocationCode: preparedLocation.code,
+        notes: args.notes?.trim() || null,
+      },
+    }, tx);
+
+    return { prepared: true, alreadyPrepared: false, preparedAt };
   });
 }
 
@@ -913,6 +1254,7 @@ export async function markSalesRequestDelivered(
         status: true,
         assignedToUserId: true,
         pulledAt: true,
+        preparedForDeliveryAt: true,
         deliveredToCustomerAt: true,
         lines: {
           select: {
@@ -943,6 +1285,9 @@ export async function markSalesRequestDelivered(
     }
     if (!order.assignedToUserId || !order.pulledAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede marcar entregado sin tomar y asignar el pedido");
+    }
+    if (!order.preparedForDeliveryAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede marcar entregado sin preparar el pedido en el área de entrega");
     }
 
     const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");
@@ -1004,6 +1349,7 @@ export async function markSalesRequestDelivered(
         status: "CONFIRMADA",
         assignedToUserId: { not: null },
         pulledAt: { not: null },
+        preparedForDeliveryAt: { not: null },
         deliveredToCustomerAt: null,
       },
       data: {

@@ -39,11 +39,9 @@ const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
   WAREHOUSE_OPERATOR: [
     "catalog.view",
     "inventory.view",
-    "inventory.adjust",
     "inventory.transfer",
     "inventory.receive",
     "inventory.pick",
-    "kardex.view",
     "production.view",
     "production.cockpit.view",
     "production.execute",
@@ -58,6 +56,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
     "sales.view",
     "sales.create_order",
     "customers.view",
+    "customers.quick_create_sales",
   ],
 };
 

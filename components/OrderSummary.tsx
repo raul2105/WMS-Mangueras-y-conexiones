@@ -4,6 +4,40 @@ import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/section-card";
 import { cn } from "@/lib/cn";
 
+export type CommercialPromiseStatus =
+  | "promise_safe"
+  | "insufficient_stock"
+  | "unresolved"
+  | "stale"
+  | "substitute_requires_confirmation";
+
+export interface CommercialPromiseDisplay {
+  status: CommercialPromiseStatus;
+  warehouseCode?: string;
+  warehouseName?: string;
+  availableQuantity?: number;
+  checkedAt?: string;
+  isSubstitute?: boolean;
+  originalProductName?: string;
+  originalProductSku?: string;
+}
+
+const COMMERCIAL_PROMISE_STATUS_LABELS: Record<CommercialPromiseStatus, string> = {
+  promise_safe: "Promesa segura",
+  insufficient_stock: "Disponibilidad insuficiente",
+  unresolved: "Disponibilidad no verificada",
+  stale: "Promesa vencida",
+  substitute_requires_confirmation: "Sustituto pendiente de confirmar",
+};
+
+const COMMERCIAL_PROMISE_STATUS_VARIANTS: Record<CommercialPromiseStatus, "success" | "warning" | "danger" | "neutral" | "accent"> = {
+  promise_safe: "success",
+  insufficient_stock: "danger",
+  unresolved: "warning",
+  stale: "warning",
+  substitute_requires_confirmation: "accent",
+};
+
 interface OrderSummaryProps {
   customerName?: string | null;
   customerId?: string | null;
@@ -29,14 +63,14 @@ interface OrderSummaryProps {
   missingFields?: string[];
   hasCommercialContext?: boolean;
   displayQuery?: string;
+  // KAN-128: Commercial availability promise
+  commercialPromise?: CommercialPromiseDisplay | null;
 }
 
 const STEPS = [
   { key: "customer", label: "Cliente" },
-  { key: "products", label: "Productos" },
-  { key: "availability", label: "Disponibilidad" },
-  { key: "commitment", label: "Compromiso" },
-  { key: "confirmation", label: "Confirmación" },
+  { key: "product", label: "Producto" },
+  { key: "delivery", label: "Entrega" },
 ];
 
 export function OrderSummary({
@@ -54,6 +88,7 @@ export function OrderSummary({
   missingFields = [],
   hasCommercialContext = false,
   displayQuery,
+  commercialPromise = null,
 }: OrderSummaryProps) {
   return (
     <>
@@ -79,13 +114,14 @@ export function OrderSummary({
             missingFields={missingFields}
             hasCommercialContext={hasCommercialContext}
             displayQuery={displayQuery}
+            commercialPromise={commercialPromise}
           />
         </SectionCard>
       </aside>
 
       {/* Mobile collapsible version - visible on mobile */}
       <div className="lg:hidden" data-testid="order-summary-mobile">
-        <details className="rounded-2xl border border-white/10 bg-white/5">
+        <details className="op-surface-muted">
           <summary className="flex cursor-pointer items-center justify-between p-4 list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
@@ -93,7 +129,7 @@ export function OrderSummary({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <span className="font-medium text-white">Resumen del pedido</span>
+              <span className="font-medium text-[var(--text-primary)]">Resumen del pedido</span>
               <Badge
                 variant={
                   readinessState === "ready" ? "success" :
@@ -110,7 +146,7 @@ export function OrderSummary({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </summary>
-          <div className="p-4 space-y-4 border-t border-white/10">
+          <div className="p-4 space-y-4 border-t border-[var(--border-default)]">
             <OrderSummaryMobileContent
               customerName={customerName}
               customerId={customerId}
@@ -146,30 +182,53 @@ function OrderSummaryContent({
   missingFields = [],
   hasCommercialContext = false,
   displayQuery,
+  commercialPromise = null,
 }: OrderSummaryProps) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      <div className="op-next-action" data-testid="next-required-action" role="status">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+          Siguiente acción
+        </p>
+        <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+          {readinessState === "ready"
+            ? "Revisar y crear el pedido"
+            : missingFields.length > 0
+              ? getFieldLabel(missingFields[0])
+              : "Completar la captura"}
+        </p>
+        {readinessState !== "ready" && missingFields.length > 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            Completa este dato para continuar con el siguiente paso.
+          </p>
+        ) : null}
+      </div>
       {/* Progress Steps */}
       <nav className="space-y-2" aria-label="Progreso del pedido guiado" data-testid="guided-progress">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-          Pasos
-        </p>
-        <ol className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+            Progreso
+          </p>
+          <span className="text-xs text-[var(--text-muted)]">
+            {readinessState === "ready" ? "3 de 3" : `${Math.max(0, STEPS.findIndex((step) => step.key === getCurrentStep(readinessState, missingFields)))} de 3`}
+          </span>
+        </div>
+        <ol className="op-progress-list">
           {STEPS.map((step, index) => {
             const isCurrent = getCurrentStep(readinessState, missingFields) === step.key;
             const isCompleted = isStepCompleted(step.key, readinessState, missingFields);
-            
+
             return (
               <li key={step.key} className="relative" data-testid={`progress-step-${step.key}`}>
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
-                      "shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold",
+                      "op-progress-marker",
                       isCompleted
                         ? "bg-emerald-500 text-white"
                         : isCurrent
                           ? "bg-cyan-500 text-white"
-                          : "bg-white/10 text-slate-400 border border-white/10"
+                          : "bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)] border border-[var(--status-neutral-border)]"
                     )}
                   >
                     {isCompleted ? "✓" : index + 1}
@@ -198,7 +257,77 @@ function OrderSummaryContent({
         </ol>
       </nav>
 
-      <div className="border-t border-white/10 pt-4 space-y-4">
+      {/* Commercial Availability Promise - KAN-128 */}
+      {commercialPromise && (
+        <div className="op-surface-muted p-4 space-y-3" data-testid="commercial-promise-section">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200">
+              Promesa de disponibilidad
+            </p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={COMMERCIAL_PROMISE_STATUS_VARIANTS[commercialPromise.status]}
+                className="text-xs"
+                data-testid="commercial-promise-status"
+              >
+                {COMMERCIAL_PROMISE_STATUS_LABELS[commercialPromise.status]}
+              </Badge>
+              {commercialPromise.warehouseCode && (
+                <span className="text-xs text-slate-400 font-mono" data-testid="commercial-promise-warehouse">
+                  {commercialPromise.warehouseCode}
+                  {commercialPromise.warehouseName && ` - ${commercialPromise.warehouseName}`}
+                </span>
+              )}
+            </div>
+            {commercialPromise.availableQuantity !== undefined && (
+              <p className="text-sm text-white">
+                <span className="text-slate-400">Disponible al verificar: </span>
+                <span className="font-semibold" data-testid="commercial-promise-available-qty">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span>
+                {commercialPromise.isSubstitute && (
+                  <Badge variant="accent" className="ml-2 text-xs">Sustituto</Badge>
+                )}
+              </p>
+            )}
+            {commercialPromise.checkedAt && (
+              <p className="text-xs text-slate-400">
+                Verificado: {new Date(commercialPromise.checkedAt).toLocaleString("es-MX", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+            )}
+            {commercialPromise.isSubstitute && commercialPromise.originalProductName && (
+              <p className="text-xs text-cyan-300">
+                <span className="font-semibold text-white">Sustituye a:</span>{" "}
+                {commercialPromise.originalProductName} ({commercialPromise.originalProductSku})
+              </p>
+            )}
+            {commercialPromise.status === "stale" && (
+              <p className="text-xs text-amber-300">⚠ La verificación supera el umbral de 15 minutos. Vuelva a verificar disponibilidad.</p>
+            )}
+            {commercialPromise.status === "insufficient_stock" && (
+              <p className="text-xs text-red-300">⚠ Stock insuficiente para la cantidad solicitada.</p>
+            )}
+            {commercialPromise.status === "unresolved" && (
+              <p className="text-xs text-amber-300">⚠ No hay verificación de disponibilidad para este producto/almacén.</p>
+            )}
+            {commercialPromise.status === "substitute_requires_confirmation" && (
+              <p className="text-xs text-cyan-300">⚠ Este producto es un sustituto/equivalencia. Requiere confirmación explícita del cliente.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-[var(--border-soft)] pt-3 space-y-3">
         {/* Customer */}
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
@@ -214,9 +343,6 @@ function OrderSummaryContent({
               <span className="text-slate-400">Cliente pendiente</span>
             )}
           </p>
-          {missingFields.includes("customerId") || missingFields.includes("customerName") ? (
-            <p className="text-xs text-amber-300">Selecciona un cliente del catálogo</p>
-          ) : null}
         </div>
 
         {/* Warehouse / Fulfillment Source */}
@@ -231,9 +357,6 @@ function OrderSummaryContent({
               <span className="text-slate-400">Almacén pendiente</span>
             )}
           </p>
-          {missingFields.includes("warehouseId") && (
-            <p className="text-xs text-amber-300">Selecciona un almacén</p>
-          )}
         </div>
 
         {/* Delivery / Commitment Date */}
@@ -253,9 +376,6 @@ function OrderSummaryContent({
               <span className="text-slate-400">Fecha pendiente</span>
             )}
           </p>
-          {missingFields.includes("dueDate") && (
-            <p className="text-xs text-amber-300">Selecciona la fecha de compromiso</p>
-          )}
         </div>
 
         {/* Product Lines */}
@@ -265,7 +385,7 @@ function OrderSummaryContent({
           </p>
           {selectedProduct ? (
             <div className="space-y-2">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="op-surface-muted p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-white truncate">{selectedProduct.name}</p>
@@ -321,7 +441,7 @@ function OrderSummaryContent({
         </div>
 
         {/* Readiness State */}
-        <div className="border-t border-white/10 pt-4">
+        <div className="border-t border-[var(--border-soft)] pt-4">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
             Estado
           </p>
@@ -338,16 +458,11 @@ function OrderSummaryContent({
               {readinessState === "not_ready" && "○ Pendiente de captura"}
             </Badge>
           </div>
-          {readinessState === "missing_required" && missingFields.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {missingFields.map((field) => (
-                <li key={field} className="text-xs text-amber-300 flex items-center gap-1">
-                  <span>•</span>
-                  <span>{getFieldLabel(field)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {readinessState === "missing_required" && missingFields.length > 0 ? (
+            <p className="mt-2 text-xs text-[var(--status-warning-text)]">
+              Falta completar el siguiente requisito para continuar.
+            </p>
+          ) : null}
         </div>
       </div>
     </div>
@@ -365,7 +480,7 @@ function OrderSummaryMobileContent({
   hasCommercialContext = false,
   displayQuery,
   missingFields = [],
-}: OrderSummaryProps) {
+}: Omit<OrderSummaryProps, "commercialPromise">) {
   return (
     <div className="space-y-4">
       <div className="space-y-3">
@@ -379,7 +494,7 @@ function OrderSummaryMobileContent({
           <div>
             <p className="text-xs text-slate-400">Almacén</p>
             <p className={cn("text-sm font-medium", !warehouseCode ? "text-slate-400" : "text-white")}>
-              {warehouseCode && warehouseName ? `${warehouseCode} - ${warehouseName}` : "Almacén pendiente"}
+              {warehouseCode && warehouseName ? `${warehouseCode} - {warehouseName}` : "Almacén pendiente"}
             </p>
           </div>
           <div>
@@ -417,17 +532,16 @@ function OrderSummaryMobileContent({
 }
 
 function getCurrentStep(readinessState: string, missingFields: string[]): string {
-  if (readinessState === "ready") return "confirmation";
+  if (readinessState === "ready") return "delivery";
   if (missingFields.includes("customerId") || missingFields.includes("customerName")) return "customer";
-  if (missingFields.includes("lineProductId") || (missingFields.length === 0 && readinessState === "not_ready")) return "products";
-  if (missingFields.includes("warehouseId") || missingFields.includes("dueDate")) return "commitment";
-  if (readinessState === "missing_required") return "availability";
-  return "products";
+  if (missingFields.includes("lineProductId") || (missingFields.length === 0 && readinessState === "not_ready")) return "product";
+  if (missingFields.includes("warehouseId") || missingFields.includes("dueDate")) return "delivery";
+  return "product";
 }
 
 function isStepCompleted(stepKey: string, readinessState: string, missingFields: string[]): boolean {
   const currentStep = getCurrentStep(readinessState, missingFields);
-  const stepOrder = ["customer", "products", "availability", "commitment", "confirmation"];
+  const stepOrder = ["customer", "product", "delivery"];
   const currentIndex = stepOrder.indexOf(currentStep);
   const stepIndex = stepOrder.indexOf(stepKey);
   return stepIndex < currentIndex || (stepIndex === currentIndex && readinessState === "ready");

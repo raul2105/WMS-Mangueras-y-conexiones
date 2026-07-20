@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma";
 import { createCustomer, CustomerServiceError, searchCustomers } from "@/lib/customers/customer-service";
-import { requirePermission } from "@/lib/rbac";
+import { RbacPermissionError } from "@/lib/rbac";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { customerQuickCreateInlineSchema, firstErrorMessage } from "@/lib/schemas/wms";
 
@@ -12,7 +12,21 @@ function normalizeTaxId(value: string | null | undefined) {
 }
 
 export async function POST(request: Request) {
-  await requirePermission("customers.manage");
+  const sessionCtx = await getSessionContext();
+  if (!sessionCtx.isAuthenticated || !sessionCtx.session?.user) {
+    throw new RbacPermissionError("Authentication required");
+  }
+
+  const canManageCustomers =
+    sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("customers.manage");
+  const canQuickCreateForSales = sessionCtx.permissions.includes(
+    "customers.quick_create_sales",
+  );
+  if (!canManageCustomers && !canQuickCreateForSales) {
+    throw new RbacPermissionError(
+      "Permission required: customers.quick_create_sales",
+    );
+  }
 
   const body = await request.json().catch(() => null);
   const parsed = customerQuickCreateInlineSchema.safeParse({
@@ -43,17 +57,17 @@ export async function POST(request: Request) {
     }
   }
 
-  const sessionCtx = await getSessionContext();
-
   try {
     const created = await createCustomer(prisma, {
-      code: parsed.data.code,
+      code: canManageCustomers ? parsed.data.code : undefined,
       name: parsed.data.name,
       taxId: parsed.data.taxId,
       email: parsed.data.email || undefined,
       actor: sessionCtx.user?.name ?? sessionCtx.user?.email ?? "system",
       actorUserId: sessionCtx.user?.id ?? null,
-      source: "production/requests/new/quick-create",
+      source: canManageCustomers
+        ? "production/requests/new/quick-create"
+        : "production/requests/new/sales-quick-create",
     });
 
     return Response.json(

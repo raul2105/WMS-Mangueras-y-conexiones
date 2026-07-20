@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const requirePermissionMock = vi.fn();
 const getSessionContextMock = vi.fn();
 const searchCustomersMock = vi.fn();
 const createCustomerMock = vi.fn();
@@ -15,8 +14,15 @@ class MockCustomerServiceError extends Error {
   }
 }
 
+class MockRbacPermissionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RbacPermissionError";
+  }
+}
+
 vi.mock("@/lib/rbac", () => ({
-  requirePermission: requirePermissionMock,
+  RbacPermissionError: MockRbacPermissionError,
 }));
 
 vi.mock("@/lib/auth/session-context", () => ({
@@ -36,8 +42,13 @@ vi.mock("@/lib/prisma", () => ({
 describe("customer quick-create api runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    requirePermissionMock.mockResolvedValue(undefined);
     getSessionContextMock.mockResolvedValue({
+      isAuthenticated: true,
+      isSystemAdmin: false,
+      permissions: ["customers.quick_create_sales"],
+      session: {
+        user: { id: "user-1", name: "QA", email: "qa@scmayher.com" },
+      },
       user: { id: "user-1", name: "QA", email: "qa@scmayher.com" },
     });
     searchCustomersMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10, hasMore: false });
@@ -69,8 +80,14 @@ describe("customer quick-create api runtime", () => {
 
     expect(response.status).toBe(201);
     expect(payload.id).toBe("cust-1");
-    expect(requirePermissionMock).toHaveBeenCalledWith("customers.manage");
     expect(createCustomerMock).toHaveBeenCalledTimes(1);
+    expect(createCustomerMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        code: undefined,
+        source: "production/requests/new/sales-quick-create",
+      }),
+    );
   });
 
   it("returns 400 when schema validation fails", async () => {

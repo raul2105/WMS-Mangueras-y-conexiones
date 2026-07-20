@@ -6,6 +6,10 @@ export function hasSalesWriteAccess(args: { roles: string[]; permissions: string
   return isSystemAdmin(args.roles) || args.roles.includes("MANAGER") || args.permissions.includes("sales.create_order");
 }
 
+export function hasSalesAssignmentAccess(args: { roles: string[] }) {
+  return isSystemAdmin(args.roles) || args.roles.includes("MANAGER");
+}
+
 export function hasProductionCockpitAccess(args: {
   roles: string[];
   permissions: string[];
@@ -31,4 +35,15 @@ export async function requireSalesWriteAccess() {
   }
 
   throw new RbacPermissionError("Permission required: sales.create_order");
+}
+
+export async function requireSalesAssignmentAccess() {
+  const ctx = await getSessionContext();
+  if (!ctx.isAuthenticated || !ctx.session?.user) {
+    throw new RbacPermissionError("Authentication required");
+  }
+  if (hasSalesAssignmentAccess({ roles: ctx.roles })) {
+    return ctx.session;
+  }
+  throw new RbacPermissionError("Permission required: manager sales assignment");
 }

@@ -2,70 +2,82 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Package, Truck, Box } from 'lucide-react';
+import { AlertTriangle, Box, Package, Truck } from 'lucide-react';
 import Link from 'next/link';
 
 interface WarehouseHomeContentProps {
   pendingPicking: number;
-  todaysReceptions: number;
+  inProgressPicking: number;
+  verifyPicking: number;
   activeAssemblies: number;
 }
 
 export function WarehouseHomeContent({ 
   pendingPicking, 
-  todaysReceptions, 
+  inProgressPicking,
+  verifyPicking,
   activeAssemblies
 }: WarehouseHomeContentProps) {
-  const stats = [
-    { label: 'Picking Pendiente', value: String(pendingPicking), icon: Package, color: 'text-blue-600', href: '/inventory/pick?status=pending', live: true },
-    { label: 'Recepciones Hoy', value: String(todaysReceptions), icon: Truck, color: 'text-green-600', href: '/inventory/receive?date=today', live: true },
-    { label: 'Ensambles Activos', value: String(activeAssemblies), icon: Box, color: 'text-purple-600', href: '/production?ops=assembly_open', live: true },
+  const workBuckets = [
+    { label: 'Verificar', value: verifyPicking, icon: AlertTriangle, href: '/production/requests?queue=partial', description: 'Revisa surtidos parciales antes de continuar.' },
+    { label: 'En proceso', value: inProgressPicking, icon: Truck, href: '/production/requests?stage=en_surtido', description: 'Continúa el surtido que ya está abierto.' },
+    { label: 'Por surtir', value: pendingPicking, icon: Package, href: '/production/requests?queue=unreleased', description: 'Empieza pedidos que esperan material.' },
+    { label: 'Ensambles pendientes', value: activeAssemblies, icon: Box, href: '/production/requests?queue=assembly_blocked', description: 'Completa ensambles ligados a un pedido.' },
   ];
+  const nextWork = workBuckets.find((bucket) => bucket.value > 0) ?? null;
 
   return (
     <div className="space-y-6">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {stats.map((stat) => (
-          <Link key={stat.label} href={stat.href} className="block">
-            <Card className="hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-500">{stat.label}</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-1">{stat.value}</p>
-                  </div>
-                  <div className={`p-3 bg-gray-100 rounded-lg ${stat.color}`}>
-                    <stat.icon size={24} />
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  {stat.live ? (
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
-                  ) : (
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Demo</span>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+      <Card className="border-blue-200 bg-blue-50">
+        <CardHeader>
+          <CardTitle>{nextWork ? 'Siguiente trabajo' : 'No hay trabajo pendiente'}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          {nextWork ? (
+            <div className="flex items-center gap-3">
+              <nextWork.icon className="h-7 w-7 text-blue-700" aria-hidden="true" />
+              <div>
+                <p className="font-semibold text-gray-900">{nextWork.label}: {nextWork.value}</p>
+                <p className="text-sm text-gray-600">{nextWork.description}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600">Cuando haya una tarea confirmada aparecerá aquí.</p>
+          )}
+          {nextWork ? <Link href={nextWork.href}><Button>Ver trabajo</Button></Link> : null}
+        </CardContent>
+      </Card>
 
-      {/* Priority Actions - use existing routes only */}
+      <section aria-labelledby="work-buckets-title">
+        <h2 id="work-buckets-title" className="mb-3 text-base font-semibold text-gray-900">Trabajo pendiente</h2>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {workBuckets.map((bucket) => (
+            <Link key={bucket.label} href={bucket.href} className="block">
+              <Card className="h-full hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  <bucket.icon className="mb-3 h-5 w-5 text-gray-600" aria-hidden="true" />
+                  <p className="text-sm text-gray-600">{bucket.label}</p>
+                  <p className="mt-1 text-3xl font-bold text-gray-900">{bucket.value}</p>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Truck size={20} />
-            Acciones Rápidas
+            Otras actividades
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[
-              { label: 'Ver Picking', href: '/inventory/pick?status=pending', icon: Package, primary: true },
-              { label: 'Ver Recepciones', href: '/inventory/receive?date=today', icon: Truck, primary: false },
-              { label: 'Ver Ensambles', href: '/production?ops=assembly_open', icon: Box, primary: false },
+              { label: 'Recibir mercancía', href: '/purchasing/orders?preset=por_recibir', icon: Truck, primary: true },
+              { label: 'Ver todo el trabajo', href: '/production/requests', icon: Package, primary: false },
+              { label: 'Consultar materiales', href: '/catalog', icon: Box, primary: false },
             ].map((action) => (
               <Link key={action.label} href={action.href}>
                 <Button

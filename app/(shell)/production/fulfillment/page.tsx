@@ -32,6 +32,8 @@ export default async function ProductionFulfillmentIndexPage({
     redirect("/production?ops=assembly_open");
   }
 
+  redirect("/production/requests");
+
   const [blockedCount, activeAssemblyCount, activePickCount] = await Promise.all([
     prisma.salesInternalOrder.count({
       where: {
@@ -73,37 +75,37 @@ export default async function ProductionFulfillmentIndexPage({
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Link href="/production/requests?queue=assembly_blocked" className="glass-card block space-y-2 hover:bg-white/5">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Bloqueos activos</p>
-          <p className="text-3xl font-bold text-white">{blockedCount.toLocaleString("es-MX")}</p>
-          <p className="text-sm text-slate-300">
+        <Link href="/production/requests?queue=assembly_blocked" className="op-panel block space-y-2 transition-colors hover:border-[var(--accent)]">
+          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">Bloqueos activos</p>
+          <p className="text-3xl font-bold text-[var(--text-primary)]">{blockedCount.toLocaleString("es-MX")}</p>
+          <p className="text-sm text-[var(--text-secondary)]">
             Abre la cola operativa con pedidos bloqueados por ensamble pendiente.
           </p>
         </Link>
 
-        <Link href="/production?ops=assembly_open" className="glass-card block space-y-2 hover:bg-white/5">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Ensambles activos</p>
-          <p className="text-3xl font-bold text-white">{activeAssemblyCount.toLocaleString("es-MX")}</p>
-          <p className="text-sm text-slate-300">
+        <Link href="/production?ops=assembly_open" className="op-panel block space-y-2 transition-colors hover:border-[var(--accent)]">
+          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">Ensambles activos</p>
+          <p className="text-3xl font-bold text-[var(--text-primary)]">{activeAssemblyCount.toLocaleString("es-MX")}</p>
+          <p className="text-sm text-[var(--text-secondary)]">
             Revisa órdenes de ensamble abiertas o en proceso desde el flujo canónico.
           </p>
         </Link>
 
-        <Link href="/production/requests" className="glass-card block space-y-2 hover:bg-white/5">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Surtidos directos activos</p>
-          <p className="text-3xl font-bold text-white">{activePickCount.toLocaleString("es-MX")}</p>
-          <p className="text-sm text-slate-300">
+        <Link href="/production/requests" className="op-panel block space-y-2 transition-colors hover:border-[var(--accent)]">
+          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">Surtidos directos activos</p>
+          <p className="text-3xl font-bold text-[var(--text-primary)]">{activePickCount.toLocaleString("es-MX")}</p>
+          <p className="text-sm text-[var(--text-secondary)]">
             Continúa el surtido directo desde el cockpit de pedidos compartido.
           </p>
         </Link>
       </div>
 
-      <div className="glass-card space-y-3">
-        <h2 className="text-lg font-semibold text-white">Rutas heredadas soportadas</h2>
-        <p className="text-sm text-slate-400">
+      <div className="op-panel space-y-3">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Rutas heredadas soportadas</h2>
+        <p className="text-sm text-[var(--text-muted)]">
           Esta vista mantiene activos los enlaces históricos usados por dashboards o marcadores antiguos.
         </p>
-        <ul className="space-y-2 text-sm text-slate-300">
+        <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
           <li>
             <code>/production/fulfillment?blocked=true</code> redirige a la cola canónica de bloqueos:
             {" "}

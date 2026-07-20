@@ -1,6 +1,7 @@
 import Link from "next/link";
 import prisma from "@/lib/prisma";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { PageHeader } from "@/components/ui/page-header";
 import { buttonStyles } from "@/components/ui/button";
 import { ensureDefaultLabelTemplates } from "@/lib/labeling-service";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 export default async function LabelsPage() {
   await pageGuard("labels.manage");
+  const sessionCtx = await getSessionContext();
+  const isOperatorView = sessionCtx.roles.includes("WAREHOUSE_OPERATOR") && !sessionCtx.roles.includes("MANAGER") && !sessionCtx.isSystemAdmin;
   await ensureDefaultLabelTemplates(prisma);
 
   const [recentJobs, templateCount] = await Promise.all([
@@ -27,6 +30,8 @@ export default async function LabelsPage() {
             sourceDocumentType: true,
             sourceDocumentId: true,
             operatorName: true,
+            product: { select: { sku: true, name: true } },
+            location: { select: { code: true } },
           },
         },
       },
@@ -37,28 +42,28 @@ export default async function LabelsPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <PageHeader
-        title="Etiquetas"
-        description="Centro de acceso a trabajos de impresión, documentos etiquetados y trazabilidad asociada."
+        title={isOperatorView ? "Etiquetas de trabajo" : "Etiquetas"}
+        description={isOperatorView ? "Abre o reimprime etiquetas de material, recepción y surtido." : "Centro de acceso a trabajos de impresión, documentos etiquetados y trazabilidad asociada."}
         actions={
           <>
             <Link href="/inventory" className={buttonStyles({ variant: "secondary" })}>
               Inventario
             </Link>
-            <Link href="/trace" className={buttonStyles({ variant: "secondary" })}>
+            {!isOperatorView ? <Link href="/trace" className={buttonStyles({ variant: "secondary" })}>
               Trace
-            </Link>
+            </Link> : null}
           </>
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="glass-card space-y-2">
+      <div className={`grid gap-4 ${isOperatorView ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
+        {!isOperatorView ? <div className="glass-card space-y-2">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Plantillas activas</p>
           <p className="text-3xl font-bold text-white">{templateCount.toLocaleString("es-MX")}</p>
           <p className="text-sm text-slate-300">
             Plantillas disponibles para movimientos, ubicaciones y documentos.
           </p>
-        </div>
+        </div> : null}
         <div className="glass-card space-y-2">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Trabajos recientes</p>
           <p className="text-3xl font-bold text-white">{recentJobs.length.toLocaleString("es-MX")}</p>
@@ -75,8 +80,8 @@ export default async function LabelsPage() {
             <Link href="/inventory/pick" className={buttonStyles({ variant: "secondary", size: "sm" })}>
               Picking
             </Link>
-            <Link href="/inventory/adjust" className={buttonStyles({ variant: "secondary", size: "sm" })}>
-              Ajustes
+            <Link href="/inventory/transfer" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+              Mover material
             </Link>
           </div>
         </div>
@@ -85,14 +90,26 @@ export default async function LabelsPage() {
       <section className="glass-card space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-white">Trabajos recientes</h2>
-          <p className="text-sm text-slate-400">
-            Revisa el último render, su operador y el documento de origen cuando exista.
-          </p>
+          <p className="text-sm text-slate-400">{isOperatorView ? "Abre la etiqueta que necesitas imprimir o volver a imprimir." : "Revisa el último render, su operador y el documento de origen cuando exista."}</p>
         </div>
 
         {recentJobs.length === 0 ? (
           <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
             Aún no hay trabajos de impresión registrados.
+          </div>
+        ) : isOperatorView ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {recentJobs.map((job) => (
+              <article key={job.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{job.traceRecord.labelType}</p>
+                <p className="mt-1 font-medium text-white">{job.traceRecord.product?.sku ?? "Material"} · {job.traceRecord.product?.name ?? "Sin producto"}</p>
+                <p className="mt-1 text-sm text-slate-300">Ubicación: {job.traceRecord.location?.code ?? "Sin ubicación"}</p>
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <span className="text-xs text-slate-400">{job.status}</span>
+                  <Link href={`/labels/jobs/${job.id}`} className={buttonStyles({ size: "sm" })}>Abrir etiqueta</Link>
+                </div>
+              </article>
+            ))}
           </div>
         ) : (
           <div className="overflow-x-auto">

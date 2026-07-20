@@ -49,6 +49,7 @@ import {
   matchOperationalPreset,
   type OperationalPresetFilter,
 } from "@/lib/dashboard/fulfillment-operational-presets";
+import { getOperationalUxState } from "@/lib/sales/operational-state";
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
 const STALE_HOURS = 4;
@@ -176,7 +177,7 @@ async function takeRequestFromList(formData: FormData) {
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
     redirect(
-      `${returnTo}${returnTo.includes("?") ? "&" : "?"}ok=${encodeURIComponent("Pedido tomado y asignado")}`,
+      `${returnTo}${returnTo.includes("?") ? "&" : "?"}ok=${encodeURIComponent("Pedido tomado; puedes continuar con la entrega")}`,
     );
   } catch (error) {
     perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
@@ -249,6 +250,7 @@ export default async function ProductionRequestsPage({
     assignedToUserId: true,
     assignedAt: true,
     pulledAt: true,
+    preparedForDeliveryAt: true,
     deliveredToCustomerAt: true,
     updatedAt: true,
     warehouse: { select: { id: true, code: true, name: true } },
@@ -345,6 +347,7 @@ export default async function ProductionRequestsPage({
         updatedAt: true,
         assignedToUserId: true,
         pulledAt: true,
+        preparedForDeliveryAt: true,
         deliveredToCustomerAt: true,
         lines: { select: { id: true, lineKind: true } },
         pickLists: {
@@ -432,6 +435,7 @@ export default async function ProductionRequestsPage({
         const flowStage = getSalesOrderFlowStage({
           status: candidate.status as SalesInternalOrderStatus,
           assignedToUserId: candidate.assignedToUserId,
+          preparedForDeliveryAt: candidate.preparedForDeliveryAt,
           deliveredToCustomerAt: candidate.deliveredToCustomerAt,
           latestPickStatus: latestPick?.status ?? null,
           hasProductLines,
@@ -445,6 +449,7 @@ export default async function ProductionRequestsPage({
           deliveredToCustomerAt: candidate.deliveredToCustomerAt,
           assignedToUserId: candidate.assignedToUserId,
           pulledAt: candidate.pulledAt,
+          preparedForDeliveryAt: candidate.preparedForDeliveryAt,
           hasCompletedDirectPick,
           hasCompletedConfiguredAssembly,
         });
@@ -568,6 +573,16 @@ export default async function ProductionRequestsPage({
       preset,
     });
   };
+  // Los pedidos cerrados no compiten con el trabajo vivo. Siguen disponibles
+  // como consulta, sin que el vendedor tenga que descifrar acciones caducadas.
+  const activeOrders = orders.filter(
+    (order) =>
+      order.status !== "CANCELADA" && !order.deliveredToCustomerAt,
+  );
+  const historicalOrders = orders.filter(
+    (order) =>
+      order.status === "CANCELADA" || Boolean(order.deliveredToCustomerAt),
+  );
   const activeFilters = [
     statusFilter
       ? {
@@ -630,41 +645,24 @@ export default async function ProductionRequestsPage({
         }
       : null,
   ].filter(Boolean) as Array<{ label: string; href: string }>;
-  const quickFilters = [
-    {
-      label: "Todos",
-      href: buildHref(1, undefined, undefined, undefined, undefined),
-      active: !statusFilter && !queueFilter && !stageFilter && !presetFilter,
-    },
-    sessionCtx.user?.id
-      ? { label: "Mis pedidos", href: "#mis-pedidos", active: false }
-      : null,
-    {
-      label: "Urgentes",
-      href: buildHref(1, undefined, undefined, undefined, "urgentes"),
-      active: presetFilter === "urgentes",
-    },
-    {
-      label: "Vencen hoy",
-      href: buildHref(1, undefined, "today"),
-      active: queueFilter === "today",
-    },
-    {
-      label: "Sin responsable",
-      href: buildHref(1, undefined, undefined, undefined, "sin_asignar"),
-      active: presetFilter === "sin_asignar",
-    },
-    {
-      label: "Bloqueados",
-      href: buildHref(1, undefined, undefined, undefined, "bloqueados"),
-      active: presetFilter === "bloqueados",
-    },
-    {
-      label: "Listos para entrega",
-      href: buildHref(1, undefined, undefined, undefined, "listos_para_entrega"),
-      active: presetFilter === "listos_para_entrega",
-    },
-  ].filter(Boolean) as Array<{
+  const quickFilters = (isOperatorView
+    ? [
+        { label: "Para actuar", href: buildHref(1, undefined, undefined, undefined, undefined), active: !statusFilter && !queueFilter && !stageFilter && !presetFilter },
+        { label: "Por surtir", href: buildHref(1, undefined, "unreleased"), active: queueFilter === "unreleased" },
+        { label: "En proceso", href: buildHref(1, undefined, undefined, "en_surtido"), active: stageFilter === "en_surtido" },
+        { label: "Bloqueados", href: buildHref(1, undefined, undefined, undefined, "bloqueados"), active: presetFilter === "bloqueados" },
+        { label: "Verificar", href: buildHref(1, undefined, "partial"), active: queueFilter === "partial" },
+        { label: "Listos para entrega", href: buildHref(1, undefined, undefined, undefined, "listos_para_entrega"), active: presetFilter === "listos_para_entrega" },
+      ]
+    : [
+        { label: "Para actuar", href: buildHref(1, undefined, undefined, undefined, undefined), active: !statusFilter && !queueFilter && !stageFilter && !presetFilter },
+        { label: "En curso", href: buildHref(1, undefined, undefined, "en_surtido", undefined), active: stageFilter === "en_surtido" },
+        { label: "Urgentes", href: buildHref(1, undefined, undefined, undefined, "urgentes"), active: presetFilter === "urgentes" },
+        { label: "Para tomar", href: buildHref(1, undefined, undefined, undefined, "sin_asignar"), active: presetFilter === "sin_asignar" },
+        { label: "Bloqueados", href: buildHref(1, undefined, undefined, undefined, "bloqueados"), active: presetFilter === "bloqueados" },
+        { label: "Listos para entrega", href: buildHref(1, undefined, undefined, undefined, "listos_para_entrega"), active: presetFilter === "listos_para_entrega" },
+      ]
+  ).filter(Boolean) as Array<{
     label: string;
     href: string;
     active: boolean;
@@ -746,6 +744,8 @@ export default async function ProductionRequestsPage({
         roles: sessionCtx.roles,
         status: order.status as SalesInternalOrderStatus,
         assignedToUserId: order.assignedToUserId,
+        assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
+        pulledAt: order.pulledAt,
         isCreatedByManager: createdByManager,
       }).canTakeOrder;
     })
@@ -754,10 +754,10 @@ export default async function ProductionRequestsPage({
     <div className="space-y-6">
       {" "}
       <PageHeader
-        title={isOperatorView ? "Cockpit de ejecución" : "Pedidos y surtidos"}
+        title={isOperatorView ? "Trabajo de almacén" : "Pedidos y surtidos"}
         description={
           isOperatorView
-            ? "Pedidos confirmados listos para surtido directo y seguimiento de ensambles."
+            ? "Elige una tarea física: surtir, continuar, verificar o completar un ensamble."
             : "Cola comercial para captura, seguimiento, asignación, surtido y entrega."
         }
         meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Cola: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
@@ -792,73 +792,17 @@ export default async function ProductionRequestsPage({
           {sp.error}
         </div>
       ) : null}
-      <section className="grid gap-4 xl:grid-cols-2">
-        <article id="mis-pedidos" className="glass-card space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--text-primary)]">
-                Mis pedidos
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">
-                Pedidos asignados a tu usuario dentro de la cola visible.
-              </p>
-            </div>
-            <Badge variant="accent">
-              {myOrders.length.toLocaleString("es-MX")}
-            </Badge>
-          </div>
-          {myOrders.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)]">
-              No tienes pedidos asignados en la vista actual.
-            </p>
-          ) : (
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 text-sm shadow-sm" data-testid="requests-work-summary">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <span className="font-semibold text-[var(--text-primary)]">{isOperatorView ? "Trabajo asignado" : "Mi cola"}</span>
+          <span>{myOrders.length.toLocaleString("es-MX")} asignados</span>
+          {!isOperatorView ? <span>{claimableOrders.length.toLocaleString("es-MX")} disponibles para tomar</span> : null}
+          {myOrders.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {myOrders.map((order) => (
-                <Link
-                  key={order.id}
-                  href={`/production/requests/${order.id}`}
-                  className={buttonStyles({ variant: "secondary", size: "sm" })}
-                >
-                  {order.code}
-                </Link>
-              ))}
+              {myOrders.slice(0, 3).map((order) => <Link key={order.id} href={`/production/requests/${order.id}`} className={getTextLinkClassName()}>{order.code}</Link>)}
             </div>
-          )}
-        </article>
-        {!isOperatorView ? (
-        <article className="glass-card space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--text-primary)]">
-                Pedidos sin responsable
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">
-                Pedidos confirmados sin asignar que puedes tomar.
-              </p>
-            </div>
-            <Badge variant="warning">
-              {claimableOrders.length.toLocaleString("es-MX")}
-            </Badge>
-          </div>
-          {claimableOrders.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)]">
-              No hay pedidos disponibles para tomar en la vista actual.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {claimableOrders.map((order) => (
-                <Link
-                  key={order.id}
-                  href={`/production/requests/${order.id}`}
-                  className={buttonStyles({ variant: "secondary", size: "sm" })}
-                >
-                  {order.code}
-                </Link>
-              ))}
-            </div>
-          )}
-        </article>
-        ) : null}
+          ) : null}
+        </div>
       </section>
       <section className="space-y-3">
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
@@ -903,7 +847,7 @@ export default async function ProductionRequestsPage({
               ) : null}
             </div>
           ) : null}
-          <details
+          {!isOperatorView ? <details
             className="group mt-3 rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2"
             data-testid="requests-more-filters"
           >
@@ -988,18 +932,18 @@ export default async function ProductionRequestsPage({
                 ))}
               </div>
             </div>
-          </details>
+          </details> : null}
         </div>
       </section>{" "}
       <section className="space-y-4">
         {" "}
-        {orders.length === 0 ? (
+        {activeOrders.length === 0 ? (
           <div className="glass-card rounded-xl p-6 text-center text-[var(--text-muted)]">
             {" "}
-            No hay pedidos para el filtro seleccionado.{" "}
+            No hay pedidos activos para el filtro seleccionado.{" "}
           </div>
         ) : (
-          orders.map((order) => {
+          activeOrders.map((order) => {
             const orderStatus = order.status as SalesInternalOrderStatus;
             const displayCustomer =
               order.customerName?.trim() || order.customer?.name || "--";
@@ -1022,6 +966,14 @@ export default async function ProductionRequestsPage({
                 ? assemblyLineIds.has(row.sourceDocumentLineId)
                 : false,
             );
+            const pendingAssemblyOrders = linkedForOrder.filter(
+              (row) =>
+                row.status !== "COMPLETADA" && row.status !== "CANCELADA",
+            );
+            const assemblyHref =
+              pendingAssemblyOrders.length === 1
+                ? `/production/orders/${pendingAssemblyOrders[0].id}`
+                : `/production/requests/${order.id}#ensambles`;
             const hasCompletedConfiguredAssembly =
               configuredLines.length === 0 ||
               (linkedForOrder.length === assemblyLineIds.size &&
@@ -1034,6 +986,8 @@ export default async function ProductionRequestsPage({
               roles: sessionCtx.roles,
               status: orderStatus,
               assignedToUserId: order.assignedToUserId,
+              assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
+              pulledAt: order.pulledAt,
               isCreatedByManager: createdByManager,
             });
             const deliveredEligibility = getMarkDeliveredEligibility({
@@ -1041,20 +995,34 @@ export default async function ProductionRequestsPage({
               deliveredToCustomerAt: order.deliveredToCustomerAt,
               assignedToUserId: order.assignedToUserId,
               pulledAt: order.pulledAt,
+              preparedForDeliveryAt: order.preparedForDeliveryAt,
               hasCompletedDirectPick,
               hasCompletedConfiguredAssembly,
+            });
+            const operationalState = getOperationalUxState({
+              blockingCause: "NONE",
+              isPartial: latestPickStatus === "PARTIAL",
+              assemblyBlocked: configuredLines.length > 0 && !hasCompletedConfiguredAssembly,
+              isUnreleased: productLines.length > 0 && (!latestPickStatus || latestPickStatus === "DRAFT"),
+              latestPickStatus,
+              canMarkDelivered: deliveredEligibility.canMarkDelivered,
+              isDelivered: Boolean(order.deliveredToCustomerAt),
+              isCancelled: orderStatus === "CANCELADA",
+              hasLines: productLines.length > 0 || configuredLines.length > 0,
             });
             const flowNarrative = getSalesOrderFlowNarrative({
               orderId: order.id,
               roles: sessionCtx.roles,
               status: orderStatus,
               assignedToUserId: order.assignedToUserId,
+              preparedForDeliveryAt: order.preparedForDeliveryAt,
               deliveredToCustomerAt: order.deliveredToCustomerAt,
               pulledAt: order.pulledAt,
               latestPickStatus,
               hasProductLines: productLines.length > 0,
               hasAssemblyLines: configuredLines.length > 0,
               hasCompletedConfiguredAssembly,
+              assemblyHref,
               takeEligibility,
               deliveredEligibility,
             });
@@ -1111,13 +1079,6 @@ export default async function ProductionRequestsPage({
                 });
               }
             }
-            if (!deliveredEligibility.canMarkDelivered && orderStatus !== "CANCELADA") {
-              attentionChips.push({
-                label: "Entrega bloqueada",
-                variant: "warning",
-              });
-            }
-
             return (
               <article
                 key={order.id}
@@ -1139,8 +1100,8 @@ export default async function ProductionRequestsPage({
                       <Badge variant={flowNarrative.flowBadgeVariant}>
                         {flowNarrative.flowStageLabel}
                       </Badge>
-                      <Badge variant={primaryActionState.state === "blocked" ? "warning" : "neutral"}>
-                        {primaryActionState.label}
+                      <Badge variant={operationalState.variant}>
+                        {operationalState.label}
                       </Badge>
                     </div>
                     <p className="text-sm text-[var(--text-muted)]">
@@ -1160,78 +1121,12 @@ export default async function ProductionRequestsPage({
                         ? `${order.warehouse.code} - ${order.warehouse.name}`
                         : "--"}
                     </p>
-                    <div className="space-y-2 md:hidden">
-                      <p className="text-sm font-medium text-[var(--text-primary)]">
-                        {flowNarrative.nextRecommendedAction.label} ·{" "}
-                        {formatDate(order.dueDate)} ·{" "}
-                        {order.assignedToUser
-                          ? (order.assignedToUser.name ??
-                            order.assignedToUser.email ??
-                            "--")
-                          : "Sin asignar"}
-                      </p>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        {flowNarrative.primaryCta.blockedReason ??
-                          flowNarrative.primaryCta.reason}
-                      </p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                      <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {operationalState.nextAction}</span>
+                      <span><span className="font-medium text-[var(--text-primary)]">Compromiso:</span> {formatDate(order.dueDate)}</span>
+                      <span><span className="font-medium text-[var(--text-primary)]">Responsable:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span>
                     </div>
-                    <div className="hidden gap-3 md:grid sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Siguiente acción
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
-                          {flowNarrative.nextRecommendedAction.label}
-                        </p>
-                        <p className="mt-1 text-sm text-[var(--text-muted)]">
-                          {flowNarrative.primaryCta.blockedReason ??
-                            flowNarrative.primaryCta.reason}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Compromiso
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
-                          {formatDate(order.dueDate)}
-                        </p>
-                        <p className="mt-1 text-sm text-[var(--text-muted)]">
-                          {isOverdue
-                            ? "Vencido"
-                            : order.dueDate
-                              ? "Fecha compromiso"
-                              : "Sin fecha prometida"}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Asignación
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
-                          {order.assignedToUser
-                            ? (order.assignedToUser.name ??
-                              order.assignedToUser.email ??
-                              "--")
-                            : "Sin asignar"}
-                        </p>
-                        <p className="mt-1 text-sm text-[var(--text-muted)]">
-                          {order.assignedAt
-                            ? `Asignado el ${formatDateTime(order.assignedAt)}`
-                            : "Pendiente de asignación"}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                          Ultimo movimiento
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-[var(--text-primary)]">
-                          {formatDateTime(order.updatedAt)}
-                        </p>
-                        <p className="mt-1 text-sm text-[var(--text-muted)]">
-                          Actualizacion operativa mas reciente
-                        </p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[var(--text-muted)]">{operationalState.description}</p>
                     <div className="flex flex-wrap gap-2">
                       {attentionChips.map((chip) => (
                         <Badge key={chip.label} variant={chip.variant}>
@@ -1258,27 +1153,27 @@ export default async function ProductionRequestsPage({
                           type="submit"
                           disabled={!takeEligibility.canTakeOrder}
                           className={buttonStyles({
-                            variant: "secondary",
+                          variant: "primary",
                             fullWidth: true,
                             className: !takeEligibility.canTakeOrder
                               ? "cursor-not-allowed opacity-55"
                               : "",
                           })}
                         >
-                          Tomar pedido
+                          {takeEligibility.takeActionLabel ?? "Tomar pedido"}
                         </button>
                       </form>
                     ) : primaryActionState.state === "allowed" ? (
                       <Link
                         href={primaryActionState.href}
                         className={buttonStyles({
-                          variant: "secondary",
+                          variant: "primary",
                           fullWidth: true,
                         })}
                       >
                         {primaryActionState.label}
                       </Link>
-                    ) : (
+                    ) : flowNarrative.flowStage !== "entregado" && flowNarrative.flowStage !== "cancelado" && flowNarrative.flowStage !== "captura" ? (
                       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-sm font-medium text-[var(--text-primary)]">
@@ -1302,15 +1197,15 @@ export default async function ProductionRequestsPage({
                             primaryActionState.reason}
                         </p>
                       </div>
-                    )}
+                    ) : null}
                     <Link
                       href={`/production/requests/${order.id}`}
                       className={buttonStyles({
-                        variant: "primary",
+                        variant: primaryActionState.state === "allowed" || flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "secondary" : "primary",
                         fullWidth: true,
                       })}
                     >
-                      Ver detalle
+                      {flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "Ver historial" : "Abrir pedido"}
                     </Link>
                   </div>
                 </header>
@@ -1474,6 +1369,38 @@ export default async function ProductionRequestsPage({
           })
         )}{" "}
       </section>{" "}
+      {historicalOrders.length > 0 ? (
+        <details id="historial" className="glass-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
+            <div>
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                Historial
+              </h2>
+              <p className="text-sm text-[var(--text-muted)]">
+                Pedidos entregados o cancelados, solo para consulta.
+              </p>
+            </div>
+            <Badge variant="neutral">{historicalOrders.length}</Badge>
+          </summary>
+          <div className="mt-4 divide-y divide-[var(--border-soft)] rounded-xl border border-[var(--border-default)]">
+            {historicalOrders.map((order) => (
+              <Link
+                key={order.id}
+                href={`/production/requests/${order.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+              >
+                <span className="font-mono text-[var(--accent)]">{order.code}</span>
+                <span className="text-[var(--text-muted)]">
+                  {order.customerName?.trim() || order.customer?.name || "--"}
+                </span>
+                <Badge variant={order.status === "CANCELADA" ? "warning" : "success"}>
+                  {order.status === "CANCELADA" ? "Cancelado" : "Entregado"}
+                </Badge>
+              </Link>
+            ))}
+          </div>
+        </details>
+      ) : null}
       {canViewAdministrativeTable ? (
         <details className="glass-card space-y-4">
           <summary className="cursor-pointer list-none">
@@ -1554,6 +1481,8 @@ export default async function ProductionRequestsPage({
                       roles: sessionCtx.roles,
                       status: orderStatus,
                       assignedToUserId: order.assignedToUserId,
+                      assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
+                      pulledAt: order.pulledAt,
                       isCreatedByManager: createdByManager,
                     });
                     const hasCompletedDirectPick =
@@ -1563,6 +1492,7 @@ export default async function ProductionRequestsPage({
                       deliveredToCustomerAt: order.deliveredToCustomerAt,
                       assignedToUserId: order.assignedToUserId,
                       pulledAt: order.pulledAt,
+                      preparedForDeliveryAt: order.preparedForDeliveryAt,
                       hasCompletedDirectPick,
                       hasCompletedConfiguredAssembly,
                     });
@@ -1571,6 +1501,7 @@ export default async function ProductionRequestsPage({
                       roles: sessionCtx.roles,
                       status: orderStatus,
                       assignedToUserId: order.assignedToUserId,
+                      preparedForDeliveryAt: order.preparedForDeliveryAt,
                       deliveredToCustomerAt: order.deliveredToCustomerAt,
                       pulledAt: order.pulledAt,
                       latestPickStatus,

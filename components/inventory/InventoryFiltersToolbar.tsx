@@ -21,6 +21,7 @@ type Props = {
   typeOptions: string[];
   warehouseOptions: Option[];
   locationOptions: Option[];
+  traceCollapsed?: boolean;
 };
 
 export function InventoryFiltersToolbar({
@@ -33,6 +34,7 @@ export function InventoryFiltersToolbar({
   typeOptions,
   warehouseOptions,
   locationOptions,
+  traceCollapsed = false,
 }: Props) {
   return (
     <SectionCard
@@ -100,7 +102,11 @@ export function InventoryFiltersToolbar({
           </Toolbar>
         </form>
 
-        <form action="/trace" method="get" className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
+        <details open={!traceCollapsed} className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-[var(--text-secondary)]">
+            Herramientas de trazabilidad
+          </summary>
+          <form action="/trace" method="get" className="mt-3">
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
             <Input
               name="traceId"
@@ -113,7 +119,8 @@ export function InventoryFiltersToolbar({
               <ChevronRightIcon className="h-4 w-4" />
             </button>
           </div>
-        </form>
+          </form>
+        </details>
       </div>
     </SectionCard>
   );

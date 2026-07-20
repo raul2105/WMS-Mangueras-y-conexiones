@@ -201,22 +201,34 @@ export default async function ProductionFulfillmentPage({
     redirect("/production");
   }
 
+  const pendingAssemblyOrders = await prisma.productionOrder.findMany({
+    where: {
+      sourceDocumentType: "SalesInternalOrder",
+      sourceDocumentId: order.id,
+      status: { in: ["BORRADOR", "ABIERTA", "EN_PROCESO"] },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, code: true },
+  });
+  const assemblyContinuationHref =
+    pendingAssemblyOrders.length === 1
+      ? `/production/orders/${pendingAssemblyOrders[0].id}`
+      : `/production/requests/${order.id}#ensambles`;
+
   const activePickList = order.pickLists.find((pickList) => pickList.status !== "CANCELLED") ?? null;
   const actionableTasks =
     activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
+  const directPickCompleted = activePickList?.status === "COMPLETED";
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <PageHeader
-        title="Surtido directo"
-        description="Operación física de productos independientes del pedido hacia staging o shipping."
+        title="Surtir productos"
+        description={`Pedido ${order.code}: recoge los productos directos y llévalos a ${activePickList?.targetLocation.code ?? "staging"}.`}
         actions={
           <>
             <Link href={`/production/requests/${order.id}`} className={buttonStyles({ variant: "secondary" })}>
               Volver al pedido
-            </Link>
-            <Link href="/production" className={buttonStyles({ variant: "secondary" })}>
-              Ensamble
             </Link>
           </>
         }
@@ -229,8 +241,8 @@ export default async function ProductionFulfillmentPage({
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{sp.ok}</div>
       ) : null}
 
-      <section className="glass-card grid gap-4 lg:grid-cols-[1fr_1fr]">
-        <div className="space-y-2 text-sm text-slate-300">
+      <section className="op-panel grid gap-4 lg:grid-cols-[1fr_1fr]">
+        <div className="space-y-2 text-sm text-[var(--text-secondary)]">
           <p className="font-mono text-cyan-300">{order.code}</p>
           <p>Cliente: {order.customerName ?? "--"}</p>
           <p>Almacen: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</p>
@@ -238,19 +250,37 @@ export default async function ProductionFulfillmentPage({
           <p>Estado del pedido: {order.status}</p>
         </div>
         <div className="space-y-3">
+          <div className="op-next-action" data-testid="fulfillment-next-action">
+            <p className="op-label">Siguiente paso</p>
+            {directPickCompleted && pendingAssemblyOrders.length > 0 ? (
+              <Link href={assemblyContinuationHref} className="mt-1 inline-flex font-semibold text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                {pendingAssemblyOrders.length === 1
+                  ? `Continuar ensamble ${pendingAssemblyOrders[0].code}`
+                  : "Continuar con los ensambles del pedido"}
+              </Link>
+            ) : (
+              <p className="mt-1 font-semibold text-[var(--text-primary)]">
+                {activePickList?.status === "DRAFT"
+                  ? "Libera el surtido para empezar."
+                  : directPickCompleted
+                    ? "Surtido directo terminado. Vuelve al pedido para continuar."
+                    : "Confirma las cantidades realmente recogidas."}
+              </p>
+            )}
+          </div>
           {!activePickList ? (
-            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
+            <div className="op-surface-muted px-4 py-6 text-sm">
               Este pedido no tiene surtido directo generado.
             </div>
           ) : (
-            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-slate-300">
+            <div className="op-surface-muted px-4 py-4 text-sm">
               <p>
-                Pick list activa: <span className="font-mono text-cyan-300">{activePickList.code}</span> · {summarizePickListStatus(activePickList.status)}
+                Lista de surtido: <span className="font-mono text-cyan-300">{activePickList.code}</span> · {summarizePickListStatus(activePickList.status)}
               </p>
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 op-helper">
                 Destino: {activePickList.targetLocation.code} - {activePickList.targetLocation.name}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="op-helper">
                 Liberada: {activePickList.releasedAt ? new Date(activePickList.releasedAt).toLocaleString("es-MX") : "--"} · Cerrada: {activePickList.completedAt ? new Date(activePickList.completedAt).toLocaleString("es-MX") : "--"}
               </p>
             </div>
@@ -268,11 +298,11 @@ export default async function ProductionFulfillmentPage({
       </section>
 
       {activePickList ? (
-        <section className="glass-card space-y-4">
+        <section className="op-panel space-y-4">
           <div>
-            <h2 className="text-lg font-semibold text-white">Tareas de surtido</h2>
-            <p className="text-sm text-slate-400">
-              Confirma lo recogido desde almacenamiento hacia {activePickList.targetLocation.code}. Las tareas parciales cierran con liberacion del faltante reservado.
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Productos por recoger</h2>
+            <p className="text-sm text-[var(--text-muted)]">
+              Confirma la cantidad real que llevaste a {activePickList.targetLocation.code}. Si falta material, registra el motivo.
             </p>
           </div>
 

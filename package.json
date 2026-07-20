@@ -13,6 +13,7 @@
     "lint": "npx eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node scripts/db/run-vitest-postgres.cjs run",
+    "test:unit": "vitest --config vitest.unit.config.ts run",
     "test:sqlite": "node scripts/db/run-vitest-sqlite.cjs run",
     "test:postgres": "node scripts/db/run-vitest-postgres.cjs run",
     "smoke:published": "node scripts/smoke/published-links.cjs",

@@ -1,17 +1,19 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { purchaseOrderCreateSchema, firstErrorMessage } from "@/lib/schemas/wms";
+import {
+  purchaseOrderCreateLinesSchema,
+  purchaseOrderCreateSchema,
+  firstErrorMessage,
+} from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
-import { Button, buttonStyles } from "@/components/ui/button";
+import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
-import { SectionCard } from "@/components/ui/section-card";
-import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { resolvePurchaseOrderFrozenFields } from "@/lib/purchasing/purchase-order-document-service";
+import { PurchaseOrderCreateForm } from "@/components/purchasing/PurchaseOrderCreateForm";
+import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 async function createOrder(formData: FormData) {
   "use server";
@@ -21,10 +23,22 @@ async function createOrder(formData: FormData) {
   const deliveryWarehouseId = String(formData.get("deliveryWarehouseId") ?? "").trim();
   const expectedDate = String(formData.get("expectedDate") ?? "").trim() || undefined;
   const notes = String(formData.get("notes") ?? "").trim() || undefined;
+  const linesJson = String(formData.get("linesJson") ?? "[]");
 
   const parsed = purchaseOrderCreateSchema.safeParse({ supplierId, deliveryWarehouseId, expectedDate, notes });
   if (!parsed.success) {
     redirect(`/purchasing/orders/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
+  }
+
+  let rawLines: unknown;
+  try {
+    rawLines = JSON.parse(linesJson);
+  } catch {
+    redirect(`/purchasing/orders/new?error=${encodeURIComponent("No se pudieron leer los productos de la orden")}`);
+  }
+  const parsedLines = purchaseOrderCreateLinesSchema.safeParse(rawLines);
+  if (!parsedLines.success) {
+    redirect(`/purchasing/orders/new?error=${encodeURIComponent(firstErrorMessage(parsedLines.error))}`);
   }
 
   const [supplier, warehouse] = await Promise.all([
@@ -38,6 +52,31 @@ async function createOrder(formData: FormData) {
     redirect(`/purchasing/orders/new?error=${encodeURIComponent("Almacén destino no encontrado o inactivo")}`);
   }
 
+  const productIds = parsedLines.data.map((line) => line.productId);
+  const [validProducts, supplierPrices] = await Promise.all([
+    prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, unitLabel: true, purchaseUnitLabel: true, purchaseUnitFactor: true, type: true, attributes: true },
+    }),
+    prisma.supplierProduct.findMany({
+      where: { supplierId: parsed.data.supplierId, productId: { in: productIds } },
+      select: { productId: true, unitPrice: true },
+    }),
+  ]);
+  if (validProducts.length !== productIds.length) {
+    redirect(`/purchasing/orders/new?error=${encodeURIComponent("Uno de los productos ya no está disponible en el catálogo")}`);
+  }
+  const productById = new Map(validProducts.map((product) => [product.id, product]));
+  for (const line of parsedLines.data) {
+    const product = productById.get(line.productId);
+    if (!product) continue;
+    const quantityError = quantityValidationMessage(line.qtyOrdered, getPurchaseUnitPolicy(product));
+    if (quantityError) {
+      redirect(`/purchasing/orders/new?error=${encodeURIComponent(quantityError)}`);
+    }
+  }
+  const supplierPriceByProduct = new Map(supplierPrices.map((item) => [item.productId, item.unitPrice]));
+
   const frozenFields = resolvePurchaseOrderFrozenFields({
     deliveryWarehouse: { id: warehouse.id, address: warehouse.address ?? null },
     supplierPaymentTerms: supplier.paymentTerms,
@@ -47,7 +86,7 @@ async function createOrder(formData: FormData) {
   const year = new Date().getFullYear();
   const folio = `OC-${year}-${String(count + 1).padStart(4, "0")}`;
 
-  const order = await prisma.purchaseOrder.create({
+  const order = await prisma.$transaction(async (tx) => tx.purchaseOrder.create({
     data: {
       folio,
       supplierId: parsed.data.supplierId,
@@ -56,9 +95,21 @@ async function createOrder(formData: FormData) {
       notes: parsed.data.notes ?? null,
       deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
       paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
+      lines: {
+        create: parsedLines.data.map((line) => {
+          const product = productById.get(line.productId)!;
+          return {
+            productId: line.productId,
+            qtyOrdered: line.qtyOrdered,
+            unitPrice: line.unitPrice ?? supplierPriceByProduct.get(line.productId) ?? null,
+            purchaseUnitLabel: product.purchaseUnitLabel ?? product.unitLabel,
+            purchaseUnitFactor: product.purchaseUnitFactor,
+          };
+        }),
+      },
     },
     select: { id: true, folio: true },
-  });
+  }));
 
   await createAuditLogSafe({
     entityType: "PURCHASE_ORDER",
@@ -87,25 +138,32 @@ export default async function NewPurchaseOrderPage({
   await pageGuard("purchasing.manage");
   const sp = await searchParams;
 
-  const suppliers = await prisma.supplier.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
-    select: { id: true, code: true, name: true },
-  });
-  const warehouses = await prisma.warehouse.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
-    select: { id: true, code: true, name: true, address: true },
-  });
+  const [suppliers, warehouses, products] = await Promise.all([
+    prisma.supplier.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, code: true, name: true },
+    }),
+    prisma.warehouse.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, code: true, name: true, address: true },
+    }),
+    prisma.product.findMany({
+      orderBy: { sku: "asc" },
+      select: { id: true, sku: true, name: true, type: true, unitLabel: true, purchaseUnitLabel: true, purchaseUnitFactor: true, attributes: true },
+    }),
+  ]);
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="mx-auto max-w-5xl space-y-5">
       <PageHeader
-        title="Nueva Orden de Compra"
-        description="Configura proveedor, fecha compromiso y notas operativas."
+        eyebrow="Compras y abastecimiento"
+        title="Nueva orden de compra"
+        description="Captura los datos y productos en una sola pantalla. La orden se guardará como borrador para revisión."
         actions={
           <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary" })}>
-            Ordenes
+            Órdenes de compra
           </Link>
         }
       />
@@ -120,8 +178,8 @@ export default async function NewPurchaseOrderPage({
           title={suppliers.length === 0 ? "No hay proveedores activos" : "No hay almacenes activos"}
           description={
             suppliers.length === 0
-              ? "Registra un proveedor antes de generar nuevas ordenes de compra."
-              : "Registra un almacén activo antes de generar nuevas ordenes de compra."
+              ? "Registra un proveedor antes de generar nuevas órdenes de compra."
+              : "Registra un almacén activo antes de generar nuevas órdenes de compra."
           }
           actions={
             <Link
@@ -134,55 +192,21 @@ export default async function NewPurchaseOrderPage({
         />
       )}
 
-      <form action={createOrder}>
-        <SectionCard
-          title="Datos de la orden"
-          footer={
-            <>
-              <Link href="/purchasing/orders" className={buttonStyles({ variant: "secondary" })}>Cancelar</Link>
-              <Button type="submit" disabled={suppliers.length === 0 || warehouses.length === 0}>Crear OC</Button>
-            </>
-          }
-        >
-          <Select name="supplierId" required label="Proveedor" placeholder="Seleccionar proveedor...">
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code} - {s.name}
-              </option>
-            ))}
-          </Select>
-
-          <Select
-            name="deliveryWarehouseId"
-            required
-            label="Almacén destino"
-            placeholder="Seleccionar almacén..."
-            hint="La dirección de este almacén se congelará como dirección de entrega."
-          >
-            {warehouses.map((warehouse) => (
-              <option key={warehouse.id} value={warehouse.id}>
-                {warehouse.code} - {warehouse.name} {warehouse.address ? `(${warehouse.address})` : ""}
-              </option>
-            ))}
-          </Select>
-
-          <Input
-            name="expectedDate"
-            type="date"
-            label="Fecha esperada de entrega"
-            min={new Date().toISOString().slice(0, 10)}
-          />
-
-          <Textarea
-            name="notes"
-            label="Notas"
-            rows={3}
-            maxLength={1000}
-            placeholder="Instrucciones especiales, condiciones de pago..."
-            textareaClassName="resize-none"
-          />
-        </SectionCard>
-      </form>
+      <PurchaseOrderCreateForm
+        action={createOrder}
+        suppliers={suppliers}
+        warehouses={warehouses}
+        products={products.map((product) => ({
+          id: product.id,
+          code: product.sku,
+          name: product.name,
+          type: product.type,
+          unitLabel: product.unitLabel,
+          purchaseUnitLabel: product.purchaseUnitLabel,
+          purchaseUnitFactor: product.purchaseUnitFactor,
+          attributes: product.attributes,
+        }))}
+      />
     </div>
   );
 }

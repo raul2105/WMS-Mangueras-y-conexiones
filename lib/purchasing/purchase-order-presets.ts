@@ -8,6 +8,8 @@ export const PURCHASE_ORDER_PRESET_FILTERS = [
   "parciales",
   "recibidas",
   "vencidas",
+  "por_recibir",
+  "recepcion_parcial",
   "por_recibir_hoy",
 ] as const;
 
@@ -64,6 +66,10 @@ export function getPurchaseOrderPresetLabel(filter: PurchaseOrderPresetFilter) {
       return "Recibidas";
     case "vencidas":
       return "Vencidas";
+    case "por_recibir":
+      return "Por recibir";
+    case "recepcion_parcial":
+      return "Recepción parcial";
     case "por_recibir_hoy":
       return "Por recibir hoy";
     default:
@@ -94,6 +100,10 @@ export function buildPurchaseOrderPresetWhere(
         expectedDate: { lt: start },
       };
     }
+    case "por_recibir":
+      return { status: { in: ["CONFIRMADA", "EN_TRANSITO"] } };
+    case "recepcion_parcial":
+      return { status: "PARCIAL" };
     case "por_recibir_hoy": {
       const { start, end } = getMexicoCityDayBounds();
       return {
@@ -129,6 +139,10 @@ export function matchesPurchaseOrderPreset(
       return status === "RECIBIDA";
     case "vencidas":
       return Boolean(expectedDate && OPEN_STATUSES.includes(status as typeof OPEN_STATUSES[number]) && expectedDate < start);
+    case "por_recibir":
+      return status === "CONFIRMADA" || status === "EN_TRANSITO";
+    case "recepcion_parcial":
+      return status === "PARCIAL";
     case "por_recibir_hoy":
       return Boolean(expectedDate && OPEN_STATUSES.includes(status as typeof OPEN_STATUSES[number]) && expectedDate >= start && expectedDate < end);
     default:

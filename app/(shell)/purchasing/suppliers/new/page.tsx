@@ -142,7 +142,7 @@ export default async function NewSupplierPage({
             name="address"
             rows={2}
             maxLength={500}
-            label="Direccion"
+            label="Dirección"
             placeholder="Calle, Numero, Colonia, CP, Ciudad"
             textareaClassName="resize-none"
           />

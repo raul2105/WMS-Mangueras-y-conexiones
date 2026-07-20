@@ -12,6 +12,29 @@ Runbook para desplegar la app web remota en AWS con OpenNext, Lambda, CloudFront
 
 ## Comandos recomendados
 
+### Ruta preferida de ejecución
+
+Para despliegues AWS/OpenNext, la ruta preferida es WSL/Linux o CI con un
+toolchain Linux limpio. El despliegue exitoso del flujo operativo se validó con
+WSL/Linux y el commit `9bee315`. La ejecución nativa en Windows queda como
+best-effort porque OpenNext y Prisma pueden empaquetar dependencias nativas
+incorrectas para Lambda ARM64.
+
+En WSL, ejecutar los comandos desde el checkout Linux con `node_modules`
+instalado en Linux; no reutilizar `node_modules` generado por Windows:
+
+```bash
+npm ci
+npm run prisma:validate
+npm run prisma:generate:aws
+npx @opennextjs/aws build
+(cd infra/cdk && npm ci && npx cdk deploy WmsWebDevStack --require-approval never)
+npm run smoke:web -- --base-url <cloudfront-dev-url>
+```
+
+CI es equivalente cuando el pipeline conserva la misma validación de Prisma,
+OpenNext, CDK y smoke contra CloudFront.
+
 Validación previa:
 
 ```bash

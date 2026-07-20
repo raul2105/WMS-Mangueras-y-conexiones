@@ -11,6 +11,7 @@ import {
   parseDueDate,
   firstErrorMessage,
   salesInternalOrderAssemblyLineCreateSchema,
+  salesInternalOrderAssemblyCreateSchema,
   salesInternalOrderCreateSchema,
   salesInternalOrderProductLineCreateSchema,
   salesOrderPickConfirmSchema,
@@ -312,6 +313,19 @@ describe("sales internal order schemas", () => {
         assemblyQuantityRaw: "0",
       }).success,
     ).toBe(false);
+  });
+
+  it("validates an assembly selected before the sales order exists", () => {
+    const base = {
+      warehouseId: "wh-1",
+      entryFittingProductId: "entry-1",
+      hoseProductId: "hose-1",
+      exitFittingProductId: "exit-1",
+      hoseLengthRaw: "2.5",
+      assemblyQuantityRaw: "3",
+    };
+    expect(salesInternalOrderAssemblyCreateSchema.safeParse(base).success).toBe(true);
+    expect(salesInternalOrderAssemblyCreateSchema.safeParse({ ...base, entryFittingProductId: "" }).success).toBe(false);
   });
 });
 

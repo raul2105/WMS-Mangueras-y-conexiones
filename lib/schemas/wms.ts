@@ -129,7 +129,23 @@ export function parseDueDate(value?: string) {
 }
 
 export function firstErrorMessage(error: z.ZodError) {
-  return error.issues[0]?.message ?? "Datos invalidos";
+  const issue = error.issues[0];
+  if (!issue) return "Revisa los datos capturados";
+
+  if (issue.code === "invalid_type") {
+    const field = String(issue.path.at(-1) ?? "");
+    const labels: Record<string, string> = {
+      discrepancyReason: "el motivo de la diferencia",
+      locationId: "la ubicación",
+      operatorName: "el operador",
+      quantityRaw: "la cantidad",
+      reference: "la referencia",
+      notes: "las notas",
+    };
+    return `Revisa ${labels[field] ?? "el dato capturado"}`;
+  }
+
+  return issue.message;
 }
 
 // ─── Módulo de Compras ────────────────────────────────────────────────────────
@@ -226,13 +242,36 @@ export const supplierBrandSchema = z.object({
 
 export const purchaseOrderCreateSchema = z.object({
   supplierId: requiredText("Proveedor"),
-  deliveryWarehouseId: requiredText("Almacen destino"),
+  deliveryWarehouseId: requiredText("Almacén destino"),
   expectedDate: z.string().trim().optional(),
   notes: z.string().trim().max(1000).optional(),
 });
 
+export const purchaseOrderCreateLineSchema = z.object({
+  productId: requiredText("Producto"),
+  qtyOrdered: z.coerce.number().positive("La cantidad debe ser mayor a cero"),
+  unitPrice: z.coerce.number().min(0, "El precio no puede ser negativo").nullable().optional(),
+});
+
+export const purchaseOrderCreateLinesSchema = z
+  .array(purchaseOrderCreateLineSchema)
+  .min(1, "Agrega al menos un producto a la orden")
+  .superRefine((lines, ctx) => {
+    const seen = new Set<string>();
+    lines.forEach((line, index) => {
+      if (seen.has(line.productId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "No repitas el mismo producto; modifica la cantidad de la línea existente",
+          path: [index, "productId"],
+        });
+      }
+      seen.add(line.productId);
+    });
+  });
+
 export const purchaseOrderUpdateSchema = z.object({
-  deliveryWarehouseId: requiredText("Almacen destino"),
+  deliveryWarehouseId: requiredText("Almacén destino"),
   expectedDate: z.string().trim().optional(),
   notes: z.string().trim().max(1000).optional(),
 });
@@ -260,11 +299,11 @@ export const purchaseReceiptOperationSchema = z.object({
 // Per-line receiving discrepancy schema
 export const purchaseReceiptLineDiscrepancySchema = z.object({
   lineId: requiredText("Línea"),
-  qtyReceived: z.coerce.number().int().min(0),
-  qtyDamaged: z.coerce.number().int().min(0).default(0),
-  qtyMissing: z.coerce.number().int().min(0).default(0),
-  qtyRejected: z.coerce.number().int().min(0).default(0),
-  qtySurplusReported: z.coerce.number().int().min(0).default(0),
+  qtyReceived: z.coerce.number().min(0),
+  qtyDamaged: z.coerce.number().min(0).default(0),
+  qtyMissing: z.coerce.number().min(0).default(0),
+  qtyRejected: z.coerce.number().min(0).default(0),
+  qtySurplusReported: z.coerce.number().min(0).default(0),
   discrepancyReason: z.string().trim().max(500).optional(),
 }).refine(
   (data) => {
@@ -309,8 +348,45 @@ export const salesInternalOrderAssemblyLineCreateSchema = z.object({
   notes: z.string().trim().max(1000).optional(),
 });
 
+export const salesInternalOrderAssemblyCreateSchema =
+  salesInternalOrderAssemblyLineCreateSchema.omit({ orderId: true });
+
+export const salesInternalOrderLinesCreateSchema = z
+  .array(
+    z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("PRODUCT"),
+        productId: requiredText("Producto"),
+        requestedQty: z.number().finite().positive("La cantidad debe ser mayor que cero"),
+        notes: z.string().trim().max(500).optional(),
+      }),
+      z.object({
+        kind: z.literal("ASSEMBLY"),
+        entryFittingProductId: requiredText("Conexion de entrada"),
+        hoseProductId: requiredText("Manguera"),
+        exitFittingProductId: requiredText("Conexion de salida"),
+        hoseLength: z.number().finite().positive("La longitud debe ser mayor que cero"),
+        assemblyQuantity: z.number().finite().positive("La cantidad debe ser mayor que cero"),
+        sourceDocumentRef: z.string().trim().max(120).optional(),
+        notes: z.string().trim().max(1000).optional(),
+      }),
+    ]),
+  )
+  .min(1, "Agrega al menos un producto o ensamble");
+
 export const salesInternalOrderTransitionSchema = z.object({
   orderId: requiredText("Pedido"),
+});
+
+export const salesInternalOrderPreparationSchema = z.object({
+  orderId: requiredText("Pedido"),
+  preparedLocationId: requiredText("Área de entrega"),
+  notes: z.string().trim().max(500).optional(),
+});
+
+export const salesInternalOrderAssignmentSchema = z.object({
+  orderId: requiredText("Pedido"),
+  assigneeUserId: requiredText("Vendedor"),
 });
 
 export const salesGenerateProductionOrderSchema = z.object({

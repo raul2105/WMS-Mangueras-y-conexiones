@@ -17,21 +17,21 @@ import {
   PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS,
 } from "@/lib/purchasing/purchase-order-email-contract";
 import { getEmailProvider } from "@/lib/email/provider";
+import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 const ORDER_TIMELINE = [
   { status: "BORRADOR", label: "Borrador" },
   { status: "CONFIRMADA", label: "Confirmada" },
   { status: "EN_TRANSITO", label: "En tránsito" },
-  { status: "PARCIAL", label: "Parcial" },
   { status: "RECIBIDA", label: "Recibida" },
 ] as const;
 
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
   CONFIRMADA: "Confirmada",
-  EN_TRANSITO: "En Tránsito",
+  EN_TRANSITO: "En tránsito",
   RECIBIDA: "Recibida",
-  PARCIAL: "Parcial",
+  PARCIAL: "Recepción parcial",
   CANCELADA: "Cancelada",
 };
 
@@ -78,7 +78,7 @@ function getTimelineBadgeVariant(stepIndex: number, activeIndex: number, current
   return "neutral";
 }
 
-function getNextAction(orderStatus: string, canReceive: boolean, allowedTransitions: string[]) {
+function getNextAction(orderStatus: string, allowedTransitions: string[]) {
   if (orderStatus === "BORRADOR") {
     return {
       title: "Completar borrador",
@@ -87,19 +87,27 @@ function getNextAction(orderStatus: string, canReceive: boolean, allowedTransiti
     };
   }
 
-  if (canReceive) {
+  if (orderStatus === "CONFIRMADA") {
     return {
-      title: "Registrar recepción",
-      description: "La orden ya puede recibir mercancía. Continúa con la recepción operativa.",
-      action: "Recibir mercancía",
+      title: "Registrar salida del proveedor",
+      description: "Cuando el proveedor confirme el envío, marca la orden como mercancía en tránsito.",
+      action: allowedTransitions.includes("EN_TRANSITO") ? "Marcar en tránsito" : null,
     };
   }
 
   if (orderStatus === "PARCIAL") {
     return {
-      title: "Completar recepciones",
-      description: "Hay cantidades pendientes por cerrar. Revisa el historial antes de avanzar.",
-      action: allowedTransitions.includes("EN_TRANSITO") ? "Volver a en tránsito" : null,
+      title: "Dar seguimiento a lo pendiente",
+      description: "El Operador ya registró una recepción parcial. Revisa cantidades pendientes y diferencias con el proveedor.",
+      action: null,
+    };
+  }
+
+  if (orderStatus === "EN_TRANSITO") {
+    return {
+      title: "Esperar recepción física",
+      description: "La orden está disponible en la bandeja del Operador. El estado cambiará con la recepción registrada.",
+      action: null,
     };
   }
 
@@ -178,6 +186,17 @@ async function addLine(orderId: string, formData: FormData) {
 
   const unitPrice = unitPriceRaw ? Number(unitPriceRaw.replace(",", ".")) : null;
   const qtyOrdered = parsed.data.qtyOrderedRaw;
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { unitLabel: true, purchaseUnitLabel: true, purchaseUnitFactor: true, type: true, attributes: true },
+  });
+  if (!product) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Producto no encontrado")}`);
+  }
+  const quantityError = quantityValidationMessage(qtyOrdered, getPurchaseUnitPolicy(product));
+  if (quantityError) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(quantityError)}`);
+  }
 
   // Check if supplier has a price for this product
   let resolvedPrice = unitPrice;
@@ -190,7 +209,14 @@ async function addLine(orderId: string, formData: FormData) {
 
   await prisma.purchaseOrderLine.upsert({
     where: { purchaseOrderId_productId: { purchaseOrderId: orderId, productId } },
-    create: { purchaseOrderId: orderId, productId, qtyOrdered, unitPrice: resolvedPrice },
+    create: {
+      purchaseOrderId: orderId,
+      productId,
+      qtyOrdered,
+      unitPrice: resolvedPrice,
+      purchaseUnitLabel: product.purchaseUnitLabel ?? product.unitLabel,
+      purchaseUnitFactor: product.purchaseUnitFactor,
+    },
     update: { qtyOrdered, unitPrice: resolvedPrice },
   });
 
@@ -401,8 +427,16 @@ export default async function PurchaseOrderDetailPage({
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
   const canReceive = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status) && hasPending;
-  const currentTimelineIndex = ORDER_TIMELINE.findIndex((step) => step.status === order.status);
-  const nextAction = getNextAction(order.status, canReceive, allowedTransitions);
+  const timelineStatus = order.status === "PARCIAL" ? "EN_TRANSITO" : order.status;
+  const currentTimelineIndex = ORDER_TIMELINE.findIndex((step) => step.status === timelineStatus);
+  const nextAction = getNextAction(order.status, allowedTransitions);
+  const primaryTransition = order.status === "BORRADOR"
+    ? "CONFIRMADA"
+    : order.status === "CONFIRMADA"
+      ? "EN_TRANSITO"
+      : null;
+  const canRunPrimaryTransition = primaryTransition ? allowedTransitions.includes(primaryTransition) : false;
+  const canCancel = allowedTransitions.includes("CANCELADA");
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -422,14 +456,6 @@ export default async function PurchaseOrderDetailPage({
             </p>
           </div>
         </div>
-        {canReceive && (
-          <Link
-            href={`/purchasing/orders/${id}/receive`}
-            className={buttonStyles({ variant: "primary", size: "md" })}
-          >
-            Recibir mercancía →
-          </Link>
-        )}
       </div>
 
       {sp.error && <div className={`glass-card border ${surfaceBorderSoft} ${dangerText} text-sm`}>{sp.error}</div>}
@@ -441,7 +467,7 @@ export default async function PurchaseOrderDetailPage({
             <div>
               <h2 className="text-lg font-bold">Línea de tiempo operativa</h2>
               <p className={`text-sm ${mutedText} mt-1`}>
-                KAN-88: resume el avance real de la OC y el estado visible para el siguiente paso.
+                Avance comercial de la orden. La recepción parcial se muestra como una condición operativa, no como una etapa obligatoria.
               </p>
             </div>
             <Badge
@@ -452,7 +478,7 @@ export default async function PurchaseOrderDetailPage({
             </Badge>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-5">
+          <div className="grid gap-2 md:grid-cols-4">
             {ORDER_TIMELINE.map((step, index) => (
               <div
                 key={step.status}
@@ -476,6 +502,11 @@ export default async function PurchaseOrderDetailPage({
               </div>
             ))}
           </div>
+          {order.status === "PARCIAL" ? (
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning)]">
+              Recepción parcial: todavía hay mercancía pendiente o diferencias por revisar.
+            </div>
+          ) : null}
         </div>
 
         <div className="glass-card space-y-4">
@@ -488,17 +519,22 @@ export default async function PurchaseOrderDetailPage({
             <p className={`text-sm ${mutedText}`}>{nextAction.description}</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            {canReceive ? (
-              <Link href={`/purchasing/orders/${id}/receive`} className={buttonStyles({ variant: "primary", size: "md" })}>
-                {nextAction.action ?? "Recibir mercancía"}
-              </Link>
-            ) : nextAction.action ? (
-              <div className={`rounded-lg border ${surfaceBorderSoft} px-4 py-2 text-sm ${mutedText}`}>
-                {nextAction.action}
-              </div>
+            {canRunPrimaryTransition && primaryTransition ? (
+              <form action={updateStatusBound}>
+                <input type="hidden" name="status" value={primaryTransition} />
+                <button type="submit" className={buttonStyles({ variant: "primary", size: "md" })}>
+                  {nextAction.action}
+                </button>
+              </form>
             ) : (
               <div className={`rounded-lg border ${surfaceBorderSoft} px-4 py-2 text-sm ${mutedText}`}>
-                OC cerrada. Revisa el documento oficial si necesitas evidencia.
+                {order.status === "RECIBIDA"
+                  ? "Orden cerrada. Consulta el documento o el historial cuando necesites evidencia."
+                  : order.status === "CANCELADA"
+                    ? "La orden está cancelada y no admite más movimientos."
+                    : canReceive
+                      ? "La recepción física continúa en la bandeja del Operador."
+                      : "No hay una acción pendiente para el Gerente de almacén."}
               </div>
             )}
           </div>
@@ -532,25 +568,16 @@ export default async function PurchaseOrderDetailPage({
       </div>
 
       {/* Cambio de estado */}
-      {allowedTransitions.length > 0 && (
+      {canCancel && (
         <div className="glass-card">
-          <h3 className={`text-sm font-semibold ${primaryText} mb-3`}>Cambiar estado</h3>
-          <div className="flex flex-wrap gap-3">
-            {allowedTransitions.map((s) => (
-              <form key={s} action={updateStatusBound}>
-                <input type="hidden" name="status" value={s} />
-                <button
-                  type="submit"
-                  className={buttonStyles({
-                    variant: s === "CANCELADA" ? "danger" : "secondary",
-                    size: "sm",
-                  })}
-                >
-                  → {STATUS_LABELS[s] ?? s}
-                </button>
-              </form>
-            ))}
-          </div>
+          <h3 className={`text-sm font-semibold ${primaryText}`}>Opciones de la orden</h3>
+          <p className={`mt-1 text-sm ${mutedText}`}>Cancela únicamente si la compra ya no debe continuar.</p>
+          <form action={updateStatusBound} className="mt-3">
+            <input type="hidden" name="status" value="CANCELADA" />
+            <button type="submit" className={buttonStyles({ variant: "danger", size: "sm" })}>
+              Cancelar orden
+            </button>
+          </form>
         </div>
       )}
 
@@ -667,7 +694,7 @@ export default async function PurchaseOrderDetailPage({
           <div>
             <h2 className="text-lg font-bold">Correo al proveedor</h2>
             <p className={`text-sm ${mutedText} mt-1`}>
-              Contrato preparado para KAN-85. En esta versión no existe envío real por correo.
+              Envía la orden confirmada con su documento oficial al correo registrado del proveedor.
             </p>
           </div>
           <span className="inline-flex items-center gap-2">
@@ -753,7 +780,7 @@ export default async function PurchaseOrderDetailPage({
       {/* Líneas */}
       <div className="glass-card space-y-4">
         <h2 className={`text-lg font-bold border-b ${surfaceBorderSoft} pb-2`}>
-          Líneas de Compra
+          Líneas de compra
           <span className={`text-sm ${mutedText} font-normal ml-2`}>({order.lines.length})</span>
         </h2>
 
@@ -815,7 +842,7 @@ export default async function PurchaseOrderDetailPage({
                   <th className="text-right py-2">Pedido</th>
                   <th className="text-right py-2">Recibido</th>
                   <th className="text-right py-2">Pendiente</th>
-                  <th className="text-right py-2">Precio Unit.</th>
+                  <th className="text-right py-2">Precio unitario</th>
                   <th className="text-right py-2">Subtotal</th>
                   {order.status === "BORRADOR" && <th className="py-2"></th>}
                 </tr>
@@ -884,7 +911,7 @@ export default async function PurchaseOrderDetailPage({
                 />
               </label>
               <label className="space-y-1">
-                <span className={`text-xs ${mutedText}`}>Precio Unit. (MXN)</span>
+                <span className={`text-xs ${mutedText}`}>Precio unitario (MXN)</span>
                 <input
                   name="unitPriceRaw"
                   type="number"

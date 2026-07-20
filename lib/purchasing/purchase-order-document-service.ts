@@ -159,6 +159,7 @@ function mapPurchaseOrderToSnapshot(input: {
       productId: string;
       qtyOrdered: number;
       qtyReceived: number;
+      purchaseUnitLabel: string | null;
       unitPrice: number | null;
       currency: string | null;
       product: {
@@ -179,7 +180,7 @@ function mapPurchaseOrderToSnapshot(input: {
       productId: line.productId,
       sku: line.product.sku,
       name: line.product.name,
-      unitLabel: line.product.unitLabel,
+      unitLabel: line.purchaseUnitLabel ?? line.product.unitLabel,
       qtyOrdered: line.qtyOrdered,
       qtyReceived: line.qtyReceived,
       pendingQty,
@@ -277,6 +278,7 @@ async function loadPurchaseOrderForDocument(db: PrismaTransactionLike, purchaseO
           productId: true,
           qtyOrdered: true,
           qtyReceived: true,
+          purchaseUnitLabel: true,
           unitPrice: true,
           currency: true,
           product: {

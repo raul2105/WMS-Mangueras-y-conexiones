@@ -47,6 +47,7 @@ export type SalesConsoleTimelineStage =
   | "captura"
   | "asignacion"
   | "surtido"
+  | "preparacion"
   | "entrega"
   | "cancelacion";
 
@@ -140,6 +141,8 @@ export function getSalesConsoleTimelineItems(input: {
   pulledAt?: Date | string | null;
   latestPickStatus?: string | null;
   latestPickUpdatedAt?: Date | string | null;
+  preparedForDeliveryAt?: Date | string | null;
+  preparedForDeliveryLocationLabel?: string | null;
   deliveredAt?: Date | string | null;
   cancelledAt?: Date | string | null;
 }): SalesConsoleTimelineItem[] {
@@ -179,6 +182,15 @@ export function getSalesConsoleTimelineItems(input: {
           : input.latestPickStatus
             ? "warning"
             : "neutral",
+    },
+    {
+      stage: "preparacion",
+      label: "Preparado para entrega",
+      detail: input.preparedForDeliveryAt
+        ? `Pedido separado${input.preparedForDeliveryLocationLabel ? ` en ${input.preparedForDeliveryLocationLabel}` : " en el área de entrega"}`
+        : "Pendiente de separar en el área de entrega",
+      at: input.preparedForDeliveryAt ?? null,
+      variant: input.preparedForDeliveryAt ? "success" : "neutral",
     },
     {
       stage: "entrega",

@@ -24,6 +24,8 @@ async function updateProduct(id: string, formData: FormData) {
   const type = String(formData.get("type") ?? "").trim().toUpperCase();
   const description = String(formData.get("description") ?? "").trim() || null;
   const unitLabel = String(formData.get("unitLabel") ?? "").trim() || "unidad";
+  const purchaseUnitLabel = String(formData.get("purchaseUnitLabel") ?? "").trim() || unitLabel;
+  const purchaseUnitFactorRaw = String(formData.get("purchaseUnitFactor") ?? "").trim();
   const referenceCode = String(formData.get("referenceCode") ?? "").trim() || null;
   const imageUrl = String(formData.get("imageUrl") ?? "").trim() || null;
   const categoryRaw = String(formData.get("category") ?? "").trim();
@@ -49,6 +51,10 @@ async function updateProduct(id: string, formData: FormData) {
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
   const purchaseMoq = purchaseMoqRaw ? Number(purchaseMoqRaw.replace(",", ".")) : null;
   const price = priceRaw ? Number(priceRaw.replace(",", ".")) : null;
+  const purchaseUnitFactor = purchaseUnitFactorRaw ? Number(purchaseUnitFactorRaw.replace(",", ".")) : 1;
+  if (!Number.isFinite(purchaseUnitFactor) || purchaseUnitFactor <= 0) {
+    redirect(`/catalog/${id}/edit?error=${encodeURIComponent("La equivalencia de compra debe ser mayor que cero")}`);
+  }
 
   // Resolve brand snapshot from SupplierBrand
   let brand: string | null = null;
@@ -112,6 +118,8 @@ async function updateProduct(id: string, formData: FormData) {
       description,
       brand,
       unitLabel,
+      purchaseUnitLabel,
+      purchaseUnitFactor,
       referenceCode: referenceCode || null,
       imageUrl: resolvedImageUrl || null,
       subcategory,
@@ -132,7 +140,7 @@ async function updateProduct(id: string, formData: FormData) {
     entityId: id,
       before,
       action: "UPDATE_PRODUCT",
-    after: { name, type: normalizedType, brand, unitLabel, primarySupplierId, supplierBrandId },
+    after: { name, type: normalizedType, brand, unitLabel, purchaseUnitLabel, purchaseUnitFactor, primarySupplierId, supplierBrandId },
     source: "catalog/edit",
     actor: "system",
   });
@@ -163,6 +171,8 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
         type: true,
         description: true,
         unitLabel: true,
+        purchaseUnitLabel: true,
+        purchaseUnitFactor: true,
         referenceCode: true,
         imageUrl: true,
         category: true,
@@ -219,6 +229,15 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <span className="text-sm text-slate-400">SKU</span>
             <input value={product.sku} disabled className="w-full px-4 py-3 glass rounded-lg opacity-60 cursor-not-allowed font-mono" />
             <p className="text-xs text-slate-500">El SKU no se puede modificar.</p>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Unidad de compra</span>
+            <input name="purchaseUnitLabel" defaultValue={product.purchaseUnitLabel ?? product.unitLabel} className="w-full px-4 py-3 glass rounded-lg" placeholder="Ej. rollo o m" />
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Equivalencia a unidad base</span>
+            <input name="purchaseUnitFactor" inputMode="decimal" defaultValue={product.purchaseUnitFactor} className="w-full px-4 py-3 glass rounded-lg" />
+            <p className="text-xs text-slate-500">Ej. un rollo de 50 m equivale a 50.</p>
           </label>
 
           <label className="space-y-1">

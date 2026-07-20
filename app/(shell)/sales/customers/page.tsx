@@ -107,20 +107,7 @@ export default async function SalesCustomersPage({
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{sp.error}</div>
       ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-cyan-400">{totalCustomers}</p>
-          <p className="text-sm text-slate-400 mt-1">Total clientes</p>
-        </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-emerald-400">{activeCustomers}</p>
-          <p className="text-sm text-slate-400 mt-1">Activos</p>
-        </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-slate-400">{Math.max(0, totalCustomers - activeCustomers)}</p>
-          <p className="text-sm text-slate-400 mt-1">Inactivos</p>
-        </div>
-      </div>
+      <p className="text-sm text-slate-400">{totalCustomers} clientes · {activeCustomers} activos · {Math.max(0, totalCustomers - activeCustomers)} inactivos</p>
 
       <form method="get" className="glass-card flex flex-col gap-3 md:flex-row md:items-end">
         <label className="flex-1 space-y-1">

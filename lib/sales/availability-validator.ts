@@ -1,8 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { 
   CommercialAvailabilityPromise, 
-  computePromiseStatus,
-  CommercialPromiseStatus 
+  CommercialPromiseStatus,
+  getCommercialPromiseStaleThresholdMinutes,
 } from "@/lib/sales/availability-promise";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -117,16 +117,15 @@ export async function validateCommercialPromise(
   }
 
   // Check staleness
-  const staleThresholdMinutes = opts?.staleThresholdMinutes ?? 15;
+  const staleThresholdMinutes = opts?.staleThresholdMinutes ?? getCommercialPromiseStaleThresholdMinutes();
   const checkedAt = new Date(promise.checkedAt);
   const ageMinutes = (Date.now() - checkedAt.getTime()) / (1000 * 60);
   
   if (ageMinutes > staleThresholdMinutes) {
-    const status = current.availableQuantity >= requestedQuantity 
-      ? "insufficient_stock" // Use insufficient_stock if actually insufficient, otherwise promise_safe but with stale warning
-      : "insufficient_stock";
-    
-    // Actually, if it's stale but currently sufficient, it's still promise_safe but with warning
+    // A server-side check has just refreshed the availability. Preserve the
+    // stale source in the reason/audit, but do not reject a request that is
+    // currently satisfiable; the later inventory reservation remains the
+    // atomic source of truth.
     const isCurrentlySufficient = current.availableQuantity >= requestedQuantity;
     
     return {

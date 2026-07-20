@@ -43,7 +43,6 @@ export default function CatalogFilters({
   subcategories,
   attributeKeys,
   attributeValues,
-  isSalesExecutive = false,
 }: {
   counts: Record<string, number>;
   brands: FacetOption[];
@@ -51,14 +50,13 @@ export default function CatalogFilters({
   subcategories: FacetOption[];
   attributeKeys: FacetOption[];
   attributeValues: FacetOption[];
-  isSalesExecutive?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentType = searchParams.get("type");
   const currentQ = searchParams.get("q") ?? "";
   const [searchValue, setSearchValue] = useState(currentQ);
-  const [showAdvanced, setShowAdvanced] = useState(!isSalesExecutive || hasAdvancedFilters(searchParams));
+  const [showAdvanced, setShowAdvanced] = useState(Boolean(hasAdvancedFilters(searchParams)));
 
   const pushWithParams = (next: URLSearchParams) => {
     const qs = next.toString();
@@ -135,57 +133,24 @@ export default function CatalogFilters({
           <Input
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
-            rootClassName={isSalesExecutive ? "md:col-span-5" : "md:col-span-2"}
+            rootClassName="md:col-span-5"
             label="Buscar producto"
             placeholder="SKU, nombre, referencia, descripción"
           />
 
-          {!isSalesExecutive && (
-            <>
-              <Select label="Categoria" value={searchParams.get("category") ?? ""} onChange={(e) => handleSelectChange("category", e.target.value)} placeholder="Todas">
-                {categories.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.value} ({option.count})
-                  </option>
-                ))}
-              </Select>
-              <Select label="Marca" value={searchParams.get("brand") ?? ""} onChange={(e) => handleSelectChange("brand", e.target.value)} placeholder="Todas">
-                {brands.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.value} ({option.count})
-                  </option>
-                ))}
-              </Select>
-            </>
-          )}
-
           <Toolbar className="md:col-span-7" align="end">
             <ToolbarGroup>
-              {isSalesExecutive ? (
-                <>
-                  <Button type="button" onClick={() => setShowAdvanced(true)} variant="ghost" size="sm">
-                    Más filtros
-                  </Button>
-                  <Button type="submit" size="sm">Buscar</Button>
-                </>
-              ) : (
-                <>
-                  <Button type="button" onClick={handleClearAdvanced} variant="ghost">
-                    Limpiar
-                  </Button>
-                  <Button type="submit">Aplicar filtros</Button>
-                </>
-              )}
+              <Button type="button" onClick={() => setShowAdvanced((value) => !value)} variant="ghost" size="sm">
+                {showAdvanced ? "Ocultar filtros técnicos" : "Más filtros técnicos"}
+              </Button>
+              <Button type="button" onClick={handleClearAdvanced} variant="ghost" size="sm">Limpiar</Button>
+              <Button type="submit" size="sm">Buscar</Button>
             </ToolbarGroup>
           </Toolbar>
         </div>
 
-        {/* Advanced filters - collapsed for SALES_EXECUTIVE */}
-        {(!isSalesExecutive || showAdvanced) && (
+        {showAdvanced && (
           <div className="panel grid grid-cols-1 gap-3 p-4 md:grid-cols-7 animate-in fade-in slide-in-from-top-2 duration-200">
-            {isSalesExecutive && (
-              <div className="md:col-span-2" />
-            )}
             <Select label="Categoria" value={searchParams.get("category") ?? ""} onChange={(e) => handleSelectChange("category", e.target.value)} placeholder="Todas">
               {categories.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -237,10 +202,8 @@ export default function CatalogFilters({
 
             <Toolbar className="md:col-span-7" align="end">
               <ToolbarGroup>
-                <Button type="button" onClick={handleClearAll} variant="ghost">
-                  {isSalesExecutive ? "Limpiar todo" : "Limpiar"}
-                </Button>
-                <Button type="submit">{isSalesExecutive ? "Aplicar" : "Aplicar filtros"}</Button>
+                <Button type="button" onClick={handleClearAll} variant="ghost">Limpiar todo</Button>
+                <Button type="submit">Aplicar filtros</Button>
               </ToolbarGroup>
             </Toolbar>
           </div>

@@ -102,41 +102,34 @@ test.describe("KAN-74: Commercial catalog mode for SALES_EXECUTIVE", () => {
     await expect(page).toHaveURL(/\/catalog$/);
   });
 
-  test("Admin/Manager sees full technical filters expanded by default", async ({ page }) => {
+  test("Admin/Manager opens technical filters only when requested", async ({ page }) => {
     // Login to home first, then navigate to catalog
     await loginAs(page, "MANAGER", EXPECTED_HOME.MANAGER, EXPECTED_HOME.MANAGER);
     await page.goto("/catalog");
 
-    // For non-SALES_EXECUTIVE, there are TWO category dropdowns rendered (one in each form section)
-    // Use .first() to get the first one
-    await expect(page.getByLabel("Categoria", { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel("Marca", { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel("Subcategoria", { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel("Atributo", { exact: true }).first()).toBeVisible();
-
-    // Should NOT see "Más filtros" button (it's only for SALES_EXECUTIVE)
-    await expect(page.getByRole("button", { name: /Más filtros/i })).toBeHidden();
+    await expect(page.getByRole("button", { name: /Más filtros técnicos/i })).toBeVisible();
+    await expect(page.getByLabel("Categoria", { exact: true })).toBeHidden();
+    await page.getByRole("button", { name: /Más filtros técnicos/i }).click();
+    await expect(page.getByLabel("Categoria", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Marca", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Subcategoria", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Atributo", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Flujo comercial/i })).toBeVisible();
 
-    // Should see "Limpiar" and "Aplicar filtros" buttons (use .first() since there are two of each)
-    await expect(page.getByRole("button", { name: /Limpiar/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /Aplicar filtros/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Limpiar todo" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Aplicar filtros/i })).toBeVisible();
   });
 
-  test("Warehouse operator sees full technical filters expanded by default", async ({ page }) => {
+  test("Warehouse operator starts with one quick lookup and can reveal technical filters", async ({ page }) => {
     // Login to home first, then navigate to catalog
     await loginAs(page, "WAREHOUSE_OPERATOR", EXPECTED_HOME.WAREHOUSE_OPERATOR, EXPECTED_HOME.WAREHOUSE_OPERATOR);
     await page.goto("/catalog");
 
-    // For non-SALES_EXECUTIVE, there are TWO category dropdowns rendered (one in each form section)
-    // Use .first() to get the first one
-    await expect(page.getByLabel("Categoria", { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel("Marca", { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel("Subcategoria", { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel("Atributo", { exact: true }).first()).toBeVisible();
-
-    // Should NOT see "Más filtros" button
-    await expect(page.getByRole("button", { name: /Más filtros/i })).toBeHidden();
+    await expect(page.getByRole("button", { name: /Más filtros técnicos/i })).toBeVisible();
+    await expect(page.getByLabel("Categoria", { exact: true })).toBeHidden();
+    await page.getByRole("button", { name: /Más filtros técnicos/i }).click();
+    await expect(page.getByLabel("Categoria", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Marca", { exact: true })).toBeVisible();
   });
 
   test("Catalog results show commercial fields for sales: name, SKU, type, category, brand, stock, price, actions", async ({

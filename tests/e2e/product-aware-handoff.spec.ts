@@ -199,7 +199,8 @@ test.describe.serial("product aware handoff", () => {
   });
 
   test("catalog detail hands off product context into new request", async ({ page }) => {
-    await loginAs(page, "SALES_EXECUTIVE", `/catalog/${fixture.baseProductId}`);
+    const catalogCallback = `/catalog/${fixture.baseProductId}`;
+    await loginAs(page, "SALES_EXECUTIVE", catalogCallback, catalogCallback);
     await page.goto(`/catalog/${fixture.baseProductId}`);
 
     await expect(page.getByRole("heading", { name: new RegExp(FIXTURE.baseName, "i") })).toBeVisible();
@@ -229,7 +230,8 @@ test.describe.serial("product aware handoff", () => {
   });
 
   test("availability and equivalences preserve context into request creation", async ({ page }) => {
-    await loginAs(page, "SALES_EXECUTIVE", `/production/availability?q=${fixture.baseSku}&productId=${fixture.baseProductId}&sku=${fixture.baseSku}&source=catalog`);
+    const availabilityCallback = `/production/availability?q=${fixture.baseSku}&productId=${fixture.baseProductId}&sku=${fixture.baseSku}&source=catalog`;
+    await loginAs(page, "SALES_EXECUTIVE", availabilityCallback, availabilityCallback);
     await page.goto(`/production/availability?q=${fixture.baseSku}&productId=${fixture.baseProductId}&sku=${fixture.baseSku}&source=catalog`);
 
     await expect(page.getByRole("heading", { name: /Disponibilidad comercial/i })).toBeVisible();
@@ -255,12 +257,13 @@ test.describe.serial("product aware handoff", () => {
     await page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.equivalentName}`, "i") }).click();
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*source=equivalences/);
     await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
-    await expect(page.getByText(/Sustituye a/i)).toBeVisible();
+    await expect(page.getByText("Sustituye a", { exact: true })).toBeVisible();
     await expect(page.getByText(FIXTURE.baseSku).first()).toBeVisible();
   });
 
   test("invalid product context is safe and manual capture still works", async ({ page }) => {
-    await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new?productId=missing-product&sku=BAD-SKU&source=catalog");
+    const invalidProductCallback = "/production/requests/new?productId=missing-product&sku=BAD-SKU&source=catalog";
+    await loginAs(page, "SALES_EXECUTIVE", invalidProductCallback, invalidProductCallback);
     await page.goto("/production/requests/new?productId=missing-product&sku=BAD-SKU&source=catalog");
 
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
@@ -271,8 +274,9 @@ test.describe.serial("product aware handoff", () => {
     await expect(page.getByRole("link", { name: /Quitar selección/i }).first()).toBeVisible();
   });
 
-  test("a selected product can be removed before submit and the request still saves", async ({ page }) => {
-    await loginAs(page, "SALES_EXECUTIVE", `/catalog/${fixture.baseProductId}`);
+  test("a selected product can be removed before submit and blocks a header-only save", async ({ page }) => {
+    const catalogCallback = `/catalog/${fixture.baseProductId}`;
+    await loginAs(page, "SALES_EXECUTIVE", catalogCallback, catalogCallback);
     await page.goto(`/catalog/${fixture.baseProductId}`);
 
     await page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.baseName}`, "i") }).click();
@@ -287,17 +291,16 @@ test.describe.serial("product aware handoff", () => {
 
     await page.locator('select[name="warehouseId"]').selectOption(fixture.warehouseId);
     await page.locator('input[name="dueDate"]').fill("2026-06-25");
-    await page.getByRole("button", { name: /Crear pedido/i }).click();
-
-    await expect(page).toHaveURL(/\/production\/requests\/.+\?ok=/);
-    await expect(page.getByRole("heading", { name: /Productos independientes/i })).toBeVisible();
-    await expect(page.getByText(FIXTURE.baseSku)).toHaveCount(0);
-    await expect(page.getByText(/Todavia no hay productos independientes en este pedido/i)).toBeVisible();
+    const createOrderButton = page.getByTestId("create-order-button");
+    await expect(createOrderButton).toHaveText("Completa los campos requeridos");
+    await expect(createOrderButton).toBeDisabled();
+    await expect(page.getByText(/producto.*obligatorio|línea.*producto/i).first()).toBeVisible();
   });
 
   test("manager can use the handoff and mobile layout remains usable", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await loginAs(page, "MANAGER", `/catalog/${fixture.baseProductId}`);
+    const catalogCallback = `/catalog/${fixture.baseProductId}`;
+    await loginAs(page, "MANAGER", catalogCallback, catalogCallback);
     await page.goto(`/catalog/${fixture.baseProductId}`);
 
     await expect(page.getByRole("heading", { name: new RegExp(FIXTURE.baseName, "i") })).toBeVisible();

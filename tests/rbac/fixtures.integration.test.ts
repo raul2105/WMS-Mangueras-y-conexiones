@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import { ensureRbacFixtures, getRolePermissions } from "@/tests/fixtures/rbac-fixtures";
 
 const prisma = new PrismaClient();
+const shouldRunPostgresSuite = process.env.RUN_POSTGRES_TESTS === "1";
+const describePostgres = shouldRunPostgresSuite ? describe : describe.skip;
 
 const TEST_EMAILS = [
   "test-admin@scmayher.com",
@@ -11,7 +13,7 @@ const TEST_EMAILS = [
   "test-sales@scmayher.com",
 ];
 
-describe("rbac fixtures seed by role", () => {
+describePostgres("rbac fixtures seed by role", () => {
   beforeAll(async () => {
     await ensureRbacFixtures(prisma);
   }, 60_000);
@@ -73,5 +75,7 @@ describe("rbac fixtures seed by role", () => {
     const warehouseCodes = (warehouse?.rolePermissions ?? []).map((rp) => rp.permission.code);
     expect(warehouseCodes).not.toContain("customers.view");
     expect(warehouseCodes).not.toContain("customers.manage");
+    expect(warehouseCodes).not.toContain("inventory.adjust");
+    expect(warehouseCodes).not.toContain("kardex.view");
   });
 });

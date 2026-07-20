@@ -13,6 +13,57 @@
   box-shadow: var(--shadow-md);
 }
 
+/* Shared operational surfaces. These keep commercial and warehouse flows
+   on the same semantic theme in dark and light mode. */
+.op-surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+}
+
+.op-surface-muted {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.op-field {
+  width: 100%;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-interactive);
+  color: var(--text-primary);
+}
+
+.op-field:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.op-label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.op-helper {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.op-link {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.op-link:hover,
+.op-link:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
 /* Operational UX layout primitives */
 .op-layout {
   display: grid;
@@ -156,6 +207,34 @@
   color: var(--mobile-cta-text);
   background: var(--mobile-cta);
   border-color: var(--mobile-cta-hover);
+}
+
+.op-next-action {
+  border: 1px solid var(--execution-active-border);
+  border-radius: var(--radius-md);
+  background: var(--execution-active-bg);
+  padding: 0.75rem;
+}
+
+.op-progress-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.op-progress-marker {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--status-neutral-bg);
+  color: var(--status-neutral-text);
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .role-manager-accent {

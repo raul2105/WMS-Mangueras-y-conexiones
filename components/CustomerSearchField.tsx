@@ -25,6 +25,7 @@ type Props = {
   placeholder?: string;
   minChars?: number;
   allowQuickCreate?: boolean;
+  allowQuickCreateCode?: boolean;
   quickCreateLabel?: string;
   value?: string;
   onChange?: (value: string) => void;
@@ -42,6 +43,7 @@ export default function CustomerSearchField({
   placeholder = "Busca por código, nombre o RFC",
   minChars = 2,
   allowQuickCreate = false,
+  allowQuickCreateCode = false,
   quickCreateLabel = "Crear cliente rápido",
   value,
   onChange,
@@ -152,19 +154,13 @@ export default function CustomerSearchField({
 
   const helperText = useMemo(() => {
     if (disabled) return "Campo deshabilitado.";
-    if (!trimmedQuery)
-      return allowQuickCreate
-        ? `Empieza por el cliente. Escribe al menos ${minChars} caracteres para buscar o crea uno rápido si no existe.`
-        : `Empieza por el cliente. Escribe al menos ${minChars} caracteres para buscar.`;
+    if (!trimmedQuery) return `Escribe al menos ${minChars} caracteres para buscar.`;
     if (trimmedQuery.length < minChars)
-      return allowQuickCreate
-        ? `Escribe al menos ${minChars} caracteres para buscar o crea uno rápido si no existe.`
-        : `Escribe al menos ${minChars} caracteres para buscar.`;
+      return `Escribe al menos ${minChars} caracteres para buscar.`;
     return null;
-  }, [allowQuickCreate, disabled, minChars, trimmedQuery]);
+  }, [disabled, minChars, trimmedQuery]);
 
   const showList = isOpen && results.length > 0;
-  const showRequiredHint = required && !selectedId;
   const canShowQuickCreate =
     allowQuickCreate &&
     !disabled &&
@@ -229,6 +225,7 @@ export default function CustomerSearchField({
       const created = payload as CustomerSearchMatch;
       setSelected(created);
       setSelectedId(created.id);
+      onChange?.(created.id);
       setQuery(customerLabel(created));
       setResults([]);
       setCursor(null);
@@ -257,7 +254,7 @@ export default function CustomerSearchField({
           onChange={(event) => {
             const newValue = event.target.value;
             setQuery(newValue);
-            onChange?.(selectedId); // keep selectedId in sync
+            onChange?.("");
             setIsOpen(true);
             setCursor(null);
             setNextCursor(null);
@@ -291,12 +288,6 @@ export default function CustomerSearchField({
       {searchError ? (
         <p className="text-xs text-amber-300">{searchError}</p>
       ) : null}
-      {showRequiredHint ? (
-        <p className="text-xs text-amber-300">
-          Selecciona o crea un cliente para continuar.
-        </p>
-      ) : null}
-
       {showList ? (
         <div className="grid gap-2">
           {results.map((option) => (
@@ -307,6 +298,7 @@ export default function CustomerSearchField({
               onClick={() => {
                 setSelected(option);
                 setSelectedId(option.id);
+                onChange?.(option.id);
                 setQuery(customerLabel(option));
                 setResults([]);
                 setCursor(null);
@@ -365,17 +357,17 @@ export default function CustomerSearchField({
                   placeholder="Cliente"
                 />
               </label>
-              <label className="space-y-1">
-                <span className="text-xs text-slate-400">
-                  Código (opcional)
-                </span>
-                <input
-                  value={quickCreateCode}
-                  onChange={(event) => setQuickCreateCode(event.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
-                  placeholder="CLI-2026-0001"
-                />
-              </label>
+              {allowQuickCreateCode ? (
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-400">Código (opcional)</span>
+                  <input
+                    value={quickCreateCode}
+                    onChange={(event) => setQuickCreateCode(event.target.value)}
+                    className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                    placeholder="CLI-2026-0001"
+                  />
+                </label>
+              ) : null}
               <label className="space-y-1">
                 <span className="text-xs text-slate-400">RFC (opcional)</span>
                 <input
@@ -439,6 +431,7 @@ export default function CustomerSearchField({
               onClick={() => {
                 setSelected(null);
                 setSelectedId("");
+                onChange?.("");
                 setQuery("");
                 setIsOpen(false);
                 setResults([]);

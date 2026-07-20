@@ -24,11 +24,12 @@ test.describe("KAN-48 customer quick-create", () => {
     await prisma.$disconnect();
   });
 
-  test("customers.view sin customers.manage no ve CTA de creación rápida", async ({ page }) => {
+  test("sales puede abrir el registro rápido sin acceso a la administración de clientes", async ({ page }) => {
     await loginAs(page, USERS.SALES_EXECUTIVE.email, USERS.SALES_EXECUTIVE.password);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await page.getByLabel(/Selecciona o crea el cliente/i).fill(`KAN48-SALES-${Date.now()}`);
-    await expect(page.getByText("Crear cliente rápido")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Registrar cliente para este pedido" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Registrar cliente" })).toHaveCount(0);
   });
 
   test("customers.manage puede crear cliente y queda seleccionado", async ({ page }) => {
@@ -37,8 +38,8 @@ test.describe("KAN-48 customer quick-create", () => {
 
     const uniqueName = `KAN48-QC-${Date.now()}`;
     await page.getByLabel(/Selecciona o crea el cliente/i).fill(uniqueName);
-    await expect(page.getByRole("button", { name: "Crear cliente rápido" })).toBeVisible();
-    await page.getByRole("button", { name: "Crear cliente rápido" }).click();
+    await expect(page.getByRole("button", { name: "Registrar cliente para este pedido" })).toBeVisible();
+    await page.getByRole("button", { name: "Registrar cliente para este pedido" }).click();
     await page.getByRole("button", { name: "Guardar y seleccionar" }).click();
 
     await expect(page.locator("div").filter({ hasText: uniqueName }).first()).toBeVisible();
@@ -51,8 +52,8 @@ test.describe("KAN-48 customer quick-create", () => {
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
 
     await page.getByLabel(/Selecciona o crea el cliente/i).fill(`KAN48-ERR-${Date.now()}`);
-    await expect(page.getByRole("button", { name: "Crear cliente rápido" })).toBeVisible();
-    await page.getByRole("button", { name: "Crear cliente rápido" }).click();
+    await expect(page.getByRole("button", { name: "Registrar cliente para este pedido" })).toBeVisible();
+    await page.getByRole("button", { name: "Registrar cliente para este pedido" }).click();
     await page.locator('input[placeholder="contacto@cliente.com"]').fill("correo-invalido");
     await page.getByRole("button", { name: "Guardar y seleccionar" }).click();
 

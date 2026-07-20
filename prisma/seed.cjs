@@ -27,6 +27,7 @@ const RBAC_PERMISSIONS = [
   'sales.view',
   'sales.create_order',
   'customers.view',
+  'customers.quick_create_sales',
   'customers.manage',
   'audit.view',
   'labels.manage',
@@ -75,11 +76,9 @@ const RBAC_ROLES = [
     permissions: [
       'catalog.view',
       'inventory.view',
-      'inventory.adjust',
       'inventory.transfer',
       'inventory.receive',
       'inventory.pick',
-      'kardex.view',
       'production.view',
       'production.cockpit.view',
       'production.execute',
@@ -99,6 +98,7 @@ const RBAC_ROLES = [
       'sales.view',
       'sales.create_order',
       'customers.view',
+      'customers.quick_create_sales',
     ],
   },
 ];

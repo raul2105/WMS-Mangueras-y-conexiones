@@ -23,6 +23,7 @@ model User {
   confirmedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderConfirmedBy")
   cancelledSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderCancelledBy")
   assignedSalesOrders  SalesInternalOrder[] @relation("SalesInternalOrderAssignedTo")
+  preparedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderPreparedForDeliveryBy")
   deliveredSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderDeliveredBy")
 
   inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
@@ -98,6 +99,8 @@ model Product {
   description String?
   type        String   // HOSE, FITTING, ASSEMBLY, ACCESSORY
   unitLabel   String   @default("unidad")
+  purchaseUnitLabel String?
+  purchaseUnitFactor Float @default(1)
   brand       String?
   subcategory String?
   base_cost   Float?
@@ -257,6 +260,7 @@ model Location {
   salesOrderPickListsTarget SalesInternalOrderPickList[] @relation("SalesOrderPickListTargetLocation")
   salesOrderPickTasksSource SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskSourceLocation")
   salesOrderPickTasksTarget SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskTargetLocation")
+  preparedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderPreparedForDeliveryLocation")
   assemblyWipWorkOrders  AssemblyWorkOrder[] @relation("AssemblyWipLocation")
   traceRecords TraceRecord[]
 
@@ -542,12 +546,16 @@ model SalesInternalOrder {
   confirmedByUserId String?
   cancelledByUserId String?
   assignedToUserId String?
+  preparedForDeliveryByUserId String?
+  preparedForDeliveryLocationId String?
   deliveredByUserId String?
 
   confirmedAt DateTime?
   cancelledAt DateTime?
   assignedAt DateTime?
   pulledAt DateTime?
+  preparedForDeliveryAt DateTime?
+  preparedForDeliveryNotes String?
   deliveredToCustomerAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -558,6 +566,8 @@ model SalesInternalOrder {
   confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
   cancelledByUser User? @relation("SalesInternalOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   assignedToUser User? @relation("SalesInternalOrderAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  preparedForDeliveryByUser User? @relation("SalesInternalOrderPreparedForDeliveryBy", fields: [preparedForDeliveryByUserId], references: [id], onDelete: SetNull)
+  preparedForDeliveryLocation Location? @relation("SalesInternalOrderPreparedForDeliveryLocation", fields: [preparedForDeliveryLocationId], references: [id], onDelete: SetNull)
   deliveredByUser User? @relation("SalesInternalOrderDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
   lines SalesInternalOrderLine[]
   pickLists SalesInternalOrderPickList[]
@@ -565,6 +575,8 @@ model SalesInternalOrder {
   @@index([status, createdAt])
   @@index([requestedByUserId])
   @@index([assignedToUserId])
+  @@index([preparedForDeliveryAt])
+  @@index([preparedForDeliveryLocationId])
   @@index([deliveredToCustomerAt])
   @@index([customerId])
   @@index([warehouseId])
@@ -1010,8 +1022,10 @@ model PurchaseOrderLine {
   id              String   @id @default(uuid())
   purchaseOrderId String
   productId       String
-  qtyOrdered      Int
-  qtyReceived     Int      @default(0)
+  qtyOrdered      Float
+  qtyReceived     Float    @default(0)
+  purchaseUnitLabel String?
+  purchaseUnitFactor Float @default(1)
   unitPrice       Float?
   currency        String   @default("MXN")
 
@@ -1089,11 +1103,11 @@ model PurchaseReceiptLine {
   purchaseReceiptId   String
   purchaseOrderLineId String
   productId           String
-  qtyReceived         Int
-  qtyDamaged          Int  @default(0)
-  qtyMissing          Int  @default(0)
-  qtyRejected         Int  @default(0)
-  qtySurplusReported  Int  @default(0)
+  qtyReceived         Float
+  qtyDamaged          Float  @default(0)
+  qtyMissing          Float  @default(0)
+  qtyRejected         Float  @default(0)
+  qtySurplusReported  Float  @default(0)
   discrepancyReason   String?
 
   purchaseReceipt   PurchaseReceipt   @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)

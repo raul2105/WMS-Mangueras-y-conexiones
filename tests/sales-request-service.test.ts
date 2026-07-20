@@ -9,6 +9,7 @@ import {
   confirmSalesRequestOrder,
   confirmSalesRequestPickTasksBatch,
   createSalesRequestDraftHeader,
+  markSalesRequestPreparedForDelivery,
   markSalesRequestDelivered,
   pullSalesRequestOrder,
   releaseSalesRequestPickList,
@@ -147,6 +148,27 @@ async function createUserWithRole(args: { email: string; name: string; roleCode:
     select: { id: true, email: true, name: true },
   });
   return user;
+}
+
+async function prepareOrderForDelivery(orderId: string, preparedByUserId: string) {
+  const order = await prisma.salesInternalOrder.findUnique({
+    where: { id: orderId },
+    select: { warehouseId: true },
+  });
+  const deliveryLocation = await prisma.location.findFirst({
+    where: {
+      warehouseId: order?.warehouseId ?? undefined,
+      isActive: true,
+      usageType: { in: ["STAGING", "SHIPPING"] },
+    },
+    select: { id: true },
+  });
+  if (!deliveryLocation) throw new Error("Área de entrega de prueba no encontrada");
+  return markSalesRequestPreparedForDelivery(prisma, {
+    orderId,
+    preparedByUserId,
+    preparedLocationId: deliveryLocation.id,
+  });
 }
 
 beforeAll(async () => {
@@ -847,6 +869,7 @@ describe("sales request service", () => {
       orderId: order.id,
       assignedToUserId: sales.id,
     });
+    await prepareOrderForDelivery(order.id, sales.id);
 
     const result = await markSalesRequestDelivered(prisma, {
       orderId: order.id,
@@ -938,6 +961,7 @@ describe("sales request service", () => {
       orderId: order.id,
       assignedToUserId: sales.id,
     });
+    await prepareOrderForDelivery(order.id, sales.id);
 
     const first = await markSalesRequestDelivered(prisma, {
       orderId: order.id,
@@ -1016,6 +1040,7 @@ describe("sales request service", () => {
       orderId: order.id,
       assignedToUserId: sales.id,
     });
+    await prepareOrderForDelivery(order.id, sales.id);
 
     await prisma.inventory.updateMany({
       where: { locationId: pickList!.targetLocationId, productId: productA.id },
@@ -1097,6 +1122,7 @@ describe("sales request service", () => {
       orderId: order.id,
       assignedToUserId: sales.id,
     });
+    await prepareOrderForDelivery(order.id, sales.id);
 
     const [first, second] = await Promise.all([
       markSalesRequestDelivered(prisma, {
@@ -1208,6 +1234,8 @@ describe("sales request service", () => {
       orderId: orderB.id,
       assignedToUserId: salesB.id,
     });
+    await prepareOrderForDelivery(orderA.id, salesA.id);
+    await prepareOrderForDelivery(orderB.id, salesB.id);
 
     const [resultA, resultB] = await Promise.allSettled([
       markSalesRequestDelivered(prisma, {
@@ -1416,6 +1444,7 @@ describe("sales request service", () => {
       tasks: assemblyTasks.map((task) => ({ taskId: task.id, pickedQty: 1 })),
     });
     await closeAssemblyWorkOrderConsume(prisma, production.id, "Operador Full Flow");
+    await prepareOrderForDelivery(order.id, sales.id);
 
     await markSalesRequestDelivered(prisma, {
       orderId: order.id,

@@ -119,7 +119,7 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     route: "/inventory/adjust",
     description: "Ajuste de inventario (correcciones de diferencias)",
     permission: "inventory.adjust",
-    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
   },
   {
     route: "/inventory/transfer",
@@ -131,7 +131,7 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     route: "/inventory/kardex",
     description: "Historial paginado de todos los movimientos de inventario",
     permission: "kardex.view",
-    roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
   },
 
   // ── Almacenes ──────────────────────────────────────────────────────────

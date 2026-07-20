@@ -15,7 +15,7 @@ describe("KAN-52 flow narrative contract", () => {
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(detailContent).toContain("getSalesOrderFlowNarrative");
     expect(detailContent).toContain("getSalesConsoleTimelineItems");
-    expect(detailContent).toContain("Timeline operativo");
+    expect(detailContent).toContain("Seguimiento del pedido");
     expect(consoleContent).toContain("Surtido / fulfillment");
     expect(consoleContent).toContain("Cancelación");
   });
@@ -43,6 +43,6 @@ describe("KAN-52 flow narrative contract", () => {
     expect(detailContent).toContain("getMarkDeliveredEligibility");
     expect(detailContent).toContain("pulledAt: order.pulledAt");
     expect(detailContent).toContain("latestPickUpdatedAt");
-    expect(detailContent).toContain("Siguiente acción");
+    expect(detailContent).toContain("Siguiente paso");
   });
 });

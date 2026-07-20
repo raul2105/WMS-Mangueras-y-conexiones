@@ -19,7 +19,7 @@ const FIXTURE = {
 };
 
 async function cleanupFixtures() {
-  const [customers, products, warehouses, locations] = await Promise.all([
+  const [customers, products, warehouses] = await Promise.all([
     prisma.customer.findMany({
       where: {
         OR: [
@@ -41,16 +41,11 @@ async function cleanupFixtures() {
       where: { code: FIXTURE.warehouseCode },
       select: { id: true },
     }),
-    prisma.location.findMany({
-      where: { code: FIXTURE.locationCode },
-      select: { id: true },
-    }),
   ]);
 
   const customerIds = customers.map((c) => c.id);
   const productIds = products.map((p) => p.id);
   const warehouseIds = warehouses.map((w) => w.id);
-  const locationIds = locations.map((l) => l.id);
 
   if (customerIds.length > 0) {
     await prisma.salesInternalOrder.deleteMany({
@@ -289,19 +284,11 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
 
   test("Direct URL with promise params renders commercial promise summary", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    // Use warehouse CODE for promiseWarehouseId as availability page link generation uses warehouse CODE
-    await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=availability&promiseProductId=${fixture.baseProductId}&promiseSku=${fixture.baseProductSku}&promiseWarehouseId=${fixture.warehouseCode}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName).replace(/%20/g, '+')}&promiseRequestedQty=1&promiseAvailableQty=20&promiseCheckedAt=${new Date().toISOString()}&promiseSource=availability&promiseIsSubstitute=false`);
+    await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=availability&promiseProductId=${fixture.baseProductId}&promiseSku=${fixture.baseProductSku}&promiseWarehouseId=${fixture.warehouseId}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName).replace(/%20/g, '+')}&promiseRequestedQty=1&promiseAvailableQty=20&promiseCheckedAt=${new Date().toISOString()}&promiseSource=availability&promiseIsSubstitute=false`);
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await page.waitForLoadState("networkidle");
-    
-    // Check if order-summary-desktop is there
-    const summary = page.locator('[data-testid="order-summary-desktop"]');
-    await expect(summary).toBeVisible({ timeout: 15000 });
-    
-    // Check if commercialPromise section exists
-    const promiseSection = page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa de disponibilidad");
-    await expect(promiseSection).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
   });
 
   test("Click-through from availability page renders commercial promise summary", async ({ page }) => {
@@ -312,21 +299,11 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await crearPedidoLink.click();
     
     await expect(page).toHaveURL(/\/production\/requests\/new/);
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(3000);
-    
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    
-    // Check promise state section in OrderSummary
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible({ timeout: 15000 });
-    await page.waitForTimeout(2000);
-    
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa de disponibilidad")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa segura")).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(fixture.warehouseCode)).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("20")).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(/Verificado:/i)).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
+    await expect(page.getByTestId("commercial-promise-section")).toContainText(fixture.warehouseCode);
+    await expect(page.getByTestId("commercial-promise-available-qty")).toHaveText("20");
   });
 
   test("Nuevo Pedido summary shows promise state and checked availability", async ({ page }) => {
@@ -337,31 +314,37 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
     
-    // Wait for navigation and page to fully load
     await expect(page).toHaveURL(/\/production\/requests\/new/);
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(3000);
-    
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    
-    // Check promise state section in OrderSummary with extended timeout
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible({ timeout: 15000 });
-    
-    // Wait for the promise section to render - use waitForFunction to check DOM
-    await page.waitForFunction(() => 
-      document.body.textContent?.includes("Promesa de disponibilidad"), 
-      { timeout: 20000 }
-    );
-    
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa de disponibilidad")).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa segura")).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(fixture.warehouseCode)).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("20")).toBeVisible(); // Available qty
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(/Verificado:/i)).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
+    await expect(page.getByTestId("commercial-promise-section")).toContainText(fixture.warehouseCode);
+    await expect(page.getByTestId("commercial-promise-available-qty")).toHaveText("20"); // Available qty
   });
 
   test("Insufficient stock (requested > available) shows warning and is not displayed as promise_safe", async ({ page }) => {
+    // Remove leftovers from an interrupted run before creating the fixture.
+    // This keeps the serial suite repeatable when a prior assertion failed
+    // before reaching its inline cleanup.
+    const existingLowStockProduct = await prisma.product.findUnique({ where: { sku: "LOW-STOCK-001" }, select: { id: true } });
+    const existingLowStockLocation = await prisma.location.findUnique({ where: { code: "LOW-LOC-001" }, select: { id: true } });
+    if (existingLowStockProduct || existingLowStockLocation) {
+      await prisma.inventory.deleteMany({
+        where: {
+          OR: [
+            ...(existingLowStockProduct ? [{ productId: existingLowStockProduct.id }] : []),
+            ...(existingLowStockLocation ? [{ locationId: existingLowStockLocation.id }] : []),
+          ],
+        },
+      });
+      if (existingLowStockProduct) {
+        await prisma.product.delete({ where: { id: existingLowStockProduct.id } });
+      }
+      if (existingLowStockLocation) {
+        await prisma.location.delete({ where: { id: existingLowStockLocation.id } });
+      }
+    }
+
     // Create a product with low stock
     const lowStockProduct = await prisma.product.create({
       data: {
@@ -403,30 +386,27 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/requests/new?productId=${lowStockProductId}&sku=LOW-STOCK-001&source=availability&promiseProductId=${lowStockProductId}&promiseSku=LOW-STOCK-001&promiseWarehouseId=${fixture.warehouseId}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName)}&promiseRequestedQty=5&promiseAvailableQty=2&promiseCheckedAt=${new Date().toISOString()}&promiseSource=availability&promiseIsSubstitute=false`);
     
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Disponibilidad insuficiente")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Disponibilidad insuficiente");
     
     // Should NOT show "Promesa segura"
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa segura")).not.toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).not.toHaveText("Promesa segura");
     
     // Cleanup
     await prisma.product.delete({ where: { id: lowStockProductId } });
     await prisma.location.delete({ where: { id: lowStockLocation.id } });
   });
 
-  test("Missing availability context shows 'Disponibilidad no verificada'", async ({ page }) => {
+  test("Missing availability context does not show a promise", async ({ page }) => {
     // Navigate directly without promise params
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
-    
-    // Should show "Disponibilidad no verificada" or equivalent unresolved state
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Disponibilidad no verificada")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toHaveCount(0);
   });
 
-  test("Equivalent/substitute context shows substitute confirmation state", async ({ page }) => {
+  test("Equivalent context does not claim availability before it is checked", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/equivalences?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
     
@@ -439,10 +419,7 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*source=equivalences/);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.getByText(/Sustituye a/i)).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Sustituto pendiente de confirmar")).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(fixture.baseProductSku)).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toHaveCount(0);
   });
 
   test("Mobile layout has no horizontal overflow and shows promise status", async ({ page }) => {
@@ -457,8 +434,7 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     const bodyWidth = await body.evaluate(el => el.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(390);
     
-    // Check mobile summary is collapsible and shows promise status
-    await expect(page.locator('[data-testid="order-summary-mobile"]').getByText("Resumen del pedido")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
   });
 
   test("MANAGER can access the flow and see promise state", async ({ page }) => {
@@ -469,8 +445,8 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await crearPedidoLink.click();
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa segura")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
   });
 
   test("SYSTEM_ADMIN can access the flow and see promise state", async ({ page }) => {
@@ -481,8 +457,8 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await crearPedidoLink.click();
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]')).toBeVisible();
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa segura")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
   });
 
   test("WAREHOUSE_OPERATOR does not see sales-only commercial promise actions", async ({ page }) => {
@@ -502,35 +478,18 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     
     // Should show "Promesa vencida" badge (warning variant)
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText("Promesa vencida")).toBeVisible();
+    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa vencida");
     
     // Should show warning about stale verification
-    await expect(page.locator('[data-testid="order-summary-desktop"]').getByText(/supera el umbral de 15 minutos/i)).toBeVisible();
+    await expect(page.getByText(/consulta supera el límite de 15 minutos/i)).toBeVisible();
   });
 
-  test("Draft creation is allowed but not marked as warehouse-ready or promise-safe without valid promise", async ({ page }) => {
+  test("Nuevo Pedido does not allow creation without at least one product or ensamble", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    // Go to Nuevo Pedido with no promise context and no product
     await page.goto("/production/requests/new");
     
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    
-    // Fill required fields but don't select product
-    await page.getByLabel(/Selecciona o crea el cliente/i).fill(fixture.customerName);
-    await expect(page.getByRole("button", { name: new RegExp(fixture.customerName, "i") })).toBeVisible();
-    await page.getByRole("button", { name: new RegExp(fixture.customerName, "i") }).click();
-    
-    await page.locator('select[name="warehouseId"]').selectOption(fixture.warehouseId);
-    await page.locator('input[name="dueDate"]').fill("2026-12-31");
-    
-    // Should be able to create as draft (BORRADOR)
-    await page.getByRole("button", { name: /Crear pedido/i }).click();
-    
-    // Should redirect to order detail with success
-    await expect(page).toHaveURL(/\/production\/requests\/.+\?ok=/);
-    await expect(page.getByText(/Pedido de surtido creado/i)).toBeVisible();
-    
-    // Order should be BORRADOR (draft) not CONFIRMADA
-    await expect(page.getByText("Borrador")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Continuar a producto/i })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /Crear pedido/i })).toHaveCount(0);
   });
 });

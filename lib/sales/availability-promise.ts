@@ -48,6 +48,29 @@ export interface CommercialAvailabilityPromise {
   originalProductSku?: string;
 }
 
+export const DEFAULT_COMMERCIAL_PROMISE_STALE_THRESHOLD_MINUTES = 15;
+
+/**
+ * Keeps the promise-vigency policy in one place. The value is intentionally
+ * server-side: changing it in AWS still requires applying environment
+ * configuration and restarting/redeploying the runtime.
+ */
+export function getCommercialPromiseStaleThresholdMinutes(
+  env?: { COMMERCIAL_PROMISE_STALE_THRESHOLD_MINUTES?: string | undefined },
+) {
+  const configured = Number(
+    env?.COMMERCIAL_PROMISE_STALE_THRESHOLD_MINUTES ?? process.env["COMMERCIAL_PROMISE_STALE_THRESHOLD_MINUTES"],
+  );
+  if (!Number.isFinite(configured)) {
+    return DEFAULT_COMMERCIAL_PROMISE_STALE_THRESHOLD_MINUTES;
+  }
+
+  const wholeMinutes = Math.trunc(configured);
+  return wholeMinutes >= 1 && wholeMinutes <= 480
+    ? wholeMinutes
+    : DEFAULT_COMMERCIAL_PROMISE_STALE_THRESHOLD_MINUTES;
+}
+
 /**
  * Human-readable labels for promise status (Spanish commercial language)
  */
@@ -87,7 +110,7 @@ export function computePromiseStatus(promise: CommercialAvailabilityPromise | nu
   }
 
   // Check staleness
-  const staleThresholdMinutes = opts?.staleThresholdMinutes ?? 15;
+  const staleThresholdMinutes = opts?.staleThresholdMinutes ?? getCommercialPromiseStaleThresholdMinutes();
   const checkedAt = new Date(promise.checkedAt);
   const ageMinutes = (Date.now() - checkedAt.getTime()) / (1000 * 60);
   if (ageMinutes > staleThresholdMinutes) {
@@ -116,7 +139,7 @@ const commercialPromiseSchema = z.object({
   availableQuantity: z.coerce.number().nonnegative(),
   checkedAt: z.string().datetime(),
   source: z.enum(["catalog", "availability", "equivalences", "manual", "substitute"]),
-  isSubstitute: z.coerce.boolean().default(false),
+  isSubstitute: z.boolean().default(false),
   originalProductId: z.string().uuid().optional(),
   originalProductSku: z.string().optional(),
 });
@@ -126,6 +149,8 @@ const commercialPromiseSchema = z.object({
  */
 export function buildCommercialPromiseFromSearchParams(searchParams: URLSearchParams): CommercialAvailabilityPromise | null {
   try {
+    const optionalParam = (key: string) => searchParams.get(key) ?? undefined;
+    const substituteParam = searchParams.get("promiseIsSubstitute");
     const result = commercialPromiseSchema.safeParse({
       productId: searchParams.get("promiseProductId"),
       sku: searchParams.get("promiseSku"),
@@ -136,9 +161,12 @@ export function buildCommercialPromiseFromSearchParams(searchParams: URLSearchPa
       availableQuantity: searchParams.get("promiseAvailableQty"),
       checkedAt: searchParams.get("promiseCheckedAt"),
       source: searchParams.get("promiseSource"),
-      isSubstitute: searchParams.get("promiseIsSubstitute"),
-      originalProductId: searchParams.get("promiseOriginalProductId"),
-      originalProductSku: searchParams.get("promiseOriginalProductSku"),
+      // URLSearchParams returns strings. Do not use z.coerce.boolean here:
+      // Boolean("false") is true, which would incorrectly turn every normal
+      // availability handoff into a substitute confirmation.
+      isSubstitute: substituteParam === null ? undefined : substituteParam === "true",
+      originalProductId: optionalParam("promiseOriginalProductId"),
+      originalProductSku: optionalParam("promiseOriginalProductSku"),
     });
     
     if (result.success) {
@@ -148,6 +176,16 @@ export function buildCommercialPromiseFromSearchParams(searchParams: URLSearchPa
   } catch {
     return null;
   }
+}
+
+/**
+ * Parses a promise posted back by Nuevo Pedido. It is still treated as
+ * client-provided context and must be revalidated against inventory on the
+ * server before an order is created.
+ */
+export function parseCommercialPromise(value: unknown): CommercialAvailabilityPromise | null {
+  const result = commercialPromiseSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
 
 /**

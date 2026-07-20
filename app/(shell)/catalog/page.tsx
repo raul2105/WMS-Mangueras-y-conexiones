@@ -114,6 +114,9 @@ export default async function CatalogPage({ searchParams }: PageProps) {
     ]);
     const currentPage = parsePositiveInt(params.page, 1);
     const isSalesExecutive = sessionCtx.roles.includes("SALES_EXECUTIVE");
+    const isOperatorView =
+        sessionCtx.roles.includes("WAREHOUSE_OPERATOR") &&
+        !sessionCtx.roles.includes("SALES_EXECUTIVE");
     const canEditCatalog =
         sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("catalog.edit");
 
@@ -317,8 +320,12 @@ export default async function CatalogPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Catálogo comercial"
-        description="Busca producto antes de validar disponibilidad, revisar equivalencias o crear un pedido."
+        title={isOperatorView ? "Consulta de materiales" : "Catálogo comercial"}
+        description={
+          isOperatorView
+            ? "Consulta especificaciones y existencia por ubicación para surtir, recibir o ensamblar."
+            : "Busca producto antes de validar disponibilidad, revisar equivalencias o crear un pedido."
+        }
         actions={
           canEditCatalog ? (
             <>
@@ -333,7 +340,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         }
       />
 
-      {!isSalesExecutive ? (
+      {!isSalesExecutive && !isOperatorView ? (
         <SectionCard
           title="Flujo comercial"
           description="Producto requerido → disponibilidad → equivalencias → pedido."
@@ -362,7 +369,6 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         subcategories={subcategories.length > 0 ? subcategories : TAXONOMY_SUBCATEGORIES.map((value) => ({ value, count: 0 }))}
         attributeKeys={attributeKeys}
         attributeValues={attributeValues}
-        isSalesExecutive={isSalesExecutive}
       />
 
       <SectionCard
@@ -378,9 +384,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             <EmptyState
               compact
               title="Sin resultados"
-              description="No se encontraron productos con los filtros activos. Prueba otro producto o salta a disponibilidad, equivalencias o nuevo pedido."
+              description={
+                isOperatorView
+                  ? "No se encontraron materiales con los filtros activos. Prueba otro código, nombre o ubicación."
+                  : "No se encontraron productos con los filtros activos. Prueba otro producto o salta a disponibilidad, equivalencias o nuevo pedido."
+              }
               actions={
-                <>
+                !isOperatorView ? <>
                   <Link href={buildCommercialSearchHref("/production/availability", searchQuery, { source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                     Ver disponibilidad
                   </Link>
@@ -390,7 +400,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                   <Link href={buildCommercialRequestHref({ q: searchQuery, source: "catalog" })} className={buttonStyles({ size: "sm" })}>
                     Crear pedido
                   </Link>
-                </>
+                </> : undefined
               }
             />
           ) : (
@@ -405,31 +415,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                         <Th>Marca</Th>
                         <Th>Categoria</Th>
                         <Th className="text-right">Stock</Th>
-                        <Th className="text-right">Precio</Th>
-                        <Th className="text-right">Siguiente acción</Th>
+                        {!isOperatorView ? <Th className="text-right">Precio</Th> : null}
+                        <Th className="text-right">Acción</Th>
                       </tr>
                     </thead>
                     <tbody>
                       {products.map((product) => {
                         const stock = sumStock(product.inventory);
-                        const availabilityHref = buildCommercialSearchHref(
-                            "/production/availability",
-                            product.sku,
-                            {
-                                productId: product.id,
-                                sku: product.sku,
-                                source: "catalog",
-                            },
-                        );
-                        const equivalencesHref = buildCommercialSearchHref(
-                            "/production/equivalences",
-                            product.sku,
-                            {
-                                productId: product.id,
-                                sku: product.sku,
-                                source: "catalog",
-                            },
-                        );
                         const requestHref = buildCommercialRequestHref({
                             productId: product.id,
                             sku: product.sku,
@@ -453,20 +445,16 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                             <Td>{product.brand ?? "--"}</Td>
                             <Td>{product.category?.name ?? product.subcategory ?? "--"}</Td>
                             <Td className={`text-right font-semibold ${stock > 0 ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>{stock}</Td>
-                            <Td className="text-right font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</Td>
+                            {!isOperatorView ? <Td className="text-right font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</Td> : null}
                             <Td className="text-right">
                               <div className="flex flex-wrap justify-end gap-2">
-                                <Link href={availabilityHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                                  Ver disponibilidad
-                                </Link>
-                                <Link href={equivalencesHref} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                                  Revisar equivalencias
-                                </Link>
-                                <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
-                                  Crear pedido
-                                </Link>
+                                {!isOperatorView ? (
+                                  <Link href={requestHref} className={buttonStyles({ size: "sm" })}>
+                                    Agregar al pedido
+                                  </Link>
+                                ) : null}
                                 <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
-                                Ver detalle
+                                  Ver ficha
                                 </Link>
                               </div>
                             </Td>
@@ -504,17 +492,13 @@ export default async function CatalogPage({ searchParams }: PageProps) {
                         ))}
                       </div>
                       <div className="mt-3 flex flex-col gap-2">
-                        <p className="font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</p>
+                        {!isOperatorView ? <p className="font-semibold text-[var(--text-primary)]">${product.price?.toFixed(2) ?? "--"}</p> : null}
                         <div className="flex flex-wrap gap-2">
-                          <Link href={buildCommercialSearchHref("/production/availability", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                            Ver disponibilidad
-                          </Link>
-                          <Link href={buildCommercialSearchHref("/production/equivalences", product.sku, { productId: product.id, sku: product.sku, source: "catalog" })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
-                            Revisar equivalencias
-                          </Link>
-                          <Link href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, q: searchQuery, source: "catalog" })} className={buttonStyles({ size: "sm" })}>
-                            Crear pedido
-                          </Link>
+                          {!isOperatorView ? (
+                            <Link href={buildCommercialRequestHref({ productId: product.id, sku: product.sku, q: searchQuery, source: "catalog" })} className={buttonStyles({ size: "sm" })}>
+                              Agregar al pedido
+                            </Link>
+                          ) : null}
                           <Link href={`/catalog/${product.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
                             Ver detalle
                           </Link>

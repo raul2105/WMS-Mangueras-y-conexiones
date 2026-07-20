@@ -27,7 +27,7 @@ describe("sales internal order flow stage", () => {
     ).toBe("en_surtido");
   });
 
-  it("returns listo_entrega when direct pick and assembly are complete", () => {
+  it("returns listo_entrega only after the completed work is prepared for delivery", () => {
     expect(
       getSalesOrderFlowStage({
         status: "CONFIRMADA",
@@ -36,6 +36,7 @@ describe("sales internal order flow stage", () => {
         hasProductLines: true,
         hasAssemblyLines: true,
         hasCompletedConfiguredAssembly: true,
+        preparedForDeliveryAt: new Date("2026-05-01T01:00:00.000Z"),
       }),
     ).toBe("listo_entrega");
   });
@@ -90,6 +91,7 @@ describe("sales internal order flow stage", () => {
       hasProductLines: true,
       hasAssemblyLines: true,
       hasCompletedConfiguredAssembly: true,
+      preparedForDeliveryAt: new Date("2026-05-01T01:00:00.000Z"),
       deliveredEligibility: { canMarkDelivered: true, deliveredBlockedReason: null },
     });
 
@@ -144,6 +146,35 @@ describe("sales internal order flow stage", () => {
     expect(cta.action.label).toBe("Completar ensamble");
   });
 
+  it("keeps a mixed order in its exact linked assembly instead of the general assembly list", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-mixed",
+      roles: ["WAREHOUSE_OPERATOR"],
+      flowStage: "en_surtido",
+      hasProductLines: true,
+      latestPickStatus: "COMPLETED",
+      hasAssemblyLines: true,
+      hasCompletedConfiguredAssembly: false,
+      assemblyHref: "/production/orders/assembly-for-ord-mixed",
+    });
+
+    expect(cta.code).toBe("COMPLETE_ASSEMBLY");
+    expect(cta.action.href).toBe("/production/orders/assembly-for-ord-mixed");
+  });
+
+  it("keeps multiple pending assemblies inside their parent order for explicit selection", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-many-assemblies",
+      roles: ["WAREHOUSE_OPERATOR"],
+      flowStage: "en_surtido",
+      hasProductLines: false,
+      hasAssemblyLines: true,
+      hasCompletedConfiguredAssembly: false,
+    });
+
+    expect(cta.action.href).toBe("/production/requests/ord-many-assemblies#ensambles");
+  });
+
   it("allows delivery CTA for manager and system admin when delivery is eligible", () => {
     const managerCta = resolveSalesOrderPrimaryCta({
       orderId: "ord-6",
@@ -192,6 +223,31 @@ describe("sales internal order flow stage", () => {
     expect(cta.blockedReason).toContain("ensamble");
   });
 
+  it("lets the assigned sales executive continue a ready order that was not yet acknowledged", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-ready-assigned",
+      roles: ["SALES_EXECUTIVE"],
+      flowStage: "listo_entrega",
+      hasProductLines: true,
+      latestPickStatus: "COMPLETED",
+      hasAssemblyLines: true,
+      hasCompletedConfiguredAssembly: true,
+      takeEligibility: {
+        canTakeOrder: true,
+        takeBlockedReason: null,
+        takeActionLabel: "Continuar pedido",
+      },
+      deliveredEligibility: {
+        canMarkDelivered: false,
+        deliveredBlockedReason: "El pedido debe estar tomado y asignado",
+      },
+    });
+
+    expect(cta.code).toBe("TAKE_ORDER");
+    expect(cta.isAllowed).toBe(true);
+    expect(cta.action.label).toBe("Continuar pedido");
+  });
+
   it("maps cockpit work types and stage progress from the shared flow stage", () => {
     expect(
       getSalesConsoleWorkType({
@@ -238,6 +294,7 @@ describe("sales internal order flow stage", () => {
       hasProductLines: true,
       hasAssemblyLines: false,
       hasCompletedConfiguredAssembly: true,
+      preparedForDeliveryAt: new Date("2026-05-01T01:00:00.000Z"),
       deliveredEligibility: { canMarkDelivered: true, deliveredBlockedReason: null },
     });
     const blockedState = resolveSalesConsolePrimaryActionState({
@@ -365,12 +422,13 @@ describe("sales internal order flow stage", () => {
           hasProductLines: true,
           hasAssemblyLines: false,
           hasCompletedConfiguredAssembly: true,
+          preparedForDeliveryAt: new Date("2026-05-01T01:00:00.000Z"),
           takeEligibility: { canTakeOrder: false, takeBlockedReason: "El pedido ya está asignado" },
           deliveredEligibility: { canMarkDelivered: true, deliveredBlockedReason: null },
         },
         expected: {
           flowStage: "listo_entrega",
-          listLabel: "Listo para entrega",
+          listLabel: "Preparado para entrega",
           detailTimelineLabel: "Entrega",
           nextAction: "Marcar entrega",
           filterBucket: "Listos para entrega",
@@ -392,7 +450,7 @@ describe("sales internal order flow stage", () => {
           flowStage: "entregado",
           listLabel: "Entregado",
           detailTimelineLabel: "Entrega",
-          nextAction: "Revisar bloqueo",
+          nextAction: "Ver historial",
           filterBucket: "Entregado",
           deliveryEligibility: false,
           meaning: "delivered",
@@ -410,7 +468,7 @@ describe("sales internal order flow stage", () => {
           flowStage: "cancelado",
           listLabel: "Cancelado",
           detailTimelineLabel: "Cancelación",
-          nextAction: "Revisar bloqueo",
+          nextAction: "Ver historial",
           filterBucket: "Cancelada",
           deliveryEligibility: false,
           meaning: "cancelled",
@@ -451,6 +509,7 @@ describe("sales internal order flow stage", () => {
       pulledAt: new Date("2026-05-01T14:00:00.000Z"),
       latestPickStatus: "COMPLETED",
       latestPickUpdatedAt: new Date("2026-05-01T15:00:00.000Z"),
+      preparedForDeliveryAt: new Date("2026-05-01T16:00:00.000Z"),
       deliveredAt: new Date("2026-05-02T12:00:00.000Z"),
       cancelledAt: new Date("2026-05-03T12:00:00.000Z"),
     }).map((item) => item.label);
@@ -459,6 +518,7 @@ describe("sales internal order flow stage", () => {
       "Captura",
       "Asignación",
       "Surtido / fulfillment",
+      "Preparado para entrega",
       "Entrega",
       "Cancelación",
     ]);

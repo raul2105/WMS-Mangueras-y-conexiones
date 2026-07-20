@@ -131,7 +131,18 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
       label: "Ejecución",
       icon: "production",
       description:
-        "Cockpit operativo para surtido directo y ensambles confirmados.",
+        "Trabajo físico de surtido, verificación y ensamble.",
+      match: "prefix",
+      requiredPermission: "production.cockpit.view",
+    };
+  }
+
+  if (productionIndex >= 0 && primaryRole === "MANAGER") {
+    items[productionIndex] = {
+      href: "/production/requests",
+      label: "Pedidos",
+      icon: "production",
+      description: "Crear, revisar y asignar pedidos comerciales a ventas.",
       match: "prefix",
       requiredPermission: "production.cockpit.view",
     };
@@ -178,11 +189,13 @@ export function getVisibleNavItems(
   const homeItem: NavItem = {
     ...navItems[0],
     href: homeHref,
-    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : "Dashboard",
+    label: primaryRole === "SALES_EXECUTIVE" ? "Pedidos" : primaryRole === "WAREHOUSE_OPERATOR" ? "Trabajo de hoy" : "Dashboard",
     description:
       primaryRole === "SALES_EXECUTIVE"
         ? "Acceso principal a tus pedidos de surtido."
-        : "Acceso principal de tu rol.",
+        : primaryRole === "WAREHOUSE_OPERATOR"
+          ? "Tu trabajo físico pendiente y las actividades de almacén."
+          : "Acceso principal de tu rol.",
     match: "prefix",
   };
 

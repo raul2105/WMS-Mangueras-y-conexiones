@@ -86,8 +86,8 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/audit")).toBe(true);
   });
 
-  it("WAREHOUSE_OPERATOR can do physical inventory but not warehouse admin or audit", () => {
-    expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/adjust")).toBe(true);
+  it("WAREHOUSE_OPERATOR can execute controlled inventory work but not adjustments, warehouse admin, or audit", () => {
+    expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/adjust")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/transfer")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/inventory/pick")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/warehouse")).toBe(false);

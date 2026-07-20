@@ -361,7 +361,7 @@ export default async function SupplierDetailPage({
                   <th className="text-left py-2">SKU</th>
                   <th className="text-left py-2">Producto</th>
                   <th className="text-left py-2">Clave Proveedor</th>
-                  <th className="text-right py-2">Precio Unit.</th>
+                  <th className="text-right py-2">Precio unitario</th>
                   <th className="text-right py-2">Lead Time</th>
                   <th className="py-2"></th>
                 </tr>
@@ -412,7 +412,7 @@ export default async function SupplierDetailPage({
                 <input name="supplierSku" maxLength={50} placeholder="ABC-123" className="w-full px-3 py-2 glass rounded-lg text-sm" />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Precio Unit. (MXN)</span>
+                <span className="text-xs text-slate-400">Precio unitario (MXN)</span>
                 <input name="unitPrice" type="number" step="0.01" min="0" placeholder="0.00" className="w-full px-3 py-2 glass rounded-lg text-sm" />
               </label>
               <label className="space-y-1">

@@ -20,9 +20,9 @@ const PAGE_SIZE = 50;
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
   CONFIRMADA: "Confirmada",
-  EN_TRANSITO: "En Tránsito",
+  EN_TRANSITO: "En tránsito",
   RECIBIDA: "Recibida",
-  PARCIAL: "Parcial",
+  PARCIAL: "Recepción parcial",
   CANCELADA: "Cancelada",
 };
 
@@ -66,7 +66,8 @@ export default async function PurchaseOrdersPage({
     sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.manage");
   const canReceivePurchasing =
     sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.receive");
-  const presetFilter = isPurchaseOrderPresetFilter(sp.preset) ? sp.preset : undefined;
+  const requestedPreset = isPurchaseOrderPresetFilter(sp.preset) ? sp.preset : undefined;
+  const presetFilter = requestedPreset ?? (!canManagePurchasing && !sp.status ? "por_recibir" : undefined);
   const statusFilter = !presetFilter ? (sp.status as
     | "BORRADOR"
     | "CONFIRMADA"
@@ -131,23 +132,35 @@ export default async function PurchaseOrdersPage({
   };
 
   const filterButtons = [
-    { key: "todas", label: `Todas (${totalCount})` },
-    { key: "borrador", label: `${getPurchaseOrderPresetLabel("borrador")} (${draftCount})` },
-    { key: "confirmadas", label: `${getPurchaseOrderPresetLabel("confirmadas")} (${confirmedCount})` },
-    { key: "en_transito", label: `${getPurchaseOrderPresetLabel("en_transito")} (${transitCount})` },
-    { key: "parciales", label: `${getPurchaseOrderPresetLabel("parciales")} (${partialCount})` },
-    { key: "recibidas", label: `${getPurchaseOrderPresetLabel("recibidas")} (${receivedCount})` },
-    { key: "vencidas", label: `${getPurchaseOrderPresetLabel("vencidas")} (${overdueCount})` },
-    { key: "por_recibir_hoy", label: `${getPurchaseOrderPresetLabel("por_recibir_hoy")} (${dueTodayCount})` },
+    ...(canManagePurchasing
+      ? [
+          { key: "todas", label: `Todas (${totalCount})` },
+          { key: "borrador", label: `Por completar (${draftCount})` },
+          { key: "confirmadas", label: `Por enviar o recibir (${confirmedCount})` },
+          { key: "en_transito", label: `${getPurchaseOrderPresetLabel("en_transito")} (${transitCount})` },
+          { key: "recepcion_parcial", label: `${getPurchaseOrderPresetLabel("recepcion_parcial")} (${partialCount})` },
+          { key: "vencidas", label: `${getPurchaseOrderPresetLabel("vencidas")} (${overdueCount})` },
+          { key: "recibidas", label: `Cerradas (${receivedCount})` },
+        ]
+      : [
+          { key: "por_recibir", label: `${getPurchaseOrderPresetLabel("por_recibir")} (${confirmedCount + transitCount})` },
+          { key: "recepcion_parcial", label: `${getPurchaseOrderPresetLabel("recepcion_parcial")} (${partialCount})` },
+          { key: "por_recibir_hoy", label: `${getPurchaseOrderPresetLabel("por_recibir_hoy")} (${dueTodayCount})` },
+          { key: "recibidas", label: `Historial (${receivedCount})` },
+        ]),
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Compras"
-        title="Órdenes de compra"
-        description="Lista operativa por preset. El detalle y las acciones de gestión solo aparecen para roles autorizados."
-        meta={`${filteredCount} órdenes registradas`}
+        eyebrow={canManagePurchasing ? "Compras y abastecimiento" : "Recepciones"}
+        title={canManagePurchasing ? "Órdenes de compra" : "Trabajo de recepción"}
+        description={
+          canManagePurchasing
+            ? "Revisa las órdenes que requieren una decisión y continúa con su siguiente acción."
+            : "Selecciona la mercancía que vas a recibir o continúa una recepción parcial."
+        }
+        meta={`${filteredCount} ${filteredCount === 1 ? "orden" : "órdenes"}`}
         actions={
           <>
             <Link href="/purchasing" className={buttonStyles({ variant: "secondary" })}>
@@ -163,8 +176,8 @@ export default async function PurchaseOrdersPage({
       />
 
       <SectionCard
-        title="Presets operativos"
-        description="Filtra por ciclo operativo sin perder el contexto de la lista."
+        title="Bandejas de trabajo"
+        description={canManagePurchasing ? "Cada bandeja agrupa órdenes con una decisión similar." : "Cada bandeja corresponde a una actividad física de recepción."}
         contentClassName="space-y-3"
       >
         <div className="flex flex-wrap gap-2">
@@ -185,15 +198,15 @@ export default async function PurchaseOrdersPage({
         </div>
         {!canManagePurchasing ? (
           <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-secondary)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-            Vista operativa para tu rol. Solo se muestran acciones de recepción y se ocultan rutas de gestión.
+            Aquí solo aparecen acciones de recepción. La aprobación, compra y seguimiento con el proveedor corresponden al Gerente de almacén.
           </div>
         ) : null}
       </SectionCard>
 
       {orders.length === 0 ? (
         <EmptyState
-          title={statusFilter ? `No hay órdenes con estado "${STATUS_LABELS[statusFilter]}"` : "No hay órdenes de compra"}
-          description="Cambia el filtro o crea la primera orden si tu rol lo permite."
+          title={statusFilter ? `No hay órdenes con estado "${STATUS_LABELS[statusFilter]}"` : "No hay trabajo en esta bandeja"}
+          description={canManagePurchasing ? "Cambia de bandeja o crea una nueva orden de compra." : "Selecciona otra bandeja para consultar recepciones anteriores."}
           actions={
             canManagePurchasing ? (
               <Link href="/purchasing/orders/new" className={buttonStyles({ size: "sm" })}>
@@ -292,17 +305,17 @@ export default async function PurchaseOrdersPage({
 
                   <div className="mt-4 space-y-2">
                     {canManagePurchasing ? (
-                      <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "secondary", size: "sm", fullWidth: true })}>
-                        Ver detalle
+                      <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ size: "sm", fullWidth: true })}>
+                        Abrir orden
                       </Link>
                     ) : null}
-                    {canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
+                    {!canManagePurchasing && canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
                       <Link href={`/purchasing/orders/${order.id}/receive`} className={buttonStyles({ size: "sm", fullWidth: true })}>
-                        Recibir mercancía
+                        {order.status === "PARCIAL" ? "Continuar recepción" : "Iniciar recepción"}
                       </Link>
                     ) : null}
                     {!canManagePurchasing && !(canReceivePurchasing && canReceivePurchaseOrder(order.status)) ? (
-                      <p className="text-xs text-[var(--text-muted)]">Sin acciones operativas disponibles para tu rol en esta orden.</p>
+                      <p className="text-xs text-[var(--text-muted)]">Recepción cerrada. Consulta el historial cuando necesites evidencia.</p>
                     ) : null}
                   </div>
                 </article>
@@ -356,13 +369,13 @@ export default async function PurchaseOrdersPage({
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
                             {canManagePurchasing ? (
-                              <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
-                                Ver detalle
+                              <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ size: "sm" })}>
+                                Abrir orden
                               </Link>
                             ) : null}
-                            {canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
+                            {!canManagePurchasing && canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
                               <Link href={`/purchasing/orders/${order.id}/receive`} className={buttonStyles({ size: "sm" })}>
-                                Recibir mercancía
+                                {order.status === "PARCIAL" ? "Continuar recepción" : "Iniciar recepción"}
                               </Link>
                             ) : null}
                             {!canManagePurchasing && !(canReceivePurchasing && canReceivePurchaseOrder(order.status)) ? (

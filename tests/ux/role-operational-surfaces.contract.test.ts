@@ -19,15 +19,14 @@ describe("role-specific operational surfaces", () => {
     expect(content).toContain("/production/requests?queue=assembly_blocked");
   });
 
-  it("keeps manager purchasing visible and operator purchasing reception-focused", () => {
+  it("keeps manager purchasing visible and the operator receipt path focused", () => {
     const managerHome = read("components/home/ManagerHomeContent.tsx");
-    const purchasing = read("app/(shell)/purchasing/page.tsx");
+    const receive = read("app/(shell)/inventory/receive/page.tsx");
 
     expect(managerHome).toContain("OC por confirmar");
     expect(managerHome).toContain("Crear OC");
-    expect(purchasing).toContain("Compras y abastecimiento");
-    expect(purchasing).toContain("Recepciones");
-    expect(purchasing).toContain("isOperatorView");
+    expect(receive).toContain("Recepción (Entrada)");
+    expect(receive).toContain('requirePermission("inventory.receive")');
   });
 
   it("removes commercial order creation from the operator material lookup", () => {

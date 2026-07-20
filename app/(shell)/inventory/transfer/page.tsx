@@ -15,6 +15,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,8 @@ async function transferStock(formData: FormData) {
       brand: true,
       description: true,
       type: true,
+      unitLabel: true,
+      attributes: true,
       subcategory: true,
       category: { select: { name: true } },
       inventory: { select: { quantity: true, available: true } },
@@ -69,6 +72,10 @@ async function transferStock(formData: FormData) {
       ? `Coincidencias: ${suggestions.slice(0, 3).map((row) => row.sku).join(", ")}`
       : "Producto no encontrado (SKU/Referencia)";
     redirect(`/inventory/transfer?error=${encodeURIComponent(hint)}`);
+  }
+  const quantityError = quantityValidationMessage(parsed.data.quantityRaw, getQuantityPolicy(product));
+  if (quantityError) {
+    redirect(`/inventory/transfer?error=${encodeURIComponent(quantityError)}`);
   }
 
   const [fromLocation, toLocation] = await Promise.all([
@@ -123,7 +130,7 @@ async function transferStock(formData: FormData) {
 export default async function TransferPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string }>;
+  searchParams: Promise<{ ok?: string; error?: string; from?: string; reference?: string }>;
 }) {
   await pageGuard("inventory.transfer");
   const sp = await searchParams;
@@ -154,6 +161,8 @@ export default async function TransferPage({
   const referenceSuggestions = Array.from(
     new Set(recentReferences.map((row) => row.reference?.trim() ?? "").filter(Boolean))
   );
+  const defaultFromLocation = locations.some((location) => location.code === sp.from) ? sp.from : "";
+  const defaultReference = (sp.reference ?? "").trim().slice(0, 120);
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -178,7 +187,7 @@ export default async function TransferPage({
         </div>
       )}
 
-      <SectionCard title="Flujo de transferencia" description={`Usuario autenticado: ${actor.actorName ?? "Usuario autenticado"}. Confirma origen y destino antes de enviar.`}>
+      <SectionCard title="Mover material" description={`Usuario autenticado: ${actor.actorName ?? "Usuario autenticado"}. Confirma origen y destino antes de enviar.`}>
       <form action={transferStock} className="space-y-6">
         <div className="space-y-5">
           <section className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
@@ -200,7 +209,7 @@ export default async function TransferPage({
           <section className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Paso 2 · Confirma origen y destino</p>
             <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Select name="fromLocation" required label="Ubicación origen *" placeholder="Selecciona ubicación origen">
+              <Select name="fromLocation" required label="Ubicación origen *" placeholder="Selecciona ubicación origen" defaultValue={defaultFromLocation}>
                   <option value="">Selecciona ubicación origen</option>
                   {locations.map((location) => (
                     <option key={`from-${location.code}`} value={location.code}>
@@ -226,6 +235,7 @@ export default async function TransferPage({
               <Input
                 name="reference"
                 label="Referencia"
+                defaultValue={defaultReference}
                 list={referenceSuggestions.length > 0 ? "transfer-reference-options" : undefined}
                 placeholder="TRF-0001"
               />

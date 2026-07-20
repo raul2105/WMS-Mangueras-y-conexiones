@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import prisma from '@/lib/prisma';
 import { WarehouseHomeContent } from '@/components/home/WarehouseHomeContent';
 import { Suspense } from 'react';
+import { buildSalesRequestVisibilityWhere } from '@/lib/sales/visibility';
 
 export default async function WarehouseHomePage() {
   const ctx = await getSessionContext();
@@ -11,41 +12,61 @@ export default async function WarehouseHomePage() {
     redirect('/forbidden');
   }
 
-  // Fetch real warehouse data
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const [pendingPicking, todaysReceptions, activeAssemblies] = await Promise.all([
-    // Pending picking count
-    prisma.inventory.count({
-      where: {
-        reserved: { gt: 0 }
-      }
-    }),
-    // Today's receptions
-    prisma.inventoryMovement.count({
-      where: {
-        type: 'IN',
-        createdAt: { gte: today, lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) }
-      }
-    }),
-    // Active assemblies (production orders in progress)
-    prisma.productionOrder.count({
-      where: {
-        status: { in: ['ABIERTA', 'EN_PROCESO'] }
-      }
-    })
-  ]);
+  // These cards deliberately use the same confirmed, non-delivered order scope
+  // as the execution cockpit. Inventory reservations alone are not operator work.
+  const visibleWhere = buildSalesRequestVisibilityWhere({
+    roles: ctx.roles,
+    userId: ctx.user?.id ?? null,
+  });
+  const executionOrders = await prisma.salesInternalOrder.findMany({
+    where: visibleWhere,
+    select: {
+      id: true,
+      lines: { select: { lineKind: true } },
+      pickLists: {
+        where: { status: { not: 'CANCELLED' } },
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 1,
+        select: { status: true },
+      },
+    },
+  });
+  const assemblyOrderIds = executionOrders
+    .filter((order) => order.lines.some((line) => line.lineKind === 'CONFIGURED_ASSEMBLY'))
+    .map((order) => order.id);
+  const openAssemblyRows = assemblyOrderIds.length > 0
+    ? await prisma.productionOrder.findMany({
+        where: {
+          sourceDocumentType: 'SalesInternalOrder',
+          sourceDocumentId: { in: assemblyOrderIds },
+          status: { in: ['BORRADOR', 'ABIERTA', 'EN_PROCESO'] },
+        },
+        select: { sourceDocumentId: true },
+      })
+    : [];
+  const pendingPicking = executionOrders.filter((order) => {
+    const hasDirectProduct = order.lines.some((line) => line.lineKind === 'PRODUCT');
+    const status = order.pickLists[0]?.status;
+    return hasDirectProduct && (!status || status === 'DRAFT');
+  }).length;
+  const inProgressPicking = executionOrders.filter(
+    (order) => order.pickLists[0]?.status === 'IN_PROGRESS',
+  ).length;
+  const verifyPicking = executionOrders.filter(
+    (order) => order.pickLists[0]?.status === 'PARTIAL',
+  ).length;
+  const activeAssemblies = new Set(
+    openAssemblyRows.map((row) => row.sourceDocumentId).filter(Boolean),
+  ).size;
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Inicio Almacén</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">Trabajo de hoy</h1>
       <Suspense fallback={<WarehouseHomeSkeleton />}>
         <WarehouseHomeContent 
           pendingPicking={pendingPicking}
-          todaysReceptions={todaysReceptions}
+          inProgressPicking={inProgressPicking}
+          verifyPicking={verifyPicking}
           activeAssemblies={activeAssemblies}
         />
       </Suspense>

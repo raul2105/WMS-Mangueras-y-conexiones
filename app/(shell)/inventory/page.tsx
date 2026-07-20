@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { pageGuard } from "@/components/rbac/PageGuard";
 import { buildProductSearchWhere, scoreProductSearch, sumInventoryAvailable, sumInventoryQuantity } from "@/lib/product-search";
 import { buttonStyles } from "@/components/ui/button";
 import { InventoryEnterpriseTable } from "@/components/inventory/InventoryEnterpriseTable";
@@ -65,6 +67,12 @@ function buildProductWhere({
 }
 
 export default async function InventoryHomePage({ searchParams }: PageProps) {
+  await pageGuard("inventory.view");
+  const sessionCtx = await getSessionContext();
+  const isOperatorView =
+    sessionCtx.roles.includes("WAREHOUSE_OPERATOR") &&
+    !sessionCtx.roles.includes("MANAGER") &&
+    !sessionCtx.isSystemAdmin;
   const sp = await searchParams;
   const query = sp.q?.trim() ?? "";
   const selectedType = sp.type?.trim() ?? "";
@@ -192,8 +200,12 @@ export default async function InventoryHomePage({ searchParams }: PageProps) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Inventario"
-        description="Busqueda operativa por SKU, referencia, nombre, marca y atributos."
+        title={isOperatorView ? "Inventario físico" : "Inventario"}
+        description={
+          isOperatorView
+            ? "Busca material y ejecuta recepción, surtido o transferencia por ubicación."
+            : "Búsqueda operativa por SKU, referencia, nombre, marca y atributos."
+        }
         meta={`${totalRows.toLocaleString("es-MX")} resultados • Pagina ${safePage} de ${totalPages}`}
         actions={
           <>
@@ -205,18 +217,22 @@ export default async function InventoryHomePage({ searchParams }: PageProps) {
               <ArrowUpIcon className="h-4 w-4" />
               Picking
             </Link>
-            <Link href="/inventory/adjust" className={buttonStyles({ variant: "secondary" })}>
-              <InventoryIcon className="h-4 w-4" />
-              Ajuste
-            </Link>
+            {!isOperatorView ? (
+              <Link href="/inventory/adjust" className={buttonStyles({ variant: "secondary" })}>
+                <InventoryIcon className="h-4 w-4" />
+                Ajuste
+              </Link>
+            ) : null}
             <Link href="/inventory/transfer" className={buttonStyles({ variant: "secondary" })}>
               <SwapIcon className="h-4 w-4" />
               Transferir
             </Link>
-            <Link href="/inventory/kardex" className={buttonStyles({ variant: "secondary" })}>
-              <MenuIcon className="h-4 w-4" />
-              Kardex
-            </Link>
+            {!isOperatorView ? (
+              <Link href="/inventory/kardex" className={buttonStyles({ variant: "secondary" })}>
+                <MenuIcon className="h-4 w-4" />
+                Kardex
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -237,6 +253,7 @@ export default async function InventoryHomePage({ searchParams }: PageProps) {
           value: location.code,
           label: `${location.code} - ${location.name} (${location.warehouse.code})`,
         }))}
+        traceCollapsed={isOperatorView}
       />
 
       <InventoryEnterpriseTable

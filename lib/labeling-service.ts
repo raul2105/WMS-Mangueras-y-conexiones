@@ -93,21 +93,22 @@ export function generateTraceId(labelType: LabelType): string {
 }
 
 export async function ensureDefaultLabelTemplates(db: Db) {
-  await Promise.all(
-    DEFAULT_TEMPLATES.map((tpl) =>
-      db.labelTemplate.upsert({
-        where: { code: tpl.code },
-        update: {
-          name: tpl.name,
-          labelType: tpl.labelType,
-          isActive: true,
-          definitionJson: tpl.definitionJson,
-          isDefault: tpl.isDefault ?? false,
-        },
-        create: tpl,
-      })
-    )
-  );
+  // A transaction client shares one database connection. Keep the template
+  // upserts serial so an operational pick does not queue concurrent writes on
+  // that connection while it is holding inventory reservations.
+  for (const tpl of DEFAULT_TEMPLATES) {
+    await db.labelTemplate.upsert({
+      where: { code: tpl.code },
+      update: {
+        name: tpl.name,
+        labelType: tpl.labelType,
+        isActive: true,
+        definitionJson: tpl.definitionJson,
+        isDefault: tpl.isDefault ?? false,
+      },
+      create: tpl,
+    });
+  }
 }
 
 async function resolveTemplate(db: Db, labelType: LabelType, templateCode?: string | null) {

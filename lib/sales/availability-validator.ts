@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { 
-  CommercialAvailabilityPromise, 
+import {
+  CommercialAvailabilityPromise,
   CommercialPromiseStatus,
   getCommercialPromiseStaleThresholdMinutes,
 } from "@/lib/sales/availability-promise";
@@ -43,7 +43,7 @@ export async function checkCurrentAvailability(
   });
 
   const availableQuantity = inventoryRows.reduce((sum, row) => sum + row.available, 0);
-  
+
   return {
     productId,
     warehouseId,
@@ -73,12 +73,12 @@ export interface PromiseValidationResult {
 
 /**
  * Validate a commercial availability promise against current inventory.
- * 
+ *
  * @param db - Database client
  * @param promise - The promise to validate (can be null)
  * @param requestedQuantity - Quantity being requested in the order (may differ from promise.requestedQuantity)
  * @param opts - Options including staleness threshold
- * 
+ *
  * Returns validation result with current status and whether it's safe to commit.
  */
 export async function validateCommercialPromise(
@@ -88,7 +88,7 @@ export async function validateCommercialPromise(
   opts?: { staleThresholdMinutes?: number }
 ): Promise<PromiseValidationResult> {
   const validatedAt = new Date().toISOString();
-  
+
   // No promise = unresolved
   if (!promise) {
     return {
@@ -103,7 +103,7 @@ export async function validateCommercialPromise(
 
   // Check current availability
   const current = await checkCurrentAvailability(db, promise.productId, promise.warehouseId);
-  
+
   // If substitute, always requires confirmation regardless of current stock
   if (promise.isSubstitute) {
     return {
@@ -120,14 +120,14 @@ export async function validateCommercialPromise(
   const staleThresholdMinutes = opts?.staleThresholdMinutes ?? getCommercialPromiseStaleThresholdMinutes();
   const checkedAt = new Date(promise.checkedAt);
   const ageMinutes = (Date.now() - checkedAt.getTime()) / (1000 * 60);
-  
+
   if (ageMinutes > staleThresholdMinutes) {
     // A server-side check has just refreshed the availability. Preserve the
     // stale source in the reason/audit, but do not reject a request that is
     // currently satisfiable; the later inventory reservation remains the
     // atomic source of truth.
     const isCurrentlySufficient = current.availableQuantity >= requestedQuantity;
-    
+
     return {
       status: isCurrentlySufficient ? "promise_safe" : "insufficient_stock",
       currentAvailable: current.availableQuantity,
@@ -140,7 +140,7 @@ export async function validateCommercialPromise(
 
   // Check sufficiency against requested quantity (not promise.requestedQuantity)
   const isSufficient = current.availableQuantity >= requestedQuantity;
-  
+
   return {
     status: isSufficient ? "promise_safe" : "insufficient_stock",
     currentAvailable: current.availableQuantity,
@@ -169,7 +169,7 @@ export async function buildPromiseFromAvailabilityContext(
     where: { id: warehouseId },
     select: { code: true, name: true },
   });
-  
+
   if (!warehouse) {
     throw new Error("Warehouse not found");
   }
@@ -212,7 +212,7 @@ export async function buildSubstitutePromise(
     requestedQuantity,
     source
   );
-  
+
   return {
     ...basePromise,
     isSubstitute: true,

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/section-card";
 import { cn } from "@/lib/cn";
 
-export type CommercialPromiseStatus = 
+export type CommercialPromiseStatus =
   | "promise_safe"
   | "insufficient_stock"
   | "unresolved"
@@ -217,7 +217,7 @@ function OrderSummaryContent({
           {STEPS.map((step, index) => {
             const isCurrent = getCurrentStep(readinessState, missingFields) === step.key;
             const isCompleted = isStepCompleted(step.key, readinessState, missingFields);
-            
+
             return (
               <li key={step.key} className="relative" data-testid={`progress-step-${step.key}`}>
                 <div className="flex items-center gap-2">

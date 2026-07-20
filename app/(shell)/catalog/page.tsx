@@ -263,7 +263,7 @@ export default async function CatalogPage({ searchParams }: PageProps) {
             },
         }),
     ]);
-    
+
     const counts: Record<string, number> = {
         total: 0,
         HOSE: 0,

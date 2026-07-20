@@ -80,7 +80,7 @@ async function cleanupFixtures() {
       select: { id: true },
     });
     const allLocationIds = allLocationsInWarehouse.map((l) => l.id);
-    
+
     if (allLocationIds.length > 0) {
       // Delete all inventory that references these locations
       await prisma.inventory.deleteMany({
@@ -91,7 +91,7 @@ async function cleanupFixtures() {
         where: { id: { in: allLocationIds } },
       });
     }
-    
+
     // Now delete the warehouses
     await prisma.warehouse.deleteMany({
       where: { id: { in: warehouseIds } },
@@ -229,11 +229,11 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("SALES_EXECUTIVE opens availability from /sales and sees commercial availability page", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto("/sales");
-    
+
     const availabilityLink = page.getByRole("link", { name: /Disponibilidad/i });
     await expect(availabilityLink).toBeVisible();
     await availabilityLink.click();
-    
+
     await expect(page).toHaveURL(/\/production\/availability/);
     await expect(page.getByRole("heading", { name: /Disponibilidad comercial/i })).toBeVisible();
   });
@@ -241,14 +241,14 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("Product + warehouse availability shows warehouse-specific 'Crear pedido' links with promise context", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     await expect(page.getByRole("heading", { name: /Disponibilidad comercial/i })).toBeVisible();
     await expect(page.getByLabel(/Producto requerido/i)).toHaveValue(fixture.baseProductSku);
-    
+
     // Check warehouse-specific "Crear pedido" link exists with warehouse code
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await expect(crearPedidoLink).toBeVisible();
-    
+
     // Verify link contains all promise parameters
     const href = await crearPedidoLink.getAttribute("href");
     expect(href).toContain("promiseWarehouseCode=" + fixture.warehouseCode);
@@ -260,13 +260,13 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("Crear pedido from availability carries productId, sku, warehouseId, available quantity, source=availability", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
-    
+
     await expect(page).toHaveURL(/\/production\/requests\/new/);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    
+
     // Verify URL has all promise parameters
     expect(page.url()).toContain("productId=" + fixture.baseProductId);
     expect(page.url()).toContain("sku=" + fixture.baseProductSku);
@@ -285,7 +285,7 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("Direct URL with promise params renders commercial promise summary", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=availability&promiseProductId=${fixture.baseProductId}&promiseSku=${fixture.baseProductSku}&promiseWarehouseId=${fixture.warehouseId}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName).replace(/%20/g, '+')}&promiseRequestedQty=1&promiseAvailableQty=20&promiseCheckedAt=${new Date().toISOString()}&promiseSource=availability&promiseIsSubstitute=false`);
-    
+
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
     await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
@@ -294,10 +294,10 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("Click-through from availability page renders commercial promise summary", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
-    
+
     await expect(page).toHaveURL(/\/production\/requests\/new/);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
@@ -310,10 +310,10 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await loginAs(page, "SALES_EXECUTIVE");
     // Use the same flow as test #3 which passes - click through from availability page
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
-    
+
     await expect(page).toHaveURL(/\/production\/requests\/new/);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
@@ -381,17 +381,17 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     });
 
     const { id: lowStockProductId } = lowStockProduct;
-    
+
     // Test with requested qty > available qty directly in Nuevo Pedido
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/requests/new?productId=${lowStockProductId}&sku=LOW-STOCK-001&source=availability&promiseProductId=${lowStockProductId}&promiseSku=LOW-STOCK-001&promiseWarehouseId=${fixture.warehouseId}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName)}&promiseRequestedQty=5&promiseAvailableQty=2&promiseCheckedAt=${new Date().toISOString()}&promiseSource=availability&promiseIsSubstitute=false`);
-    
+
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
     await expect(page.getByTestId("commercial-promise-status")).toHaveText("Disponibilidad insuficiente");
-    
+
     // Should NOT show "Promesa segura"
     await expect(page.getByTestId("commercial-promise-status")).not.toHaveText("Promesa segura");
-    
+
     // Cleanup
     await prisma.product.delete({ where: { id: lowStockProductId } });
     await prisma.location.delete({ where: { id: lowStockLocation.id } });
@@ -401,7 +401,7 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     // Navigate directly without promise params
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toHaveCount(0);
   });
@@ -409,14 +409,14 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("Equivalent context does not claim availability before it is checked", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/equivalences?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     await expect(page.getByRole("heading", { name: /Alternativas y equivalencias/i })).toBeVisible();
-    
+
     // Click create order for equivalent product
     const crearPedidoEquivLink = page.getByRole("link", { name: new RegExp(`Crear pedido con ${FIXTURE.equivalentName}`, "i") });
     await expect(crearPedidoEquivLink).toBeVisible();
     await crearPedidoEquivLink.click();
-    
+
     await expect(page).toHaveURL(/\/production\/requests\/new\?.*source=equivalences/);
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toHaveCount(0);
@@ -426,24 +426,24 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await page.setViewportSize({ width: 390, height: 844 });
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
-    
+
     const body = page.locator("body");
     const bodyWidth = await body.evaluate(el => el.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(390);
-    
+
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
   });
 
   test("MANAGER can access the flow and see promise state", async ({ page }) => {
     await loginAs(page, "MANAGER");
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
-    
+
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
     await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
@@ -452,10 +452,10 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("SYSTEM_ADMIN can access the flow and see promise state", async ({ page }) => {
     await loginAs(page, "SYSTEM_ADMIN");
     await page.goto(`/production/availability?q=${fixture.baseProductSku}&productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=catalog`);
-    
+
     const crearPedidoLink = page.getByRole("link", { name: new RegExp(`Crear pedido.*${fixture.warehouseCode}`, "i") });
     await crearPedidoLink.click();
-    
+
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
     await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
@@ -464,7 +464,7 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("WAREHOUSE_OPERATOR does not see sales-only commercial promise actions", async ({ page }) => {
     await loginAs(page, "WAREHOUSE_OPERATOR");
     await page.goto("/production/requests/new");
-    
+
     // Should not have access to sales views - either redirected or blocked
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).not.toBeVisible();
   });
@@ -474,12 +474,12 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     const staleTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto(`/production/requests/new?productId=${fixture.baseProductId}&sku=${fixture.baseProductSku}&source=availability&promiseProductId=${fixture.baseProductId}&promiseSku=${fixture.baseProductSku}&promiseWarehouseId=${fixture.warehouseId}&promiseWarehouseCode=${fixture.warehouseCode}&promiseWarehouseName=${encodeURIComponent(fixture.warehouseName)}&promiseRequestedQty=5&promiseAvailableQty=20&promiseCheckedAt=${encodeURIComponent(staleTime)}&promiseSource=availability&promiseIsSubstitute=false`);
-    
+
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
-    
+
     // Should show "Promesa vencida" badge (warning variant)
     await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa vencida");
-    
+
     // Should show warning about stale verification
     await expect(page.getByText(/consulta supera el límite de 15 minutos/i)).toBeVisible();
   });
@@ -487,7 +487,7 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
   test("Nuevo Pedido does not allow creation without at least one product or ensamble", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
     await page.goto("/production/requests/new");
-    
+
     await expect(page.getByRole("heading", { name: /Nuevo pedido comercial/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Continuar a producto/i })).toBeDisabled();
     await expect(page.getByRole("button", { name: /Crear pedido/i })).toHaveCount(0);

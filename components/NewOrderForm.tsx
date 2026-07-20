@@ -127,11 +127,11 @@ export function NewOrderForm({
   // A search query is context only; warehouse execution requires a resolved line.
   const assemblyReady = Boolean(warehouseId && entryFittingProductId && hoseProductId && exitFittingProductId && parsePositiveDecimal(hoseLength) && parsePositiveDecimal(assemblyQuantity));
   const hasProductContext = orderLines.length > 0;
-  const readinessState: "not_ready" | "missing_required" | "ready" = 
-    missingFields.length === 0 && hasProductContext 
-      ? "ready" 
-      : missingFields.length > 0 
-        ? "missing_required" 
+  const readinessState: "not_ready" | "missing_required" | "ready" =
+    missingFields.length === 0 && hasProductContext
+      ? "ready"
+      : missingFields.length > 0
+        ? "missing_required"
         : "not_ready";
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {

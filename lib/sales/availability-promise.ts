@@ -2,19 +2,19 @@ import { z } from "zod";
 
 /**
  * KAN-128: Commercial Availability Promise Contract
- * 
+ *
  * This defines the contract for carrying availability promise state
  * from the commercial availability page into the sales order creation flow.
  */
 
-export type CommercialPromiseSource = 
-  | "catalog" 
-  | "availability" 
-  | "equivalences" 
+export type CommercialPromiseSource =
+  | "catalog"
+  | "availability"
+  | "equivalences"
   | "manual"
   | "substitute";
 
-export type CommercialPromiseStatus = 
+export type CommercialPromiseStatus =
   | "promise_safe"
   | "insufficient_stock"
   | "unresolved"
@@ -168,7 +168,7 @@ export function buildCommercialPromiseFromSearchParams(searchParams: URLSearchPa
       originalProductId: optionalParam("promiseOriginalProductId"),
       originalProductSku: optionalParam("promiseOriginalProductSku"),
     });
-    
+
     if (result.success) {
       return result.data;
     }

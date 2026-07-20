@@ -1,6 +1,6 @@
 # Wireframes UX de baja fidelidad: Sales → Almacén
 
-Fecha: 2026-07-09  
+Fecha: 2026-07-09
 Estado: propuesta; no implementada.
 
 ## Reglas de diseño
@@ -154,4 +154,3 @@ No se debe trasladar literalmente la cuadrícula desktop a móvil.
 - Cambios en enums Prisma o migraciones.
 - Reglas nuevas de autorización.
 - Deploy o validación contra AWS.
-

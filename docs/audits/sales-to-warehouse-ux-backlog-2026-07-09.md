@@ -1,6 +1,6 @@
 # Backlog priorizado de mejora Sales → Almacén
 
-Fecha: 2026-07-09  
+Fecha: 2026-07-09
 Estado: propuesta derivada del levantamiento; requiere validación funcional con AWS antes de cerrar alcance.
 
 | Prioridad | Lote | Resultado | Alcance | Dependencia |
@@ -26,4 +26,3 @@ Estado: propuesta derivada del levantamiento; requiere validación funcional con
 ## Criterio de no expansión
 
 Si la validación AWS demuestra que staging, ownership físico o entrega no tienen persistencia suficiente, se debe abrir un ticket funcional separado antes de modificar la UI. No se debe resolver una ausencia de modelo de datos solo con cambios visuales.
-

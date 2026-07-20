@@ -1,6 +1,6 @@
 # Matriz de estados y responsabilidades: Sales → Almacén
 
-Fecha: 2026-07-09  
+Fecha: 2026-07-09
 Estado: levantamiento documental; validación AWS pendiente hasta disponibilidad autorizada.
 
 ## Objetivo
@@ -88,4 +88,3 @@ El código actual ya distingue señales útiles para priorización gerencial: ve
 ## Criterio de aceptación del levantamiento funcional
 
 La matriz se considerará validada cuando cada transición tenga: pantalla, rol autorizado, acción observable, persistencia verificable y prueba E2E o evidencia de servicio equivalente.
-

@@ -1,6 +1,6 @@
 # Levantamiento UX/UI de flujos operativos
 
-Fecha: 2026-07-09  
+Fecha: 2026-07-09
 Alcance: revisión visual y funcional de superficies operativas por rol, sin modificar componentes de diseño ni datos de AWS.
 
 ## Resultado ejecutivo

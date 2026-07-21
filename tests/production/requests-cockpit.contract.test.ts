@@ -17,12 +17,12 @@ describe("production requests cockpit contract", () => {
     expect(listContent).toContain("getSalesOrderFlowNarrative");
     expect(listContent).toContain("takeRequestFromList");
     expect(listContent).toContain("Pedidos y surtidos");
-    expect(listContent).toContain("Mis pedidos");
-    expect(listContent).toContain("Pedidos sin responsable");
+    expect(listContent).toContain("Trabajo asignado");
+    expect(listContent).toContain("disponibles para tomar");
     expect(listContent).toContain("requests-active-filters");
     expect(listContent).toContain("request-card");
     expect(listContent).toContain("Ver seguimiento operativo");
-    expect(listContent).toContain("Siguiente acción");
+    expect(listContent).toContain("Siguiente:");
     expect(listContent).toContain("Seguimiento");
     expect(listContent).toContain("Seguimiento comercial");
     expect(listContent).toContain("Ver detalle");

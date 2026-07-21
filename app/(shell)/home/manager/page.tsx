@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { ManagerHomeContent } from '@/components/home/ManagerHomeContent';
 import { ManagerHomeSkeleton } from '@/components/home/ManagerHomeSkeleton';
 import { getFulfillmentDashboardSnapshot } from '@/lib/dashboard/fulfillment-dashboard';
+import prisma from '@/lib/prisma';
 
 export default async function ManagerHomePage() {
   const ctx = await getSessionContext();
@@ -13,10 +14,11 @@ export default async function ManagerHomePage() {
   }
 
   // Fetch real data from fulfillment dashboard
-  const fulfillmentSnapshot = await getFulfillmentDashboardSnapshot({ 
-    role: "MANAGER", 
-    staleHours: 4 
-  });
+  const [fulfillmentSnapshot, purchaseDrafts, purchaseAttention] = await Promise.all([
+    getFulfillmentDashboardSnapshot({ role: "MANAGER", staleHours: 4 }),
+    prisma.purchaseOrder.count({ where: { status: 'BORRADOR' } }),
+    prisma.purchaseOrder.count({ where: { status: 'PARCIAL' } }),
+  ]);
 
   const overdueOrders = fulfillmentSnapshot.kpis?.overdue ?? 0;
   const alerts = fulfillmentSnapshot.alerts ?? [];
@@ -31,6 +33,8 @@ export default async function ManagerHomePage() {
         <ManagerHomeContent 
           overdueOrders={overdueOrders}
           activeBlockers={activeBlockers}
+          purchaseDrafts={purchaseDrafts}
+          purchaseAttention={purchaseAttention}
         />
       </Suspense>
     </div>

@@ -17,6 +17,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,8 @@ async function pickStock(formData: FormData) {
       brand: true,
       description: true,
       type: true,
+      unitLabel: true,
+      attributes: true,
       subcategory: true,
       category: { select: { name: true } },
       inventory: { select: { quantity: true, available: true } },
@@ -71,6 +74,10 @@ async function pickStock(formData: FormData) {
       ? `Coincidencias: ${suggestions.slice(0, 3).map((row) => row.sku).join(", ")}`
       : "Producto no encontrado (SKU/Referencia)";
     redirect(`/inventory/pick?error=${encodeURIComponent(hint)}`);
+  }
+  const quantityError = quantityValidationMessage(quantity, getQuantityPolicy(product));
+  if (quantityError) {
+    redirect(`/inventory/pick?error=${encodeURIComponent(quantityError)}`);
   }
 
   // Find location by code if provided

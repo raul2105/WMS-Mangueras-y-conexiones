@@ -23,7 +23,7 @@ describe("purchase order document contracts", () => {
     expect(content).toContain("Correo al proveedor");
     expect(content).toContain("Envío por correo deshabilitado");
     expect(content).toContain("Vista previa del cuerpo");
-    expect(content).toContain("KAN-85");
+    expect(content).not.toContain("KAN-");
   });
 
   it("guards the document preview page and print action", () => {

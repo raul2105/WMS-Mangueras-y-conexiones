@@ -13,6 +13,7 @@ import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import { resolveProductInput } from "@/lib/product-search";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,8 @@ async function receiveStock(formData: FormData) {
       brand: true,
       description: true,
       type: true,
+      unitLabel: true,
+      attributes: true,
       subcategory: true,
       category: { select: { name: true } },
       inventory: { select: { quantity: true, available: true } },
@@ -81,6 +84,10 @@ async function receiveStock(formData: FormData) {
       ? `Coincidencias: ${suggestions.slice(0, 3).map((row) => row.sku).join(", ")}`
       : "Producto no encontrado (SKU/Referencia)";
     redirect(`/inventory/receive?error=${encodeURIComponent(hint)}`);
+  }
+  const quantityError = quantityValidationMessage(quantity, getQuantityPolicy(product));
+  if (quantityError) {
+    redirect(`/inventory/receive?error=${encodeURIComponent(quantityError)}`);
   }
 
   const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true } });

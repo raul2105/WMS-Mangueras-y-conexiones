@@ -10,14 +10,18 @@ import RequestProductLineForm from "@/components/RequestProductLineForm";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
 import {
   hasProductionCockpitAccess,
+  hasSalesAssignmentAccess,
   hasSalesWriteAccess,
+  requireSalesAssignmentAccess,
   requireSalesWriteAccess,
 } from "@/lib/rbac/sales";
 import {
   addSalesRequestProductLine,
   cancelSalesRequestOrder,
+  assignSalesRequestOrder,
   confirmSalesRequestOrder,
   deleteSalesRequestLine,
+  markSalesRequestPreparedForDelivery,
   markSalesRequestDelivered,
   pullSalesRequestOrder,
 } from "@/lib/sales/request-service";
@@ -33,6 +37,8 @@ import {
 import { getSalesConsoleTimelineItems } from "@/lib/sales/console";
 import {
   firstErrorMessage,
+  salesInternalOrderAssignmentSchema,
+  salesInternalOrderPreparationSchema,
   salesInternalOrderProductLineCreateSchema,
   salesInternalOrderTransitionSchema,
 } from "@/lib/schemas/wms";
@@ -153,11 +159,40 @@ async function takeRequest(formData: FormData) {
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
-    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido tomado y asignado")}`);
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido tomado; puedes continuar con la entrega")}`);
   } catch (error) {
     perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo tomar el pedido";
+    redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function assignRequest(formData: FormData) {
+  "use server";
+  const perf = startPerf("action.production.requests.detail.assign");
+  const requestId = await getRequestId();
+  await requireSalesAssignmentAccess();
+  const sessionCtx = await getSessionContext();
+  const parsed = salesInternalOrderAssignmentSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+    assigneeUserId: String(formData.get("assigneeUserId") ?? "").trim(),
+  });
+  if (!parsed.success || !sessionCtx.user?.id) {
+    const message = parsed.success ? "Sesión inválida para asignar el pedido" : firstErrorMessage(parsed.error);
+    redirect(`/production/requests?error=${encodeURIComponent(message)}`);
+  }
+  try {
+    const result = await assignSalesRequestOrder(prisma, {
+      ...parsed.data,
+      assignedByUserId: sessionCtx.user.id,
+    });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true, alreadyAssigned: result.alreadyAssigned });
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent(result.alreadyAssigned ? "El pedido ya estaba asignado a ese vendedor" : "Vendedor asignado; queda pendiente de aceptación")}`);
+  } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "No se pudo asignar el pedido";
     redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
   }
 }
@@ -194,6 +229,36 @@ async function markDelivered(formData: FormData) {
     perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo marcar la entrega";
+    redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function markPreparedForDelivery(formData: FormData) {
+  "use server";
+  const perf = startPerf("action.production.requests.detail.prepare_delivery");
+  const requestId = await getRequestId();
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const sessionCtx = await getSessionContext();
+  const parsed = salesInternalOrderPreparationSchema.safeParse({
+    orderId: String(formData.get("orderId") ?? "").trim(),
+    preparedLocationId: String(formData.get("preparedLocationId") ?? "").trim(),
+    notes: String(formData.get("notes") ?? "").trim() || undefined,
+  });
+  if (!parsed.success || !sessionCtx.user?.id) {
+    const message = parsed.success ? "Sesión inválida para preparar el pedido" : firstErrorMessage(parsed.error);
+    redirect(`/production/requests/${String(formData.get("orderId") ?? "")}?error=${encodeURIComponent(message)}`);
+  }
+  try {
+    const result = await markSalesRequestPreparedForDelivery(prisma, {
+      ...parsed.data,
+      preparedByUserId: sessionCtx.user.id,
+    });
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: true, alreadyPrepared: result.alreadyPrepared });
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent(result.alreadyPrepared ? result.warning : "Pedido preparado para entrega")}`);
+  } catch (error) {
+    perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "No se pudo preparar el pedido";
     redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
   }
 }
@@ -344,6 +409,8 @@ export default async function ProductionRequestDetailPage({
       assignedToUserId: true,
       assignedAt: true,
       pulledAt: true,
+      preparedForDeliveryAt: true,
+      preparedForDeliveryNotes: true,
       deliveredToCustomerAt: true,
       createdAt: true,
       confirmedAt: true,
@@ -365,6 +432,8 @@ export default async function ProductionRequestDetailPage({
         },
       },
       assignedToUser: { select: { name: true, email: true } },
+      preparedForDeliveryByUser: { select: { name: true, email: true } },
+      preparedForDeliveryLocation: { select: { code: true, name: true } },
       confirmedByUser: { select: { name: true, email: true } },
       cancelledByUser: { select: { name: true, email: true } },
       deliveredByUser: { select: { name: true, email: true } },
@@ -442,6 +511,29 @@ export default async function ProductionRequestDetailPage({
   }) as any;
   if (!order) redirect("/production/requests");
 
+  const canManageAssignments = hasSalesAssignmentAccess({ roles: sessionCtx.roles });
+  const salesExecutives = canManageAssignments
+    ? await prisma.user.findMany({
+        where: {
+          isActive: true,
+          userRoles: { some: { role: { code: "SALES_EXECUTIVE", isActive: true } } },
+        },
+        orderBy: [{ name: "asc" }, { email: "asc" }],
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const deliveryLocations = order.warehouse?.id
+    ? await prisma.location.findMany({
+        where: {
+          warehouseId: order.warehouse.id,
+          isActive: true,
+          usageType: { in: ["STAGING", "SHIPPING"] },
+        },
+        orderBy: [{ usageType: "asc" }, { code: "asc" }],
+        select: { id: true, code: true, name: true, usageType: true },
+      })
+    : [];
+
   const linkedProductionOrders = await prisma.productionOrder.findMany({
     where: {
       sourceDocumentType: "SalesInternalOrder",
@@ -471,6 +563,7 @@ export default async function ProductionRequestDetailPage({
           "PULL_REQUEST",
           "RELEASE_DIRECT_PICKLIST",
           "CONFIRM_DIRECT_PICK",
+          "MARK_PREPARED_FOR_DELIVERY",
           "MARK_DELIVERED_TO_CUSTOMER",
           "CANCEL_REQUEST",
         ],
@@ -508,6 +601,8 @@ export default async function ProductionRequestDetailPage({
     roles: sessionCtx.roles,
     status: orderStatus,
     assignedToUserId: order.assignedToUserId,
+    assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
+    pulledAt: order.pulledAt,
     isCreatedByManager,
   });
 
@@ -515,6 +610,13 @@ export default async function ProductionRequestDetailPage({
   const configuredLines = (order.lines as any[]).filter((line: any) => line.lineKind === "CONFIGURED_ASSEMBLY");
   const hasCompletedDirectPick = productLines.length === 0 || latestPickList?.status === "COMPLETED";
   const expectedAssemblyLineIds = new Set(configuredLines.map((line: any) => line.id));
+  const pendingAssemblyOrders = linkedProductionOrders.filter(
+    (row) => row.status !== "COMPLETADA" && row.status !== "CANCELADA",
+  );
+  const assemblyHref =
+    pendingAssemblyOrders.length === 1
+      ? `/production/orders/${pendingAssemblyOrders[0].id}`
+      : `/production/requests/${order.id}#ensambles`;
   const hasCompletedConfiguredAssembly = configuredLines.length === 0
     || (
       linkedProductionOrders.length === configuredLines.length
@@ -525,20 +627,31 @@ export default async function ProductionRequestDetailPage({
     deliveredToCustomerAt: order.deliveredToCustomerAt,
     assignedToUserId: order.assignedToUserId,
     pulledAt: order.pulledAt,
+    preparedForDeliveryAt: order.preparedForDeliveryAt,
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
   });
+  const canPrepareForDelivery =
+    canOperateDirectPick &&
+    orderStatus === "CONFIRMADA" &&
+    Boolean(order.assignedToUserId && order.pulledAt) &&
+    hasCompletedDirectPick &&
+    hasCompletedConfiguredAssembly &&
+    !order.preparedForDeliveryAt &&
+    !order.deliveredToCustomerAt;
   const flowNarrative = getSalesOrderFlowNarrative({
     orderId: order.id,
     roles: sessionCtx.roles,
     status: orderStatus,
     assignedToUserId: order.assignedToUserId,
+    preparedForDeliveryAt: order.preparedForDeliveryAt,
     deliveredToCustomerAt: order.deliveredToCustomerAt,
     pulledAt: order.pulledAt,
     latestPickStatus: latestPickList?.status ?? null,
     hasProductLines: productLines.length > 0,
     hasAssemblyLines: configuredLines.length > 0,
     hasCompletedConfiguredAssembly,
+    assemblyHref,
     takeEligibility,
     deliveredEligibility,
   });
@@ -549,6 +662,10 @@ export default async function ProductionRequestDetailPage({
     pulledAt: order.pulledAt,
     latestPickStatus: latestPickList?.status ?? null,
     latestPickUpdatedAt: latestPickList?.updatedAt ?? null,
+    preparedForDeliveryAt: order.preparedForDeliveryAt,
+    preparedForDeliveryLocationLabel: order.preparedForDeliveryLocation
+      ? `${order.preparedForDeliveryLocation.code} — ${order.preparedForDeliveryLocation.name}`
+      : null,
     deliveredAt: order.deliveredToCustomerAt,
     cancelledAt: order.cancelledAt,
   });
@@ -592,25 +709,15 @@ export default async function ProductionRequestDetailPage({
         </div>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]">
-        <div className="glass-card space-y-4 text-sm text-[var(--text-secondary)]">
+      <section className="glass-card space-y-4 text-sm text-[var(--text-secondary)]" data-testid="request-work-summary">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado y siguiente acción</h2>
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado del pedido</h2>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[var(--text-muted)]">Etapa actual:</span>
                 <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
               </div>
-              <p className="text-[var(--text-primary)]">
-                Cliente:{" "}
-                {order.customerId && canViewCustomers ? (
-                  <Link href={`/sales/customers/${order.customerId}`} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
-                    {displayCustomer}
-                  </Link>
-                ) : (
-                  displayCustomer
-                )}
-              </p>
+              <p>Compromiso: {formatDate(order.dueDate)} · Responsable: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href="/production/requests" className={buttonStyles({ variant: "secondary" })}>
@@ -619,15 +726,11 @@ export default async function ProductionRequestDetailPage({
             </div>
           </div>
 
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              Siguiente acción
-            </p>
-            <p className="mt-2 text-[var(--text-primary)]">
+          <div className="op-next-action">
+            <p className="op-label">{flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "Pedido finalizado" : "Siguiente paso"}</p>
+            <p className="mt-1 font-semibold text-[var(--text-primary)]">
               {flowNarrative.nextRecommendedAction.blockedReason ? (
-                <span className="text-[var(--text-muted)]">
-                  {flowNarrative.nextRecommendedAction.label}
-                </span>
+                flowNarrative.nextRecommendedAction.label
               ) : (
                 <Link href={flowNarrative.nextRecommendedAction.href} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
                   {flowNarrative.nextRecommendedAction.label}
@@ -641,43 +744,6 @@ export default async function ProductionRequestDetailPage({
             ) : null}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                Pedido
-              </p>
-              <p className="mt-1 text-[var(--text-primary)]">
-                {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">
-                Fecha compromiso: {formatDate(order.dueDate)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                Asignación
-              </p>
-              <p className="mt-1 text-[var(--text-primary)]">
-                {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "--"}
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">
-                Solicitado por: {order.requestedByUser?.name ?? order.requestedByUser?.email ?? "--"}
-              </p>
-            </div>
-          </div>
-
-          {order.notes ? (
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 text-[var(--text-secondary)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                Notas
-              </p>
-              <p className="mt-2 text-sm">{order.notes}</p>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="glass-card space-y-4">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Acciones</h2>
           <div className="flex flex-wrap gap-3">
             {canRenderWriteActions ? (
               <>
@@ -689,72 +755,164 @@ export default async function ProductionRequestDetailPage({
                     </button>
                   </form>
                 ) : null}
-                {order.status !== "CANCELADA" ? (
-                  <form action={cancelRequest}>
-                    <input type="hidden" name="orderId" value={order.id} />
-                    <button type="submit" className="btn-secondary border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger-text)] hover:bg-[var(--danger-soft-hover)]">
-                      Cancelar pedido
-                    </button>
-                  </form>
-                ) : null}
-                <div className="space-y-1">
+                {takeEligibility.canTakeOrder ? (
                   <form action={takeRequest}>
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button
-                      type="submit"
-                      disabled={!takeEligibility.canTakeOrder}
-                      className={`btn-primary ${!takeEligibility.canTakeOrder ? "cursor-not-allowed opacity-55" : ""}`}
-                    >
-                      Tomar pedido
-                    </button>
+                    <button type="submit" className="btn-secondary">{takeEligibility.takeActionLabel ?? "Tomar pedido"}</button>
                   </form>
-                  {!takeEligibility.canTakeOrder ? <p className="text-xs text-[var(--status-warning-text)]">{takeEligibility.takeBlockedReason}</p> : null}
-                </div>
-                <div className="space-y-1">
+                ) : null}
+                {deliveredEligibility.canMarkDelivered ? (
                   <form action={markDelivered}>
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button
-                      type="submit"
-                      disabled={!deliveredEligibility.canMarkDelivered}
-                      className={`btn-secondary ${!deliveredEligibility.canMarkDelivered ? "cursor-not-allowed opacity-55" : ""}`}
-                    >
-                      Entregado al cliente
-                    </button>
+                    <button type="submit" className="btn-primary">Entregado al cliente</button>
                   </form>
-                  {!deliveredEligibility.canMarkDelivered ? (
-                    <p className="text-xs text-[var(--status-warning-text)]">{deliveredEligibility.deliveredBlockedReason}</p>
-                  ) : null}
-                </div>
+                ) : null}
               </>
             ) : (
               <p className="text-sm text-[var(--text-muted)]">Este rol puede revisar el pedido, pero no ejecutar acciones de escritura.</p>
             )}
-            {canOperateDirectPick && productLines.length > 0 ? (
-              <Link href={`/production/fulfillment/${order.id}`} className={buttonStyles({ variant: "secondary" })}>
-                Operar surtido directo
-              </Link>
-            ) : null}
           </div>
-          <p className="text-sm text-[var(--text-muted)]">
-            {isOperatorView
-              ? "Desde aquí puedes revisar el estado del pedido y saltar a surtido directo o al seguimiento del ensamble."
-              : "La captura y el seguimiento viven en el pedido. La operación física directa y el ensamble exacto siguen en vistas separadas."}
-          </p>
-          {latestPickList ? (
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-              Último surtido directo: <span className="font-mono text-[var(--accent)]">{latestPickList.code}</span> · {summarizePickListStatus(latestPickList.status)}
-              <p className="mt-1 text-xs text-[var(--text-muted)]">
-                Destino: {latestPickList.targetLocation.code} - {latestPickList.targetLocation.name}
+          {canPrepareForDelivery ? (
+            <form action={markPreparedForDelivery} className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] p-4" data-testid="prepare-for-delivery-form">
+              <input type="hidden" name="orderId" value={order.id} />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                  Área de entrega *
+                  <select name="preparedLocationId" required className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                    <option value="">Selecciona dónde quedó separado</option>
+                    {deliveryLocations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.code} — {location.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                  Nota (opcional)
+                  <input name="notes" maxLength={500} placeholder="Ej. esperando recolección del cliente" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
+                </label>
+                <button type="submit" className="btn-primary" disabled={deliveryLocations.length === 0}>
+                  Preparar para entrega
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                Registra el lugar físico donde quedó separado. Ventas podrá continuar sólo después de este paso.
               </p>
+              {deliveryLocations.length === 0 ? (
+                <p className="mt-1 text-xs text-[var(--status-warning-text)]">No hay un área de entrega activa configurada para este almacén.</p>
+              ) : null}
+            </form>
+          ) : null}
+          {order.preparedForDeliveryAt ? (
+            <div className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--text-secondary)]" data-testid="prepared-for-delivery-summary">
+              <p className="font-semibold text-[var(--status-success-text)]">Preparado para entrega</p>
+              <p className="mt-1">
+                Área: {order.preparedForDeliveryLocation ? `${order.preparedForDeliveryLocation.code} — ${order.preparedForDeliveryLocation.name}` : "Sin área registrada"}
+                {" · "}Preparó: {order.preparedForDeliveryByUser?.name ?? order.preparedForDeliveryByUser?.email ?? "Usuario operativo"}
+                {" · "}{formatDateTime(order.preparedForDeliveryAt)}
+              </p>
+              {order.preparedForDeliveryNotes ? <p className="mt-1 text-xs">{order.preparedForDeliveryNotes}</p> : null}
             </div>
           ) : null}
-        </div>
+          {canManageAssignments && order.status === "CONFIRMADA" && !order.pulledAt && !order.deliveredToCustomerAt ? (
+            <form action={assignRequest} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3" data-testid="manager-assign-order">
+              <input type="hidden" name="orderId" value={order.id} />
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                  {order.assignedToUserId ? "Responsable asignado" : "Asignar vendedor"}
+                  <select name="assigneeUserId" defaultValue={order.assignedToUserId ?? ""} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" required>
+                    <option value="" disabled>Selecciona un ejecutivo</option>
+                    {salesExecutives.map((user) => <option key={user.id} value={user.id}>{user.name ?? user.email} · {user.email}</option>)}
+                  </select>
+                </label>
+                <button type="submit" className="btn-secondary">{order.assignedToUserId ? "Reasignar antes de toma" : "Asignar vendedor"}</button>
+              </div>
+              <p className="mt-2 text-xs text-[var(--text-muted)]">El vendedor verá el pedido en su cola y deberá aceptarlo antes de continuar.</p>
+            </form>
+          ) : null}
+          {(order.notes || latestPickList || (canRenderWriteActions && order.status !== "CANCELADA")) ? (
+            <details className="border-t border-[var(--border-soft)] pt-3">
+              <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">Ver información y acciones adicionales</summary>
+              <div className="mt-3 space-y-3">
+                {order.notes ? <p><span className="font-medium text-[var(--text-primary)]">Notas:</span> {order.notes}</p> : null}
+                {latestPickList ? <p>Último surtido: <span className="font-mono text-[var(--accent)]">{latestPickList.code}</span> · {summarizePickListStatus(latestPickList.status)} · {latestPickList.targetLocation.code} - {latestPickList.targetLocation.name}</p> : null}
+                {canRenderWriteActions && order.status !== "CANCELADA" ? (
+                  <form action={cancelRequest}><input type="hidden" name="orderId" value={order.id} /><button type="submit" className="btn-secondary border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger-text)] hover:bg-[var(--danger-soft-hover)]">Cancelar pedido</button></form>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
       </section>
 
+      {(productLines.length > 0 || configuredLines.length > 0) ? (
+        <section className="glass-card space-y-4" data-testid="request-work-board">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Trabajo de este pedido</h2>
+            <p className="text-sm text-[var(--text-muted)]">
+              Cada renglón se atiende en su propia operación. Completa todos antes de entregar el pedido.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {productLines.length > 0 ? (
+              <article className="flex flex-col gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 sm:flex-row sm:items-center sm:justify-between" data-testid="request-work-direct-pick">
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--text-primary)]">Productos directos</p>
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                    {productLines.length.toLocaleString("es-MX")} {productLines.length === 1 ? "producto" : "productos"} para surtir y separar para entrega.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Badge variant={hasCompletedDirectPick ? "success" : latestPickList?.status === "DRAFT" ? "warning" : "accent"}>
+                    {hasCompletedDirectPick
+                      ? "Surtido completado"
+                      : latestPickList?.status === "DRAFT"
+                        ? "Por liberar"
+                        : summarizePickListStatus(latestPickList?.status ?? "DRAFT")}
+                  </Badge>
+                  {canOperateDirectPick ? (
+                    <Link href={`/production/fulfillment/${order.id}`} className={buttonStyles({ variant: hasCompletedDirectPick ? "secondary" : "primary", size: "sm" })}>
+                      {hasCompletedDirectPick ? "Ver surtido" : "Surtir productos"}
+                    </Link>
+                  ) : null}
+                </div>
+              </article>
+            ) : null}
+
+            {configuredLines.map((line: any, index: number) => {
+              const linkedProduction = linkedProductionByLine.get(line.id);
+              const isCompleted = linkedProduction?.status === "COMPLETADA";
+              const isCancelled = linkedProduction?.status === "CANCELADA";
+
+              return (
+                <article key={line.id} className="flex flex-col gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 sm:flex-row sm:items-center sm:justify-between" data-testid={`request-work-assembly-${index + 1}`}>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[var(--text-primary)]">Ensamble {index + 1}</p>
+                    <p className="mt-1 truncate text-sm text-[var(--text-secondary)]">
+                      {line.assemblyConfiguration?.entryFittingProduct.sku} + {line.assemblyConfiguration?.hoseProduct.sku} + {line.assemblyConfiguration?.exitFittingProduct.sku}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge variant={isCompleted ? "success" : isCancelled ? "danger" : linkedProduction ? "warning" : "neutral"}>
+                      {linkedProduction ? summarizeProductionStatus(linkedProduction.status) : "Pendiente de generar"}
+                    </Badge>
+                    {canOperateDirectPick && linkedProduction && !isCancelled ? (
+                      <Link href={`/production/orders/${linkedProduction.id}`} className={buttonStyles({ variant: isCompleted ? "secondary" : "primary", size: "sm" })}>
+                        {isCompleted ? "Ver ensamble" : "Continuar ensamble"}
+                      </Link>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
-        <div className="glass-card space-y-3">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Timeline operativo</h2>
-          <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+        <details className="glass-card space-y-3">
+          <summary className="cursor-pointer text-lg font-semibold text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">Seguimiento del pedido</summary>
+          <ul className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
             {timeline.map((item) => (
               <li key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
@@ -769,7 +927,7 @@ export default async function ProductionRequestDetailPage({
               </li>
             ))}
           </ul>
-        </div>
+        </details>
 
         <details className="glass-card space-y-3">
           <summary className="cursor-pointer text-lg font-semibold text-[var(--text-primary)]">
@@ -848,7 +1006,7 @@ export default async function ProductionRequestDetailPage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Productos independientes</h2>
-            <p className="text-sm text-[var(--text-muted)]">Lineas con surtido directo a staging sin pasar por WIP.</p>
+            <p className="text-sm text-[var(--text-muted)]">Líneas con surtido directo hacia el área de entrega, sin pasar por WIP.</p>
           </div>
           {canOperateDirectPick && productLines.length > 0 ? (
             <Link href={`/production/fulfillment/${order.id}`} className={buttonStyles({ variant: "secondary", size: "sm" })}>
@@ -931,7 +1089,7 @@ export default async function ProductionRequestDetailPage({
         )}
       </section>
 
-      <section className="glass-card space-y-4">
+      <section id="ensambles" className="glass-card space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">Ensambles configurados</h2>
           <p className="text-sm text-[var(--text-muted)]">Lineas que generan una orden exacta ligada al pedido sin depender de un SKU `ASSEMBLY`.</p>

@@ -189,6 +189,6 @@ describe("purchase order email contract", () => {
     expect(pageContent).toContain("Correo al proveedor");
     expect(pageContent).toContain("Vista previa del cuerpo");
     expect(pageContent).toContain("Envío por correo deshabilitado");
-    expect(pageContent).toContain("KAN-85");
+    expect(pageContent).not.toContain("KAN-");
   });
 });

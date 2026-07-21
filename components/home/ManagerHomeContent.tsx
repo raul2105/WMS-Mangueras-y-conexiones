@@ -2,27 +2,33 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, Users, Flag } from 'lucide-react';
+import { AlertCircle, ClipboardList, Flag, ShoppingCart, Truck, Users } from 'lucide-react';
 import Link from 'next/link';
 
 interface ManagerHomeContentProps {
   overdueOrders: number;
   activeBlockers: number;
+  purchaseDrafts: number;
+  purchaseAttention: number;
 }
 
 export function ManagerHomeContent({ 
   overdueOrders, 
-  activeBlockers
+  activeBlockers,
+  purchaseDrafts,
+  purchaseAttention,
 }: ManagerHomeContentProps) {
   const stats = [
     { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-red-600', href: '/production/requests?queue=overdue', live: true },
     { label: 'Bloqueos Activos', value: String(activeBlockers), icon: Flag, color: 'text-purple-600', href: '/production/requests?queue=assembly_blocked', live: true },
+    { label: 'OC por confirmar', value: String(purchaseDrafts), icon: ShoppingCart, color: 'text-amber-600', href: '/purchasing/orders?preset=borrador', live: true },
+    { label: 'Recepciones a resolver', value: String(purchaseAttention), icon: Truck, color: 'text-orange-600', href: '/purchasing/orders?preset=parciales', live: true },
   ];
 
   return (
     <div className="space-y-6">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((stat => <Link key={stat.label} href={stat.href} className="block">
             <Card className="hover:shadow-md transition-shadow cursor-pointer">
               <CardContent className="p-6">
@@ -44,23 +50,25 @@ export function ManagerHomeContent({
         ))}
       </div>
 
-      {/* Quick Actions */}
+      {/* Manager decisions, not warehouse execution. */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users size={20} />
-            Acciones de Gestión
+            Decisiones del día
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
-              { label: 'Reasignar Trabajo', href: '/warehouse?reassign=true', icon: Users },
-              { label: 'Resolver Bloqueos', href: '/production/requests?queue=assembly_blocked', icon: Flag },
-              { label: 'Ver Reportes', href: '/audit', icon: Flag },
+              { label: 'Revisar pedidos', href: '/production/requests', icon: ClipboardList, primary: true },
+              { label: 'Asignar vendedores', href: '/production/requests?stage=por_asignar', icon: Users },
+              { label: 'Resolver bloqueos', href: '/production/requests?queue=assembly_blocked', icon: Flag },
+              { label: 'Crear OC', href: '/purchasing/orders/new', icon: ShoppingCart },
+              { label: 'Ver abastecimiento', href: '/purchasing/orders', icon: Truck },
             ].map((action) => (
               <Link key={action.label} href={action.href}>
-                <Button variant="secondary" className="w-full justify-start gap-2 h-auto py-3">
+                <Button variant={action.primary ? "primary" : "secondary"} className="w-full justify-start gap-2 h-auto py-3">
                   <action.icon size={18} />
                   <span>{action.label}</span>
                 </Button>

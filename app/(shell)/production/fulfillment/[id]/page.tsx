@@ -283,6 +283,9 @@ export default async function ProductionFulfillmentPage({
               <p className="op-helper">
                 Liberada: {activePickList.releasedAt ? new Date(activePickList.releasedAt).toLocaleString("es-MX") : "--"} · Cerrada: {activePickList.completedAt ? new Date(activePickList.completedAt).toLocaleString("es-MX") : "--"}
               </p>
+              <a href={`/api/production/requests/${order.id}/pick-list.pdf`} className="mt-3 inline-flex text-sm font-semibold text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                Descargar lista de surtido
+              </a>
             </div>
           )}
 

@@ -767,6 +767,11 @@ export default async function ProductionRequestDetailPage({
                     <button type="submit" className="btn-primary">Entregado al cliente</button>
                   </form>
                 ) : null}
+                {order.deliveredToCustomerAt ? (
+                  <a href={`/api/production/requests/${order.id}/delivery.pdf`} className={buttonStyles({ variant: "secondary" })}>
+                    Descargar comprobante de entrega
+                  </a>
+                ) : null}
               </>
             ) : (
               <p className="text-sm text-[var(--text-muted)]">Este rol puede revisar el pedido, pero no ejecutar acciones de escritura.</p>

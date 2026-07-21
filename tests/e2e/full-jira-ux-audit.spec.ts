@@ -254,38 +254,32 @@ test.describe
       page.getByRole("heading", { name: /Órdenes de compra/i }),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: /Todas/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Borrador/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Por completar/i })).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /Confirmadas/i }),
+      page.getByRole("link", { name: /Por enviar o recibir/i }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /En tránsito/i }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: /Parciales/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Recibidas/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Recepción parcial/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Cerradas/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /Vencidas/i })).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /Por recibir hoy/i }),
-    ).toBeVisible();
-
     await page.getByRole("link", { name: /Vencidas/i }).click();
     await expect(page).toHaveURL(/\/purchasing\/orders\?preset=vencidas/);
     await expect(
       page.getByRole("link", { name: /E2E-PO-OVERDUE-/i }).first(),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: /Por recibir hoy/i }).click();
-    await expect(page).toHaveURL(
-      /\/purchasing\/orders\?preset=por_recibir_hoy/,
-    );
+    await page.getByRole("link", { name: /Por enviar o recibir/i }).click();
+    await expect(page).toHaveURL(/\/purchasing\/orders\?preset=confirmadas/);
     await expect(
       page.getByRole("link", { name: /E2E-PO-CONF-/i }).first(),
     ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /E2E-PO-PARTIAL-/i }).first(),
-    ).toBeVisible();
+    await page.getByRole("link", { name: /Recepción parcial/i }).click();
+    await expect(page).toHaveURL(/\/purchasing\/orders\?preset=recepcion_parcial/);
+    await expect(page.getByRole("link", { name: /E2E-PO-PARTIAL-/i }).first()).toBeVisible();
 
-    await page.getByRole("link", { name: /Borrador/i }).click();
+    await page.getByRole("link", { name: /Por completar/i }).click();
     await expect(page).toHaveURL(/\/purchasing\/orders\?preset=borrador/);
     await expect(
       page.getByRole("link", { name: /E2E-PO-DRAFT-/i }).first(),
@@ -310,10 +304,9 @@ test.describe
     await expect(
       page.getByRole("link", { name: /Descargar PDF/i }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /Recibir mercancía/i }),
-    ).toHaveCount(2);
-    await expect(page.getByText(/KAN-88/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Marcar en tránsito/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Recibir mercancía/i })).toHaveCount(0);
+    await expect(page.getByText(/KAN-88/i)).toHaveCount(0);
   });
 
   test("KAN-80 warehouse execution cockpit exposes the new request capture route", async ({

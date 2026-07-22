@@ -218,13 +218,21 @@ export default async function ProductionFulfillmentPage({
   const activePickList = order.pickLists.find((pickList) => pickList.status !== "CANCELLED") ?? null;
   const actionableTasks =
     activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
-  const directPickCompleted = activePickList?.status === "COMPLETED";
+  // Un pedido sólo de ensamble no tiene lista de surtido directo. Esa etapa ausente
+  // se considera completa para llevar al operador al trabajo pendiente real.
+  const directPickCompleted = !activePickList || activePickList.status === "COMPLETED";
+  const fulfillmentTitle = activePickList ? "Surtir productos" : pendingAssemblyOrders.length > 0 ? "Continuar ensamble" : "Preparar pedido";
+  const fulfillmentDescription = activePickList
+    ? `Pedido ${order.code}: recoge los productos directos y llévalos a ${activePickList.targetLocation.code}.`
+    : pendingAssemblyOrders.length > 0
+      ? `Pedido ${order.code}: este pedido no tiene producto directo; continúa con el ensamble asignado.`
+      : `Pedido ${order.code}: no tiene surtido directo pendiente.`;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <PageHeader
-        title="Surtir productos"
-        description={`Pedido ${order.code}: recoge los productos directos y llévalos a ${activePickList?.targetLocation.code ?? "staging"}.`}
+        title={fulfillmentTitle}
+        description={fulfillmentDescription}
         actions={
           <>
             <Link href={`/production/requests/${order.id}`} className={buttonStyles({ variant: "secondary" })}>

@@ -131,6 +131,146 @@ test.describe.serial("mixed sales order continuity", () => {
     await prisma.$disconnect();
   });
 
+  test("completes a direct-product order and downloads its operational documents", async ({ page }) => {
+    await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new", "/production/requests/new");
+    await page.getByLabel("Selecciona o crea el cliente").fill(fixture.customerName);
+    await page.getByRole("button", { name: new RegExp(fixture.customerName) }).click();
+    await page.getByRole("button", { name: "Continuar a producto →" }).click();
+    await page.getByRole("button", { name: "Producto directo" }).click();
+    await page.getByLabel("Almacén para surtido").selectOption(fixture.warehouseId);
+    await page.getByTestId("new-order-direct-product-input").fill(fixture.directSku);
+    await page.getByRole("button", { name: new RegExp(fixture.directSku) }).click();
+    await page.getByRole("button", { name: "Agregar producto al pedido" }).click();
+    await page.getByRole("button", { name: "Continuar a entrega →" }).click();
+    await page.getByLabel("Fecha compromiso").fill("2026-12-31");
+    await Promise.all([
+      page.waitForURL(/\/production\/requests\/[^/?]+\?ok=/),
+      page.getByTestId("create-order-button").click(),
+    ]);
+
+    const directOrder = await prisma.salesInternalOrder.findFirstOrThrow({
+      where: { warehouseId: fixture.warehouseId, customerId: fixture.customerId },
+      orderBy: { createdAt: "desc" },
+      include: { lines: true },
+    });
+    expect(directOrder.lines).toHaveLength(1);
+    expect(directOrder.lines[0]?.lineKind).toBe("PRODUCT");
+
+    await loginFresh(page, "MANAGER", `/production/requests/${directOrder.id}`);
+    await page.getByRole("button", { name: "Confirmar pedido" }).click();
+    await page.getByTestId("manager-assign-order").locator("select").selectOption(fixture.salesUserId);
+    await page.getByTestId("manager-assign-order").getByRole("button", { name: /Asignar vendedor|Reasignar antes de toma/ }).click();
+
+    await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
+    await page.getByRole("button", { name: /Tomar pedido|Continuar pedido/ }).click();
+
+    await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${directOrder.id}`);
+    const pickDownload = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Descargar lista de surtido" }).click();
+    expect((await pickDownload).suggestedFilename()).toMatch(/^surtido-.*\.pdf$/);
+    await page.getByRole("button", { name: "Liberar surtido directo" }).click();
+    await page.getByRole("button", { name: "Confirmar surtido" }).click();
+    await expect(page.getByTestId("fulfillment-next-action")).toContainText("Surtido directo terminado");
+    await page.goto(`/production/requests/${directOrder.id}`);
+    await expect(page.getByTestId("prepare-for-delivery-form")).toBeVisible();
+    await page.getByTestId("prepare-for-delivery-form").locator('select[name="preparedLocationId"]').selectOption(fixture.shippingLocationId);
+    await page.getByLabel("Nota (opcional)").fill("Fixture directo preparado para entrega");
+    await Promise.all([
+      page.waitForURL(/\?ok=/),
+      page.getByRole("button", { name: "Preparar para entrega" }).click(),
+    ]);
+    await expect(page.getByTestId("prepared-for-delivery-summary")).toContainText("Preparado para entrega");
+
+    await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
+    await page.getByRole("button", { name: "Entregado al cliente" }).click();
+    const deliveryDownload = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Descargar comprobante de entrega" }).click();
+    expect((await deliveryDownload).suggestedFilename()).toMatch(/^entrega-.*\.pdf$/);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/production/requests/${directOrder.id}`);
+    await expect(page.getByRole("link", { name: "Descargar comprobante de entrega" })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    const finalOrder = await prisma.salesInternalOrder.findUniqueOrThrow({
+      where: { id: directOrder.id },
+      select: { preparedForDeliveryAt: true, preparedForDeliveryNotes: true, preparedForDeliveryLocation: { select: { code: true } }, deliveredToCustomerAt: true },
+    });
+    expect(finalOrder.preparedForDeliveryAt).toBeTruthy();
+    expect(finalOrder.preparedForDeliveryLocation?.code).toBe(`${tag}-SHIP`);
+    expect(finalOrder.preparedForDeliveryNotes).toBe("Fixture directo preparado para entrega");
+    expect(finalOrder.deliveredToCustomerAt).toBeTruthy();
+  });
+
+  test("completes an assembly-only order without requiring a direct pick", async ({ page }) => {
+    await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new", "/production/requests/new");
+    await page.getByLabel("Selecciona o crea el cliente").fill(fixture.customerName);
+    await page.getByRole("button", { name: new RegExp(fixture.customerName) }).click();
+    await page.getByRole("button", { name: "Continuar a producto →" }).click();
+    await page.getByRole("button", { name: "Ensamble" }).click();
+    await page.locator('select[name="warehouseId"]').selectOption(fixture.warehouseId);
+    await page.getByTestId("new-order-entry-fitting-input").fill(fixture.entrySku);
+    await page.getByRole("button", { name: new RegExp(fixture.entrySku) }).click();
+    await page.getByTestId("new-order-exit-fitting-input").fill(fixture.exitSku);
+    await page.getByRole("button", { name: new RegExp(fixture.exitSku) }).click();
+    await page.getByTestId("new-order-hose-input").fill(fixture.hoseSku);
+    await page.getByRole("button", { name: new RegExp(fixture.hoseSku) }).click();
+    await page.getByLabel("Longitud por ensamble").fill("2");
+    await page.getByLabel("Cantidad de ensambles").fill("1");
+    await page.getByRole("button", { name: "Agregar ensamble al pedido" }).click();
+    await page.getByRole("button", { name: "Continuar a entrega →" }).click();
+    await page.getByLabel("Fecha compromiso").fill("2026-12-31");
+    await Promise.all([
+      page.waitForURL(/\/production\/requests\/[^/?]+\?ok=/),
+      page.getByTestId("create-order-button").click(),
+    ]);
+
+    const assemblyOrder = await prisma.salesInternalOrder.findFirstOrThrow({
+      where: { warehouseId: fixture.warehouseId, customerId: fixture.customerId },
+      orderBy: { createdAt: "desc" },
+      include: { lines: true },
+    });
+    expect(assemblyOrder.lines).toHaveLength(1);
+    expect(assemblyOrder.lines[0]?.lineKind).toBe("CONFIGURED_ASSEMBLY");
+
+    await loginFresh(page, "MANAGER", `/production/requests/${assemblyOrder.id}`);
+    await page.getByRole("button", { name: "Confirmar pedido" }).click();
+    await page.getByTestId("manager-assign-order").locator("select").selectOption(fixture.salesUserId);
+    await page.getByTestId("manager-assign-order").getByRole("button", { name: /Asignar vendedor|Reasignar antes de toma/ }).click();
+
+    await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${assemblyOrder.id}`);
+    await page.getByRole("button", { name: /Tomar pedido|Continuar pedido/ }).click();
+
+    await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${assemblyOrder.id}`);
+    const continueAssembly = page.getByRole("link", { name: /Continuar ensamble/ });
+    await expect(continueAssembly).toBeVisible();
+    await continueAssembly.click();
+    const production = await prisma.productionOrder.findFirstOrThrow({
+      where: { sourceDocumentId: assemblyOrder.id },
+      select: { id: true },
+    });
+    await expect(page).toHaveURL(new RegExp(`/production/orders/${production.id}`));
+    await page.getByRole("button", { name: "Liberar materiales" }).click();
+    await page.getByLabel("Operador").fill(`Operador ${tag}`);
+    await page.getByTestId("confirm-assembly-materials").click({ noWaitAfter: true });
+    await expect(page.getByText(/orden cerrada\/consumida/i)).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("link", { name: "Volver al pedido" }).click();
+    await expect(page.getByTestId("prepare-for-delivery-form")).toBeVisible();
+    await page.getByTestId("prepare-for-delivery-form").locator('select[name="preparedLocationId"]').selectOption(fixture.shippingLocationId);
+    await page.getByRole("button", { name: "Preparar para entrega" }).click();
+    await expect(page.getByTestId("prepared-for-delivery-summary")).toContainText("Preparado para entrega");
+
+    await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${assemblyOrder.id}`);
+    await page.getByRole("button", { name: "Entregado al cliente" }).click();
+    await expect(page.getByRole("link", { name: "Descargar comprobante de entrega" })).toBeVisible();
+    const finalOrder = await prisma.salesInternalOrder.findUniqueOrThrow({
+      where: { id: assemblyOrder.id },
+      select: { preparedForDeliveryAt: true, deliveredToCustomerAt: true },
+    });
+    expect(finalOrder.preparedForDeliveryAt).toBeTruthy();
+    expect(finalOrder.deliveredToCustomerAt).toBeTruthy();
+  });
+
   test("maintains one continuous route from a mixed order to delivery", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new", "/production/requests/new");
     await page.getByLabel("Selecciona o crea el cliente").fill(fixture.customerName);

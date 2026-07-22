@@ -142,6 +142,7 @@ export function summarizePickListStatus(status: string | null | undefined) {
 type TakeOrderEligibilityInput = {
   roles: string[];
   status: SalesInternalOrderStatus;
+  deliveredToCustomerAt?: Date | string | null;
   assignedToUserId?: string | null;
   assignedToCurrentUser?: boolean;
   pulledAt?: Date | string | null;
@@ -163,6 +164,12 @@ export function getTakeOrderEligibility(input: TakeOrderEligibilityInput): TakeO
     return {
       canTakeOrder: false,
       takeBlockedReason: "El pedido está cancelado",
+    };
+  }
+  if (input.deliveredToCustomerAt) {
+    return {
+      canTakeOrder: false,
+      takeBlockedReason: "El pedido ya fue entregado",
     };
   }
   if (input.assignedToUserId && !input.pulledAt && input.assignedToCurrentUser) {

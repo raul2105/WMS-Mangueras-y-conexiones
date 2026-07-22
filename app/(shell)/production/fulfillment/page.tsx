@@ -79,7 +79,7 @@ export default async function ProductionFulfillmentIndexPage({
           <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-muted)]">Bloqueos activos</p>
           <p className="text-3xl font-bold text-[var(--text-primary)]">{blockedCount.toLocaleString("es-MX")}</p>
           <p className="text-sm text-[var(--text-secondary)]">
-            Abre la cola operativa con pedidos bloqueados por ensamble pendiente.
+            Abre la bandeja operativa con pedidos bloqueados por ensamble pendiente.
           </p>
         </Link>
 
@@ -107,7 +107,7 @@ export default async function ProductionFulfillmentIndexPage({
         </p>
         <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
           <li>
-            <code>/production/fulfillment?blocked=true</code> redirige a la cola canónica de bloqueos:
+            <code>/production/fulfillment?blocked=true</code> redirige a la bandeja canónica de bloqueos:
             {" "}
             <code>/production/requests?queue=assembly_blocked</code>
           </li>

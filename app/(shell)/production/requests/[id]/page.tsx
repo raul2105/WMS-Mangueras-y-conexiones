@@ -600,6 +600,7 @@ export default async function ProductionRequestDetailPage({
   const takeEligibility = getTakeOrderEligibility({
     roles: sessionCtx.roles,
     status: orderStatus,
+    deliveredToCustomerAt: order.deliveredToCustomerAt,
     assignedToUserId: order.assignedToUserId,
     assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
     pulledAt: order.pulledAt,
@@ -832,7 +833,7 @@ export default async function ProductionRequestDetailPage({
                 </label>
                 <button type="submit" className="btn-secondary">{order.assignedToUserId ? "Reasignar antes de toma" : "Asignar vendedor"}</button>
               </div>
-              <p className="mt-2 text-xs text-[var(--text-muted)]">El vendedor verá el pedido en su cola y deberá aceptarlo antes de continuar.</p>
+              <p className="mt-2 text-xs text-[var(--text-muted)]">El pedido estará disponible en la bandeja de Ventas y deberá tomarse antes de continuar.</p>
             </form>
           ) : null}
           {(order.notes || latestPickList || (canRenderWriteActions && order.status !== "CANCELADA")) ? (

@@ -523,6 +523,41 @@ describe("sales request service", () => {
     expect(afterPayload?.assignedAt).toBeTruthy();
   });
 
+  it("rejects taking a delivered manager order", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-delivered-pull@scmayher.com",
+      name: "Manager Delivered Pull",
+      roleCode: "MANAGER",
+    });
+    const sales = await createUserWithRole({
+      email: "sales-delivered-pull@scmayher.com",
+      name: "Sales Delivered Pull",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const { warehouse } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Entregado",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+    });
+    await prisma.salesInternalOrder.update({
+      where: { id: order.id },
+      data: {
+        status: "CONFIRMADA",
+        deliveredToCustomerAt: new Date("2026-05-02T00:00:00.000Z"),
+      },
+    });
+
+    await expect(
+      pullSalesRequestOrder(prisma, {
+        orderId: order.id,
+        assignedToUserId: sales.id,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_ORDER_STATE" });
+  });
+
   it("rejects pull when assignee is not SALES_EXECUTIVE", async () => {
     const manager = await createUserWithRole({
       email: "manager-no-sales-pull@scmayher.com",

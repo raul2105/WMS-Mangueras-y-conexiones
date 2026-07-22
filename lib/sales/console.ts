@@ -156,7 +156,7 @@ export function getSalesConsoleTimelineItems(input: {
     {
       stage: "captura",
       label: "Captura",
-      detail: "Pedido registrado en la cola comercial",
+      detail: "Pedido registrado en la bandeja comercial",
       at: input.createdAt,
       variant: "accent",
     },

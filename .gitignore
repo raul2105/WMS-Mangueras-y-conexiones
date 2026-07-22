@@ -91,3 +91,4 @@ prisma/*.backup*
 /.vs/
 *.bak
 *.bak_*
+.playwright-cli/

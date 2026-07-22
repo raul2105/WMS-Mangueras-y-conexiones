@@ -42,8 +42,8 @@ const styles = StyleSheet.create({
   value: { fontSize: 9, color: "#172033" },
   tableHead: { flexDirection: "row", backgroundColor: "#0f2b5b", color: "#ffffff", padding: 6 },
   row: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#cbd5e1", paddingVertical: 6 },
-  sku: { width: "20%", fontSize: 8 },
-  product: { width: "52%", fontSize: 8 },
+  sku: { width: "22%", flexShrink: 1, fontSize: 7, paddingRight: 5 },
+  product: { width: "50%", flexShrink: 1, fontSize: 8, paddingRight: 4 },
   quantity: { width: "28%", textAlign: "right", fontSize: 8 },
   note: { marginTop: 14, padding: 8, backgroundColor: "#fff7ed", borderRadius: 3, color: "#7c2d12" },
   footer: { position: "absolute", bottom: 20, left: 28, right: 28, fontSize: 7, color: "#64748b", textAlign: "center" },
@@ -51,6 +51,12 @@ const styles = StyleSheet.create({
 
 function formatDate(value: Date) {
   return value.toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatSkuForDocument(sku: string) {
+  // Un SKU puede ser una clave continua de trazabilidad. Sólo se parte para
+  // impresión, evitando que invada la columna de material.
+  return sku.length > 18 ? sku.match(/.{1,18}/g)?.join("\n") ?? sku : sku;
 }
 
 export function OperationalDocumentPdf({ snapshot }: { snapshot: OperationalDocumentSnapshot }) {
@@ -83,7 +89,7 @@ export function OperationalDocumentPdf({ snapshot }: { snapshot: OperationalDocu
         </View>
         {snapshot.lines.map((line, index) => (
           <View key={`${line.sku}-${index}`} style={styles.row}>
-            <Text style={styles.sku}>{line.sku}</Text>
+            <Text style={styles.sku}>{formatSkuForDocument(line.sku)}</Text>
             <View style={styles.product}><Text>{line.name}</Text>{line.detail ? <Text style={styles.label}>{line.detail}</Text> : null}</View>
             <Text style={styles.quantity}>{line.quantity.toLocaleString("es-MX")} {line.unit}</Text>
           </View>

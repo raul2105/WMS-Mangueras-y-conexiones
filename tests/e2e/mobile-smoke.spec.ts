@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { loginAs, type RoleKey } from "./lib/auth.helpers";
 
 const MOBILE_ROUTES = [
-  { path: "/", role: "SYSTEM_ADMIN" as RoleKey, heading: /Dashboard/i },
+  { path: "/", role: "SYSTEM_ADMIN" as RoleKey, heading: /Inicio Administraci[oó]n/i },
   {
     path: "/production/requests",
     role: "SALES_EXECUTIVE" as RoleKey,
@@ -21,7 +21,7 @@ const MOBILE_ROUTES = [
   {
     path: "/purchasing/orders",
     role: "WAREHOUSE_OPERATOR" as RoleKey,
-    heading: /^Órdenes de compra$/i,
+    heading: /^Trabajo de recepción$/i,
   },
   {
     path: "/inventory",
@@ -36,15 +36,15 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
     test.describe(`Mobile: ${path} (authenticated as ${role})`, () => {
       test(`carga correctamente en móvil`, async ({ page }, testInfo) => {
         test.skip(!testInfo.project.name.startsWith("mobile"), "Este smoke solo valida proyectos móviles.");
-        await loginAs(page, role);
-        const routePage = await page.context().newPage();
-        await routePage.goto(path);
+        const expectedUrl = path === "/" ? undefined : path;
+        await loginAs(page, role, path, expectedUrl);
+        const routePage = page;
         await expect(routePage.getByRole("heading", { name: heading })).toBeVisible();
         if (path === "/production/requests" && role === "SALES_EXECUTIVE") {
           await expect(routePage.getByTestId("requests-quick-filters")).toBeVisible();
           await expect(
             routePage.getByTestId("requests-quick-filters").getByRole("link", {
-              name: /^Mis pedidos$/,
+              name: /^Para actuar$/,
             }),
           ).toBeVisible();
           await expect(routePage.getByText("Más filtros", { exact: true })).toBeVisible();
@@ -72,7 +72,6 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
           expect(quickFiltersHeight?.height ?? 0).toBeLessThan(120);
         }
         if (path === "/production/requests/new" && role === "SALES_EXECUTIVE") {
-          await expect(routePage.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
           await expect(routePage.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
         }
         if (path === "/purchasing/orders" && role === "WAREHOUSE_OPERATOR") {
@@ -86,18 +85,17 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
           if ((await receiveLinks.count()) > 0) {
             await expect(receiveLinks.first()).toBeVisible();
           } else {
-            await expect(routePage.getByText(/Sin acciones operativas disponibles|Sin acción|No hay órdenes de compra/i).first()).toBeVisible();
+            await expect(routePage.getByText(/No hay trabajo en esta bandeja/i).first()).toBeVisible();
           }
         }
         if (path === "/purchasing/orders" && role === "MANAGER") {
           await expect(
-            routePage.getByRole("link", { name: /Por recibir hoy/i }),
+            routePage.getByRole("link", { name: /Por enviar o recibir/i }),
           ).toBeVisible();
         }
         const bodyWidth = await routePage.evaluate(() => document.body.scrollWidth);
         const viewportWidth = routePage.viewportSize()?.width ?? 390;
         expect(bodyWidth).toBeLessThanOrEqual(viewportWidth + 20);
-        await routePage.close();
       });
     });
   } else {

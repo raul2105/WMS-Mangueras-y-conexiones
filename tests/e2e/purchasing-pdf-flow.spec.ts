@@ -125,12 +125,17 @@ test.describe("PDF Flow - Purchase Order Document", () => {
     await expect(page.getByText(/No existe un documento oficial persistido para esta OC/i)).toBeVisible();
   });
 
-  test("KAN-93 detail page keeps contract-only actions accessible on mobile", async ({ page }) => {
+  test("detail page keeps official-document actions accessible on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await loginAs(page, "MANAGER", `/purchasing/orders/${orderWithDocumentId}`);
+    await loginAs(
+      page,
+      "MANAGER",
+      `/purchasing/orders/${orderWithDocumentId}`,
+      `/purchasing/orders/${orderWithDocumentId}`,
+    );
     await page.goto(`/purchasing/orders/${orderWithDocumentId}`);
 
-    await expect(page.getByText(/Contrato preparado para KAN-85/i)).toBeVisible();
+    await expect(page.getByText(/Avance comercial de la orden/i)).toBeVisible();
     await expect(page.getByRole("heading", { name: /Línea de tiempo operativa/i })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Siguiente acción/i })).toBeVisible();
     const detailLink = page.getByRole("link", { name: /Ver documento oficial/i });

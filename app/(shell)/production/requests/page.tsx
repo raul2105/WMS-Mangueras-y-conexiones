@@ -1122,7 +1122,7 @@ export default async function ProductionRequestsPage({
                         : "--"}
                     </p>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                      <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {operationalState.nextAction}</span>
+                      <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {flowNarrative.nextRecommendedAction.label}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Compromiso:</span> {formatDate(order.dueDate)}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Responsable:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span>
                     </div>

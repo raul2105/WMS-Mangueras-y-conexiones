@@ -41,6 +41,12 @@ describe("resolvePostLoginRedirect", () => {
   it("rechaza callbacks no autorizados para el rol", () => {
     expect(resolvePostLoginRedirect("/users", ["MANAGER"])).toBe("/home/manager");
     expect(resolvePostLoginRedirect("/production/fulfillment", ["SALES_EXECUTIVE"])).toBe("/home/sales");
+    expect(resolvePostLoginRedirect("/production/requests/new", ["WAREHOUSE_OPERATOR"])).toBe("/home/warehouse");
+  });
+
+  it("preserva las rutas comerciales de captura y configuracion para ventas", () => {
+    expect(resolvePostLoginRedirect("/production/requests/new", ["SALES_EXECUTIVE"])).toBe("/production/requests/new");
+    expect(resolvePostLoginRedirect("/production/requests/order-1/assembly/new", ["SALES_EXECUTIVE"])).toBe("/production/requests/order-1/assembly/new");
   });
 
   it("permite callback al home propio del rol", () => {

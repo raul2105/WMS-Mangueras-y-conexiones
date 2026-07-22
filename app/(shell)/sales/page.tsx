@@ -7,6 +7,52 @@ import { getSalesOrderFlowStage } from "@/lib/sales/internal-orders";
 
 export const dynamic = "force-dynamic";
 
+type SalesOrderForFlow = {
+  status: Parameters<typeof getSalesOrderFlowStage>[0]["status"];
+  assignedToUserId: string | null;
+  deliveredToCustomerAt: Date | null;
+  preparedForDeliveryAt: Date | null;
+  lines: Array<{ id: string; lineKind: string }>;
+  pickLists: Array<{ status: string }>;
+};
+
+type LinkedAssemblyOrder = {
+  sourceDocumentId: string | null;
+  sourceDocumentLineId: string | null;
+  status: string;
+};
+
+function getCanonicalSalesFlowStage(
+  order: SalesOrderForFlow,
+  linkedAssemblyOrders: LinkedAssemblyOrder[],
+) {
+  const productLines = order.lines.filter((line) => line.lineKind === "PRODUCT");
+  const assemblyLineIds = order.lines
+    .filter((line) => line.lineKind === "CONFIGURED_ASSEMBLY")
+    .map((line) => line.id);
+  const assemblyLineIdSet = new Set(assemblyLineIds);
+  const linkedForOrder = linkedAssemblyOrders.filter(
+    (productionOrder) =>
+      productionOrder.sourceDocumentLineId !== null &&
+      assemblyLineIdSet.has(productionOrder.sourceDocumentLineId),
+  );
+  const hasCompletedConfiguredAssembly =
+    assemblyLineIds.length === 0 ||
+    (linkedForOrder.length === assemblyLineIds.length &&
+      linkedForOrder.every((productionOrder) => productionOrder.status === "COMPLETADA"));
+
+  return getSalesOrderFlowStage({
+    status: order.status,
+    assignedToUserId: order.assignedToUserId,
+    deliveredToCustomerAt: order.deliveredToCustomerAt,
+    preparedForDeliveryAt: order.preparedForDeliveryAt,
+    latestPickStatus: order.pickLists[0]?.status ?? null,
+    hasProductLines: productLines.length > 0,
+    hasAssemblyLines: assemblyLineIds.length > 0,
+    hasCompletedConfiguredAssembly,
+  });
+}
+
 export default async function SalesPage() {
   const ctx = await getSessionContext();
 
@@ -41,13 +87,13 @@ export default async function SalesPage() {
       status: true,
       assignedToUserId: true,
       pulledAt: true,
+      preparedForDeliveryAt: true,
       deliveredToCustomerAt: true,
       cancelledAt: true,
       updatedAt: true,
       customerName: true,
       lines: {
-        select: { id: true },
-        take: 1,
+        select: { id: true, lineKind: true },
       },
       pickLists: {
         select: { status: true },
@@ -57,7 +103,61 @@ export default async function SalesPage() {
     },
   });
 
-  // Count orders by canonical flow stage using shared helper
+  const recentOrdersData = await prisma.salesInternalOrder.findMany({
+    where: {
+      OR: [
+        { assignedToUserId: userId },
+        { requestedByUserId: userId },
+      ],
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 8,
+    select: {
+      id: true,
+      code: true,
+      customerName: true,
+      status: true,
+      assignedToUserId: true,
+      pulledAt: true,
+      preparedForDeliveryAt: true,
+      deliveredToCustomerAt: true,
+      cancelledAt: true,
+      updatedAt: true,
+      lines: {
+        select: { id: true, lineKind: true },
+      },
+      pickLists: {
+        select: { status: true },
+        take: 1,
+        orderBy: { updatedAt: "desc" },
+      },
+    },
+  });
+
+  const orderIds = [...new Set([...orders, ...recentOrdersData].map((order) => order.id))];
+  const linkedAssemblyOrders = orderIds.length
+    ? await prisma.productionOrder.findMany({
+        where: {
+          sourceDocumentType: "SalesInternalOrder",
+          sourceDocumentId: { in: orderIds },
+        },
+        select: {
+          sourceDocumentId: true,
+          sourceDocumentLineId: true,
+          status: true,
+        },
+      })
+    : [];
+
+  const linkedAssembliesByOrderId = new Map<string, LinkedAssemblyOrder[]>();
+  for (const productionOrder of linkedAssemblyOrders) {
+    if (!productionOrder.sourceDocumentId) continue;
+    const current = linkedAssembliesByOrderId.get(productionOrder.sourceDocumentId) ?? [];
+    current.push(productionOrder);
+    linkedAssembliesByOrderId.set(productionOrder.sourceDocumentId, current);
+  }
+
+  // Count orders by canonical flow stage using the same line and assembly facts as the execution flow.
   let capturaOrders = 0;
   let porAsignarOrders = 0;
   let enSurtidoOrders = 0;
@@ -65,20 +165,10 @@ export default async function SalesPage() {
   let entregadoOrders = 0;
 
   for (const order of orders) {
-    const hasProductLines = order.lines.length > 0;
-    const hasAssemblyLines = false; // Assembly configs are on order lines, not directly on order
-    const latestPickStatus = order.pickLists[0]?.status ?? null;
-    const hasCompletedConfiguredAssembly = false; // Assembly completion tracked elsewhere
-
-    const stage = getSalesOrderFlowStage({
-      status: order.status,
-      assignedToUserId: order.assignedToUserId,
-      deliveredToCustomerAt: order.deliveredToCustomerAt,
-      latestPickStatus,
-      hasProductLines,
-      hasAssemblyLines,
-      hasCompletedConfiguredAssembly,
-    });
+    const stage = getCanonicalSalesFlowStage(
+      order,
+      linkedAssembliesByOrderId.get(order.id) ?? [],
+    );
 
     switch (stage) {
       case "captura":
@@ -101,53 +191,11 @@ export default async function SalesPage() {
 
   const activeCustomers = await prisma.customer.count({ where: { isActive: true } });
 
-  // Fetch recent orders for the "Recent Orders" section
-  const recentOrdersData = await prisma.salesInternalOrder.findMany({
-    where: {
-      OR: [
-        { assignedToUserId: userId },
-        { requestedByUserId: userId },
-      ],
-    },
-    orderBy: { updatedAt: "desc" },
-    take: 8,
-    select: {
-      id: true,
-      code: true,
-      customerName: true,
-      status: true,
-      assignedToUserId: true,
-      pulledAt: true,
-      deliveredToCustomerAt: true,
-      cancelledAt: true,
-      updatedAt: true,
-      lines: {
-        select: { id: true },
-        take: 1,
-      },
-      pickLists: {
-        select: { status: true },
-        take: 1,
-        orderBy: { updatedAt: "desc" },
-      },
-    },
-  });
-
   const recentOrders = recentOrdersData.map((order) => {
-    const hasProductLines = order.lines.length > 0;
-    const hasAssemblyLines = false;
-    const latestPickStatus = order.pickLists[0]?.status ?? null;
-    const hasCompletedConfiguredAssembly = false;
-
-    const flowStage = getSalesOrderFlowStage({
-      status: order.status,
-      assignedToUserId: order.assignedToUserId,
-      deliveredToCustomerAt: order.deliveredToCustomerAt,
-      latestPickStatus,
-      hasProductLines,
-      hasAssemblyLines,
-      hasCompletedConfiguredAssembly,
-    });
+    const flowStage = getCanonicalSalesFlowStage(
+      order,
+      linkedAssembliesByOrderId.get(order.id) ?? [],
+    );
     return {
       id: order.id,
       code: order.code,

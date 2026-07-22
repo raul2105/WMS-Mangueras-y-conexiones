@@ -50,6 +50,8 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/warehouse/abc")).toBe("warehouse.manage");
     expect(getRequiredPermissionForPath("/audit")).toBe("audit.view");
     expect(getRequiredPermissionForPath("/production/requests")).toBe("production.cockpit.view");
+    expect(getRequiredPermissionForPath("/production/requests/new")).toBe("sales.view");
+    expect(getRequiredPermissionForPath("/production/requests/abc/assembly/new")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/availability")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/equivalences")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/production/fulfillment")).toBe("production.execute");
@@ -115,10 +117,12 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/fulfillment")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/fulfillment/abc")).toBe(true);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests/new")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/production/requests/abc/assembly/new")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/availability")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/production/equivalences")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/production/requests")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/requests/new")).toBe(true);
+    expect(canAccess("SALES_EXECUTIVE", "/production/requests/abc/assembly/new")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/availability")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/equivalences")).toBe(true);
     expect(canAccess("SALES_EXECUTIVE", "/production/fulfillment")).toBe(false);

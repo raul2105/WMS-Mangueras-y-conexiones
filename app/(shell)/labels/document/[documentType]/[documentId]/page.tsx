@@ -41,13 +41,27 @@ export default async function LabelsByDocumentPage({
         </Link>
       </div>
 
-      {isPurchaseReceipt && receiptLocation ? (
+      {isPurchaseReceipt ? (
         <div className="glass-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-semibold text-white">Siguiente paso: mover material</p>
-            <p className="text-sm text-slate-300">Lleva la mercancía de {receiptLocation} a su ubicación final.</p>
+            <p className="font-semibold text-white">{receiptLocation ? "Siguiente paso: mover material" : "Comprobante de recepción disponible"}</p>
+            <p className="text-sm text-slate-300">
+              {receiptLocation
+                ? `Lleva la mercancía de ${receiptLocation} a su ubicación final.`
+                : "Conserva el comprobante para documentar la recepción física."}
+            </p>
           </div>
-          <Link href={`/inventory/transfer?from=${encodeURIComponent(receiptLocation)}&reference=${encodeURIComponent("Recepción")}`} className="btn-primary">Mover material</Link>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Link
+              href={`/api/purchasing/receipts/${documentId}/pdf`}
+              className="rounded-lg border border-white/20 px-4 py-2 text-center text-sm font-medium text-slate-100 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+            >
+              Descargar comprobante
+            </Link>
+            {receiptLocation ? (
+              <Link href={`/inventory/transfer?from=${encodeURIComponent(receiptLocation)}&reference=${encodeURIComponent("Recepción")}`} className="btn-primary">Mover material</Link>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -76,4 +90,3 @@ export default async function LabelsByDocumentPage({
     </div>
   );
 }
-

@@ -292,7 +292,7 @@ export function NewOrderForm({
             })}
           </nav>
           {serverError ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            <div className="status-danger rounded-xl px-4 py-3 text-sm">
               {serverError}
             </div>
           ) : null}
@@ -308,7 +308,7 @@ export function NewOrderForm({
               </div>
 
               {invalidProductContext ? (
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                <div className="status-warning rounded-xl p-4 text-sm">
                   No encontramos el producto seleccionado. Puedes corregir la
                   selección o seguir con la captura manual sin perder el
                   pedido.
@@ -345,7 +345,7 @@ export function NewOrderForm({
                     </div>
                   </div>
                   <div className="op-next-action text-sm">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--execution-active-text)]">
                       Siguiente acción
                     </p>
                     <p className="mt-2">
@@ -355,8 +355,8 @@ export function NewOrderForm({
                   </div>
                 </div>
               ) : displayQuery ? (
-                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                <div className="status-info rounded-xl p-4 text-sm">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--execution-active-text)]">
                     Contexto comercial
                   </p>
                   <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">

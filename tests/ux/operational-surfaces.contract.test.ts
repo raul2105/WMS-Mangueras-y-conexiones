@@ -83,5 +83,20 @@ describe("operational surfaces UI contract", () => {
     expect(primitives).toContain(".op-progress-list");
     expect(primitives).toContain(".op-progress-marker");
     expect(primitives).toContain(".op-card");
+    expect(primitives).toContain(".op-interactive:focus-visible");
+  });
+
+  it("keeps customer selection and order feedback on semantic operational tokens", () => {
+    const customerSearch = read("components/CustomerSearchField.tsx");
+    const form = read("components/NewOrderForm.tsx");
+    const summary = read("components/OrderSummary.tsx");
+
+    expect(customerSearch).toContain('className="op-field px-4 py-3');
+    expect(customerSearch).toContain("op-interactive");
+    expect(customerSearch).toContain("status-info rounded-lg");
+    expect(form).toContain("status-danger rounded-xl");
+    expect(form).toContain("status-warning rounded-xl");
+    expect(summary).toContain("focus-visible:ring-[var(--focus-ring)]");
+    expect(summary).toContain('"text-[var(--status-warning-text)]"');
   });
 });

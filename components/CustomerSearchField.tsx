@@ -247,7 +247,7 @@ export default function CustomerSearchField({
       <input type="hidden" name={name} value={selectedId} required={required} />
 
       <label className="space-y-1">
-        <span className="text-sm text-slate-400">{label}</span>
+        <span className="op-label">{label}</span>
         <input
           value={query}
           disabled={disabled}
@@ -274,19 +274,19 @@ export default function CustomerSearchField({
               }
             }, 140);
           }}
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+          className="op-field px-4 py-3 disabled:cursor-not-allowed disabled:opacity-60"
           placeholder={placeholder}
         />
       </label>
 
       {isLoading ? (
-        <p className="text-xs text-slate-500">Buscando clientes...</p>
+        <p className="op-helper">Buscando clientes...</p>
       ) : null}
       {!isLoading && helperText ? (
-        <p className="text-xs text-slate-500">{helperText}</p>
+        <p className="op-helper">{helperText}</p>
       ) : null}
       {searchError ? (
-        <p className="text-xs text-amber-300">{searchError}</p>
+        <p className="text-xs text-[var(--status-warning-text)]">{searchError}</p>
       ) : null}
       {showList ? (
         <div className="grid gap-2">
@@ -306,11 +306,11 @@ export default function CustomerSearchField({
                 setSearchError(null);
                 setIsOpen(false);
               }}
-              className="rounded-lg border border-white/10 p-3 text-left hover:border-cyan-400/50 hover:bg-white/5"
+              className="op-surface-muted op-interactive p-3 text-left"
             >
-              <p className="text-xs font-mono text-cyan-300">{option.code}</p>
-              <p className="text-sm text-slate-100">{option.name}</p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs font-mono text-[var(--text-accent)]">{option.code}</p>
+              <p className="text-sm text-[var(--text-primary)]">{option.name}</p>
+              <p className="op-helper">
                 {option.taxId ?? option.email ?? "Sin RFC/email"}
               </p>
             </button>
@@ -320,7 +320,7 @@ export default function CustomerSearchField({
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setCursor(nextCursor)}
-              className="rounded-lg border border-white/10 p-3 text-left text-sm text-cyan-300 hover:border-cyan-400/50 hover:bg-white/5"
+              className="op-surface-muted op-interactive p-3 text-left text-sm text-[var(--text-accent)]"
               disabled={isLoading}
             >
               {isLoading ? "Cargando..." : "Mostrar más coincidencias"}
@@ -330,7 +330,7 @@ export default function CustomerSearchField({
       ) : null}
 
       {canShowQuickCreate ? (
-        <div className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="op-surface-muted space-y-2 p-3">
           {!isQuickCreateOpen ? (
             <button
               type="button"
@@ -342,52 +342,52 @@ export default function CustomerSearchField({
                 setQuickCreateError(null);
                 setQuickCreateName(trimmedQuery);
               }}
-              className="rounded border border-cyan-500/40 px-3 py-2 text-sm text-cyan-300 hover:border-cyan-400 hover:text-cyan-200"
+              className="op-interactive rounded border border-[var(--status-info-border)] px-3 py-2 text-sm text-[var(--text-accent)]"
             >
               {quickCreateLabel}
             </button>
           ) : (
             <div className="grid gap-2 md:grid-cols-2">
               <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-slate-400">Nombre</span>
+                <span className="op-helper">Nombre</span>
                 <input
                   value={quickCreateName}
                   onChange={(event) => setQuickCreateName(event.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  className="op-field px-3 py-2 text-sm"
                   placeholder="Cliente"
                 />
               </label>
               {allowQuickCreateCode ? (
                 <label className="space-y-1">
-                  <span className="text-xs text-slate-400">Código (opcional)</span>
+                  <span className="op-helper">Código (opcional)</span>
                   <input
                     value={quickCreateCode}
                     onChange={(event) => setQuickCreateCode(event.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                    className="op-field px-3 py-2 text-sm"
                     placeholder="CLI-2026-0001"
                   />
                 </label>
               ) : null}
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">RFC (opcional)</span>
+                <span className="op-helper">RFC (opcional)</span>
                 <input
                   value={quickCreateTaxId}
                   onChange={(event) => setQuickCreateTaxId(event.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  className="op-field px-3 py-2 text-sm"
                   placeholder="RFC"
                 />
               </label>
               <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-slate-400">Email (opcional)</span>
+                <span className="op-helper">Email (opcional)</span>
                 <input
                   value={quickCreateEmail}
                   onChange={(event) => setQuickCreateEmail(event.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                  className="op-field px-3 py-2 text-sm"
                   placeholder="contacto@cliente.com"
                 />
               </label>
               {quickCreateError ? (
-                <p className="text-xs text-amber-300 md:col-span-2">
+                <p className="text-xs text-[var(--status-warning-text)] md:col-span-2">
                   {quickCreateError}
                 </p>
               ) : null}
@@ -396,7 +396,7 @@ export default function CustomerSearchField({
                   type="button"
                   onClick={submitQuickCreate}
                   disabled={!canSubmitQuickCreate}
-                  className="rounded border border-cyan-500/40 px-3 py-2 text-xs text-cyan-300 hover:border-cyan-400 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="op-interactive rounded border border-[var(--status-info-border)] px-3 py-2 text-xs text-[var(--text-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isQuickCreateSaving
                     ? "Guardando..."
@@ -406,7 +406,7 @@ export default function CustomerSearchField({
                   type="button"
                   onClick={resetQuickCreate}
                   disabled={isQuickCreateSaving}
-                  className="rounded border border-white/10 px-3 py-2 text-xs text-slate-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="op-interactive rounded border border-[var(--border-default)] px-3 py-2 text-xs text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Cancelar
                 </button>
@@ -417,12 +417,12 @@ export default function CustomerSearchField({
       ) : null}
 
       {selected ? (
-        <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3">
+        <div className="status-info rounded-lg p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs text-cyan-300 font-mono">{selected.code}</p>
-              <p className="text-sm text-slate-100">{selected.name}</p>
-              <p className="text-xs text-slate-300">
+              <p className="text-xs text-[var(--text-accent)] font-mono">{selected.code}</p>
+              <p className="text-sm text-[var(--text-primary)]">{selected.name}</p>
+              <p className="text-xs text-[var(--text-secondary)]">
                 {selected.taxId ?? selected.email ?? "Sin datos de contacto"}
               </p>
             </div>
@@ -438,7 +438,7 @@ export default function CustomerSearchField({
                 setCursor(null);
                 setNextCursor(null);
               }}
-              className="text-xs rounded border border-white/10 px-2 py-1 text-slate-300 hover:text-white"
+              className="op-interactive rounded border border-[var(--border-default)] px-2 py-1 text-xs text-[var(--text-secondary)]"
             >
               Limpiar
             </button>

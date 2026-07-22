@@ -122,7 +122,7 @@ export function OrderSummary({
       {/* Mobile collapsible version - visible on mobile */}
       <div className="lg:hidden" data-testid="order-summary-mobile">
         <details className="op-surface-muted">
-          <summary className="flex cursor-pointer items-center justify-between p-4 list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">
+          <summary className="flex cursor-pointer items-center justify-between p-4 list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
                 <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -142,7 +142,7 @@ export function OrderSummary({
                 {readinessState === "not_ready" && "Pendiente"}
               </Badge>
             </div>
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </summary>
@@ -236,7 +236,7 @@ function OrderSummaryContent({
                   <span
                     className={cn(
                       "text-sm font-medium",
-                      isCompleted ? "text-emerald-300" : isCurrent ? "text-cyan-300" : "text-slate-300"
+                      isCompleted ? "text-[var(--status-success-text)]" : isCurrent ? "text-[var(--execution-active-text)]" : "text-[var(--text-secondary)]"
                     )}
                   >
                     {step.label}
@@ -330,41 +330,41 @@ function OrderSummaryContent({
       <div className="border-t border-[var(--border-soft)] pt-3 space-y-3">
         {/* Customer */}
         <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
             Cliente
           </p>
-          <p className={cn("text-sm", missingFields.includes("customerId") || missingFields.includes("customerName") ? "text-amber-300" : "text-white")}>
+          <p className={cn("text-sm", missingFields.includes("customerId") || missingFields.includes("customerName") ? "text-[var(--status-warning-text)]" : "text-[var(--text-primary)]")}>
             {customerName || customerId ? (
               <>
                 {customerName && <span className="font-medium">{customerName}</span>}
                 {customerId && <span className="font-mono text-xs text-slate-400 ml-1">({customerId})</span>}
               </>
             ) : (
-              <span className="text-slate-400">Cliente pendiente</span>
+              <span className="text-[var(--text-muted)]">Cliente pendiente</span>
             )}
           </p>
         </div>
 
         {/* Warehouse / Fulfillment Source */}
         <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
             Almacén / Origen
           </p>
-          <p className={cn("text-sm", missingFields.includes("warehouseId") ? "text-amber-300" : "text-white")}>
+          <p className={cn("text-sm", missingFields.includes("warehouseId") ? "text-[var(--status-warning-text)]" : "text-[var(--text-primary)]")}>
             {warehouseCode && warehouseName ? (
               <>{warehouseCode} - {warehouseName}</>
             ) : (
-              <span className="text-slate-400">Almacén pendiente</span>
+              <span className="text-[var(--text-muted)]">Almacén pendiente</span>
             )}
           </p>
         </div>
 
         {/* Delivery / Commitment Date */}
         <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
             Fecha compromiso
           </p>
-          <p className={cn("text-sm", missingFields.includes("dueDate") ? "text-amber-300" : "text-white")}>
+          <p className={cn("text-sm", missingFields.includes("dueDate") ? "text-[var(--status-warning-text)]" : "text-[var(--text-primary)]")}>
             {dueDate ? (
               new Date(dueDate).toLocaleDateString("es-MX", {
                 weekday: "short",
@@ -373,7 +373,7 @@ function OrderSummaryContent({
                 year: "numeric",
               })
             ) : (
-              <span className="text-slate-400">Fecha pendiente</span>
+              <span className="text-[var(--text-muted)]">Fecha pendiente</span>
             )}
           </p>
         </div>

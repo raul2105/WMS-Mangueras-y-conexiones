@@ -47,6 +47,34 @@ describe("prepared for delivery sales order contract", () => {
     });
   });
 
+  it("keeps an assembly-only order on its linked assembly until the work is complete", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "order-assembly-only",
+      roles: ["WAREHOUSE_OPERATOR"],
+      flowStage: "en_surtido",
+      hasProductLines: false,
+      hasAssemblyLines: true,
+      hasCompletedConfiguredAssembly: false,
+      assemblyHref: "/production/orders/assembly-order-1",
+    });
+
+    expect(cta).toMatchObject({
+      code: "COMPLETE_ASSEMBLY",
+      action: { href: "/production/orders/assembly-order-1" },
+      isAllowed: true,
+    });
+    expect(
+      getMarkDeliveredEligibility({
+        ...completedWork,
+        hasCompletedConfiguredAssembly: false,
+        preparedForDeliveryAt: new Date("2026-07-16T10:20:00.000Z"),
+      }),
+    ).toMatchObject({
+      canMarkDelivered: false,
+      deliveredBlockedReason: "Todas las órdenes de ensamble ligadas deben estar completadas",
+    });
+  });
+
   it("exposes prepared for delivery only after the physical area is recorded", () => {
     const preparedAt = new Date("2026-07-16T10:20:00.000Z");
     expect(

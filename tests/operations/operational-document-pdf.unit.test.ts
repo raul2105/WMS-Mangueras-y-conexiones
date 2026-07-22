@@ -18,7 +18,7 @@ describe("operational document PDFs", () => {
           generatedAt: new Date("2026-07-21T12:00:00Z"),
           warehouse: "WH-01 - Almacén Principal",
           location: "DESP-01 - Entregas",
-          lines: [{ sku: "MANG-01", name: "Manguera hidráulica", quantity: 2, unit: "m" }],
+          lines: [{ sku: "SKU-DE-TRAZABILIDAD-MUY-LARGO-001", name: "Manguera hidráulica", quantity: 2, unit: "m" }],
         },
       }) as Parameters<typeof renderToBuffer>[0],
     );

@@ -1,7 +1,8 @@
 # Matriz de estados y responsabilidades: Sales → Almacén
 
-Fecha: 2026-07-09
-Estado: levantamiento documental; validación AWS pendiente hasta disponibilidad autorizada.
+Fecha original: 2026-07-09
+Última validación: 2026-07-21
+Estado: matriz operativa contrastada con código, E2E Chromium y persistencia de fixtures temporales.
 
 ## Objetivo
 
@@ -28,8 +29,8 @@ Definir una lectura común del proyecto: qué hace cada rol, en qué pantalla, c
 | Surtido directo | `/production/fulfillment/[id]` | Warehouse | Pedido con líneas surtibles | Confirmar cantidades y ubicación | Pick liberado, en progreso, parcial o completo | Warehouse / Manager | Producto, ubicación, cantidad, usuario, timestamp |
 | Ensamble | `/production/orders/[id]` | Warehouse | Configuración y componentes | Liberar/pickear/consumir orden | Ensamble abierto, en proceso o completado | Warehouse | Componentes, WIP, consumo, pick status |
 | Verificación | Detalle de pedido / cola | Warehouse | Surtido o ensamble completado | Validar que líneas y cantidades coincidan | Listo para staging o bloqueado | Warehouse | Verificación por línea y faltantes |
-| Staging | Actualmente representado como destino/eligibilidad | Warehouse | Pedido verificado | Confirmar ubicación y preparación física | Listo para entrega | Warehouse / Manager | Bahía/ubicación, cantidad, responsable |
-| Entrega | Cola/detalle de pedido | Sales / Manager según autorización | Pedido listo para entrega | Registrar entrega al cliente | Entregado | Sales / Manager | Fecha, usuario, evidencia de entrega |
+| Preparado para entrega | `/production/requests/[id]` | Warehouse | Surtido directo y ensambles completos | Registrar área física, responsable y nota | Listo para entrega persistente | Sales / Manager | Ubicación, responsable, fecha, nota y auditoría |
+| Entrega | `/production/requests/[id]` | Sales / Manager | Pedido preparado para entrega | Registrar entrega al cliente | Entregado | Sales / Manager | Fecha, usuario, movimientos y comprobante PDF |
 
 ## Estados de negocio unificados propuestos
 
@@ -45,8 +46,8 @@ Estos nombres son una propuesta de lenguaje UX; no implican alterar todavía los
 | `Surtido parcial` | Parte de la cantidad está disponible | Resolver faltante o sustitución |
 | `En ensamble` | Componentes o configuración requieren producción | Ejecutar orden de ensamble |
 | `Bloqueado` | Excepción que impide avanzar | Resolver causa indicada |
-| `Listo para verificar` | Surtido/ensamble reportado como completo | Validar líneas y cantidades |
-| `Listo para entrega` | Verificación y staging confirmados | Registrar entrega |
+| `Preparado para entrega` | Surtido/ensamble completos y área física registrada | Registrar entrega |
+| `Listo para entrega` | Pedido preparado y elegible para entrega comercial | Registrar entrega |
 | `Entregado` | Entrega registrada | Consultar trazabilidad |
 
 ## Mapeo con señales existentes
@@ -74,16 +75,22 @@ El código actual ya distingue señales útiles para priorización gerencial: ve
 | Ejecutar ensamble | No | Sí | Sí | Sí |
 | Resolver bloqueos | No | Parcial, según acción | Sí | Sí |
 | Reasignar trabajo | No | No | Sí | Sí |
-| Registrar entrega | Pendiente de confirmar autorización final | No definido | Sí | Sí |
+| Registrar entrega | Sí, sólo cuando el pedido esté preparado y completo | No | Sí, con las mismas validaciones | Sí |
 | Administrar RBAC/configuración | No | No | No | Sí |
 
-## Gaps que requieren validación mañana
+## Validación realizada — 2026-07-21
 
-- Confirmar en AWS si existe una transición persistida y trazable para `Listo para entrega` distinta de la elegibilidad calculada.
-- Confirmar quién está autorizado actualmente para registrar entrega.
-- Confirmar si existe ownership físico separado de `assignedToUserId` comercial.
-- Validar que las cantidades surtidas, staging y entrega sean consistentes con líneas directas y de ensamble.
-- Ejecutar E2E completo con datos controlados desde pedido confirmado hasta entrega.
+- PR #77: https://github.com/raul2105/WMS-Mangueras-y-conexiones/pull/77
+- E2E Chromium: producto directo, ensamble configurado y pedido mixto desde captura hasta entrega.
+- Cada fixture temporal registra y valida `preparedForDeliveryAt`, ubicación física, nota de preparación y `deliveredToCustomerAt`.
+- Se valida la descarga del PDF de surtido por Operador y del comprobante de entrega por Ventas.
+- El servicio impide preparar o entregar si falta surtido directo, una orden de ensamble ligada o el área física de entrega.
+
+## Pendientes explícitos
+
+- Confirmar en navegador la descarga de comprobante de recepción de compras y revisar visualmente los tres formatos PDF con un renderizador disponible.
+- Documentar, sin alterar la regla actual, si la asignación comercial y la responsabilidad física deben persistirse como campos separados.
+- Mantener KAN-127, KAN-130, KAN-132 y KAN-134 abiertos hasta completar la evidencia documental y los escenarios de excepción.
 
 ## Criterio de aceptación del levantamiento funcional
 

@@ -85,8 +85,8 @@ export function AdminHomeContent({
           <div className="space-y-3">
             {(recentAudits && recentAudits.length > 0 ? recentAudits : []).map((audit) => (
               <div key={audit.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">{audit.action}</p>
+                <div className="min-w-0">
+                  <p className="break-words font-medium">{audit.action}</p>
                   <p className="text-sm text-gray-500">
                     {audit.actor ?? 'Sistema'} · {formatTimeAgo(audit.createdAt)}
                   </p>

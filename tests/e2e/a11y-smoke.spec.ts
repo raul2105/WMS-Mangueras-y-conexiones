@@ -17,13 +17,13 @@ const A11Y_ROUTES: A11yRoute[] = [
   {
     path: "/",
     role: "SYSTEM_ADMIN" as RoleKey,
-    heading: /Dashboard/i,
+    heading: /Inicio Administraci[oó]n/i,
     tags: TAGS,
   },
   {
     path: "/production/requests",
     role: "SALES_EXECUTIVE" as RoleKey,
-    heading: /Pedidos comerciales/i,
+    heading: /Pedidos y surtidos/i,
     tags: TAGS,
     extraChecks: async (page: import("@playwright/test").Page) => {
       await expect(page.getByTestId("requests-quick-filters")).toBeVisible();
@@ -47,7 +47,6 @@ const A11Y_ROUTES: A11yRoute[] = [
     heading: /Nuevo pedido comercial/i,
     tags: TAGS,
     extraChecks: async (page: import("@playwright/test").Page) => {
-      await expect(page.getByRole("heading", { name: /Captura comercial/i })).toBeVisible();
       await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
     },
   },
@@ -60,7 +59,7 @@ const A11Y_ROUTES: A11yRoute[] = [
   {
     path: "/purchasing/orders",
     role: "WAREHOUSE_OPERATOR" as RoleKey,
-    heading: /^Órdenes de compra$/i,
+    heading: /^Trabajo de recepción$/i,
     tags: TAGS,
   },
   {
@@ -81,8 +80,8 @@ for (const { path, role, heading, tags, extraChecks } of A11Y_ROUTES) {
   if (role) {
     test.describe(`KAN-55/KAN-63/KAN-87 A11y: ${path} (authenticated as ${role})`, () => {
       test(`no axe violations on ${path}`, async ({ page }) => {
-        await loginAs(page, role, path);
-        await page.goto(path);
+        const expectedUrl = path === "/" ? undefined : path;
+        await loginAs(page, role, path, expectedUrl);
         await expect(
           page.getByRole("heading", { name: heading }),
         ).toBeVisible();

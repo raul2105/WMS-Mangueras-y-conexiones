@@ -26,7 +26,7 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
   { prefix: "/warehouse/", permission: "warehouse.manage" },
   { prefix: "/warehouse", permission: "warehouse.manage" },
 
-  { prefix: "/production/requests/", permission: "production.cockpit.view" },
+  { prefix: "/production/requests/new", permission: "sales.view" },
   { prefix: "/production/requests", permission: "production.cockpit.view" },
   { prefix: "/production/availability", permission: "sales.view" },
   { prefix: "/production/equivalences", permission: "sales.view" },
@@ -66,6 +66,13 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
 ];
 
 export function getRequiredPermissionForPath(pathname: string): PermissionCode | null {
+  if (
+    pathname === "/production/requests/new" ||
+    /^\/production\/requests\/[^/]+\/assembly\/new$/.test(pathname)
+  ) {
+    return "sales.view";
+  }
+
   if (pathname.startsWith("/sales/customers/") && pathname.endsWith("/edit")) {
     return "customers.manage";
   }

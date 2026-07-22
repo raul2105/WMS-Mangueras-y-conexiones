@@ -161,6 +161,7 @@ export default async function SalesPage() {
   let capturaOrders = 0;
   let porAsignarOrders = 0;
   let enSurtidoOrders = 0;
+  let prepararEntregaOrders = 0;
   let listoEntregaOrders = 0;
   let entregadoOrders = 0;
 
@@ -179,6 +180,9 @@ export default async function SalesPage() {
         break;
       case "en_surtido":
         enSurtidoOrders++;
+        break;
+      case "preparar_entrega":
+        prepararEntregaOrders++;
         break;
       case "listo_entrega":
         listoEntregaOrders++;
@@ -214,6 +218,7 @@ export default async function SalesPage() {
             captura: capturaOrders,
             porAsignar: porAsignarOrders,
             enSurtido: enSurtidoOrders,
+            prepararEntrega: prepararEntregaOrders,
             listoEntrega: listoEntregaOrders,
             entregado: entregadoOrders,
             activeCustomers,
@@ -252,6 +257,8 @@ function getNextAction(flowStage: string): string {
       return "Asignar operador";
     case "en_surtido":
       return "Seguimiento surtido";
+    case "preparar_entrega":
+      return "Separar para entrega";
     case "listo_entrega":
       return "Coordinar entrega";
     case "entregado":

@@ -22,6 +22,7 @@ export type SalesOrderFlowStage =
   | "captura"
   | "por_asignar"
   | "en_surtido"
+  | "preparar_entrega"
   | "listo_entrega"
   | "entregado"
   | "cancelado";
@@ -32,6 +33,7 @@ export const SALES_ORDER_FLOW_STAGE_LABELS: Record<
   captura: "Captura",
   por_asignar: "Por asignar",
   en_surtido: "En surtido",
+  preparar_entrega: "Separar para entrega",
   listo_entrega: "Preparado para entrega",
   entregado: "Entregado",
   cancelado: "Cancelado",
@@ -45,6 +47,7 @@ export const SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS: Record<
   captura: "neutral",
   por_asignar: "accent",
   en_surtido: "warning",
+  preparar_entrega: "accent",
   listo_entrega: "success",
   entregado: "success",
   cancelado: "danger",
@@ -263,8 +266,8 @@ export function getSalesOrderFlowStage(
     !hasProductLines || input.latestPickStatus === "COMPLETED";
   const assemblyCompleted =
     !hasAssemblyLines || input.hasCompletedConfiguredAssembly === true;
-  if (directPickCompleted && assemblyCompleted && input.preparedForDeliveryAt) {
-    return "listo_entrega";
+  if (directPickCompleted && assemblyCompleted) {
+    return input.preparedForDeliveryAt ? "listo_entrega" : "preparar_entrega";
   }
   return "en_surtido";
 }
@@ -275,7 +278,8 @@ export type SalesOrderRecommendedAction = {
     | "Operar surtido"
   | "Completar ensamble"
   | "Preparar pedido"
-    | "Marcar entrega"
+  | "En espera de almacén"
+  | "Marcar entrega"
     | "Ver historial"
     | "Revisar bloqueo";
   href: string;
@@ -425,6 +429,31 @@ export function resolveSalesOrderPrimaryCta(
       blockedReason: "No hay acción operativa habilitada para el rol actual",
     };
   }
+  if (input.flowStage === "preparar_entrega") {
+    if (isWarehouse || isManager || isAdmin) {
+      return {
+        code: "PREPARE_DELIVERY",
+        action: { label: "Preparar pedido", href: orderHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "Surtido y ensambles completos; registra el área física de entrega.",
+      };
+    }
+    return {
+      code: "REVIEW_BLOCK",
+      action: {
+        label: "En espera de almacén",
+        href: orderHref,
+        blockedReason: "Almacén debe registrar el área de entrega antes de confirmar la entrega al cliente.",
+      },
+      actorRole,
+      isPrimary: true,
+      isAllowed: false,
+      reason: "La separación física corresponde a Almacén; Ventas confirma la entrega después de ese registro.",
+      blockedReason: "Almacén debe registrar el área de entrega antes de confirmar la entrega al cliente.",
+    };
+  }
   if (input.flowStage === "listo_entrega") {
     if (isSales && input.takeEligibility?.canTakeOrder) {
       return {
@@ -521,7 +550,7 @@ export function getSalesOrderFlowNarrative(
     hasCompletedConfiguredAssembly: input.hasCompletedConfiguredAssembly,
   });
   let riskLevel: FlowRiskLevel = "BAJO";
-  if (flowStage === "por_asignar") riskLevel = "MEDIO";
+  if (flowStage === "por_asignar" || flowStage === "preparar_entrega") riskLevel = "MEDIO";
   if (flowStage === "en_surtido") riskLevel = "ALTO";
   const primaryCta = resolveSalesOrderPrimaryCta({
     orderId: input.orderId,

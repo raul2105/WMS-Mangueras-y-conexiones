@@ -1052,6 +1052,11 @@ export default async function ProductionRequestsPage({
               isUnreleased: productLines.length > 0 && (!latestPickStatus || latestPickStatus === "DRAFT"),
               latestPickStatus,
               canMarkDelivered: deliveredEligibility.canMarkDelivered,
+              needsDeliveryPreparation:
+                hasCompletedDirectPick &&
+                hasCompletedConfiguredAssembly &&
+                !order.preparedForDeliveryAt &&
+                !order.deliveredToCustomerAt,
               isDelivered: Boolean(order.deliveredToCustomerAt),
               isCancelled: orderStatus === "CANCELADA",
               hasLines: productLines.length > 0 || configuredLines.length > 0,

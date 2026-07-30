@@ -12,28 +12,39 @@ test.describe("KAN-128: AWS read-only operational evidence", () => {
     "Set WMS_AWS_READONLY_E2E=1 plus WMS_KAN128_PRODUCT_SKU, WMS_KAN128_WAREHOUSE_CODE and WMS_KAN128_ORDER_CODE to run this read-only AWS gate.",
   );
 
-  test("sales sees a fresh promise and warehouse sees the preserved handoff", async ({ page }) => {
+  test("sales sees a fresh promise and warehouse sees the preserved handoff", async ({ browser }) => {
     if (!productSku || !warehouseCode || !orderCode) {
       throw new Error("Missing KAN-128 AWS read-only test identifiers.");
     }
 
-    await loginAs(page, "SALES_EXECUTIVE");
-    await page.goto(`/production/availability?q=${encodeURIComponent(productSku)}&sku=${encodeURIComponent(productSku)}&source=catalog`);
+    const salesContext = await browser.newContext();
+    const salesPage = await salesContext.newPage();
+    try {
+      await loginAs(salesPage, "SALES_EXECUTIVE");
+      await salesPage.goto(`/production/availability?q=${encodeURIComponent(productSku)}&sku=${encodeURIComponent(productSku)}&source=catalog`);
 
-    await expect(page.getByRole("heading", { name: /Disponibilidad comercial/i })).toBeVisible();
-    const createOrder = page.getByRole("link", { name: new RegExp(`Crear pedido.*${warehouseCode}`, "i") });
-    await expect(createOrder).toBeVisible();
-    await createOrder.click();
+      await expect(salesPage.getByRole("heading", { name: /Disponibilidad comercial/i })).toBeVisible();
+      const createOrder = salesPage.getByRole("link", { name: new RegExp(`Crear pedido.*${warehouseCode}`, "i") });
+      await expect(createOrder).toBeVisible();
+      await createOrder.click();
 
-    await expect(page).toHaveURL(/\/production\/requests\/new/);
-    await expect(page.getByTestId("commercial-promise-section")).toBeVisible();
-    await expect(page.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
+      await expect(salesPage).toHaveURL(/\/production\/requests\/new/);
+      await expect(salesPage.getByTestId("commercial-promise-section")).toBeVisible();
+      await expect(salesPage.getByTestId("commercial-promise-status")).toHaveText("Promesa segura");
+    } finally {
+      await salesContext.close();
+    }
 
-    await page.goto("/logout");
-    await loginAs(page, "WAREHOUSE_OPERATOR");
-    await page.goto("/production/requests?queue=unreleased");
+    const warehouseContext = await browser.newContext();
+    const warehousePage = await warehouseContext.newPage();
+    try {
+      await loginAs(warehousePage, "WAREHOUSE_OPERATOR");
+      await warehousePage.goto("/production/requests?queue=unreleased");
 
-    await expect(page.getByRole("link", { name: orderCode, exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Operar surtido" })).toBeVisible();
+      await expect(warehousePage.getByRole("link", { name: orderCode, exact: true })).toBeVisible();
+      await expect(warehousePage.getByRole("link", { name: "Operar surtido" })).toBeVisible();
+    } finally {
+      await warehouseContext.close();
+    }
   });
 });

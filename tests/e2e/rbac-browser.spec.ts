@@ -125,14 +125,8 @@ test.describe("RBAC en navegador por rol", () => {
     await expect(page.getByRole("link", { name: /Almacenes/i })).toHaveCount(0);
   });
 
-  test("rutas legacy de sales redirigen al flujo nuevo", async ({ page }) => {
+  test("aliases de pedidos comerciales redirigen al flujo nuevo", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    await expectRedirectedAllowed(
-      page,
-      "/sales",
-      /\/production\/requests(?:\?.*)?$/,
-      /Pedidos y surtidos/i,
-    );
     await expectRedirectedAllowed(
       page,
       "/sales/orders",

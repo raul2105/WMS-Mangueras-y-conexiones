@@ -248,12 +248,6 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
 
   // ── Comercial ──────────────────────────────────────────────────────────
   {
-    route: "/sales",
-    description: "Dashboard comercial: disponibilidad, equivalencias y pedidos internos",
-    permission: "sales.view",
-    roles: ["SYSTEM_ADMIN", "MANAGER", "SALES_EXECUTIVE"],
-  },
-  {
     route: "/sales/availability",
     description: "Consulta comercial de stock total, reservado y disponible",
     permission: "sales.view",

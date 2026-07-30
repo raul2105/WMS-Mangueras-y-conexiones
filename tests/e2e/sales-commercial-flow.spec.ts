@@ -187,7 +187,7 @@ test.describe("sales commercial flow", () => {
     expect(bodyWidth).toBeLessThanOrEqual(410);
   });
 
-  test("manager can still supervise the worklist and legacy sales wrappers resolve cleanly", async ({
+  test("manager can still supervise the worklist and sales capability wrappers resolve cleanly", async ({
     page,
   }) => {
     await loginAs(page, "MANAGER", "/production/requests", "/production/requests");
@@ -201,12 +201,6 @@ test.describe("sales commercial flow", () => {
     await page.locator("summary").filter({ hasText: /Vista administrativa/i }).click();
     await expect(
       page.getByRole("table", { name: /Tabla administrativa de pedidos/i }),
-    ).toBeVisible();
-
-    await page.goto("/sales");
-    await expect(page).toHaveURL(/\/sales(?:\?.*)?$/);
-    await expect(
-      page.getByRole("heading", { name: /^Ventas$/i }),
     ).toBeVisible();
 
     await page.goto("/sales/orders");

@@ -18,8 +18,8 @@ Objetivo: eliminar las dos consolas raíz de Ventas sin afectar los demás roles
 Decisión:
 
 - `/home/sales` es la entrada canónica del Ejecutivo de Ventas.
-- `/sales` queda como compatibilidad y redirige al home correspondiente; no
-  muestra una segunda consola.
+- La ruta raíz heredada `/sales` se elimina. Un acceso directo recibe 404 para
+  evitar una segunda entrada o una redirección ambigua.
 - La consola comercial nueva se reutiliza dentro de `/home/sales`.
 - `/sales/customers` y demás rutas de capacidad comercial permanecen como
   módulos, no como homes.

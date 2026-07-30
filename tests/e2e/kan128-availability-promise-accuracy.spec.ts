@@ -4,6 +4,13 @@ import { loginAs } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 
+// This suite provisions and deletes data. It must never run against AWS/RDS.
+// It remains available only for an explicitly enabled isolated PostgreSQL test
+// database; the AWS operational gate is covered by the read-only companion spec.
+const databaseUrl = String(process.env.DATABASE_URL ?? "");
+const usesIsolatedDatabase = /(?:localhost|127\.0\.0\.1|::1)/i.test(databaseUrl);
+const allowDestructiveFixtures = process.env.WMS_ALLOW_ISOLATED_E2E_FIXTURES === "1" && usesIsolatedDatabase;
+
 const FIXTURE = {
   warehouseCode: "KAN128-WH",
   warehouseName: "Almacén KAN-128",
@@ -215,6 +222,11 @@ async function seedFixtures() {
 }
 
 test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => {
+  test.skip(
+    !allowDestructiveFixtures,
+    "Requires WMS_ALLOW_ISOLATED_E2E_FIXTURES=1 and an isolated localhost PostgreSQL database; never run fixture cleanup against AWS.",
+  );
+
   let fixture: Awaited<ReturnType<typeof seedFixtures>>;
 
   test.beforeAll(async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseBusinessDate } from "@/lib/business-date";
 
 const requiredText = (label: string) =>
   z.string().trim().min(1, `${label} es obligatorio`);
@@ -123,9 +124,7 @@ export function parsePriority(value?: string, fallback = 3) {
 }
 
 export function parseDueDate(value?: string) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseBusinessDate(value);
 }
 
 export function firstErrorMessage(error: z.ZodError) {

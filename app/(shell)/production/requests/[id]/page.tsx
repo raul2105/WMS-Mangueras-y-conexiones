@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import type { SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
+import { formatBusinessDate } from "@/lib/business-date";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import RequestProductLineForm from "@/components/RequestProductLineForm";
@@ -330,10 +331,7 @@ async function deleteLine(formData: FormData) {
 }
 
 function formatDate(value: Date | string | null | undefined) {
-  if (!value) return "--";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleDateString("es-MX");
+  return formatBusinessDate(value);
 }
 
 function formatDateTime(value: Date | string | null | undefined) {

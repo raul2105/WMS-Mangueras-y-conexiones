@@ -220,6 +220,11 @@ describe("parseDueDate", () => {
   it("parses valid ISO date", () => {
     const date = parseDueDate("2026-06-01");
     expect(date).toBeInstanceOf(Date);
+    expect(date?.toISOString()).toBe("2026-06-01T00:00:00.000Z");
+  });
+
+  it("rejects an impossible calendar date", () => {
+    expect(parseDueDate("2026-02-30")).toBeNull();
   });
 
   it("returns null for invalid date", () => {

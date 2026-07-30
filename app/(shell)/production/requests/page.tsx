@@ -50,6 +50,7 @@ import {
   type OperationalPresetFilter,
 } from "@/lib/dashboard/fulfillment-operational-presets";
 import { getOperationalUxState } from "@/lib/sales/operational-state";
+import { formatBusinessDate } from "@/lib/business-date";
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
 const STALE_HOURS = 4;
@@ -101,10 +102,7 @@ function getTextLinkClassName() {
   return "text-[var(--accent)] underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]";
 }
 function formatDate(value: Date | string | null | undefined) {
-  if (!value) return "--";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleDateString("es-MX");
+  return formatBusinessDate(value);
 }
 function formatDateTime(value: Date | string | null | undefined) {
   if (!value) return "--";
@@ -1612,11 +1610,7 @@ export default async function ProductionRequestsPage({
                             : "Sin asignar"}
                         </td>
                         <td className="py-3 text-[var(--text-muted)]">
-                          {order.dueDate
-                            ? new Date(order.dueDate).toLocaleDateString(
-                                "es-MX",
-                              )
-                            : "--"}
+                          {formatBusinessDate(order.dueDate)}
                         </td>
                         <td className="py-3 text-[var(--text-muted)]">
                           {riskLabel}

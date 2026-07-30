@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { formatBusinessDate } from "@/lib/business-date";
 import prisma from "@/lib/prisma";
 import { getSalesOrderFlowStage } from "@/lib/sales/internal-orders";
 import { SalesHomeClient } from "@/app/(shell)/sales/sales-home-client";
@@ -100,7 +101,7 @@ export async function SalesConsole({ email }: { email?: string | null }) {
     assignedToUserId: true,
     preparedForDeliveryAt: true,
     deliveredToCustomerAt: true,
-    updatedAt: true,
+    dueDate: true,
     customerName: true,
     lines: { select: { id: true, lineKind: true } },
     pickLists: {
@@ -174,7 +175,7 @@ export async function SalesConsole({ email }: { email?: string | null }) {
       code: order.code,
       customerName: order.customerName ?? "Cliente desconocido",
       status,
-      dueDate: order.updatedAt ? new Date(order.updatedAt).toLocaleDateString("es-ES") : "N/A",
+      dueDate: formatBusinessDate(order.dueDate),
       nextAction: getNextAction(status),
     };
   });

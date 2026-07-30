@@ -5,6 +5,7 @@ import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
 import { buttonStyles } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { FulfillmentKpiGrid } from "@/components/dashboard/fulfillment-kpi-grid";
 import { FulfillmentPriorityQueue } from "@/components/dashboard/fulfillment-priority-queue";
 import { FulfillmentAlertList } from "@/components/dashboard/fulfillment-alert-list";
@@ -39,13 +40,6 @@ export default async function Home() {
     overdue: snapshot.kpis.overdue,
   });
 
-  const generatedAt = new Date(snapshot.generatedAt).toLocaleString("es-MX", {
-    hour: "2-digit",
-    minute: "2-digit",
-    day: "2-digit",
-    month: "short",
-  });
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -55,7 +49,7 @@ export default async function Home() {
             ? "Visión global de backlog, riesgo y bloqueos operativos para destrabar surtido y entrega."
             : "Backlog operativo priorizado para ejecutar surtidos y resolver bloqueos en tiempo."
         }
-        meta={`Actualizado ${generatedAt} · Umbral sin movimiento ${snapshot.staleHours}h`}
+        meta={<>Actualizado <LocalDateTime value={snapshot.generatedAt} /> · Umbral sin movimiento {snapshot.staleHours}h</>}
         actions={
           <>
             <Link href="/production/requests" prefetch={false} className={buttonStyles({ variant: "secondary" })}>

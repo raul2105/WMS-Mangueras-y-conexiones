@@ -418,6 +418,9 @@ export default async function ProductionRequestsPage({
           linkedForOrder
             .map((row) => row.updatedAt)
             .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+        const isActiveOrder =
+          candidate.status !== "CANCELADA" && !candidate.deliveredToCustomerAt;
+        if (!isActiveOrder) return false;
         const signals = evaluateFulfillmentSignals({
           dueDate: candidate.dueDate,
           orderUpdatedAt: candidate.updatedAt,
@@ -464,7 +467,7 @@ export default async function ProductionRequestsPage({
             canMarkDelivered: deliveredEligibility.canMarkDelivered,
             isStale: signals.isStale,
             lastOperationalUpdateAt: signals.lastUpdatedAt,
-            inActiveQueue: true,
+            inActiveQueue: isActiveOrder,
           },
           { now, timezone: BUSINESS_TIMEZONE, staleHours: STALE_HOURS },
         );
@@ -557,6 +560,70 @@ export default async function ProductionRequestsPage({
   const canViewCustomers =
     sessionCtx.isSystemAdmin ||
     sessionCtx.permissions.includes("customers.view");
+  const isSalesWorkspace =
+    sessionCtx.roles.includes("SALES_EXECUTIVE") && !isOperatorView;
+  const activeWorkWhere: Prisma.SalesInternalOrderWhereInput = {
+    AND: [
+      visibleWhere,
+      { status: { not: "CANCELADA" } },
+      { deliveredToCustomerAt: null },
+    ],
+  };
+  const [assignedWorkCount, availableToTakeCount, unassignedWorkCount, assignedWorkSamples] =
+    await Promise.all([
+      isSalesWorkspace && sessionCtx.user?.id
+        ? prisma.salesInternalOrder.count({
+            where: {
+              AND: [activeWorkWhere, { assignedToUserId: sessionCtx.user.id }],
+            },
+          })
+        : !isOperatorView
+          ? prisma.salesInternalOrder.count({
+              where: {
+                AND: [activeWorkWhere, { assignedToUserId: { not: null } }],
+              },
+            })
+          : sessionCtx.user?.id
+            ? prisma.salesInternalOrder.count({
+                where: {
+                  AND: [activeWorkWhere, { assignedToUserId: sessionCtx.user.id }],
+                },
+              })
+        : 0,
+      isSalesWorkspace
+        ? prisma.salesInternalOrder.count({
+            where: {
+              AND: [
+                activeWorkWhere,
+                { status: "CONFIRMADA" },
+                { assignedToUserId: null },
+                {
+                  requestedByUser: {
+                    userRoles: {
+                      some: { role: { code: "MANAGER", isActive: true } },
+                    },
+                  },
+                },
+              ],
+            },
+          })
+        : 0,
+      !isOperatorView && !isSalesWorkspace
+        ? prisma.salesInternalOrder.count({
+            where: { AND: [activeWorkWhere, { assignedToUserId: null }] },
+          })
+        : 0,
+      isSalesWorkspace && sessionCtx.user?.id
+        ? prisma.salesInternalOrder.findMany({
+            where: {
+              AND: [activeWorkWhere, { assignedToUserId: sessionCtx.user.id }],
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 3,
+            select: { id: true, code: true },
+          })
+        : [],
+    ]);
   const buildHref = (
     page: number,
     status = statusFilter,
@@ -598,7 +665,7 @@ export default async function ProductionRequestsPage({
       : null,
     queueFilter
       ? {
-          label: `Cola: ${QUEUE_LABELS[queueFilter]}`,
+          label: `Bandeja: ${QUEUE_LABELS[queueFilter]}`,
           href: buildRequestHref({
             page: 1,
             status: statusFilter,
@@ -727,29 +794,6 @@ export default async function ProductionRequestsPage({
       ],
     },
   ];
-  const myOrders = sessionCtx.user?.id
-    ? orders
-        .filter(
-          (order) =>
-            order.assignedToUserId === sessionCtx.user?.id &&
-            order.status !== "CANCELADA",
-        )
-        .slice(0, 3)
-    : [];
-  const claimableOrders = orders
-    .filter((order) => {
-      const createdByManager =
-        (order.requestedByUser?.userRoles.length ?? 0) > 0;
-      return getTakeOrderEligibility({
-        roles: sessionCtx.roles,
-        status: order.status as SalesInternalOrderStatus,
-        assignedToUserId: order.assignedToUserId,
-        assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
-        pulledAt: order.pulledAt,
-        isCreatedByManager: createdByManager,
-      }).canTakeOrder;
-    })
-    .slice(0, 3);
   return (
     <div className="space-y-6">
       {" "}
@@ -758,9 +802,9 @@ export default async function ProductionRequestsPage({
         description={
           isOperatorView
             ? "Elige una tarea física: surtir, continuar, verificar o completar un ensamble."
-            : "Cola comercial para captura, seguimiento, asignación, surtido y entrega."
+            : "Bandeja comercial para captura, seguimiento, asignación, surtido y entrega."
         }
-        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Cola: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
+        meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Bandeja: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
           <>
             {canViewCustomers && !isOperatorView ? (
@@ -794,12 +838,13 @@ export default async function ProductionRequestsPage({
       ) : null}
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 text-sm shadow-sm" data-testid="requests-work-summary">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <span className="font-semibold text-[var(--text-primary)]">{isOperatorView ? "Trabajo asignado" : "Mi cola"}</span>
-          <span>{myOrders.length.toLocaleString("es-MX")} asignados</span>
-          {!isOperatorView ? <span>{claimableOrders.length.toLocaleString("es-MX")} disponibles para tomar</span> : null}
-          {myOrders.length > 0 ? (
+          <span className="font-semibold text-[var(--text-primary)]">{isOperatorView ? "Trabajo asignado" : isSalesWorkspace ? "Pedidos a tu cargo" : "Asignación comercial"}</span>
+          <span>{assignedWorkCount.toLocaleString("es-MX")} asignados</span>
+          {isSalesWorkspace ? <span>{availableToTakeCount.toLocaleString("es-MX")} disponibles para tomar</span> : null}
+          {!isOperatorView && !isSalesWorkspace ? <span>{unassignedWorkCount.toLocaleString("es-MX")} sin responsable</span> : null}
+          {assignedWorkSamples.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {myOrders.slice(0, 3).map((order) => <Link key={order.id} href={`/production/requests/${order.id}`} className={getTextLinkClassName()}>{order.code}</Link>)}
+              {assignedWorkSamples.map((order) => <Link key={order.id} href={`/production/requests/${order.id}`} className={getTextLinkClassName()}>{order.code}</Link>)}
             </div>
           ) : null}
         </div>
@@ -985,6 +1030,7 @@ export default async function ProductionRequestsPage({
             const takeEligibility = getTakeOrderEligibility({
               roles: sessionCtx.roles,
               status: orderStatus,
+              deliveredToCustomerAt: order.deliveredToCustomerAt,
               assignedToUserId: order.assignedToUserId,
               assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
               pulledAt: order.pulledAt,
@@ -1006,6 +1052,11 @@ export default async function ProductionRequestsPage({
               isUnreleased: productLines.length > 0 && (!latestPickStatus || latestPickStatus === "DRAFT"),
               latestPickStatus,
               canMarkDelivered: deliveredEligibility.canMarkDelivered,
+              needsDeliveryPreparation:
+                hasCompletedDirectPick &&
+                hasCompletedConfiguredAssembly &&
+                !order.preparedForDeliveryAt &&
+                !order.deliveredToCustomerAt,
               isDelivered: Boolean(order.deliveredToCustomerAt),
               isCancelled: orderStatus === "CANCELADA",
               hasLines: productLines.length > 0 || configuredLines.length > 0,
@@ -1480,6 +1531,7 @@ export default async function ProductionRequestsPage({
                     const takeEligibility = getTakeOrderEligibility({
                       roles: sessionCtx.roles,
                       status: orderStatus,
+                      deliveredToCustomerAt: order.deliveredToCustomerAt,
                       assignedToUserId: order.assignedToUserId,
                       assignedToCurrentUser: order.assignedToUserId === sessionCtx.user?.id,
                       pulledAt: order.pulledAt,

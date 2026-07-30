@@ -5,6 +5,7 @@ export type OperationalUxStateKey =
   | "in_progress"
   | "blocked"
   | "verify"
+  | "ready_to_prepare"
   | "ready_to_deliver"
   | "attention"
   | "delivered"
@@ -66,7 +67,7 @@ const BLOCKING_STATE: Record<Exclude<FulfillmentBlockingCause, "NONE">, Operatio
   },
 };
 
-export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause" | "isPartial" | "assemblyBlocked" | "isUnreleased"> & { latestPickStatus?: string | null; canMarkDelivered?: boolean; isDelivered?: boolean; isCancelled?: boolean; hasLines?: boolean }): OperationalUxState {
+export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause" | "isPartial" | "assemblyBlocked" | "isUnreleased"> & { latestPickStatus?: string | null; canMarkDelivered?: boolean; needsDeliveryPreparation?: boolean; isDelivered?: boolean; isCancelled?: boolean; hasLines?: boolean }): OperationalUxState {
   if (signals.isDelivered) {
     return { key: "delivered", label: "Entregado", description: "Pedido finalizado; consulta el historial si necesitas comprobarlo.", nextAction: "Ver historial", variant: "success" };
   }
@@ -83,6 +84,15 @@ export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause
       description: "Surtido y ensamble cumplen las condiciones de entrega.",
       nextAction: "Verificar y registrar entrega",
       variant: "success",
+    };
+  }
+  if (signals.needsDeliveryPreparation) {
+    return {
+      key: "ready_to_prepare",
+      label: "Separar para entrega",
+      description: "Surtido y ensamble terminados; falta registrar el área física de entrega.",
+      nextAction: "Registrar área de entrega",
+      variant: "accent",
     };
   }
 

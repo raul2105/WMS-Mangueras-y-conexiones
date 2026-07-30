@@ -24,6 +24,7 @@ interface SalesHomeClientProps {
     captura: number;
     porAsignar: number;
     enSurtido: number;
+    prepararEntrega: number;
     listoEntrega: number;
     entregado: number;
     activeCustomers: number;
@@ -65,6 +66,8 @@ function getStatusBadgeVariant(status: string) {
       return "warning";
     case "en_surtido":
       return "info";
+    case "preparar_entrega":
+      return "warning";
     case "listo_entrega":
       return "success";
     default:
@@ -131,6 +134,15 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
       href: "/production/requests?stage=en_surtido",
     },
     {
+      key: "prepararEntrega",
+      label: "Separar para entrega",
+      count: stats.prepararEntrega,
+      description: "Surtido terminado; falta registrar el área de entrega",
+      icon: Package,
+      variant: "accent" as const,
+      href: "/production/requests?stage=preparar_entrega",
+    },
+    {
       key: "listoEntrega",
       label: "Listos para entregar",
       count: stats.listoEntrega,
@@ -192,7 +204,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
 
       {/* Work Summary */}
       <SectionCard title="Mi trabajo activo">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           {workStages.map((stage) => (
             <Link key={stage.key} href={stage.href}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">

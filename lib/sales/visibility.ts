@@ -46,6 +46,8 @@ export function buildSalesRequestVisibilityWhere(args: {
           { assignedToUserId: userId },
           {
             assignedToUserId: null,
+            status: { not: "CANCELADA" },
+            deliveredToCustomerAt: null,
             requestedByUser: {
               userRoles: {
                 some: {

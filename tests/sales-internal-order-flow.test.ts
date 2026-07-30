@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getSalesOrderFlowNarrative, getSalesOrderFlowStage, resolveSalesOrderPrimaryCta } from "@/lib/sales/internal-orders";
+import { getSalesOrderFlowNarrative, getSalesOrderFlowStage, getTakeOrderEligibility, resolveSalesOrderPrimaryCta } from "@/lib/sales/internal-orders";
 import {
   getSalesConsoleStageProgress,
   getSalesConsoleTimelineItems,
@@ -48,6 +48,21 @@ describe("sales internal order flow stage", () => {
         deliveredToCustomerAt: new Date("2026-05-01T00:00:00.000Z"),
       }),
     ).toBe("entregado");
+  });
+
+  it("never offers a delivered order to a sales executive", () => {
+    expect(
+      getTakeOrderEligibility({
+        roles: ["SALES_EXECUTIVE"],
+        status: "CONFIRMADA",
+        deliveredToCustomerAt: new Date("2026-05-01T00:00:00.000Z"),
+        assignedToUserId: null,
+        isCreatedByManager: true,
+      }),
+    ).toEqual({
+      canTakeOrder: false,
+      takeBlockedReason: "El pedido ya fue entregado",
+    });
   });
 
   it("returns cancelado for cancelled orders", () => {

@@ -12,6 +12,7 @@ export const SALES_CONSOLE_STAGE_FLOW: SalesOrderFlowStage[] = [
   "captura",
   "por_asignar",
   "en_surtido",
+  "preparar_entrega",
   "listo_entrega",
   "entregado",
   "cancelado",
@@ -89,6 +90,12 @@ export function getSalesConsoleWorkType(input: {
         detail: "Asignado a almacén, surtido en proceso.",
         variant: "success",
       };
+    case "preparar_entrega":
+      return {
+        label: "Separar para entrega",
+        detail: "Surtido y ensambles terminados; falta registrar el área física de entrega.",
+        variant: "accent",
+      };
     case "listo_entrega":
       return {
         label: "Listo para entregar",
@@ -126,6 +133,8 @@ export function getSalesConsoleStageProgress(currentStage: SalesOrderFlowStage):
               ? "warning"
               : currentStage === "en_surtido"
                 ? "warning"
+                : currentStage === "preparar_entrega"
+                  ? "accent"
                 : "success"
         : currentIndex >= 0 && index < currentIndex && currentStage !== "cancelado"
           ? "success"
@@ -156,7 +165,7 @@ export function getSalesConsoleTimelineItems(input: {
     {
       stage: "captura",
       label: "Captura",
-      detail: "Pedido registrado en la cola comercial",
+      detail: "Pedido registrado en la bandeja comercial",
       at: input.createdAt,
       variant: "accent",
     },

@@ -28,6 +28,19 @@ describe("operational UX state contract", () => {
     ).toMatchObject({ key: "ready_to_deliver", label: "Listo para entrega" });
   });
 
+  it("names completed work awaiting physical delivery preparation", () => {
+    expect(
+      getOperationalUxState({
+        blockingCause: "NONE",
+        isPartial: false,
+        assemblyBlocked: false,
+        isUnreleased: false,
+        latestPickStatus: "COMPLETED",
+        needsDeliveryPreparation: true,
+      }),
+    ).toMatchObject({ key: "ready_to_prepare", label: "Separar para entrega" });
+  });
+
   it("keeps partial work actionable without a database", () => {
     expect(
       getOperationalUxState({

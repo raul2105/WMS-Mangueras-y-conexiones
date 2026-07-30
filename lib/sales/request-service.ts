@@ -924,6 +924,7 @@ export async function pullSalesRequestOrder(
           id: true,
           code: true,
           status: true,
+          deliveredToCustomerAt: true,
           assignedToUserId: true,
           pulledAt: true,
           requestedByUser: {
@@ -966,6 +967,9 @@ export async function pullSalesRequestOrder(
     if (order.status === "CANCELADA") {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede tomar un pedido cancelado");
     }
+    if (order.deliveredToCustomerAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede tomar un pedido ya entregado");
+    }
     if (!assignee || !assignee.isActive || assignee.userRoles.length === 0) {
       throw new InventoryServiceError("INVALID_ASSIGNEE", "Solo un ejecutivo de ventas activo puede tomar el pedido");
     }
@@ -988,6 +992,7 @@ export async function pullSalesRequestOrder(
           ? { assignedToUserId: args.assignedToUserId, pulledAt: null }
           : { assignedToUserId: null }),
         status: { not: "CANCELADA" },
+        deliveredToCustomerAt: null,
       },
       data: {
         ...(isAssignedToCurrentSales ? {} : { assignedToUserId: args.assignedToUserId, assignedAt: now }),

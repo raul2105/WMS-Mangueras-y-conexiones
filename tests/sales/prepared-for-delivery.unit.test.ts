@@ -14,14 +14,16 @@ describe("prepared for delivery sales order contract", () => {
     hasCompletedConfiguredAssembly: true,
   };
 
-  it("keeps a completed order in fulfillment until an operator records the delivery area", () => {
+  it("identifies a completed order awaiting physical separation before delivery", () => {
     expect(
       getSalesOrderFlowStage({
         ...completedWork,
         hasProductLines: true,
         hasAssemblyLines: true,
+        latestPickStatus: "COMPLETED",
+        hasCompletedConfiguredAssembly: true,
       }),
-    ).toBe("en_surtido");
+    ).toBe("preparar_entrega");
 
     expect(getMarkDeliveredEligibility(completedWork)).toMatchObject({
       canMarkDelivered: false,
@@ -33,7 +35,7 @@ describe("prepared for delivery sales order contract", () => {
     const cta = resolveSalesOrderPrimaryCta({
       orderId: "order-ready",
       roles: ["WAREHOUSE_OPERATOR"],
-      flowStage: "en_surtido",
+      flowStage: "preparar_entrega",
       hasProductLines: true,
       latestPickStatus: "COMPLETED",
       hasAssemblyLines: true,
@@ -44,6 +46,24 @@ describe("prepared for delivery sales order contract", () => {
       code: "PREPARE_DELIVERY",
       action: { label: "Preparar pedido", href: "/production/requests/order-ready" },
       isAllowed: true,
+    });
+  });
+
+  it("tells sales to wait for warehouse preparation instead of reporting a generic block", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "order-ready-sales",
+      roles: ["SALES_EXECUTIVE"],
+      flowStage: "preparar_entrega",
+      hasProductLines: true,
+      latestPickStatus: "COMPLETED",
+      hasAssemblyLines: true,
+      hasCompletedConfiguredAssembly: true,
+    });
+
+    expect(cta).toMatchObject({
+      code: "REVIEW_BLOCK",
+      action: { label: "En espera de almacén" },
+      blockedReason: expect.stringContaining("Almacén"),
     });
   });
 

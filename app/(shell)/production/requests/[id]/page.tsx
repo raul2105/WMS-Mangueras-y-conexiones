@@ -7,6 +7,7 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import { formatBusinessDate } from "@/lib/business-date";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import RequestProductLineForm from "@/components/RequestProductLineForm";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
 import {
@@ -332,13 +333,6 @@ async function deleteLine(formData: FormData) {
 
 function formatDate(value: Date | string | null | undefined) {
   return formatBusinessDate(value);
-}
-
-function formatDateTime(value: Date | string | null | undefined) {
-  if (!value) return "--";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleString("es-MX");
 }
 
 function getExecutionBadgeVariant(status: string | null | undefined): "neutral" | "accent" | "success" | "warning" | "danger" {
@@ -813,7 +807,7 @@ export default async function ProductionRequestDetailPage({
               <p className="mt-1">
                 Área: {order.preparedForDeliveryLocation ? `${order.preparedForDeliveryLocation.code} — ${order.preparedForDeliveryLocation.name}` : "Sin área registrada"}
                 {" · "}Preparó: {order.preparedForDeliveryByUser?.name ?? order.preparedForDeliveryByUser?.email ?? "Usuario operativo"}
-                {" · "}{formatDateTime(order.preparedForDeliveryAt)}
+                {" · "}<LocalDateTime value={order.preparedForDeliveryAt} />
               </p>
               {order.preparedForDeliveryNotes ? <p className="mt-1 text-xs">{order.preparedForDeliveryNotes}</p> : null}
             </div>
@@ -925,7 +919,7 @@ export default async function ProductionRequestDetailPage({
                     <p className="text-xs text-[var(--text-muted)]">{item.detail}</p>
                   </div>
                   <Badge variant={item.variant} size="sm">
-                    {item.at ? formatDateTime(item.at) : "Pendiente"}
+                    {item.at ? <LocalDateTime value={item.at} /> : "Pendiente"}
                   </Badge>
                 </div>
               </li>
@@ -946,7 +940,7 @@ export default async function ProductionRequestDetailPage({
                   <li key={`${entry.action}-${entry.createdAt.toISOString()}-${idx}`} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2">
                     <p className="text-[var(--text-primary)]">{entry.action}</p>
                     <p className="text-xs text-[var(--text-muted)]">
-                      {entry.actorUser?.name ?? entry.actorUser?.email ?? entry.actor ?? "system"} · {formatDateTime(entry.createdAt)}
+                      {entry.actorUser?.name ?? entry.actorUser?.email ?? entry.actor ?? "system"} · <LocalDateTime value={entry.createdAt} />
                     </p>
                   </li>
                 ))}

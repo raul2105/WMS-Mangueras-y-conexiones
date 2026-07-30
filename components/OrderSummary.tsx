@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { SectionCard } from "@/components/ui/section-card";
 import { cn } from "@/lib/cn";
 
@@ -297,12 +298,7 @@ function OrderSummaryContent({
             )}
             {commercialPromise.checkedAt && (
               <p className="text-xs text-slate-400">
-                Verificado: {new Date(commercialPromise.checkedAt).toLocaleString("es-MX", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                Verificado: <LocalDateTime value={commercialPromise.checkedAt} />
               </p>
             )}
             {commercialPromise.isSubstitute && commercialPromise.originalProductName && (

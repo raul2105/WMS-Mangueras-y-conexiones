@@ -105,9 +105,15 @@ export default async function SalesPage() {
 
   const recentOrdersData = await prisma.salesInternalOrder.findMany({
     where: {
-      OR: [
-        { assignedToUserId: userId },
-        { requestedByUserId: userId },
+      AND: [
+        {
+          OR: [
+            { assignedToUserId: userId },
+            { requestedByUserId: userId },
+          ],
+        },
+        { status: { not: "CANCELADA" } },
+        { deliveredToCustomerAt: null },
       ],
     },
     orderBy: { updatedAt: "desc" },
@@ -116,6 +122,7 @@ export default async function SalesPage() {
       id: true,
       code: true,
       customerName: true,
+      dueDate: true,
       status: true,
       assignedToUserId: true,
       pulledAt: true,
@@ -205,7 +212,7 @@ export default async function SalesPage() {
       code: order.code,
       customerName: order.customerName ?? "Cliente desconocido",
       status: flowStage,
-      dueDate: order.updatedAt ? new Date(order.updatedAt).toLocaleDateString("es-ES") : "N/A",
+      dueDate: order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "Sin fecha compromiso",
       nextAction: getNextAction(flowStage),
     };
   });

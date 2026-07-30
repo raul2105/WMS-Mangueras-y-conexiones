@@ -55,7 +55,7 @@ const ROLE_CHECKS: Record<
     ],
   },
   SALES_EXECUTIVE: {
-    home: "/home/sales",
+    home: "/sales",
     visibleRoutes: [
       ["/production/requests", /Pedidos y surtidos/i],
       ["/production/requests/new", /Nuevo pedido comercial/i],

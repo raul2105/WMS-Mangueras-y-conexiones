@@ -49,7 +49,6 @@ import {
   matchOperationalPreset,
   type OperationalPresetFilter,
 } from "@/lib/dashboard/fulfillment-operational-presets";
-import { getOperationalUxState } from "@/lib/sales/operational-state";
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
 const STALE_HOURS = 4;
@@ -78,6 +77,7 @@ type SearchParams = {
   customer?: string;
   queue?: string;
   preset?: string;
+  assignment?: string;
   ok?: string;
   error?: string;
 };
@@ -132,6 +132,7 @@ function buildRequestHref(args: {
   queue?: FulfillmentQueueFilter;
   stage?: SalesOrderFlowStage;
   preset?: OperationalPresetFilter;
+  assignment?: "mine";
 }) {
   const params = new URLSearchParams();
   if (args.status) params.set("status", args.status);
@@ -139,6 +140,7 @@ function buildRequestHref(args: {
   if (args.queue) params.set("queue", args.queue);
   if (args.stage) params.set("stage", args.stage);
   if (args.preset) params.set("preset", args.preset);
+  if (args.assignment) params.set("assignment", args.assignment);
   if (args.page > 1) params.set("page", String(args.page));
   const qs = params.toString();
   return qs ? `/production/requests?${qs}` : "/production/requests";
@@ -224,6 +226,8 @@ export default async function ProductionRequestsPage({
   const presetFilter = isOperationalPresetFilter(sp.preset)
     ? sp.preset
     : undefined;
+  const assignmentFilter: "mine" | undefined =
+    sp.assignment === "mine" ? "mine" : undefined;
   const customerFilter = (sp.customer ?? "").trim();
   const baseWhere: Prisma.SalesInternalOrderWhereInput = {
     ...(customerFilter ? { customerName: { contains: customerFilter } } : {}),
@@ -233,9 +237,13 @@ export default async function ProductionRequestsPage({
     userId: sessionCtx.user?.id ?? null,
     baseWhere,
   });
+  const scopedVisibleWhere: Prisma.SalesInternalOrderWhereInput =
+    assignmentFilter === "mine" && sessionCtx.user?.id
+      ? { AND: [visibleWhere, { assignedToUserId: sessionCtx.user.id }] }
+      : visibleWhere;
   const where: Prisma.SalesInternalOrderWhereInput = statusFilter
-    ? { AND: [visibleWhere, { status: statusFilter }] }
-    : visibleWhere;
+    ? { AND: [scopedVisibleWhere, { status: statusFilter }] }
+    : scopedVisibleWhere;
   const totalCount = await prisma.salesInternalOrder.count({
     where: visibleWhere,
   });
@@ -630,6 +638,7 @@ export default async function ProductionRequestsPage({
     queue = queueFilter,
     stage = stageFilter,
     preset = presetFilter,
+    assignment = assignmentFilter,
   ) => {
     return buildRequestHref({
       page,
@@ -638,8 +647,15 @@ export default async function ProductionRequestsPage({
       queue,
       stage,
       preset,
+      assignment,
     });
   };
+  const buildClearScopeHref = (preset?: OperationalPresetFilter) =>
+    buildRequestHref({
+      page: 1,
+      customer: customerFilter || undefined,
+      preset,
+    });
   // Los pedidos cerrados no compiten con el trabajo vivo. Siguen disponibles
   // como consulta, sin que el vendedor tenga que descifrar acciones caducadas.
   const activeOrders = orders.filter(
@@ -660,6 +676,7 @@ export default async function ProductionRequestsPage({
             queue: queueFilter,
             stage: stageFilter,
             preset: presetFilter,
+            assignment: assignmentFilter,
           }),
         }
       : null,
@@ -672,6 +689,7 @@ export default async function ProductionRequestsPage({
             customer: customerFilter || undefined,
             stage: stageFilter,
             preset: presetFilter,
+            assignment: assignmentFilter,
           }),
         }
       : null,
@@ -684,6 +702,7 @@ export default async function ProductionRequestsPage({
             customer: customerFilter || undefined,
             queue: queueFilter,
             preset: presetFilter,
+            assignment: assignmentFilter,
           }),
         }
       : null,
@@ -696,6 +715,7 @@ export default async function ProductionRequestsPage({
             customer: customerFilter || undefined,
             queue: queueFilter,
             stage: stageFilter,
+            assignment: assignmentFilter,
           }),
         }
       : null,
@@ -708,13 +728,27 @@ export default async function ProductionRequestsPage({
             queue: queueFilter,
             stage: stageFilter,
             preset: presetFilter,
+            assignment: assignmentFilter,
+          }),
+        }
+      : null,
+    assignmentFilter
+      ? {
+          label: "Pedidos a mi cargo",
+          href: buildRequestHref({
+            page: 1,
+            status: statusFilter,
+            customer: customerFilter || undefined,
+            queue: queueFilter,
+            stage: stageFilter,
+            preset: presetFilter,
           }),
         }
       : null,
   ].filter(Boolean) as Array<{ label: string; href: string }>;
   const quickFilters = (isOperatorView
     ? [
-        { label: "Para actuar", href: buildHref(1, undefined, undefined, undefined, undefined), active: !statusFilter && !queueFilter && !stageFilter && !presetFilter },
+        { label: "Para actuar", href: buildClearScopeHref(), active: !statusFilter && !queueFilter && !stageFilter && !presetFilter && !assignmentFilter },
         { label: "Por surtir", href: buildHref(1, undefined, "unreleased"), active: queueFilter === "unreleased" },
         { label: "En proceso", href: buildHref(1, undefined, undefined, "en_surtido"), active: stageFilter === "en_surtido" },
         { label: "Bloqueados", href: buildHref(1, undefined, undefined, undefined, "bloqueados"), active: presetFilter === "bloqueados" },
@@ -722,12 +756,9 @@ export default async function ProductionRequestsPage({
         { label: "Listos para entrega", href: buildHref(1, undefined, undefined, undefined, "listos_para_entrega"), active: presetFilter === "listos_para_entrega" },
       ]
     : [
-        { label: "Para actuar", href: buildHref(1, undefined, undefined, undefined, undefined), active: !statusFilter && !queueFilter && !stageFilter && !presetFilter },
-        { label: "En curso", href: buildHref(1, undefined, undefined, "en_surtido", undefined), active: stageFilter === "en_surtido" },
-        { label: "Urgentes", href: buildHref(1, undefined, undefined, undefined, "urgentes"), active: presetFilter === "urgentes" },
-        { label: "Para tomar", href: buildHref(1, undefined, undefined, undefined, "sin_asignar"), active: presetFilter === "sin_asignar" },
-        { label: "Bloqueados", href: buildHref(1, undefined, undefined, undefined, "bloqueados"), active: presetFilter === "bloqueados" },
-        { label: "Listos para entrega", href: buildHref(1, undefined, undefined, undefined, "listos_para_entrega"), active: presetFilter === "listos_para_entrega" },
+        { label: "Para actuar", href: buildClearScopeHref(), active: !statusFilter && !queueFilter && !stageFilter && !presetFilter && !assignmentFilter },
+        { label: "Para tomar", href: buildClearScopeHref("sin_asignar"), active: presetFilter === "sin_asignar" && !assignmentFilter },
+        { label: "Listos para entrega", href: buildClearScopeHref("listos_para_entrega"), active: presetFilter === "listos_para_entrega" && !assignmentFilter },
       ]
   ).filter(Boolean) as Array<{
     label: string;
@@ -752,6 +783,26 @@ export default async function ProductionRequestsPage({
         href: buildHref(1, undefined, undefined, stage, undefined),
         active: stageFilter === stage,
       })),
+    },
+    {
+      title: "Atención",
+      items: [
+        {
+          label: "En curso",
+          href: buildHref(1, undefined, undefined, "en_surtido", undefined),
+          active: stageFilter === "en_surtido",
+        },
+        {
+          label: "Urgentes",
+          href: buildHref(1, undefined, undefined, undefined, "urgentes"),
+          active: presetFilter === "urgentes",
+        },
+        {
+          label: "Bloqueados",
+          href: buildHref(1, undefined, undefined, undefined, "bloqueados"),
+          active: presetFilter === "bloqueados",
+        },
+      ],
     },
     {
       title: "Plazo y actividad",
@@ -802,7 +853,7 @@ export default async function ProductionRequestsPage({
         description={
           isOperatorView
             ? "Elige una tarea física: surtir, continuar, verificar o completar un ensamble."
-            : "Bandeja comercial para captura, seguimiento, asignación, surtido y entrega."
+            : "Pedidos que requieren tu atención comercial."
         }
         meta={`${filteredCount.toLocaleString("es-MX")} de ${totalCount.toLocaleString("es-MX")} pedidos${queueFilter ? ` · Bandeja: ${QUEUE_LABELS[queueFilter]}` : ""}${presetFilter ? ` · Filtro: ${PRESET_LABELS[presetFilter]}` : ""}${stageFilter ? ` · Etapa: ${SALES_ORDER_FLOW_STAGE_LABELS[stageFilter]}` : ""}`}
         actions={
@@ -843,9 +894,19 @@ export default async function ProductionRequestsPage({
           {isSalesWorkspace ? <span>{availableToTakeCount.toLocaleString("es-MX")} disponibles para tomar</span> : null}
           {!isOperatorView && !isSalesWorkspace ? <span>{unassignedWorkCount.toLocaleString("es-MX")} sin responsable</span> : null}
           {assignedWorkSamples.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {assignedWorkSamples.map((order) => <Link key={order.id} href={`/production/requests/${order.id}`} className={getTextLinkClassName()}>{order.code}</Link>)}
-            </div>
+            <Link
+              href={buildHref(
+                1,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "mine",
+              )}
+              className={getTextLinkClassName()}
+            >
+              Ver pedidos a tu cargo
+            </Link>
           ) : null}
         </div>
       </section>
@@ -994,7 +1055,6 @@ export default async function ProductionRequestsPage({
               order.customerName?.trim() || order.customer?.name || "--";
             const createdByManager =
               (order.requestedByUser?.userRoles.length ?? 0) > 0;
-            const now = new Date();
             const productLines = (order.lines as any[]).filter(
               (line: any) => line.lineKind === "PRODUCT",
             );
@@ -1045,22 +1105,6 @@ export default async function ProductionRequestsPage({
               hasCompletedDirectPick,
               hasCompletedConfiguredAssembly,
             });
-            const operationalState = getOperationalUxState({
-              blockingCause: "NONE",
-              isPartial: latestPickStatus === "PARTIAL",
-              assemblyBlocked: configuredLines.length > 0 && !hasCompletedConfiguredAssembly,
-              isUnreleased: productLines.length > 0 && (!latestPickStatus || latestPickStatus === "DRAFT"),
-              latestPickStatus,
-              canMarkDelivered: deliveredEligibility.canMarkDelivered,
-              needsDeliveryPreparation:
-                hasCompletedDirectPick &&
-                hasCompletedConfiguredAssembly &&
-                !order.preparedForDeliveryAt &&
-                !order.deliveredToCustomerAt,
-              isDelivered: Boolean(order.deliveredToCustomerAt),
-              isCancelled: orderStatus === "CANCELADA",
-              hasLines: productLines.length > 0 || configuredLines.length > 0,
-            });
             const flowNarrative = getSalesOrderFlowNarrative({
               orderId: order.id,
               roles: sessionCtx.roles,
@@ -1090,46 +1134,8 @@ export default async function ProductionRequestsPage({
               canExecuteSalesActions: canRenderWriteActions,
               canExecuteProductionActions: canOperateProductionActions,
             });
-            const dueDateMs = order.dueDate
-              ? new Date(order.dueDate).getTime()
-              : null;
-            const isOverdue =
-              dueDateMs !== null &&
-              dueDateMs < now.getTime() &&
-              orderStatus !== "CANCELADA";
-            const isUrgent =
-              !isOverdue &&
-              dueDateMs !== null &&
-              dueDateMs - now.getTime() <= 24 * 60 * 60 * 1000 &&
-              dueDateMs - now.getTime() >= 0;
             const hasNoLines =
               productLines.length === 0 && configuredLines.length === 0;
-            const attentionChips: Array<{
-              label: string;
-              variant: "neutral" | "accent" | "success" | "warning";
-            }> = [];
-            if (isOverdue) {
-              attentionChips.push({ label: "Vencido", variant: "warning" });
-            } else if (isUrgent) {
-              attentionChips.push({ label: "Urgente", variant: "warning" });
-            }
-            if (primaryActionState.state === "blocked") {
-              attentionChips.push({ label: "Bloqueado", variant: "warning" });
-            }
-            if (hasNoLines) {
-              attentionChips.push({ label: "Sin líneas", variant: "neutral" });
-            } else {
-              attentionChips.push({
-                label: `${productLines.length.toLocaleString("es-MX")} productos`,
-                variant: productLines.length > 0 ? "accent" : "neutral",
-              });
-              if (configuredLines.length > 0) {
-                attentionChips.push({
-                  label: `${configuredLines.length.toLocaleString("es-MX")} ensambles`,
-                  variant: "warning",
-                });
-              }
-            }
             return (
               <article
                 key={order.id}
@@ -1145,15 +1151,12 @@ export default async function ProductionRequestsPage({
                       >
                         {order.code}
                       </Link>
-                      <Badge variant={getStatusBadgeVariant(orderStatus)}>
-                        {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
-                      </Badge>
                       <Badge variant={flowNarrative.flowBadgeVariant}>
                         {flowNarrative.flowStageLabel}
                       </Badge>
-                      <Badge variant={operationalState.variant}>
-                        {operationalState.label}
-                      </Badge>
+                      {primaryActionState.state === "blocked" ? (
+                        <Badge variant="warning">Bloqueado</Badge>
+                      ) : null}
                     </div>
                     <p className="text-sm text-[var(--text-muted)]">
                       Cliente: {" "}
@@ -1173,18 +1176,10 @@ export default async function ProductionRequestsPage({
                         : "--"}
                     </p>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                      <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {flowNarrative.nextRecommendedAction.label}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Compromiso:</span> {formatDate(order.dueDate)}</span>
-                      <span><span className="font-medium text-[var(--text-primary)]">Responsable:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span>
+                      {!isSalesWorkspace ? <span><span className="font-medium text-[var(--text-primary)]">Responsable:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span> : null}
                     </div>
-                    <p className="text-xs text-[var(--text-muted)]">{operationalState.description}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {attentionChips.map((chip) => (
-                        <Badge key={chip.label} variant={chip.variant}>
-                          {chip.label}
-                        </Badge>
-                      ))}
-                    </div>
+                    {primaryActionState.state === "blocked" ? <p className="text-xs text-[var(--text-muted)]">{primaryActionState.blockedReason ?? primaryActionState.reason}</p> : null}
                   </div>
                   <div className="space-y-2">
                     {primaryActionState.state === "allowed" &&

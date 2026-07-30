@@ -90,10 +90,25 @@ test.describe("sales commercial flow", () => {
     ).toBeVisible();
     await expect(
       page.getByTestId("requests-quick-filters").getByRole("link", {
-        name: /^Urgentes$/,
+        name: /^Para tomar$/,
       }),
     ).toBeVisible();
     await expect(page.getByText("Más filtros", { exact: true })).toBeVisible();
+    const assignedOrdersLink = page.getByRole("link", {
+      name: "Ver pedidos a tu cargo",
+    });
+    if (await assignedOrdersLink.isVisible()) {
+      await assignedOrdersLink.click();
+      await expect(page).toHaveURL(/assignment=mine/);
+      await expect(page.getByTestId("requests-active-filters")).toContainText(
+        "Pedidos a mi cargo",
+      );
+      await expect(
+        page.getByTestId("requests-quick-filters").getByRole("link", {
+          name: "Para actuar",
+        }),
+      ).toHaveAttribute("href", "/production/requests");
+    }
     await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
     await page.locator('[data-testid="requests-more-filters"] summary').click();
     await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
@@ -129,6 +144,9 @@ test.describe("sales commercial flow", () => {
     await expect(page.getByLabel(/Selecciona o crea el cliente/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /Registrar cliente/i })).toHaveCount(0);
     await expect(page.getByTestId("sales-order-stepper")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Nuevo pedido", exact: true }),
+    ).toHaveCount(0);
   });
 
   test("requests page summarizes active filters compactly and exposes advanced groups", async ({
@@ -174,6 +192,25 @@ test.describe("sales commercial flow", () => {
     await expect(page.getByText("Surtido y ensamble", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /^Borrador$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^Captura$/i })).toBeVisible();
+  });
+
+  test("sales executive can open advanced filters with the keyboard", async ({
+    page,
+  }) => {
+    await loginAs(
+      page,
+      "SALES_EXECUTIVE",
+      "/production/requests",
+      "/production/requests",
+    );
+
+    const moreFilters = page.locator(
+      '[data-testid="requests-more-filters"] summary',
+    );
+    await moreFilters.focus();
+    await expect(moreFilters).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
   });
 
   test("mobile worklist remains card-first and readable", async ({ page }) => {

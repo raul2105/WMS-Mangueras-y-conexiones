@@ -439,7 +439,7 @@ export default async function NewProductionRequestPage({
     <>
       <PageHeader
         title="Nuevo pedido comercial"
-        description="Captura cliente, líneas y fecha compromiso."
+        description="Captura cliente, líneas y fecha compromiso en un solo flujo."
         actions={
           <Link
             href="/production/requests"

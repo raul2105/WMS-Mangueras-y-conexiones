@@ -490,5 +490,5 @@ export const ROLE_HOME: Record<RoleCode, string> = {
   SYSTEM_ADMIN: "/home/admin",
   MANAGER: "/home/manager",
   WAREHOUSE_OPERATOR: "/home/warehouse",
-  SALES_EXECUTIVE: "/home/sales",
+  SALES_EXECUTIVE: "/sales",
 };

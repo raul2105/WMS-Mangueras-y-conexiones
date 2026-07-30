@@ -13,7 +13,7 @@ export const EXPECTED_HOME: Record<RoleKey, string> = {
   SYSTEM_ADMIN: "/home/admin",
   MANAGER: "/home/manager",
   WAREHOUSE_OPERATOR: "/home/warehouse", // Note: redirect happens from /home/warehouse
-  SALES_EXECUTIVE: "/home/sales",
+  SALES_EXECUTIVE: "/sales",
 };
 
 export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navItems: number }> = {

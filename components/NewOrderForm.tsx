@@ -252,7 +252,7 @@ export function NewOrderForm({
         <input type="hidden" name="assemblyQuantity" value={assemblyQuantity} />
         <input type="hidden" name="assemblyNotes" value={assemblyNotes} />
       </> : null}
-      <SectionCard title="Nuevo pedido">
+      <SectionCard>
         <div className="space-y-5">
           <nav aria-label="Pasos del nuevo pedido" className="grid gap-2 sm:grid-cols-3" data-testid="sales-order-stepper">
             {steps.map((step) => {
@@ -390,7 +390,6 @@ export function NewOrderForm({
           <section id="captura-cliente" className="space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-accent)]">Paso 1 de 3</p>
                 <h2 className="text-2xl font-semibold text-[var(--text-primary)]">¿Quién es el cliente?</h2>
                 <p className="text-sm text-[var(--text-muted)]">
                   Selecciona la cuenta que recibirá el pedido.
@@ -445,14 +444,17 @@ export function NewOrderForm({
               </div>
             )}
             <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setActiveStep("product")}
-                disabled={!customerReady}
-                className={cn(buttonStyles({ size: "lg" }), !customerReady && "cursor-not-allowed opacity-55")}
-              >
-                Continuar a producto →
-              </button>
+              <div className="space-y-1 text-right">
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("product")}
+                  disabled={!customerReady}
+                  className={cn(buttonStyles({ size: "lg" }), !customerReady && "cursor-not-allowed opacity-55")}
+                >
+                  Continuar a producto →
+                </button>
+                {!customerReady ? <p className="text-xs text-[var(--text-muted)]">Selecciona un cliente para continuar.</p> : null}
+              </div>
             </div>
           </section>
           ) : null}

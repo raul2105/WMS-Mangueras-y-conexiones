@@ -15,7 +15,6 @@ import {
   Clock,
   AlertTriangle,
   Truck,
-  CheckCircle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -49,27 +48,6 @@ function getStageBadgeVariant(variant: string) {
       return "success";
     case "danger":
       return "danger";
-    default:
-      return "neutral";
-  }
-}
-
-function getStatusBadgeVariant(status: string) {
-  switch (status) {
-    case "entregado":
-      return "success";
-    case "cancelado":
-      return "danger";
-    case "captura":
-      return "warning";
-    case "por_asignar":
-      return "warning";
-    case "en_surtido":
-      return "info";
-    case "preparar_entrega":
-      return "warning";
-    case "listo_entrega":
-      return "success";
     default:
       return "neutral";
   }
@@ -137,7 +115,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
       key: "prepararEntrega",
       label: "Separar para entrega",
       count: stats.prepararEntrega,
-      description: "Surtido terminado; falta registrar el área de entrega",
+      description: "Falta registrar el área de entrega",
       icon: Package,
       variant: "accent" as const,
       href: "/production/requests?stage=preparar_entrega",
@@ -150,15 +128,6 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
       icon: Truck,
       variant: "success" as const,
       href: "/production/requests?stage=listo_entrega",
-    },
-    {
-      key: "entregado",
-      label: "Entregados",
-      count: stats.entregado,
-      description: "Pedidos entregados y cerrados",
-      icon: CheckCircle,
-      variant: "neutral" as const,
-      href: "/production/requests?stage=entregado",
     },
   ];
 
@@ -178,25 +147,17 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
         }
       />
 
-      {/* Quick Actions */}
-      <SectionCard title="Acciones rápidas" className="max-w-none">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" role="region" aria-label="Acciones rápidas comercial">
+      <SectionCard title="Herramientas comerciales" className="max-w-none">
+        <div className="flex flex-wrap gap-2" role="region" aria-label="Herramientas comerciales">
           {quickActions.map((action) => (
-            <Link key={action.label} href={action.href}>
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-                <CardContent className="p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-gray-100 rounded-lg">
-                      <action.icon size={20} className="text-gray-700" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{action.label}</p>
-                      <p className="text-sm text-gray-500 truncate">{action.description}</p>
-                    </div>
-                    <ChevronRight size={18} className="text-gray-400 shrink-0 mt-1" />
-                  </div>
-                </CardContent>
-              </Card>
+            <Link
+              key={action.label}
+              href={action.href}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            >
+              <action.icon size={17} aria-hidden="true" />
+              {action.label}
+              <ChevronRight size={15} aria-hidden="true" />
             </Link>
           ))}
         </div>
@@ -204,7 +165,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
 
       {/* Work Summary */}
       <SectionCard title="Mi trabajo activo">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {workStages.map((stage) => (
             <Link key={stage.key} href={stage.href}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
@@ -232,7 +193,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
 
       {/* Recent / Active Orders */}
       <SectionCard
-        title="Pedidos recientes"
+        title="Pedidos para seguimiento"
         actions={
           <Link href="/production/requests">
             <Button variant="ghost" size="sm">
@@ -263,9 +224,6 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap shrink-0">
-                        <Badge variant={getStatusBadgeVariant(order.status)}>
-                          {order.status}
-                        </Badge>
                         <Badge variant={getStageBadgeVariant(order.status)}>
                           {order.status.replace("_", " ")}
                         </Badge>
@@ -281,7 +239,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
           <Card className="border-dashed border-2 border-gray-200">
             <CardContent className="p-8 text-center">
               <Package size={48} className="mx-auto text-gray-300 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No hay pedidos recientes</h3>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No hay pedidos para seguimiento</h3>
               <p className="text-gray-500 mb-4 max-w-md mx-auto">
                 Comienza creando tu primer pedido comercial o busca productos en el catálogo.
               </p>

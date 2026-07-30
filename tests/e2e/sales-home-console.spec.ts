@@ -19,6 +19,12 @@ test.describe("Sales Home Console (KAN-126)", () => {
     await expect(page).not.toHaveURL(/\/production\/requests/);
   });
 
+  test("legacy sales home redirects to the current sales console", async ({ page }) => {
+    await page.goto("/home/sales");
+    await expect(page).toHaveURL(buildUrlExpectation("/sales"));
+    await expect(page.getByRole("heading", { name: "Ventas" })).toBeVisible();
+  });
+
   test("Page shows 'Ventas' heading", async ({ page }) => {
     await page.goto("/sales");
     await expect(page.getByRole("heading", { name: "Ventas" })).toBeVisible();
@@ -29,17 +35,21 @@ test.describe("Sales Home Console (KAN-126)", () => {
     await expect(page.getByRole("link", { name: /Nuevo pedido/i })).toBeVisible();
   });
 
-  test("Page shows quick action links", async ({ page }) => {
+  test("Page shows compact commercial tool links", async ({ page }) => {
     await page.goto("/sales");
 
     // Quick actions - check they exist on the page
     await expect(page.getByRole("link", { name: /Buscar producto/i })).toHaveAttribute("href", "/catalog");
     await expect(page.getByRole("link", { name: /Ver disponibilidad/i })).toHaveAttribute("href", "/production/availability");
     await expect(page.getByRole("link", { name: /Revisar equivalencias/i })).toHaveAttribute("href", "/production/equivalences");
-    await expect(page.getByRole("link", { name: /^Clientes$/i })).toHaveAttribute("href", "/sales/customers");
+    await expect(
+      page.getByLabel("Herramientas comerciales").getByRole("link", {
+        name: /^Clientes$/i,
+      }),
+    ).toHaveAttribute("href", "/sales/customers");
   });
 
-  test("Page shows 'Mi trabajo activo' section with commercial stage labels", async ({ page }) => {
+  test("Page shows current work stages without closed-order noise", async ({ page }) => {
     await page.goto("/sales");
 
     // Check for commercial stage labels (the cards in "Mi trabajo activo" section)
@@ -48,7 +58,7 @@ test.describe("Sales Home Console (KAN-126)", () => {
     await expect(page.getByText("Por asignar").first()).toBeVisible();
     await expect(page.getByText("En surtido").first()).toBeVisible();
     await expect(page.getByText("Listos para entregar").first()).toBeVisible();
-    await expect(page.getByText("Entregados").first()).toBeVisible();
+    await expect(page.getByText("Entregados").first()).toHaveCount(0);
   });
 
   test("Page does not expose warehouse-only primary actions", async ({ page }) => {
@@ -80,8 +90,8 @@ test.describe("Sales Home Console (KAN-126)", () => {
     await page.goto("/sales");
 
     // Check if empty state is visible (when no orders exist)
-    if (await page.getByText("No hay pedidos recientes").isVisible()) {
-      await expect(page.getByText("No hay pedidos recientes")).toBeVisible();
+    if (await page.getByText("No hay pedidos para seguimiento").isVisible()) {
+      await expect(page.getByText("No hay pedidos para seguimiento")).toBeVisible();
       await expect(page.getByRole("link", { name: /Nuevo pedido/i })).toBeVisible();
       await expect(page.getByRole("link", { name: /Buscar producto/i })).toBeVisible();
     }

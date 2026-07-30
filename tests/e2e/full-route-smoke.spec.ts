@@ -262,9 +262,6 @@ test.describe.serial("full route smoke", () => {
       if (route.startsWith("/sales/orders")) {
         await expect(page).toHaveURL(/\/production\/requests(?:\/[^/?]+)?(?:\?.*)?$/);
       }
-      if (route === "/sales") {
-        await expect(page).toHaveURL(/\/production\/requests(?:\?.*)?$/);
-      }
     }
   });
 

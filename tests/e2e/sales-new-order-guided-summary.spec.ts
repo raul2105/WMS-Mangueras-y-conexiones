@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import { loginAs } from "./lib/auth.helpers";
 
 test.describe("KAN-129: Guided Nuevo Pedido Summary and Progress", () => {
-  test("SALES_EXECUTIVE can open /production/requests/new from /sales Nuevo pedido", async ({ page }) => {
+  test("SALES_EXECUTIVE can open /production/requests/new from its canonical home", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    await page.goto("/sales");
+    await page.goto("/home/sales");
 
     const nuevoPedidoLink = page.getByRole("link", { name: /Nuevo pedido/i });
     await expect(nuevoPedidoLink).toBeVisible();

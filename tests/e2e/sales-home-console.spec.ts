@@ -10,11 +10,6 @@ test.describe("Sales Home Console (KAN-126)", () => {
     await expect(page).toHaveURL(buildUrlExpectation("/home/sales"));
   });
 
-  test("SALES_EXECUTIVE is redirected from legacy /sales to the canonical home", async ({ page }) => {
-    await page.goto("/sales");
-    await expect(page).toHaveURL(buildUrlExpectation("/home/sales"));
-  });
-
   test("Page shows 'Ventas' heading", async ({ page }) => {
     await page.goto("/home/sales");
     await expect(page.getByRole("heading", { name: "Ventas" })).toBeVisible();
@@ -73,7 +68,7 @@ test.describe("Sales Home Console (KAN-126)", () => {
   });
 
   test("Empty state shown when no recent orders", async ({ page }) => {
-    await page.goto("/sales");
+    await page.goto("/home/sales");
 
     // Check if empty state is visible (when no orders exist)
     if (await page.getByText("No hay pedidos recientes").isVisible()) {
@@ -84,15 +79,14 @@ test.describe("Sales Home Console (KAN-126)", () => {
   });
 });
 
-// `/sales` is compatibility-only: each role returns to its own canonical home.
 test.describe("Sales Home Console - Role Access", () => {
-  test("MANAGER is returned to its own home", async ({ page }) => {
-    await loginAs(page, "MANAGER", "/sales", "/home/manager");
+  test("MANAGER has its own canonical home", async ({ page }) => {
+    await loginAs(page, "MANAGER", "/home/manager", "/home/manager");
     await expect(page).toHaveURL(buildUrlExpectation("/home/manager"));
   });
 
-  test("SYSTEM_ADMIN is returned to its own home", async ({ page }) => {
-    await loginAs(page, "SYSTEM_ADMIN", "/sales", "/home/admin");
+  test("SYSTEM_ADMIN has its own canonical home", async ({ page }) => {
+    await loginAs(page, "SYSTEM_ADMIN", "/home/admin", "/home/admin");
     await expect(page).toHaveURL(buildUrlExpectation("/home/admin"));
   });
 });

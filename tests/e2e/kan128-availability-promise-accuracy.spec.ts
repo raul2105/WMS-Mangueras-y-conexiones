@@ -238,9 +238,9 @@ test.describe.serial("KAN-128: Commercial Availability Promise Accuracy", () => 
     await prisma.$disconnect();
   });
 
-  test("SALES_EXECUTIVE opens availability from /sales and sees commercial availability page", async ({ page }) => {
+  test("SALES_EXECUTIVE opens availability from its canonical home and sees commercial availability page", async ({ page }) => {
     await loginAs(page, "SALES_EXECUTIVE");
-    await page.goto("/sales");
+    await page.goto("/home/sales");
 
     const availabilityLink = page.getByRole("link", { name: /Disponibilidad/i });
     await expect(availabilityLink).toBeVisible();

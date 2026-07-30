@@ -89,7 +89,7 @@ export default async function SalesCustomersPage({
           <p className="text-slate-400 mt-1">Catálogo comercial y administrativo de clientes.</p>
         </div>
         <div className="flex gap-3">
-          <Link href="/sales" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+          <Link href="/home/sales" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
             ← Ventas
           </Link>
           {canManageCustomers ? (

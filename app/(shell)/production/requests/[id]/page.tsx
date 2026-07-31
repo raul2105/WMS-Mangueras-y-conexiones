@@ -26,6 +26,10 @@ import {
   markSalesRequestPreparedForDelivery,
   markSalesRequestDelivered,
   pullSalesRequestOrder,
+  receiveSalesRequestReturn,
+  requestSalesRequestCustomerReturn,
+  resolveSalesRequestOperationalException,
+  finalizeSalesRequestCancellationAfterReversal,
 } from "@/lib/sales/request-service";
 import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
@@ -40,6 +44,8 @@ import { getSalesConsoleTimelineItems } from "@/lib/sales/console";
 import {
   firstErrorMessage,
   salesInternalOrderAssignmentSchema,
+  salesInternalOrderCancellationSchema,
+  salesInternalOrderDeliverySchema,
   salesInternalOrderPreparationSchema,
   salesInternalOrderProductLineCreateSchema,
   salesInternalOrderTransitionSchema,
@@ -104,8 +110,9 @@ async function cancelRequest(formData: FormData) {
   const requestId = await getRequestId();
   await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
-  const parsed = salesInternalOrderTransitionSchema.safeParse({
+  const parsed = salesInternalOrderCancellationSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
+    reason: String(formData.get("reason") ?? "").trim() || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/requests?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
@@ -113,9 +120,10 @@ async function cancelRequest(formData: FormData) {
 
   try {
     const servicePerf = startPerf("action.production.requests.detail.cancel.service");
-    await cancelSalesRequestOrder(prisma, {
+    const result = await cancelSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
       cancelledByUserId: sessionCtx.user?.id ?? null,
+      reason: parsed.data.reason,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
 
@@ -128,7 +136,7 @@ async function cancelRequest(formData: FormData) {
     });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
 
-    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent("Pedido cancelado")}`);
+    redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent(result?.cancellationRequested ? "Solicitud de cancelación registrada; falta revisión y reversión física" : "Pedido cancelado")}`);
   } catch (error) {
     perf.end({ requestId, orderId: parsed.data.orderId, ok: false });
     if (isNextRedirectError(error)) throw error;
@@ -179,6 +187,7 @@ async function assignRequest(formData: FormData) {
   const parsed = salesInternalOrderAssignmentSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
     assigneeUserId: String(formData.get("assigneeUserId") ?? "").trim(),
+    reason: String(formData.get("reason") ?? "").trim(),
   });
   if (!parsed.success || !sessionCtx.user?.id) {
     const message = parsed.success ? "Sesión inválida para asignar el pedido" : firstErrorMessage(parsed.error);
@@ -205,8 +214,13 @@ async function markDelivered(formData: FormData) {
   const requestId = await getRequestId();
   await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
-  const parsed = salesInternalOrderTransitionSchema.safeParse({
+  const parsed = salesInternalOrderDeliverySchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
+    recipientName: String(formData.get("recipientName") ?? "").trim(),
+    deliveryMethod: String(formData.get("deliveryMethod") ?? "").trim(),
+    notes: String(formData.get("notes") ?? "").trim() || undefined,
+    evidenceUrl: String(formData.get("evidenceUrl") ?? "").trim() || undefined,
+    exceptionReason: String(formData.get("exceptionReason") ?? "").trim() || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/requests?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
@@ -220,6 +234,12 @@ async function markDelivered(formData: FormData) {
     const result = await markSalesRequestDelivered(prisma, {
       orderId: parsed.data.orderId,
       deliveredByUserId: sessionCtx.user.id,
+      deliveredByRoles: sessionCtx.roles,
+      recipientName: parsed.data.recipientName,
+      deliveryMethod: parsed.data.deliveryMethod,
+      notes: parsed.data.notes,
+      evidenceUrl: parsed.data.evidenceUrl,
+      exceptionReason: parsed.data.exceptionReason,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
@@ -245,6 +265,7 @@ async function markPreparedForDelivery(formData: FormData) {
     orderId: String(formData.get("orderId") ?? "").trim(),
     preparedLocationId: String(formData.get("preparedLocationId") ?? "").trim(),
     notes: String(formData.get("notes") ?? "").trim() || undefined,
+    evidenceUrl: String(formData.get("evidenceUrl") ?? "").trim() || undefined,
   });
   if (!parsed.success || !sessionCtx.user?.id) {
     const message = parsed.success ? "Sesión inválida para preparar el pedido" : firstErrorMessage(parsed.error);
@@ -262,6 +283,92 @@ async function markPreparedForDelivery(formData: FormData) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo preparar el pedido";
     redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function resolveOperationalException(formData: FormData) {
+  "use server";
+  await requireSalesAssignmentAccess();
+  const sessionCtx = await getSessionContext();
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const exceptionId = String(formData.get("exceptionId") ?? "").trim();
+  const resolution = String(formData.get("resolution") ?? "").trim();
+  const notes = String(formData.get("notes") ?? "").trim();
+  const allowedResolutions = ["WAIT_REPLENISHMENT", "PARTIAL_DELIVERY", "SUBSTITUTE_PRODUCT", "REDUCE_QUANTITY", "URGENT_PURCHASE", "CANCEL_LINE", "CANCEL_ORDER", "REJECT_CANCELLATION"] as const;
+  if (!sessionCtx.user?.id || !exceptionId || !orderId || !allowedResolutions.includes(resolution as typeof allowedResolutions[number])) {
+    redirect(`/production/requests/${orderId}?error=${encodeURIComponent("Resolución operativa inválida")}`);
+  }
+  try {
+    const result = await resolveSalesRequestOperationalException(prisma, {
+      exceptionId,
+      decidedByUserId: sessionCtx.user.id,
+      resolution: resolution as typeof allowedResolutions[number],
+      notes,
+    });
+    redirect(`/production/requests/${orderId}?ok=${encodeURIComponent(result.returnId ? "Cancelación aprobada; falta reversión física" : "Excepción operativa resuelta")}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    redirect(`/production/requests/${orderId}?error=${encodeURIComponent(error instanceof Error ? error.message : "No se pudo resolver la excepción")}`);
+  }
+}
+
+async function receiveReturn(formData: FormData) {
+  "use server";
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const sessionCtx = await getSessionContext();
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const returnId = String(formData.get("returnId") ?? "").trim();
+  const itemIds = formData.getAll("returnItemId").map(String);
+  const dispositions = formData.getAll("disposition").map(String);
+  const destinations = formData.getAll("destinationLocationId").map(String);
+  if (!sessionCtx.user?.id || !returnId || itemIds.length === 0 || itemIds.length !== dispositions.length || itemIds.length !== destinations.length) {
+    redirect(`/production/requests/${orderId}?error=${encodeURIComponent("Datos de recepción de devolución incompletos")}`);
+  }
+  try {
+    await receiveSalesRequestReturn(prisma, {
+      returnId,
+      receivedByUserId: sessionCtx.user.id,
+      items: itemIds.map((itemId, index) => ({
+        itemId,
+        disposition: dispositions[index] as "RESTOCK" | "REPAIR" | "SCRAP" | "REJECT",
+        destinationLocationId: destinations[index] || undefined,
+      })),
+    });
+    redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Devolución física recibida y auditada")}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    redirect(`/production/requests/${orderId}?error=${encodeURIComponent(error instanceof Error ? error.message : "No se pudo recibir la devolución")}`);
+  }
+}
+
+async function finalizeCancellation(formData: FormData) {
+  "use server";
+  await requireSalesAssignmentAccess();
+  const sessionCtx = await getSessionContext();
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  if (!sessionCtx.user?.id || !orderId) redirect(`/production/requests?error=${encodeURIComponent("Sesión o pedido inválido")}`);
+  try {
+    await finalizeSalesRequestCancellationAfterReversal(prisma, { orderId, cancelledByUserId: sessionCtx.user.id });
+    redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Cancelación confirmada después de la reversión física")}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    redirect(`/production/requests/${orderId}?error=${encodeURIComponent(error instanceof Error ? error.message : "No se pudo confirmar la cancelación")}`);
+  }
+}
+
+async function requestCustomerReturn(formData: FormData) {
+  "use server";
+  await requireSalesWriteAccess();
+  const sessionCtx = await getSessionContext();
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!sessionCtx.user?.id || !orderId || !reason) redirect(`/production/requests/${orderId}?error=${encodeURIComponent("La devolución requiere un motivo")}`);
+  try {
+    await requestSalesRequestCustomerReturn(prisma, { orderId, requestedByUserId: sessionCtx.user.id, reason });
+    redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Devolución solicitada; pendiente de recepción e inspección")}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    redirect(`/production/requests/${orderId}?error=${encodeURIComponent(error instanceof Error ? error.message : "No se pudo solicitar la devolución")}`);
   }
 }
 
@@ -404,6 +511,11 @@ export default async function ProductionRequestDetailPage({
       preparedForDeliveryAt: true,
       preparedForDeliveryNotes: true,
       deliveredToCustomerAt: true,
+      deliveryRecipientName: true,
+      deliveryMethod: true,
+      deliveryNotes: true,
+      deliveryEvidenceUrl: true,
+      deliveryExceptionReason: true,
       createdAt: true,
       confirmedAt: true,
       cancelledAt: true,
@@ -437,6 +549,30 @@ export default async function ProductionRequestDetailPage({
           status: true,
           updatedAt: true,
           targetLocation: { select: { code: true, name: true } },
+        },
+      },
+      operationalExceptions: {
+        orderBy: { reportedAt: "desc" },
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          reportedQty: true,
+          reason: true,
+          reportedAt: true,
+          resolution: true,
+          resolutionNotes: true,
+        },
+      },
+      returns: {
+        orderBy: { requestedAt: "desc" },
+        select: {
+          id: true,
+          kind: true,
+          status: true,
+          reason: true,
+          requestedAt: true,
+          items: { select: { id: true, product: { select: { sku: true, name: true } }, quantity: true, disposition: true, destinationLocationId: true } },
         },
       },
       lines: {
@@ -523,6 +659,13 @@ export default async function ProductionRequestDetailPage({
         },
         orderBy: [{ usageType: "asc" }, { code: "asc" }],
         select: { id: true, code: true, name: true, usageType: true },
+      })
+    : [];
+  const returnLocations = order.warehouse?.id
+    ? await prisma.location.findMany({
+        where: { warehouseId: order.warehouse.id, isActive: true },
+        orderBy: [{ usageType: "asc" }, { code: "asc" }],
+        select: { id: true, code: true, name: true },
       })
     : [];
 
@@ -624,6 +767,11 @@ export default async function ProductionRequestDetailPage({
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
   });
+  const canConfirmDelivery = deliveredEligibility.canMarkDelivered && (
+    (order.assignedToUserId === sessionCtx.user?.id && sessionCtx.roles.includes("SALES_EXECUTIVE"))
+    || sessionCtx.roles.includes("MANAGER")
+    || sessionCtx.roles.includes("SYSTEM_ADMIN")
+  );
   const canPrepareForDelivery =
     canOperateDirectPick &&
     orderStatus === "CONFIRMADA" &&
@@ -754,17 +902,39 @@ export default async function ProductionRequestDetailPage({
                     <button type="submit" className="btn-secondary">{takeEligibility.takeActionLabel ?? "Tomar pedido"}</button>
                   </form>
                 ) : null}
-                {deliveredEligibility.canMarkDelivered ? (
-                  <form action={markDelivered}>
+                {canConfirmDelivery ? (
+                  <form action={markDelivered} className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] p-4">
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button type="submit" className="btn-primary">Entregado al cliente</button>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="text-sm font-medium text-[var(--text-primary)]">
+                        Recibió *
+                        <input name="recipientName" required maxLength={200} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm" />
+                      </label>
+                      <label className="text-sm font-medium text-[var(--text-primary)]">
+                        Método de entrega *
+                        <input name="deliveryMethod" required maxLength={100} placeholder="Entrega directa, recolección, mensajería…" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm" />
+                      </label>
+                      <label className="text-sm font-medium text-[var(--text-primary)]">
+                        Nota
+                        <input name="notes" maxLength={500} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm" />
+                      </label>
+                      <label className="text-sm font-medium text-[var(--text-primary)]">
+                        URL de evidencia
+                        <input name="evidenceUrl" type="url" maxLength={2000} placeholder="Opcional" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm" />
+                      </label>
+                    </div>
+                    <label className="mt-3 block text-sm font-medium text-[var(--text-primary)]">
+                      Motivo de excepción (sólo Manager/Admin si no es el ejecutivo responsable)
+                      <input name="exceptionReason" maxLength={500} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm" />
+                    </label>
+                    <button type="submit" className="btn-primary mt-3">Confirmar entrega al cliente</button>
                   </form>
                 ) : null}
-                {order.deliveredToCustomerAt ? (
-                  <a href={`/api/production/requests/${order.id}/delivery.pdf`} className={buttonStyles({ variant: "secondary" })}>
-                    Descargar comprobante de entrega
-                  </a>
-                ) : null}
+          {order.deliveredToCustomerAt ? (
+            <a href={`/api/production/requests/${order.id}/delivery.pdf`} className={buttonStyles({ variant: "secondary" })}>
+              Descargar comprobante de entrega
+            </a>
+          ) : null}
               </>
             ) : (
               <p className="text-sm text-[var(--text-muted)]">Este rol puede revisar el pedido, pero no ejecutar acciones de escritura.</p>
@@ -789,6 +959,10 @@ export default async function ProductionRequestDetailPage({
                   Nota (opcional)
                   <input name="notes" maxLength={500} placeholder="Ej. esperando recolección del cliente" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
                 </label>
+                <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                  URL de evidencia (opcional)
+                  <input name="evidenceUrl" type="url" maxLength={2000} placeholder="Foto o documento de preparación" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
+                </label>
                 <button type="submit" className="btn-primary" disabled={deliveryLocations.length === 0}>
                   Preparar para entrega
                 </button>
@@ -801,6 +975,14 @@ export default async function ProductionRequestDetailPage({
               ) : null}
             </form>
           ) : null}
+          {order.deliveredToCustomerAt ? (
+            <div className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--text-secondary)]" data-testid="delivery-summary">
+              <p className="font-semibold text-[var(--status-success-text)]">Entrega confirmada</p>
+              <p className="mt-1">Recibió: {order.deliveryRecipientName ?? "No registrado"} · Método: {order.deliveryMethod ?? "No registrado"}</p>
+              {order.deliveryExceptionReason ? <p className="mt-1 text-xs">Excepción autorizada: {order.deliveryExceptionReason}</p> : null}
+              {order.deliveryEvidenceUrl ? <a href={order.deliveryEvidenceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-[var(--accent)] underline">Ver evidencia</a> : null}
+            </div>
+          ) : null}
           {order.preparedForDeliveryAt ? (
             <div className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] px-4 py-3 text-sm text-[var(--text-secondary)]" data-testid="prepared-for-delivery-summary">
               <p className="font-semibold text-[var(--status-success-text)]">Preparado para entrega</p>
@@ -812,6 +994,59 @@ export default async function ProductionRequestDetailPage({
               {order.preparedForDeliveryNotes ? <p className="mt-1 text-xs">{order.preparedForDeliveryNotes}</p> : null}
             </div>
           ) : null}
+          {order.operationalExceptions.length > 0 ? (
+            <div className="space-y-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4" data-testid="operational-exceptions">
+              <h3 className="font-semibold text-[var(--status-warning-text)]">Excepciones operativas</h3>
+              {order.operationalExceptions.map((exception: any) => (
+                <div key={exception.id} className="rounded-md border border-[var(--status-warning-border)] bg-[var(--bg-surface)] p-3 text-sm">
+                  <p className="font-medium text-[var(--text-primary)]">{exception.type === "SHORTAGE" ? "Faltante" : "Solicitud de cancelación"} · {exception.status}</p>
+                  <p className="mt-1 text-[var(--text-secondary)]">{exception.reason}{exception.reportedQty ? ` · Cantidad: ${exception.reportedQty}` : ""}</p>
+                  {exception.resolution ? <p className="mt-1 text-xs text-[var(--text-muted)]">Decisión: {exception.resolution}{exception.resolutionNotes ? ` · ${exception.resolutionNotes}` : ""}</p> : null}
+                  {canManageAssignments && exception.status === "OPEN" ? (
+                    <form action={resolveOperationalException} className="mt-3 grid gap-2 sm:grid-cols-3">
+                      <input type="hidden" name="orderId" value={order.id} />
+                      <input type="hidden" name="exceptionId" value={exception.id} />
+                      <select name="resolution" required className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-sm">
+                        {exception.type === "CANCELLATION_REQUEST" ? <><option value="CANCEL_ORDER">Aprobar cancelación y reversión</option><option value="REJECT_CANCELLATION">Rechazar cancelación</option></> : <><option value="WAIT_REPLENISHMENT">Esperar reposición</option><option value="PARTIAL_DELIVERY">Autorizar entrega parcial</option><option value="SUBSTITUTE_PRODUCT">Sustituir producto</option><option value="REDUCE_QUANTITY">Reducir cantidad</option><option value="URGENT_PURCHASE">Compra urgente</option><option value="CANCEL_LINE">Cancelar línea</option><option value="CANCEL_ORDER">Cancelar pedido</option></>}
+                      </select>
+                      <input name="notes" required maxLength={1000} placeholder="Decisión y responsable" className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-sm" />
+                      <button type="submit" className="btn-secondary">Registrar decisión</button>
+                    </form>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {order.returns.length > 0 ? (
+            <div className="space-y-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4" data-testid="sales-order-returns">
+              <h3 className="font-semibold text-[var(--text-primary)]">Devoluciones y reversión física</h3>
+              {order.returns.map((record: any) => (
+                <div key={record.id} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-sm">
+                  <p className="font-medium text-[var(--text-primary)]">{record.kind === "CANCELLATION_REVERSAL" ? "Reversión por cancelación" : "Devolución de cliente"} · {record.status}</p>
+                  <p className="mt-1 text-[var(--text-secondary)]">{record.reason}</p>
+                  {record.status === "REQUESTED" && canOperateDirectPick ? (
+                    <form action={receiveReturn} className="mt-3 space-y-2">
+                      <input type="hidden" name="orderId" value={order.id} />
+                      <input type="hidden" name="returnId" value={record.id} />
+                      {record.items.map((item: any) => (
+                        <div key={item.id} className="grid gap-2 sm:grid-cols-3">
+                          <input type="hidden" name="returnItemId" value={item.id} />
+                          <p className="self-center text-xs">{item.product.sku} · {item.quantity}</p>
+                          <select name="disposition" defaultValue={item.disposition} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-sm"><option value="RESTOCK">Reintegrar</option><option value="REPAIR">Reparar</option><option value="SCRAP">Merma</option><option value="REJECT">Rechazar</option></select>
+                          <select name="destinationLocationId" defaultValue={item.destinationLocationId ?? ""} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-sm"><option value="">Ubicación (reintegro)</option>{returnLocations.map((location) => <option key={location.id} value={location.id}>{location.code} — {location.name}</option>)}</select>
+                        </div>
+                      ))}
+                      <button type="submit" className="btn-primary">Confirmar recepción e inspección</button>
+                    </form>
+                  ) : null}
+                </div>
+              ))}
+              {canManageAssignments && order.returns.some((record: any) => record.kind === "CANCELLATION_REVERSAL" && record.status === "COMPLETED") && order.status !== "CANCELADA" ? <form action={finalizeCancellation}><input type="hidden" name="orderId" value={order.id} /><button type="submit" className="btn-secondary">Confirmar cancelación tras reversión</button></form> : null}
+            </div>
+          ) : null}
+          {order.deliveredToCustomerAt && canRenderWriteActions ? (
+            <form action={requestCustomerReturn} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3"><input type="hidden" name="orderId" value={order.id} /><label className="text-sm font-medium text-[var(--text-primary)]">Motivo de devolución del cliente *<input name="reason" required maxLength={500} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm" /></label><button type="submit" className="btn-secondary mt-2">Iniciar devolución</button></form>
+          ) : null}
           {canManageAssignments && order.status === "CONFIRMADA" && !order.pulledAt && !order.deliveredToCustomerAt ? (
             <form action={assignRequest} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3" data-testid="manager-assign-order">
               <input type="hidden" name="orderId" value={order.id} />
@@ -822,6 +1057,10 @@ export default async function ProductionRequestDetailPage({
                     <option value="" disabled>Selecciona un ejecutivo</option>
                     {salesExecutives.map((user) => <option key={user.id} value={user.id}>{user.name ?? user.email} · {user.email}</option>)}
                   </select>
+                </label>
+                <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                  Motivo de asignación directa *
+                  <input name="reason" required maxLength={500} placeholder="Ej. pedido urgente o reasignación autorizada" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
                 </label>
                 <button type="submit" className="btn-secondary">{order.assignedToUserId ? "Reasignar antes de toma" : "Asignar vendedor"}</button>
               </div>
@@ -835,7 +1074,7 @@ export default async function ProductionRequestDetailPage({
                 {order.notes ? <p><span className="font-medium text-[var(--text-primary)]">Notas:</span> {order.notes}</p> : null}
                 {latestPickList ? <p>Último surtido: <span className="font-mono text-[var(--accent)]">{latestPickList.code}</span> · {summarizePickListStatus(latestPickList.status)} · {latestPickList.targetLocation.code} - {latestPickList.targetLocation.name}</p> : null}
                 {canRenderWriteActions && order.status !== "CANCELADA" ? (
-                  <form action={cancelRequest}><input type="hidden" name="orderId" value={order.id} /><button type="submit" className="btn-secondary border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger-text)] hover:bg-[var(--danger-soft-hover)]">Cancelar pedido</button></form>
+                  <form action={cancelRequest} className="flex flex-wrap items-end gap-2"><input type="hidden" name="orderId" value={order.id} /><label className="text-xs text-[var(--text-secondary)]">Motivo (obligatorio si surtido fue liberado)<input name="reason" maxLength={500} className="mt-1 block rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-sm" /></label><button type="submit" className="btn-secondary border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger-text)] hover:bg-[var(--danger-soft-hover)]">Cancelar / solicitar reversión</button></form>
                 ) : null}
               </div>
             </details>

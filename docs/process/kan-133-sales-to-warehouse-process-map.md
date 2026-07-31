@@ -2,7 +2,7 @@
 
 Fecha de corte: 2026-07-30
 
-Estado: en revisión; validación técnica realizada, validación operativa pendiente
+Estado: en revisión; reglas operativas implementadas en rama de integración, validación AWS pendiente de migración y prueba por rol
 Ámbito: pedido comercial directo, ensamble configurado y pedido mixto
 
 ## Propósito
@@ -41,7 +41,7 @@ de compromiso son días de negocio; las marcas de auditoría son instantes.
 ## Matriz de transiciones, validación y visibilidad
 
 Ninguna transición operativa es sólo de interfaz: cada una que cambia el
-pedido, una reserva, una lista de surtido o una entrega requiere validación de
+pedido, una reserva, una lista de surtido, una excepción, una devolución o una entrega requiere validación de
 backend. La interfaz sólo presenta el estado, la siguiente acción y el motivo
 de bloqueo; no puede sustituir las reglas de servicio.
 
@@ -50,9 +50,9 @@ de bloqueo; no puede sustituir las reglas de servicio.
 | Captura → Por asignar | Pedido `BORRADOR`, cliente, almacén, fecha y líneas válidos; promesa revalidada y reserva/lista de surtido creadas cuando aplica. | Confirma el pedido y luego ve `Por asignar`. | No recibe trabajo hasta que exista pedido confirmado y asignado. | Puede localizar el pedido para asignar o reasignar. |
 | Por asignar → En surtido | La toma o asignación no puede duplicar responsable ni aceptar pedido cancelado o ya tomado. | El ejecutivo elegible puede `Tomar pedido` o `Continuar pedido`; si no, ve el responsable o bloqueo. | Recibe el trabajo de surtido o ensamble sólo después de la asignación. | Puede asignar o reasignar antes de la toma, dentro de RBAC. |
 | En surtido → Separar para entrega | Surtido directo completado y todos los ensambles configurados ligados completados. | Ve seguimiento y bloqueo mientras falte trabajo físico. | Ejecuta surtido o ensamble; al completarse recibe `Preparar pedido`. | Ve el avance y atiende excepciones. |
-| Separar para entrega → Preparado para entrega | Se registra área física, usuario responsable y marca de preparado; no basta con cambiar una etiqueta UI. | Ve `En espera de almacén`. | Registra el área y preparado físico. | Puede verificar responsable, ubicación y evidencia. |
-| Preparado para entrega → Entregado | Pedido confirmado, asignado y tomado; surtido/ensamble completos; área de entrega registrada; entrega aún no confirmada. | Responsable, Manager o Admin habilitado puede confirmar entrega; de otro modo ve la condición bloqueante. | No habilita la entrega comercial antes de completar preparación. | Puede confirmar sólo si las mismas precondiciones se cumplen. |
-| Activo → Cancelado | Se impide cancelar si el surtido u orden de ensamble ya fue liberado; se cancelan reservas/listas en borrador y se registra auditoría. | Ve cancelación o motivo de bloqueo. | No recibe un trabajo cancelado; conserva evidencia de una operación liberada. | Gestiona la excepción y revisa auditoría. |
+| Separar para entrega → Preparado para entrega | Se registra área física, usuario responsable, nota/evidencia y marca de preparado; una excepción abierta bloquea la transición. | Ve `En espera de almacén`. | Registra el área y preparado físico. | Puede verificar responsable, ubicación y evidencia. |
+| Preparado para entrega → Entregado | Pedido confirmado, asignado y tomado; surtido/ensamble completos; área de entrega registrada; sin excepción abierta; se exige quién recibió y método. | Sólo el ejecutivo responsable confirma normalmente; Manager/Admin exige motivo excepcional. | No habilita la entrega comercial antes de completar preparación. | Puede confirmar sólo si las mismas precondiciones se cumplen. |
+| Activo → Solicitud de cancelación → Cancelado | Si el surtido ya fue liberado se crea una excepción, Manager/Admin decide, Almacén realiza reversión física y sólo entonces se confirma cancelación. | Ve el bloqueo y seguimiento. | Recibe reversión física antes del cierre. | Gestiona decisión y auditoría. |
 
 Los indicadores, tarjetas, etiquetas de etapa, PDFs de consulta y enlaces de
 navegación son **UI-only**: reflejan el estado calculado, pero no autorizan ni
@@ -88,9 +88,10 @@ flowchart LR
 5. Un pedido no puede prepararse para entrega hasta que el surtido directo esté
    completado y todos los ensambles configurados ligados estén completados.
 6. Un pedido no puede entregarse si falta responsable/toma, surtido directo,
-   ensamble, área de entrega o si ya fue entregado.
-7. Cancelar libera las reservas de listas aún en borrador; no puede ocultar una
-   operación ya liberada o una condición de inventario incompatible.
+   ensamble, área de entrega, evidencia mínima de entrega o existe una excepción abierta.
+7. Cancelar libera reservas de listas aún en borrador. Si existe surtido liberado,
+   crea una solicitud de cancelación y exige decisión, reversión física y auditoría.
+8. Un pedido entregado inicia una devolución; nunca se convierte en cancelación.
 
 ## Diferencia por tipo de pedido
 
@@ -114,6 +115,12 @@ Esta evidencia demuestra disponibilidad, confirmación, reserva y handoff; no
 autoriza por sí misma el cierre de las historias posteriores.
 
 ## Excepciones y decisiones
+
+La implementación persistente usa `SalesInternalOrderException` para faltantes
+y solicitudes de cancelación, y `SalesInternalOrderReturn` para reversión de
+surtido y devolución del cliente. Estos registros conservan actor, fecha,
+motivo, decisión, ubicación y disposición física; además bloquean preparación
+y entrega mientras permanezcan abiertos.
 
 | Excepción | Estado esperado | Responsable | Acción visible |
 |---|---|---|---|

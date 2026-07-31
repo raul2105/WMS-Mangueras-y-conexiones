@@ -381,11 +381,27 @@ export const salesInternalOrderPreparationSchema = z.object({
   orderId: requiredText("Pedido"),
   preparedLocationId: requiredText("Área de entrega"),
   notes: z.string().trim().max(500).optional(),
+  evidenceUrl: z.string().trim().url("La evidencia debe ser una URL válida").max(2000).optional(),
 });
 
 export const salesInternalOrderAssignmentSchema = z.object({
   orderId: requiredText("Pedido"),
   assigneeUserId: requiredText("Vendedor"),
+  reason: requiredText("Motivo de asignación directa").max(500),
+});
+
+export const salesInternalOrderDeliverySchema = z.object({
+  orderId: requiredText("Pedido"),
+  recipientName: requiredText("Persona que recibió").max(200),
+  deliveryMethod: requiredText("Método de entrega").max(100),
+  notes: z.string().trim().max(500).optional(),
+  evidenceUrl: z.string().trim().url("La evidencia debe ser una URL válida").max(2000).optional(),
+  exceptionReason: z.string().trim().max(500).optional(),
+});
+
+export const salesInternalOrderCancellationSchema = z.object({
+  orderId: requiredText("Pedido"),
+  reason: z.string().trim().max(500).optional(),
 });
 
 export const salesGenerateProductionOrderSchema = z.object({

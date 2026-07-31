@@ -25,6 +25,11 @@ model User {
   assignedSalesOrders  SalesInternalOrder[] @relation("SalesInternalOrderAssignedTo")
   preparedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderPreparedForDeliveryBy")
   deliveredSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderDeliveredBy")
+  reportedSalesOrderExceptions SalesInternalOrderException[] @relation("SalesInternalOrderExceptionReportedBy")
+  decidedSalesOrderExceptions SalesInternalOrderException[] @relation("SalesInternalOrderExceptionDecidedBy")
+  requestedSalesOrderReturns SalesInternalOrderReturn[] @relation("SalesInternalOrderReturnRequestedBy")
+  receivedSalesOrderReturns SalesInternalOrderReturn[] @relation("SalesInternalOrderReturnReceivedBy")
+  completedSalesOrderReturns SalesInternalOrderReturn[] @relation("SalesInternalOrderReturnCompletedBy")
 
   inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
   traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
@@ -124,6 +129,7 @@ model Product {
   technicalAttributes ProductTechnicalAttribute[]
   productionOrderItems ProductionOrderItem[]
   salesInternalOrderLines SalesInternalOrderLine[]
+  salesInternalOrderReturnItems SalesInternalOrderReturnItem[]
   salesAssemblyConfigurationsEntry SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyEntryFittingProduct")
   salesAssemblyConfigurationsHose  SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyHoseProduct")
   salesAssemblyConfigurationsExit  SalesInternalOrderAssemblyConfig[] @relation("SalesAssemblyExitFittingProduct")
@@ -261,6 +267,8 @@ model Location {
   salesOrderPickTasksSource SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskSourceLocation")
   salesOrderPickTasksTarget SalesInternalOrderPickTask[] @relation("SalesOrderPickTaskTargetLocation")
   preparedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderPreparedForDeliveryLocation")
+  salesOrderReturnItemsFrom SalesInternalOrderReturnItem[] @relation("SalesInternalOrderReturnItemSourceLocation")
+  salesOrderReturnItemsTo SalesInternalOrderReturnItem[] @relation("SalesInternalOrderReturnItemDestinationLocation")
   assemblyWipWorkOrders  AssemblyWorkOrder[] @relation("AssemblyWipLocation")
   traceRecords TraceRecord[]
 
@@ -321,6 +329,50 @@ enum SalesInternalOrderStatus {
 enum SalesInternalOrderLineKind {
   PRODUCT
   CONFIGURED_ASSEMBLY
+}
+
+// Operational exceptions are explicit records instead of side effects hidden in
+// picking tasks. They block preparation and delivery until an authorized
+// decision is recorded.
+enum SalesInternalOrderExceptionType {
+  SHORTAGE
+  CANCELLATION_REQUEST
+}
+
+enum SalesInternalOrderExceptionStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum SalesInternalOrderExceptionResolution {
+  WAIT_REPLENISHMENT
+  PARTIAL_DELIVERY
+  SUBSTITUTE_PRODUCT
+  REDUCE_QUANTITY
+  URGENT_PURCHASE
+  CANCEL_LINE
+  CANCEL_ORDER
+  REJECT_CANCELLATION
+}
+
+enum SalesInternalOrderReturnKind {
+  CANCELLATION_REVERSAL
+  CUSTOMER_RETURN
+}
+
+enum SalesInternalOrderReturnStatus {
+  REQUESTED
+  RECEIVED
+  COMPLETED
+  REJECTED
+}
+
+enum SalesInternalOrderReturnDisposition {
+  RESTOCK
+  REPAIR
+  SCRAP
+  REJECT
 }
 
 enum ProductionOrderKind {
@@ -556,7 +608,13 @@ model SalesInternalOrder {
   pulledAt DateTime?
   preparedForDeliveryAt DateTime?
   preparedForDeliveryNotes String?
+  preparedForDeliveryEvidenceUrl String?
   deliveredToCustomerAt DateTime?
+  deliveryRecipientName String?
+  deliveryMethod String?
+  deliveryNotes String?
+  deliveryEvidenceUrl String?
+  deliveryExceptionReason String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -571,6 +629,8 @@ model SalesInternalOrder {
   deliveredByUser User? @relation("SalesInternalOrderDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
   lines SalesInternalOrderLine[]
   pickLists SalesInternalOrderPickList[]
+  operationalExceptions SalesInternalOrderException[]
+  returns SalesInternalOrderReturn[]
 
   @@index([status, createdAt])
   @@index([requestedByUserId])
@@ -581,6 +641,86 @@ model SalesInternalOrder {
   @@index([customerId])
   @@index([warehouseId])
   @@index([sourceMaterialRequestCode])
+}
+
+model SalesInternalOrderException {
+  id String @id @default(uuid())
+  orderId String
+  orderLineId String?
+  pickTaskId String?
+  type SalesInternalOrderExceptionType
+  status SalesInternalOrderExceptionStatus @default(OPEN)
+  reportedQty Float?
+  reason String
+  reportedByUserId String?
+  reportedAt DateTime @default(now())
+  resolution SalesInternalOrderExceptionResolution?
+  resolutionNotes String?
+  decidedByUserId String?
+  decidedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLine SalesInternalOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  pickTask SalesInternalOrderPickTask? @relation(fields: [pickTaskId], references: [id], onDelete: SetNull)
+  reportedByUser User? @relation("SalesInternalOrderExceptionReportedBy", fields: [reportedByUserId], references: [id], onDelete: SetNull)
+  decidedByUser User? @relation("SalesInternalOrderExceptionDecidedBy", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+  returns SalesInternalOrderReturn[]
+
+  @@index([orderId, status, type])
+  @@index([orderLineId])
+  @@index([pickTaskId])
+}
+
+model SalesInternalOrderReturn {
+  id String @id @default(uuid())
+  orderId String
+  exceptionId String?
+  kind SalesInternalOrderReturnKind
+  status SalesInternalOrderReturnStatus @default(REQUESTED)
+  reason String
+  requestedByUserId String?
+  requestedAt DateTime @default(now())
+  receivedByUserId String?
+  receivedAt DateTime?
+  completedByUserId String?
+  completedAt DateTime?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order SalesInternalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  exception SalesInternalOrderException? @relation(fields: [exceptionId], references: [id], onDelete: SetNull)
+  requestedByUser User? @relation("SalesInternalOrderReturnRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  receivedByUser User? @relation("SalesInternalOrderReturnReceivedBy", fields: [receivedByUserId], references: [id], onDelete: SetNull)
+  completedByUser User? @relation("SalesInternalOrderReturnCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  items SalesInternalOrderReturnItem[]
+
+  @@index([orderId, status, kind])
+  @@index([exceptionId])
+}
+
+model SalesInternalOrderReturnItem {
+  id String @id @default(uuid())
+  returnId String
+  orderLineId String?
+  productId String
+  sourceLocationId String?
+  destinationLocationId String?
+  quantity Float
+  disposition SalesInternalOrderReturnDisposition
+  notes String?
+  createdAt DateTime @default(now())
+
+  return SalesInternalOrderReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderLine SalesInternalOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  sourceLocation Location? @relation("SalesInternalOrderReturnItemSourceLocation", fields: [sourceLocationId], references: [id], onDelete: SetNull)
+  destinationLocation Location? @relation("SalesInternalOrderReturnItemDestinationLocation", fields: [destinationLocationId], references: [id], onDelete: SetNull)
+
+  @@index([returnId])
+  @@index([productId])
 }
 
 model SalesInternalOrderLine {
@@ -597,6 +737,8 @@ model SalesInternalOrderLine {
   product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
   assemblyConfiguration SalesInternalOrderAssemblyConfig?
   pickTasks SalesInternalOrderPickTask[]
+  operationalExceptions SalesInternalOrderException[]
+  returnItems SalesInternalOrderReturnItem[]
 
   @@index([orderId])
   @@index([productId])
@@ -671,6 +813,7 @@ model SalesInternalOrderPickTask {
   orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
   sourceLocation Location @relation("SalesOrderPickTaskSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
   targetLocation Location @relation("SalesOrderPickTaskTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  operationalExceptions SalesInternalOrderException[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

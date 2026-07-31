@@ -2,7 +2,7 @@
 
 Fecha de corte: 2026-07-30
 
-Estado: borrador de proceso basado en la implementación y evidencia AWS actual
+Estado: en revisión; validación técnica realizada, validación operativa pendiente
 Ámbito: pedido comercial directo, ensamble configurado y pedido mixto
 
 ## Propósito
@@ -37,6 +37,26 @@ de compromiso son días de negocio; las marcas de auditoría son instantes.
 | Preparado para entrega | Área de entrega registrada y trabajo requerido completado. | Ventas responsable, Manager o Administrador. | Se confirma la entrega al cliente. | Validación de entrega y evento de auditoría. |
 | Entregado | `deliveredToCustomerAt` registrado. | Ninguno; sólo consulta y comprobante. | Terminal. | Usuario, fecha y PDF de entrega. |
 | Cancelado | Pedido cancelado. | Ninguno; sólo consulta y auditoría. | Terminal. | Evento de cancelación y liberación aplicable. |
+
+## Matriz de transiciones, validación y visibilidad
+
+Ninguna transición operativa es sólo de interfaz: cada una que cambia el
+pedido, una reserva, una lista de surtido o una entrega requiere validación de
+backend. La interfaz sólo presenta el estado, la siguiente acción y el motivo
+de bloqueo; no puede sustituir las reglas de servicio.
+
+| Transición | Validación backend obligatoria | Presentación para Ventas | Presentación para Almacén / Producción | Supervisión |
+|---|---|---|---|---|
+| Captura → Por asignar | Pedido `BORRADOR`, cliente, almacén, fecha y líneas válidos; promesa revalidada y reserva/lista de surtido creadas cuando aplica. | Confirma el pedido y luego ve `Por asignar`. | No recibe trabajo hasta que exista pedido confirmado y asignado. | Puede localizar el pedido para asignar o reasignar. |
+| Por asignar → En surtido | La toma o asignación no puede duplicar responsable ni aceptar pedido cancelado o ya tomado. | El ejecutivo elegible puede `Tomar pedido` o `Continuar pedido`; si no, ve el responsable o bloqueo. | Recibe el trabajo de surtido o ensamble sólo después de la asignación. | Puede asignar o reasignar antes de la toma, dentro de RBAC. |
+| En surtido → Separar para entrega | Surtido directo completado y todos los ensambles configurados ligados completados. | Ve seguimiento y bloqueo mientras falte trabajo físico. | Ejecuta surtido o ensamble; al completarse recibe `Preparar pedido`. | Ve el avance y atiende excepciones. |
+| Separar para entrega → Preparado para entrega | Se registra área física, usuario responsable y marca de preparado; no basta con cambiar una etiqueta UI. | Ve `En espera de almacén`. | Registra el área y preparado físico. | Puede verificar responsable, ubicación y evidencia. |
+| Preparado para entrega → Entregado | Pedido confirmado, asignado y tomado; surtido/ensamble completos; área de entrega registrada; entrega aún no confirmada. | Responsable, Manager o Admin habilitado puede confirmar entrega; de otro modo ve la condición bloqueante. | No habilita la entrega comercial antes de completar preparación. | Puede confirmar sólo si las mismas precondiciones se cumplen. |
+| Activo → Cancelado | Se impide cancelar si el surtido u orden de ensamble ya fue liberado; se cancelan reservas/listas en borrador y se registra auditoría. | Ve cancelación o motivo de bloqueo. | No recibe un trabajo cancelado; conserva evidencia de una operación liberada. | Gestiona la excepción y revisa auditoría. |
+
+Los indicadores, tarjetas, etiquetas de etapa, PDFs de consulta y enlaces de
+navegación son **UI-only**: reflejan el estado calculado, pero no autorizan ni
+ejecutan transiciones por sí mismos.
 
 ## Flujo principal
 

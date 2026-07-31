@@ -1025,6 +1025,7 @@ export async function assignSalesRequestOrder(
     orderId: string;
     assigneeUserId: string;
     assignedByUserId: string;
+    reason: string;
   },
 ) {
   return prisma.$transaction(async (tx) => {
@@ -1054,6 +1055,9 @@ export async function assignSalesRequestOrder(
     ]);
 
     if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (!args.reason.trim()) {
+      throw new InventoryServiceError("ASSIGNMENT_REASON_REQUIRED", "La asignación directa requiere un motivo operativo");
+    }
     if (order.status !== "CONFIRMADA" || order.deliveredToCustomerAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se puede asignar un pedido confirmado pendiente de entrega");
     }
@@ -1094,6 +1098,7 @@ export async function assignSalesRequestOrder(
         orderCode: order.code,
         assignedToUserId: assignee.id,
         assignedAt: now.toISOString(),
+        reason: args.reason.trim(),
       },
     }, tx);
 
@@ -1108,6 +1113,7 @@ export async function markSalesRequestPreparedForDelivery(
     preparedByUserId: string;
     preparedLocationId: string;
     notes?: string | null;
+    evidenceUrl?: string | null;
   },
 ): Promise<MarkSalesRequestPreparedForDeliveryResult> {
   const idempotentWarning = "Pedido ya preparado para entrega; operación idempotente";
@@ -1119,10 +1125,10 @@ export async function markSalesRequestPreparedForDelivery(
         id: true,
         code: true,
         status: true,
+        deliveredToCustomerAt: true,
         warehouseId: true,
         assignedToUserId: true,
         pulledAt: true,
-        deliveredToCustomerAt: true,
         preparedForDeliveryAt: true,
         lines: { select: { id: true, lineKind: true } },
         pickLists: {
@@ -1130,6 +1136,10 @@ export async function markSalesRequestPreparedForDelivery(
           orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
           take: 1,
           select: { status: true },
+        },
+        operationalExceptions: {
+          where: { status: "OPEN" },
+          select: { id: true, type: true, reason: true },
         },
       },
     });
@@ -1143,6 +1153,12 @@ export async function markSalesRequestPreparedForDelivery(
     }
     if (!order.warehouseId) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no tiene almacén asignado");
+    }
+    if (order.operationalExceptions.length > 0) {
+      throw new InventoryServiceError(
+        "ORDER_BLOCKED_BY_EXCEPTION",
+        "El pedido tiene una excepción operativa abierta; resuélvela antes de prepararlo"
+      );
     }
 
     const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");
@@ -1204,6 +1220,7 @@ export async function markSalesRequestPreparedForDelivery(
         preparedForDeliveryByUserId: args.preparedByUserId,
         preparedForDeliveryLocationId: preparedLocation.id,
         preparedForDeliveryNotes: args.notes?.trim() || null,
+        preparedForDeliveryEvidenceUrl: args.evidenceUrl?.trim() || null,
       },
     });
     if (claim.count !== 1) {
@@ -1233,6 +1250,7 @@ export async function markSalesRequestPreparedForDelivery(
         preparedForDeliveryLocationId: preparedLocation.id,
         preparedForDeliveryLocationCode: preparedLocation.code,
         notes: args.notes?.trim() || null,
+        evidenceUrl: args.evidenceUrl?.trim() || null,
       },
     }, tx);
 
@@ -1245,6 +1263,12 @@ export async function markSalesRequestDelivered(
   args: {
     orderId: string;
     deliveredByUserId: string;
+    deliveredByRoles?: string[];
+    recipientName?: string;
+    deliveryMethod?: string;
+    notes?: string | null;
+    evidenceUrl?: string | null;
+    exceptionReason?: string | null;
   }
 ) {
   const deliveryDocumentType = "SALES_INTERNAL_ORDER_DELIVERY";
@@ -1276,6 +1300,10 @@ export async function markSalesRequestDelivered(
           take: 1,
           select: { id: true, status: true, code: true, targetLocationId: true },
         },
+        operationalExceptions: {
+          where: { status: "OPEN" },
+          select: { id: true, type: true },
+        },
       },
     });
 
@@ -1293,6 +1321,23 @@ export async function markSalesRequestDelivered(
     }
     if (!order.preparedForDeliveryAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede marcar entregado sin preparar el pedido en el área de entrega");
+    }
+    if (order.operationalExceptions.length > 0) {
+      throw new InventoryServiceError("ORDER_BLOCKED_BY_EXCEPTION", "No se puede entregar mientras exista una excepción operativa abierta");
+    }
+    const deliveredByRoles = args.deliveredByRoles ?? ["SALES_EXECUTIVE"];
+    const recipientName = args.recipientName?.trim() || "No especificado (integración histórica)";
+    const deliveryMethod = args.deliveryMethod?.trim() || "No especificado (integración histórica)";
+    if (args.deliveredByRoles && (!args.recipientName?.trim() || !args.deliveryMethod?.trim())) {
+      throw new InventoryServiceError("DELIVERY_EVIDENCE_REQUIRED", "Registra quién recibió y el método de entrega");
+    }
+    const isResponsibleExecutive = args.deliveredByUserId === order.assignedToUserId && deliveredByRoles.includes("SALES_EXECUTIVE");
+    const isOperationalException = deliveredByRoles.includes("MANAGER") || deliveredByRoles.includes("SYSTEM_ADMIN");
+    if (!isResponsibleExecutive && !isOperationalException) {
+      throw new InventoryServiceError("DELIVERY_NOT_AUTHORIZED", "Sólo el ejecutivo responsable puede confirmar la entrega");
+    }
+    if (isOperationalException && !isResponsibleExecutive && !args.exceptionReason?.trim()) {
+      throw new InventoryServiceError("DELIVERY_EXCEPTION_REASON_REQUIRED", "Manager/Admin debe registrar el motivo de la entrega excepcional");
     }
 
     const hasProductLines = order.lines.some((line) => line.lineKind === "PRODUCT");
@@ -1360,6 +1405,11 @@ export async function markSalesRequestDelivered(
       data: {
         deliveredToCustomerAt: now,
         deliveredByUserId: args.deliveredByUserId,
+        deliveryRecipientName: recipientName,
+        deliveryMethod,
+        deliveryNotes: args.notes?.trim() || null,
+        deliveryEvidenceUrl: args.evidenceUrl?.trim() || null,
+        deliveryExceptionReason: isOperationalException && !isResponsibleExecutive ? args.exceptionReason?.trim() || null : null,
       },
     });
     if (claim.count !== 1) {
@@ -1513,6 +1563,11 @@ export async function markSalesRequestDelivered(
         orderCode: order.code,
         deliveredToCustomerAt: now.toISOString(),
         deliveredByUserId: args.deliveredByUserId,
+        recipientName,
+        deliveryMethod,
+        notes: args.notes?.trim() || null,
+        evidenceUrl: args.evidenceUrl?.trim() || null,
+        exceptionReason: isOperationalException && !isResponsibleExecutive ? args.exceptionReason?.trim() || null : null,
         movementIds,
       },
     }, tx);
@@ -1576,6 +1631,7 @@ export async function cancelSalesRequestOrder(
   args: {
     orderId: string;
     cancelledByUserId?: string | null;
+    reason?: string | null;
   }
 ) {
   const perf = startPerf("sales.cancel_order");
@@ -1587,6 +1643,7 @@ export async function cancelSalesRequestOrder(
         id: true,
         code: true,
         status: true,
+        deliveredToCustomerAt: true,
       },
     });
     loadPerf.end();
@@ -1595,6 +1652,12 @@ export async function cancelSalesRequestOrder(
     }
     if (order.status === "CANCELADA") {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya está cancelado");
+    }
+    if (order.deliveredToCustomerAt) {
+      throw new InventoryServiceError(
+        "DELIVERED_ORDER_REQUIRES_RETURN",
+        "Un pedido entregado no se cancela; inicia una devolución para registrar la recepción e inspección física"
+      );
     }
 
     const guardPerf = startPerf("sales.cancel_order.guard");
@@ -1608,10 +1671,38 @@ export async function cancelSalesRequestOrder(
       select: { id: true, code: true, status: true },
     });
     if (activeDirectPick) {
-      throw new InventoryServiceError(
-        "INVALID_ORDER_STATE",
-        `No se puede cancelar porque el surtido directo ya fue liberado (${activeDirectPick.code})`
-      );
+      const cancellationReason = args.reason?.trim();
+      if (!cancellationReason) {
+        throw new InventoryServiceError(
+          "CANCELLATION_REASON_REQUIRED",
+          "La solicitud de cancelación posterior a liberar surtido requiere un motivo"
+        );
+      }
+      const existing = await tx.salesInternalOrderException.findFirst({
+        where: { orderId: order.id, type: "CANCELLATION_REQUEST", status: "OPEN" },
+        select: { id: true },
+      });
+      if (!existing) {
+        await tx.salesInternalOrderException.create({
+          data: {
+            orderId: order.id,
+            type: "CANCELLATION_REQUEST",
+            status: "OPEN",
+            reason: cancellationReason,
+            reportedByUserId: args.cancelledByUserId ?? null,
+          },
+        });
+        await createAuditLogSafeWithDb({
+          entityType: "SALES_INTERNAL_ORDER",
+          entityId: order.id,
+          action: "REQUEST_CANCELLATION_AFTER_PICK_RELEASE",
+          actor: "system",
+          actorUserId: args.cancelledByUserId ?? null,
+          source: "sales/request-service",
+          after: { pickListCode: activeDirectPick.code, reason: cancellationReason },
+        }, tx);
+      }
+      return { cancellationRequested: true, orderCode: order.code };
     }
     guardPerf.end();
 
@@ -1686,6 +1777,336 @@ export async function cancelSalesRequestOrder(
       after: { status: "CANCELADA", code: order.code },
     }, tx);
     perf.end({ orderId: order.id });
+  });
+}
+
+export async function resolveSalesRequestOperationalException(
+  prisma: PrismaClient,
+  args: {
+    exceptionId: string;
+    decidedByUserId: string;
+    resolution: "WAIT_REPLENISHMENT" | "PARTIAL_DELIVERY" | "SUBSTITUTE_PRODUCT" | "REDUCE_QUANTITY" | "URGENT_PURCHASE" | "CANCEL_LINE" | "CANCEL_ORDER" | "REJECT_CANCELLATION";
+    notes: string;
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const exception = await tx.salesInternalOrderException.findUnique({
+      where: { id: args.exceptionId },
+      select: {
+        id: true,
+        orderId: true,
+        type: true,
+        status: true,
+        reason: true,
+        order: { select: { code: true, deliveredToCustomerAt: true } },
+      },
+    });
+    if (!exception) throw new InventoryServiceError("EXCEPTION_NOT_FOUND", "La excepción operativa no existe");
+    if (exception.status !== "OPEN") throw new InventoryServiceError("EXCEPTION_CLOSED", "La excepción ya tiene una decisión registrada");
+    if (!args.notes.trim()) throw new InventoryServiceError("RESOLUTION_NOTES_REQUIRED", "La resolución requiere una nota operativa");
+    if (exception.type === "CANCELLATION_REQUEST" && !["CANCEL_ORDER", "REJECT_CANCELLATION"].includes(args.resolution)) {
+      throw new InventoryServiceError("INVALID_CANCELLATION_RESOLUTION", "Una solicitud de cancelación sólo puede aprobarse o rechazarse");
+    }
+
+    const status = args.resolution === "REJECT_CANCELLATION" ? "REJECTED" as const : "RESOLVED" as const;
+    const decidedAt = new Date();
+    await tx.salesInternalOrderException.update({
+      where: { id: exception.id },
+      data: {
+        status,
+        resolution: args.resolution,
+        resolutionNotes: args.notes.trim(),
+        decidedByUserId: args.decidedByUserId,
+        decidedAt,
+      },
+    });
+
+    let returnId: string | null = null;
+    if (exception.type === "CANCELLATION_REQUEST" && args.resolution === "CANCEL_ORDER") {
+      const pickedTasks = await tx.salesInternalOrderPickTask.findMany({
+        where: { pickList: { orderId: exception.orderId }, pickedQty: { gt: 0 }, orderLine: { productId: { not: null } } },
+        select: {
+          orderLineId: true,
+          pickedQty: true,
+          sourceLocationId: true,
+          targetLocationId: true,
+          orderLine: { select: { productId: true } },
+        },
+      });
+      const createdReturn = await tx.salesInternalOrderReturn.create({
+        data: {
+          orderId: exception.orderId,
+          exceptionId: exception.id,
+          kind: "CANCELLATION_REVERSAL",
+          reason: exception.reason,
+          requestedByUserId: args.decidedByUserId,
+          notes: args.notes.trim(),
+          items: {
+            create: pickedTasks.flatMap((task) => task.orderLine.productId ? [{
+              orderLineId: task.orderLineId,
+              productId: task.orderLine.productId,
+              sourceLocationId: task.targetLocationId,
+              destinationLocationId: task.sourceLocationId,
+              quantity: task.pickedQty,
+              disposition: "RESTOCK",
+              notes: "Reversión física de surtido por cancelación",
+            }] : []),
+          },
+        },
+        select: { id: true },
+      });
+      returnId = createdReturn.id;
+    }
+
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: exception.orderId,
+      action: "RESOLVE_OPERATIONAL_EXCEPTION",
+      actor: "system",
+      actorUserId: args.decidedByUserId,
+      source: "sales/request-service",
+      after: {
+        exceptionId: exception.id,
+        exceptionType: exception.type,
+        resolution: args.resolution,
+        notes: args.notes.trim(),
+        returnId,
+      },
+    }, tx);
+    return { exceptionId: exception.id, returnId, status };
+  });
+}
+
+export async function requestSalesRequestCustomerReturn(
+  prisma: PrismaClient,
+  args: { orderId: string; requestedByUserId: string; reason: string; notes?: string | null },
+) {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: { id: true, code: true, deliveredToCustomerAt: true },
+    });
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (!order.deliveredToCustomerAt) throw new InventoryServiceError("INVALID_ORDER_STATE", "Sólo un pedido entregado puede iniciar una devolución");
+    if (!args.reason.trim()) throw new InventoryServiceError("RETURN_REASON_REQUIRED", "La devolución requiere un motivo");
+    const existing = await tx.salesInternalOrderReturn.findFirst({
+      where: { orderId: order.id, kind: "CUSTOMER_RETURN", status: { in: ["REQUESTED", "RECEIVED"] } },
+      select: { id: true },
+    });
+    if (existing) return { returnId: existing.id, alreadyRequested: true };
+
+    const delivered = await tx.inventoryMovement.findMany({
+      where: { type: "OUT", documentType: "SALES_INTERNAL_ORDER_DELIVERY", documentId: order.id },
+      select: { productId: true, documentLineId: true, quantity: true },
+    });
+    if (delivered.length === 0) throw new InventoryServiceError("RETURN_SOURCE_NOT_FOUND", "No hay movimientos de entrega para devolver");
+    const created = await tx.salesInternalOrderReturn.create({
+      data: {
+        orderId: order.id,
+        kind: "CUSTOMER_RETURN",
+        reason: args.reason.trim(),
+        requestedByUserId: args.requestedByUserId,
+        notes: args.notes?.trim() || null,
+        items: {
+          create: delivered.map((movement) => ({
+            orderLineId: movement.documentLineId ?? null,
+            productId: movement.productId,
+            quantity: movement.quantity,
+            disposition: "REJECT",
+            notes: "Pendiente de recepción e inspección física",
+          })),
+        },
+      },
+      select: { id: true },
+    });
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "REQUEST_CUSTOMER_RETURN",
+      actor: "system",
+      actorUserId: args.requestedByUserId,
+      source: "sales/request-service",
+      after: { returnId: created.id, reason: args.reason.trim() },
+    }, tx);
+    return { returnId: created.id, alreadyRequested: false };
+  });
+}
+
+export async function receiveSalesRequestReturn(
+  prisma: PrismaClient,
+  args: {
+    returnId: string;
+    receivedByUserId: string;
+    items: Array<{
+      itemId: string;
+      disposition: "RESTOCK" | "REPAIR" | "SCRAP" | "REJECT";
+      destinationLocationId?: string | null;
+      notes?: string | null;
+    }>;
+  },
+) {
+  const inventoryService = getInventoryService(prisma);
+  return prisma.$transaction(async (tx) => {
+    const record = await tx.salesInternalOrderReturn.findUnique({
+      where: { id: args.returnId },
+      select: {
+        id: true,
+        orderId: true,
+        kind: true,
+        status: true,
+        items: { select: { id: true, productId: true, quantity: true, sourceLocationId: true, destinationLocationId: true } },
+      },
+    });
+    if (!record) throw new InventoryServiceError("RETURN_NOT_FOUND", "La devolución no existe");
+    if (record.status !== "REQUESTED") throw new InventoryServiceError("RETURN_ALREADY_RECEIVED", "La devolución ya fue recibida o cerrada");
+    if (args.items.length !== record.items.length) throw new InventoryServiceError("RETURN_ITEMS_INCOMPLETE", "Registra el resultado de todos los renglones de devolución");
+
+    const inputById = new Map(args.items.map((item) => [item.itemId, item]));
+    if (inputById.size !== record.items.length || record.items.some((item) => !inputById.has(item.id))) {
+      throw new InventoryServiceError("RETURN_ITEMS_INVALID", "Los renglones de devolución no corresponden al registro");
+    }
+
+    for (const item of record.items) {
+      const input = inputById.get(item.id)!;
+      const destinationLocationId = input.destinationLocationId?.trim() || item.destinationLocationId || null;
+      if (input.disposition === "RESTOCK" && !destinationLocationId) {
+        throw new InventoryServiceError("RETURN_DESTINATION_REQUIRED", "El reintegro requiere una ubicación de destino");
+      }
+      if (record.kind === "CANCELLATION_REVERSAL") {
+        if (!item.sourceLocationId) throw new InventoryServiceError("RETURN_SOURCE_REQUIRED", "La reversión no tiene ubicación física de origen");
+        if (input.disposition === "RESTOCK") {
+          await inventoryService.transferStock(item.productId, item.sourceLocationId, destinationLocationId!, item.quantity, record.id, {
+            tx,
+            actor: "system",
+            actorUserId: args.receivedByUserId,
+            operatorUserId: args.receivedByUserId,
+            notes: "Reversión física de surtido por cancelación",
+            documentType: "SALES_INTERNAL_ORDER_RETURN",
+            documentId: record.id,
+            documentLineId: item.id,
+          });
+        } else {
+          await inventoryService.adjustStock(item.productId, item.sourceLocationId, -item.quantity, `Disposición ${input.disposition} en reversión ${record.id}`, {
+            tx,
+            actor: "system",
+            actorUserId: args.receivedByUserId,
+            documentType: "SALES_INTERNAL_ORDER_RETURN",
+            documentId: record.id,
+            documentLineId: item.id,
+          });
+        }
+      } else if (input.disposition === "RESTOCK") {
+        await inventoryService.adjustStock(item.productId, destinationLocationId!, item.quantity, `Reintegro aceptado de devolución ${record.id}`, {
+          tx,
+          actor: "system",
+          actorUserId: args.receivedByUserId,
+          documentType: "SALES_INTERNAL_ORDER_RETURN",
+          documentId: record.id,
+          documentLineId: item.id,
+        });
+      } else {
+        await tx.inventoryMovement.create({
+          data: {
+            productId: item.productId,
+            locationId: destinationLocationId,
+            type: "ADJUSTMENT",
+            quantity: 0,
+            operatorName: "system",
+            operatorUserId: args.receivedByUserId,
+            reference: record.id,
+            notes: `Devolución recibida sin reintegro: ${input.disposition}`,
+            documentType: "SALES_INTERNAL_ORDER_RETURN",
+            documentId: record.id,
+            documentLineId: item.id,
+          },
+        });
+      }
+      await tx.salesInternalOrderReturnItem.update({
+        where: { id: item.id },
+        data: {
+          destinationLocationId,
+          disposition: input.disposition,
+          notes: input.notes?.trim() || null,
+        },
+      });
+    }
+
+    const now = new Date();
+    await tx.salesInternalOrderReturn.update({
+      where: { id: record.id },
+      data: { status: "COMPLETED", receivedByUserId: args.receivedByUserId, receivedAt: now, completedByUserId: args.receivedByUserId, completedAt: now },
+    });
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: record.orderId,
+      action: "COMPLETE_SALES_ORDER_RETURN",
+      actor: "system",
+      actorUserId: args.receivedByUserId,
+      source: "sales/request-service",
+      after: { returnId: record.id, kind: record.kind },
+    }, tx);
+    return { returnId: record.id, completed: true };
+  });
+}
+
+export async function finalizeSalesRequestCancellationAfterReversal(
+  prisma: PrismaClient,
+  args: { orderId: string; cancelledByUserId: string },
+) {
+  const inventoryService = getInventoryService(prisma);
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        operationalExceptions: { where: { type: "CANCELLATION_REQUEST", status: "RESOLVED", resolution: "CANCEL_ORDER" }, select: { id: true } },
+        returns: { where: { kind: "CANCELLATION_REVERSAL" }, select: { status: true } },
+      },
+    });
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (order.status === "CANCELADA") return { alreadyCancelled: true };
+    if (order.operationalExceptions.length === 0 || order.returns.some((record) => record.status !== "COMPLETED")) {
+      throw new InventoryServiceError("CANCELLATION_REVERSAL_PENDING", "La cancelación requiere una reversión física completada");
+    }
+    const activeAssemblies = await tx.productionOrder.count({
+      where: { sourceDocumentType: "SalesInternalOrder", sourceDocumentId: order.id, status: { not: "CANCELADA" } },
+    });
+    if (activeAssemblies > 0) {
+      throw new InventoryServiceError("ASSEMBLY_CANCELLATION_REVIEW_REQUIRED", "Existe ensamble ligado; Manager/Admin debe decidir su disposición antes de cancelar");
+    }
+    const tasks = await tx.salesInternalOrderPickTask.findMany({
+      where: { pickList: { orderId: order.id, status: { in: ["RELEASED", "IN_PROGRESS", "PARTIAL", "COMPLETED"] } }, orderLine: { productId: { not: null } } },
+      select: { id: true, reservedQty: true, pickedQty: true, shortQty: true, sourceLocationId: true, orderLine: { select: { productId: true } } },
+    });
+    for (const task of tasks) {
+      const pendingReservedQty = Math.max(0, task.reservedQty - task.pickedQty - task.shortQty);
+      if (pendingReservedQty > 0 && task.orderLine.productId) {
+        await inventoryService.releaseReservedStock(task.orderLine.productId, task.sourceLocationId, pendingReservedQty, {
+          tx,
+          actor: "system",
+          actorUserId: args.cancelledByUserId,
+          reference: order.code,
+          notes: "Liberación por cancelación posterior a surtido",
+          documentType: "SALES_INTERNAL_ORDER",
+          documentId: order.id,
+        });
+      }
+    }
+    await tx.salesInternalOrderPickTask.updateMany({ where: { pickList: { orderId: order.id } }, data: { status: "CANCELLED" } });
+    await tx.salesInternalOrderPickList.updateMany({ where: { orderId: order.id, status: { not: "CANCELLED" } }, data: { status: "CANCELLED", canceledAt: new Date() } });
+    await tx.salesInternalOrder.update({ where: { id: order.id }, data: { status: "CANCELADA", cancelledAt: new Date(), cancelledByUserId: args.cancelledByUserId } });
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "CONFIRM_CANCELLATION_AFTER_PHYSICAL_REVERSAL",
+      actor: "system",
+      actorUserId: args.cancelledByUserId,
+      source: "sales/request-service",
+      after: { status: "CANCELADA", code: order.code },
+    }, tx);
+    return { alreadyCancelled: false };
   });
 }
 
@@ -1908,6 +2329,32 @@ export async function confirmSalesRequestPickTasksBatch(
           shortReason: update.shortReason,
         },
       });
+    }
+    for (const update of updates.filter((item) => item.shortQty > 0)) {
+      const task = taskById.get(update.id);
+      if (!task) continue;
+      const existingOpenException = await tx.salesInternalOrderException.findFirst({
+        where: {
+          pickTaskId: update.id,
+          type: "SHORTAGE",
+          status: "OPEN",
+        },
+        select: { id: true },
+      });
+      if (!existingOpenException) {
+        await tx.salesInternalOrderException.create({
+          data: {
+            orderId: args.orderId,
+            orderLineId: task.orderLineId,
+            pickTaskId: update.id,
+            type: "SHORTAGE",
+            status: "OPEN",
+            reportedQty: update.shortQty,
+            reason: update.shortReason ?? "FALTANTE_EN_SURTIDO",
+            reportedByUserId: args.operatorUserId ?? null,
+          },
+        });
+      }
     }
     taskUpdatePerf.end({ updatedTasks: updates.length });
 

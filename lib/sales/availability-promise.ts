@@ -36,6 +36,8 @@ export interface CommercialAvailabilityPromise {
   requestedQuantity: number;
   /** Available quantity at check time */
   availableQuantity: number;
+  /** Quantity already reserved at check time, when available from the source */
+  reservedQuantity?: number;
   /** ISO timestamp when availability was checked */
   checkedAt: string;
   /** Source of the promise context */
@@ -137,6 +139,7 @@ const commercialPromiseSchema = z.object({
   warehouseName: z.string().min(1),
   requestedQuantity: z.coerce.number().positive(),
   availableQuantity: z.coerce.number().nonnegative(),
+  reservedQuantity: z.coerce.number().nonnegative().optional(),
   checkedAt: z.string().datetime(),
   source: z.enum(["catalog", "availability", "equivalences", "manual", "substitute"]),
   isSubstitute: z.boolean().default(false),

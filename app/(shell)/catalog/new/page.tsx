@@ -5,6 +5,7 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
+import { buildTechnicalSpecRows, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
 import { ProductSupplierBrandSelect } from "../_components/ProductSupplierBrandSelect";
 import { CategorySubcategorySelect } from "../_components/CategorySubcategorySelect";
@@ -42,6 +43,10 @@ async function createProduct(formData: FormData) {
   const quantityRaw = String(formData.get("quantity") ?? "").trim();
   const locationRaw = String(formData.get("location") ?? "").trim();
   const attributesRaw = String(formData.get("attributes") ?? "").trim();
+  const technicalSourceSupplier = String(formData.get("technicalSourceSupplier") ?? "").trim();
+  const technicalSourceDocument = String(formData.get("technicalSourceDocument") ?? "").trim();
+  const technicalSourceVersion = String(formData.get("technicalSourceVersion") ?? "").trim();
+  const technicalSourceUrl = String(formData.get("technicalSourceUrl") ?? "").trim();
   const imageFile = formData.get("imageFile");
 
   if (!sku || !name) {
@@ -73,6 +78,11 @@ async function createProduct(formData: FormData) {
     : 0;
 
   const attributes = attributesRaw ? attributesRaw : null;
+
+  const technicalValidation = validateTechnicalSpecRows(buildTechnicalSpecRows(normalizedType, attributes));
+  if (!technicalValidation.valid) {
+    redirect(`/catalog/new?error=${encodeURIComponent(`Especificaciones técnicas inválidas: ${technicalValidation.errors.join("; ")}`)}`);
+  }
 
   let imageUrl = imageUrlRaw || null;
   if (imageFile instanceof File && imageFile.size > 0) {
@@ -162,6 +172,30 @@ async function createProduct(formData: FormData) {
   });
 
   await syncProductTechnicalAttributes(prisma, product.id, attributes);
+  const technicalSource = technicalSourceSupplier && technicalSourceDocument
+    ? await prisma.productTechnicalSource.create({
+        data: {
+          supplierName: technicalSourceSupplier,
+          documentRef: technicalSourceDocument,
+          documentVersion: technicalSourceVersion || null,
+          sourceUrl: technicalSourceUrl || null,
+          status: "PENDING_REVIEW",
+        },
+        select: { id: true },
+      })
+    : null;
+  await syncProductTechnicalSpecs(prisma, product.id, normalizedType, attributes, technicalSource?.id);
+  if (imageUrl && technicalSource) {
+    await prisma.productAsset.create({
+      data: {
+        productId: product.id,
+        url: imageUrl,
+        brandSnapshot: brandRaw,
+        sourceId: technicalSource.id,
+        validationStatus: "PENDING",
+      },
+    });
+  }
 
   // KAN-10: only create initial inventory when quantity > 0 and location is valid.
   const location = inventoryParsed.data.locationCode
@@ -375,6 +409,14 @@ export default async function NewCatalogItemPage({
               placeholder='{"pressure_psi": 3263, "inner_diameter": "1/4"}'
               hint="Se guarda como texto (puede ser JSON)."
             />
+            <div className="grid gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 md:col-span-2 md:grid-cols-2">
+              <p className="text-sm font-semibold text-[var(--text-primary)] md:col-span-2">Fuente técnica curada</p>
+              <Input name="technicalSourceSupplier" label="Proveedor / marca fuente" placeholder="Gates, Parker, Dixon..." />
+              <Input name="technicalSourceDocument" label="Documento o ficha" placeholder="Código de catálogo / PDF" />
+              <Input name="technicalSourceVersion" label="Versión / fecha" placeholder="2026-01" />
+              <Input name="technicalSourceUrl" label="URL de origen" placeholder="https://..." />
+              <p className="text-xs text-[var(--text-muted)] md:col-span-2">La ficha y el asset quedan pendientes de revisión hasta ser aprobados por Administración.</p>
+            </div>
           </div>
         </SectionCard>
       </form>

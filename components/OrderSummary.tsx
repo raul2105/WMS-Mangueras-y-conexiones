@@ -16,7 +16,9 @@ export interface CommercialPromiseDisplay {
   status: CommercialPromiseStatus;
   warehouseCode?: string;
   warehouseName?: string;
+  requestedQuantity?: number;
   availableQuantity?: number;
+  reservedQuantity?: number;
   checkedAt?: string;
   isSubstitute?: boolean;
   originalProductName?: string;
@@ -159,6 +161,7 @@ export function OrderSummary({
               displayQuery={displayQuery}
               missingFields={missingFields}
               readinessState={readinessState}
+              commercialPromise={commercialPromise}
             />
           </div>
         </details>
@@ -287,10 +290,17 @@ function OrderSummaryContent({
                 </span>
               )}
             </div>
-            {commercialPromise.availableQuantity !== undefined && (
+            {(commercialPromise.requestedQuantity !== undefined || commercialPromise.availableQuantity !== undefined || commercialPromise.reservedQuantity !== undefined) && (
               <p className="text-sm text-white">
-                <span className="text-slate-400">Disponible al verificar: </span>
-                <span className="font-semibold" data-testid="commercial-promise-available-qty">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span>
+                {commercialPromise.requestedQuantity !== undefined && (
+                  <><span className="text-slate-400">Solicitado: </span><span className="font-semibold" data-testid="commercial-promise-requested-qty">{commercialPromise.requestedQuantity.toLocaleString("es-MX")}</span></>
+                )}
+                {commercialPromise.availableQuantity !== undefined && (
+                  <><span className="ml-3 text-slate-400">Disponible: </span><span className="font-semibold" data-testid="commercial-promise-available-qty">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span></>
+                )}
+                {commercialPromise.reservedQuantity !== undefined && (
+                  <><span className="ml-3 text-slate-400">Reservado: </span><span className="font-semibold" data-testid="commercial-promise-reserved-qty">{commercialPromise.reservedQuantity.toLocaleString("es-MX")}</span></>
+                )}
                 {commercialPromise.isSubstitute && (
                   <Badge variant="accent" className="ml-2 text-xs">Sustituto</Badge>
                 )}
@@ -476,7 +486,8 @@ function OrderSummaryMobileContent({
   hasCommercialContext = false,
   displayQuery,
   missingFields = [],
-}: Omit<OrderSummaryProps, "commercialPromise">) {
+  commercialPromise = null,
+}: OrderSummaryProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-3">
@@ -490,7 +501,7 @@ function OrderSummaryMobileContent({
           <div>
             <p className="text-xs text-slate-400">Almacén</p>
             <p className={cn("text-sm font-medium", !warehouseCode ? "text-slate-400" : "text-white")}>
-              {warehouseCode && warehouseName ? `${warehouseCode} - {warehouseName}` : "Almacén pendiente"}
+              {warehouseCode && warehouseName ? `${warehouseCode} - ${warehouseName}` : "Almacén pendiente"}
             </p>
           </div>
           <div>
@@ -523,6 +534,24 @@ function OrderSummaryMobileContent({
           </ul>
         </div>
       )}
+
+      {commercialPromise ? (
+        <div className="op-surface-muted space-y-2 p-3" data-testid="commercial-promise-section-mobile">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200">Promesa de disponibilidad</p>
+            <Badge variant={COMMERCIAL_PROMISE_STATUS_VARIANTS[commercialPromise.status]} className="text-xs" data-testid="commercial-promise-status-mobile">
+              {COMMERCIAL_PROMISE_STATUS_LABELS[commercialPromise.status]}
+            </Badge>
+          </div>
+          {commercialPromise.warehouseCode ? <p className="text-xs text-slate-300">Almacén: {commercialPromise.warehouseCode}{commercialPromise.warehouseName ? ` - ${commercialPromise.warehouseName}` : ""}</p> : null}
+          <p className="text-xs text-slate-300">
+            Solicitado: {commercialPromise.requestedQuantity?.toLocaleString("es-MX") ?? "--"}
+            {" · "}Disponible: {commercialPromise.availableQuantity?.toLocaleString("es-MX") ?? "--"}
+            {" · "}Reservado: {commercialPromise.reservedQuantity?.toLocaleString("es-MX") ?? "--"}
+          </p>
+          {commercialPromise.checkedAt ? <p className="text-xs text-slate-400">Verificado: <LocalDateTime value={commercialPromise.checkedAt} /></p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

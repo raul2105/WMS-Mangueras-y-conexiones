@@ -13,6 +13,7 @@ const validPromise = {
   warehouseName: "Almacén principal",
   requestedQuantity: 2,
   availableQuantity: 8,
+  reservedQuantity: 2,
   checkedAt: "2026-07-17T12:00:00.000Z",
   source: "availability",
   isSubstitute: false,

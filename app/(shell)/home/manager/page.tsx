@@ -35,6 +35,7 @@ export default async function ManagerHomePage() {
           activeBlockers={activeBlockers}
           purchaseDrafts={purchaseDrafts}
           purchaseAttention={purchaseAttention}
+          operationalMetrics={fulfillmentSnapshot.kpis.operationalMetrics}
         />
       </Suspense>
     </div>

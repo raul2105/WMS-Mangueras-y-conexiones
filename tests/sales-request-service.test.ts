@@ -6,6 +6,7 @@ import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/as
 import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   addSalesRequestProductLine,
+  assignSalesRequestPickTasks,
   confirmSalesRequestOrder,
   confirmSalesRequestPickTasksBatch,
   createSalesRequestDraftHeader,
@@ -185,6 +186,59 @@ afterAll(async () => {
 });
 
 describe("sales request service", () => {
+  it("assigns manager-required pick tasks only to an active warehouse operator and audits the ownership", async () => {
+    const { order, productA } = await createRequestFixture();
+    const manager = await createUserWithRole({
+      email: "manager-pick-assignment@scmayher.com",
+      name: "Manager surtido",
+      roleCode: "MANAGER",
+    });
+    const operator = await createUserWithRole({
+      email: "operator-pick-assignment@scmayher.com",
+      name: "Operador asignado",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 2,
+    });
+    await confirmSalesRequestOrder(prisma, { orderId: order.id });
+
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    expect(pickList?.tasks).toHaveLength(1);
+
+    await prisma.salesInternalOrderPickTask.update({
+      where: { id: pickList!.tasks[0].id },
+      data: { assignmentMode: "MANAGER_REQUIRED" },
+    });
+
+    const result = await assignSalesRequestPickTasks(prisma, {
+      orderId: order.id,
+      taskIds: [pickList!.tasks[0].id],
+      assignedToUserId: operator.id,
+      assignedByUserId: manager.id,
+    });
+
+    expect(result.assignedCount).toBe(1);
+    const [task, updatedOrder, audit] = await Promise.all([
+      prisma.salesInternalOrderPickTask.findUnique({ where: { id: pickList!.tasks[0].id } }),
+      prisma.salesInternalOrder.findUnique({ where: { id: order.id } }),
+      prisma.auditLog.findFirst({
+        where: { entityType: "SALES_INTERNAL_ORDER", entityId: order.id, action: "ASSIGN_WAREHOUSE_PICK_TASKS" },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    expect(task?.assignedToUserId).toBe(operator.id);
+    expect(updatedOrder?.warehouseAssigneeUserId).toBe(operator.id);
+    expect(audit?.actorUserId).toBe(manager.id);
+  });
+
   it("creates and rebuilds the direct draft pick list without double-reserving stock", async () => {
     const { order, productA, productB, storageA, storageB, staging } = await createRequestFixture();
 
@@ -956,6 +1010,63 @@ describe("sales request service", () => {
     expect(afterPayload?.movementIds).toEqual(result.movementIds);
   });
 
+  it("prepares with physical warehouse ownership without requiring a commercial pull and stays idempotent", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-warehouse-prepare@scmayher.com",
+      name: "Manager Warehouse Prepare",
+      roleCode: "MANAGER",
+    });
+    const operator = await createUserWithRole({
+      email: "operator-warehouse-prepare@scmayher.com",
+      name: "Operator Warehouse Prepare",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
+    const { warehouse, staging, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Cliente Warehouse Prepare",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-05-03T00:00:00.000Z"),
+      requestedByUserId: manager.id,
+      requestedByRoles: ["MANAGER"],
+      initialProductLine: { productId: productA.id, requestedQty: 1 },
+    });
+
+    await confirmSalesRequestOrder(prisma, { orderId: order.id, confirmedByUserId: manager.id });
+    await prisma.salesInternalOrderPickList.updateMany({
+      where: { orderId: order.id },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    });
+    await prisma.salesInternalOrder.update({
+      where: { id: order.id },
+      data: { warehouseAssigneeUserId: operator.id, warehouseAssignmentMode: "MANUAL" },
+    });
+
+    const first = await markSalesRequestPreparedForDelivery(prisma, {
+      orderId: order.id,
+      preparedByUserId: operator.id,
+      preparedLocationId: staging.id,
+    });
+    const second = await markSalesRequestPreparedForDelivery(prisma, {
+      orderId: order.id,
+      preparedByUserId: operator.id,
+      preparedLocationId: staging.id,
+    });
+
+    expect(first).toMatchObject({ prepared: true, alreadyPrepared: false });
+    expect(second).toMatchObject({ prepared: true, alreadyPrepared: true });
+
+    const audits = await prisma.auditLog.findMany({
+      where: {
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: order.id,
+        action: "MARK_PREPARED_FOR_DELIVERY",
+      },
+      select: { id: true, actorUserId: true },
+    });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.actorUserId).toBe(operator.id);
+  });
+
   it("treats retry as idempotent success without duplicate OUT or audit", async () => {
     const manager = await createUserWithRole({
       email: "manager-deliver-retry@scmayher.com",
@@ -1328,6 +1439,11 @@ describe("sales request service", () => {
       name: "Sales Full Flow",
       roleCode: "SALES_EXECUTIVE",
     });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-full-flow@scmayher.com",
+      name: "Warehouse Full Flow",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     const { warehouse, storageA, staging, productA } = await createRequestFixture();
     const order = await createSalesRequestDraftHeader(prisma, {
@@ -1476,9 +1592,10 @@ describe("sales request service", () => {
     await confirmAssemblyPickTasksBatch(prisma, {
       productionOrderId: production.id,
       operatorName: "Operador Full Flow",
+      operatorUserId: warehouseOperator.id,
       tasks: assemblyTasks.map((task) => ({ taskId: task.id, pickedQty: 1 })),
     });
-    await closeAssemblyWorkOrderConsume(prisma, production.id, "Operador Full Flow");
+    await closeAssemblyWorkOrderConsume(prisma, production.id, "Operador Full Flow", warehouseOperator.id);
     await prepareOrderForDelivery(order.id, sales.id);
 
     await markSalesRequestDelivered(prisma, {
@@ -1489,7 +1606,11 @@ describe("sales request service", () => {
     const [deliveredOrder, completedProduction, auditEntries] = await Promise.all([
       prisma.salesInternalOrder.findUnique({
         where: { id: order.id },
-        select: { deliveredToCustomerAt: true, deliveredByUserId: true },
+        select: {
+          deliveredToCustomerAt: true,
+          deliveredByUserId: true,
+          warehouseClaimedByUserId: true,
+        },
       }),
       prisma.productionOrder.findUnique({
         where: { id: production.id },
@@ -1499,7 +1620,14 @@ describe("sales request service", () => {
         where: {
           entityType: "SALES_INTERNAL_ORDER",
           entityId: order.id,
-          action: { in: ["PULL_REQUEST", "MARK_DELIVERED_TO_CUSTOMER"] },
+          action: {
+            in: [
+              "PULL_REQUEST",
+              "CLAIM_WAREHOUSE_ASSEMBLY",
+              "COMPLETE_WAREHOUSE_ASSEMBLY",
+              "MARK_DELIVERED_TO_CUSTOMER",
+            ],
+          },
         },
         select: { action: true },
       }),
@@ -1507,8 +1635,16 @@ describe("sales request service", () => {
 
     expect(deliveredOrder?.deliveredToCustomerAt).toBeTruthy();
     expect(deliveredOrder?.deliveredByUserId).toBe(sales.id);
+    expect(deliveredOrder?.warehouseClaimedByUserId).toBe(warehouseOperator.id);
     expect(completedProduction?.status).toBe("COMPLETADA");
-    expect(auditEntries.map((row) => row.action)).toEqual(expect.arrayContaining(["PULL_REQUEST", "MARK_DELIVERED_TO_CUSTOMER"]));
+    expect(auditEntries.map((row) => row.action)).toEqual(
+      expect.arrayContaining([
+        "PULL_REQUEST",
+        "CLAIM_WAREHOUSE_ASSEMBLY",
+        "COMPLETE_WAREHOUSE_ASSEMBLY",
+        "MARK_DELIVERED_TO_CUSTOMER",
+      ]),
+    );
   });
 
   it("KAN-68 cancel reconciles reserved for ABIERTA/EN_PROCESO and keeps unrelated scope unchanged", async () => {

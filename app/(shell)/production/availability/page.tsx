@@ -87,6 +87,7 @@ export default async function ProductionAvailabilityPage({
           where: inventoryWhere,
           select: {
             available: true,
+            reserved: true,
             location: {
               select: {
                 code: true,
@@ -106,8 +107,9 @@ export default async function ProductionAvailabilityPage({
 
   const rows = products.map((product) => {
     const available = product.inventory.reduce((acc, row) => acc + row.available, 0);
-    const byWarehouse = Object.values(
-      product.inventory.reduce<Record<string, { warehouseId: string; warehouseCode: string; warehouseName: string; available: number }>>((acc, row) => {
+    const reserved = product.inventory.reduce((acc, row) => acc + row.reserved, 0);
+      const byWarehouse = Object.values(
+      product.inventory.reduce<Record<string, { warehouseId: string; warehouseCode: string; warehouseName: string; available: number; reserved: number }>>((acc, row) => {
         const warehouseId = row.location.warehouse.id;
         const warehouseCode = row.location.warehouse.code;
         const warehouseName = row.location.warehouse.name;
@@ -116,8 +118,10 @@ export default async function ProductionAvailabilityPage({
           warehouseCode,
           warehouseName,
           available: 0,
+          reserved: 0,
         };
         current.available += row.available;
+        current.reserved += row.reserved;
         acc[warehouseCode] = current;
         return acc;
       }, {}),
@@ -141,6 +145,7 @@ export default async function ProductionAvailabilityPage({
         warehouseCode: wh.warehouseCode,
         warehouseName: wh.warehouseName,
         available: wh.available,
+        reservedQuantity: wh.reserved,
         href: buildCommercialRequestHref({
           productId: product.id,
           sku: product.sku,
@@ -155,6 +160,7 @@ export default async function ProductionAvailabilityPage({
       ...product,
       available,
       byWarehouse,
+      reserved,
       createOrderLinks,
       status: getCommercialStatus(available),
     };
@@ -302,16 +308,17 @@ export default async function ProductionAvailabilityPage({
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {row.createOrderLinks && row.createOrderLinks.length > 0 ? (
-                    row.createOrderLinks.map((link) => (
-                      <Link
-                        key={link.warehouseCode}
-                        href={link.href}
-                        className={buttonStyles({ size: "sm" })}
-                      >
-                        Crear pedido ({link.warehouseCode})
-                      </Link>
-                    ))
+                  {row.createOrderLinks?.length === 1 ? (
+                    <Link href={row.createOrderLinks[0].href} className={buttonStyles({ size: "sm" })}>
+                      Crear pedido
+                    </Link>
+                  ) : row.createOrderLinks && row.createOrderLinks.length > 1 ? (
+                    <details className="w-full rounded-lg border border-[var(--border-default)] p-2">
+                      <summary data-testid="choose-warehouse" className="cursor-pointer list-none text-sm font-semibold text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">Elegir almacén</summary>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {row.createOrderLinks.map((link) => <Link key={link.warehouseCode} data-testid={`commercial-order-warehouse-${link.warehouseCode}`} href={link.href} className={buttonStyles({ variant: "secondary", size: "sm" })}>{link.warehouseCode}</Link>)}
+                      </div>
+                    </details>
                   ) : (
                     <Link
                       href={buildCommercialRequestHref({ productId: row.id, sku: row.sku, q: query || row.sku, source: "availability" })}
@@ -377,16 +384,17 @@ export default async function ProductionAvailabilityPage({
                   </Td>
                   <Td>
                     <div className="flex flex-wrap gap-2">
-                      {row.createOrderLinks && row.createOrderLinks.length > 0 ? (
-                        row.createOrderLinks.map((link) => (
-                          <Link
-                            key={link.warehouseCode}
-                            href={link.href}
-                            className={buttonStyles({ size: "sm" })}
-                          >
-                            Crear pedido ({link.warehouseCode})
-                          </Link>
-                        ))
+                      {row.createOrderLinks?.length === 1 ? (
+                        <Link href={row.createOrderLinks[0].href} className={buttonStyles({ size: "sm" })}>
+                          Crear pedido
+                        </Link>
+                      ) : row.createOrderLinks && row.createOrderLinks.length > 1 ? (
+                        <details className="rounded-lg border border-[var(--border-default)] p-2">
+                          <summary data-testid="choose-warehouse" className="cursor-pointer list-none text-sm font-semibold text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">Elegir almacén</summary>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {row.createOrderLinks.map((link) => <Link key={link.warehouseCode} data-testid={`commercial-order-warehouse-${link.warehouseCode}`} href={link.href} className={buttonStyles({ variant: "secondary", size: "sm" })}>{link.warehouseCode}</Link>)}
+                          </div>
+                        </details>
                       ) : (
                         <Link href={buildCommercialRequestHref({ productId: row.id, sku: row.sku, q: query || row.sku, source: "availability" })} className={buttonStyles({ size: "sm" })}>
                           Crear pedido

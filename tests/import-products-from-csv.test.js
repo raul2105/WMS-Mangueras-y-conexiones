@@ -616,6 +616,28 @@ describeDb("KAN-95 import-products-from-csv", () => {
     expect(inventories.map((row) => row.quantity)).toEqual([3, 4]);
   });
 
+  it("preserves inventory in locations omitted from a partial import", async () => {
+    await seedWarehouseWithLocations(["LOC-A", "LOC-B"]);
+
+    await runImport(csv(
+      csvRow(["SKU-PARTIAL", "Producto Parcial", "HOSE", "Desc", "Marca", "pieza", "10", "20", "", "", "3", "LOC-A", "{}", "REF-PARTIAL", ""]),
+      csvRow(["SKU-PARTIAL", "Producto Parcial", "HOSE", "Desc", "Marca", "pieza", "10", "20", "", "", "4", "LOC-B", "{}", "REF-PARTIAL", ""]),
+    ));
+
+    await runImport(csv(csvRow([
+      "SKU-PARTIAL", "Producto Parcial", "HOSE", "Desc", "Marca", "pieza", "10", "20", "", "", "5", "LOC-A", "{}", "REF-PARTIAL", "",
+    ])));
+
+    const product = await prisma.product.findUnique({ where: { sku: "SKU-PARTIAL" }, select: { id: true } });
+    const inventories = await prisma.inventory.findMany({
+      where: { productId: product?.id },
+      orderBy: { quantity: "asc" },
+      select: { quantity: true },
+    });
+
+    expect(inventories.map((row) => row.quantity)).toEqual([4, 5]);
+  });
+
   it("fails on repeated SKU with conflicting product-level fields", async () => {
     await seedWarehouseWithLocations(["LOC-A"]);
 

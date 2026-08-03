@@ -4,12 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Users, Shield, Database, AlertTriangle, Settings } from 'lucide-react';
 import Link from 'next/link';
+import { FulfillmentOperationalMetrics } from '@/components/dashboard/fulfillment-operational-metrics';
+import type { FulfillmentOperationalMetrics as FulfillmentOperationalMetricsData } from '@/lib/dashboard/fulfillment-dashboard';
 
 interface AdminHomeContentProps {
   activeUsersCount: number;
   auditTotalCount: number;
   tracesRecentCount: number;
   recentAudits?: Array<{ id: string; action: string; actor: string | null; createdAt: Date | string; entityType?: string }>;
+  operationalMetrics: FulfillmentOperationalMetricsData;
 }
 
 function formatTimeAgo(date: Date | string): string {
@@ -26,11 +29,26 @@ function formatTimeAgo(date: Date | string): string {
   return `hace ${diffDays} d`;
 }
 
+function auditActionLabel(action: string): string {
+  const labels: Record<string, string> = {
+    CONFIRM_REQUEST: "Confirmar pedido",
+    ADD_PRODUCT_LINE: "Agregar producto al pedido",
+    ADD_CONFIGURED_ASSEMBLY_LINE: "Agregar ensamble al pedido",
+    REBUILD_DIRECT_PICKLIST: "Regenerar surtido directo",
+    RELEASE_DIRECT_PICKLIST: "Liberar surtido directo",
+    CLAIM_WAREHOUSE_PICK_TASKS: "Tomar tareas de almacén",
+    CONFIRM_DIRECT_PICK: "Confirmar surtido físico",
+    RESERVE_STOCK: "Reservar inventario",
+  };
+  return labels[action] ?? action.replaceAll('_', ' ').toLowerCase();
+}
+
 export function AdminHomeContent({ 
   activeUsersCount, 
   auditTotalCount, 
   tracesRecentCount,
-  recentAudits = []
+  recentAudits = [],
+  operationalMetrics,
 }: AdminHomeContentProps) {
   const stats = [
     { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
@@ -68,6 +86,8 @@ export function AdminHomeContent({
         ))}
       </div>
 
+      <FulfillmentOperationalMetrics metrics={operationalMetrics} />
+
       {/* Recent Audit */}
       <Card>
         <CardHeader>
@@ -86,7 +106,7 @@ export function AdminHomeContent({
             {(recentAudits && recentAudits.length > 0 ? recentAudits : []).map((audit) => (
               <div key={audit.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div className="min-w-0">
-                  <p className="break-words font-medium">{audit.action}</p>
+                  <p className="break-words font-medium">{auditActionLabel(audit.action)}</p>
                   <p className="text-sm text-gray-500">
                     {audit.actor ?? 'Sistema'} · {formatTimeAgo(audit.createdAt)}
                   </p>

@@ -15,6 +15,7 @@ export interface CurrentAvailabilityCheck {
   productId: string;
   warehouseId: string;
   availableQuantity: number;
+  reservedQuantity: number;
   checkedAt: string;
 }
 
@@ -39,15 +40,18 @@ export async function checkCurrentAvailability(
     },
     select: {
       available: true,
+      reserved: true,
     },
   });
 
   const availableQuantity = inventoryRows.reduce((sum, row) => sum + row.available, 0);
+  const reservedQuantity = inventoryRows.reduce((sum, row) => sum + row.reserved, 0);
 
   return {
     productId,
     warehouseId,
     availableQuantity,
+    reservedQuantity,
     checkedAt: new Date().toISOString(),
   };
 }
@@ -61,6 +65,8 @@ export interface PromiseValidationResult {
   status: CommercialPromiseStatus;
   /** Current available quantity */
   currentAvailable: number;
+  /** Current reserved quantity */
+  currentReserved: number;
   /** Whether the promise is considered valid for commitment */
   isPromiseValid: boolean;
   /** The promise data if provided, or null */
@@ -94,6 +100,7 @@ export async function validateCommercialPromise(
     return {
       status: "unresolved",
       currentAvailable: 0,
+      currentReserved: 0,
       isPromiseValid: false,
       promise: null,
       reason: "No hay contexto de disponibilidad. Verifique disponibilidad antes de confirmar.",
@@ -109,6 +116,7 @@ export async function validateCommercialPromise(
     return {
       status: "substitute_requires_confirmation",
       currentAvailable: current.availableQuantity,
+      currentReserved: current.reservedQuantity,
       isPromiseValid: false, // Requires explicit confirmation
       promise,
       reason: "Este producto es un sustituto/equivalencia. Requiere confirmación explícita del cliente.",
@@ -131,6 +139,7 @@ export async function validateCommercialPromise(
     return {
       status: isCurrentlySufficient ? "promise_safe" : "insufficient_stock",
       currentAvailable: current.availableQuantity,
+      currentReserved: current.reservedQuantity,
       isPromiseValid: isCurrentlySufficient,
       promise,
       reason: `Promesa verificada hace ${Math.round(ageMinutes)} min (límite ${staleThresholdMinutes} min). Vuelva a verificar disponibilidad.`,
@@ -144,6 +153,7 @@ export async function validateCommercialPromise(
   return {
     status: isSufficient ? "promise_safe" : "insufficient_stock",
     currentAvailable: current.availableQuantity,
+    currentReserved: current.reservedQuantity,
     isPromiseValid: isSufficient,
     promise,
     reason: isSufficient
@@ -185,6 +195,7 @@ export async function buildPromiseFromAvailabilityContext(
     warehouseName: warehouse.name,
     requestedQuantity,
     availableQuantity: current.availableQuantity,
+    reservedQuantity: current.reservedQuantity,
     checkedAt: current.checkedAt,
     source,
     isSubstitute: false,

@@ -25,8 +25,8 @@ export function FulfillmentKpiGrid({ kpis }: Props) {
       <Link href="/production?ops=assembly_open" prefetch={false}>
         <StatCard label="Ensambles abiertos" value={kpis.openLinkedAssembly.toLocaleString("es-MX")} tone="warning" icon={<WarehouseIcon className="h-5 w-5" />} />
       </Link>
-      <Link href="/purchasing/orders" prefetch={false}>
-        <StatCard label="Compras urgentes" value={kpis.relevantInboundPurchaseOrders.toLocaleString("es-MX")} tone="info" icon={<DashboardIcon className="h-5 w-5" />} />
+      <Link href="/purchasing/orders?preset=por_recibir" prefetch={false}>
+        <StatCard label="OCs por recibir" value={kpis.inboundPurchaseOrders.toLocaleString("es-MX")} tone="info" icon={<DashboardIcon className="h-5 w-5" />} />
       </Link>
     </section>
   );

@@ -116,7 +116,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "SALES_EXECUTIVE") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Todos los Pedidos",
+      label: "Pedidos comerciales",
       icon: "production",
       description:
         "Pedidos de surtido, configurador y seguimiento comercial dentro del flujo de pedidos.",
@@ -128,7 +128,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "WAREHOUSE_OPERATOR") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Ejecución",
+      label: "Trabajo de almacén",
       icon: "production",
       description:
         "Trabajo físico de surtido, verificación y ensamble.",
@@ -140,7 +140,7 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
   if (productionIndex >= 0 && primaryRole === "MANAGER") {
     items[productionIndex] = {
       href: "/production/requests",
-      label: "Pedidos",
+      label: "Supervisión de pedidos",
       icon: "production",
       description: "Crear, revisar y asignar pedidos comerciales a ventas.",
       match: "prefix",

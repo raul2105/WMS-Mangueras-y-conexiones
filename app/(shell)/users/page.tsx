@@ -113,8 +113,8 @@ export default async function UsersPage({
                 <Th>Email</Th>
                 <Th>Roles</Th>
                 <Th>Estado</Th>
-                <Th>Creado</Th>
-                <Th>Actualizado</Th>
+                <Th className="hidden lg:table-cell">Creado</Th>
+                <Th className="hidden lg:table-cell">Actualizado</Th>
                 <Th className="text-right">Acciones</Th>
               </tr>
             </thead>
@@ -135,8 +135,8 @@ export default async function UsersPage({
                   <Td>
                     <Badge variant={user.isActive ? "success" : "danger"}>{user.isActive ? "Activo" : "Inactivo"}</Badge>
                   </Td>
-                  <Td className="whitespace-nowrap">{new Date(user.createdAt).toLocaleString("es-MX")}</Td>
-                  <Td className="whitespace-nowrap">{new Date(user.updatedAt).toLocaleString("es-MX")}</Td>
+                  <Td className="hidden whitespace-nowrap lg:table-cell">{new Date(user.createdAt).toLocaleString("es-MX")}</Td>
+                  <Td className="hidden whitespace-nowrap lg:table-cell">{new Date(user.updatedAt).toLocaleString("es-MX")}</Td>
                   <Td>
                     <div className="flex justify-end gap-2">
                       <Link href={`/users/${user.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>

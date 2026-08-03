@@ -17,6 +17,7 @@ describe("home dashboard KAN-50 slice contract", () => {
     expect(content).toContain("FulfillmentKpiGrid");
     expect(content).toContain("FulfillmentPriorityQueue");
     expect(content).toContain("FulfillmentAlertList");
+    expect(content).toContain("FulfillmentOperationalMetrics");
   });
 
   it("preserves role-home redirect behavior", () => {

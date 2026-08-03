@@ -98,5 +98,7 @@ describe("operational surfaces UI contract", () => {
     expect(form).toContain("status-warning rounded-xl");
     expect(summary).toContain("focus-visible:ring-[var(--focus-ring)]");
     expect(summary).toContain('"text-[var(--status-warning-text)]"');
+    expect(summary).toContain('data-testid="commercial-promise-section-mobile"');
+    expect(summary).not.toContain("${warehouseCode} - {warehouseName}");
   });
 });

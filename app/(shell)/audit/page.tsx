@@ -31,6 +31,27 @@ function formatQuantity(value: unknown) {
   return typeof value === "number" ? value.toLocaleString("es-MX") : null;
 }
 
+function auditActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    CONFIRM_REQUEST: "Confirmar pedido",
+    ADD_PRODUCT_LINE: "Agregar producto al pedido",
+    ADD_CONFIGURED_ASSEMBLY_LINE: "Agregar ensamble al pedido",
+    REBUILD_DIRECT_PICKLIST: "Regenerar surtido directo",
+    RELEASE_DIRECT_PICKLIST: "Liberar surtido directo",
+    CLAIM_WAREHOUSE_PICK_TASKS: "Tomar tareas de almacén",
+    ASSIGN_WAREHOUSE_PICK_TASKS: "Asignar tareas a almacén",
+    CONFIRM_DIRECT_PICK: "Confirmar surtido físico",
+    CLAIM_WAREHOUSE_ASSEMBLY: "Tomar componentes de ensamble",
+    COMPLETE_WAREHOUSE_ASSEMBLY: "Completar ensamble en almacén",
+    MARK_PREPARED_FOR_DELIVERY: "Marcar preparado para entrega",
+    RESOLVE_OPERATIONAL_EXCEPTION: "Resolver excepción operativa",
+    REVALIDATE_COMMERCIAL_PROMISE: "Revalidar promesa comercial",
+    RESERVE_STOCK: "Reservar inventario",
+    MARK_DELIVERED_TO_CUSTOMER: "Registrar entrega al cliente",
+  };
+  return labels[action] ?? action.replaceAll("_", " ").toLowerCase();
+}
+
 function describeAuditEvent(row: {
   entityType: string;
   entityId: string | null;
@@ -103,10 +124,40 @@ function describeAuditEvent(row: {
       return `${actor} liberó lista de picking directo${codePrefix}${listCode}${taskCount}.`;
     }
 
+    if (row.action === "CLAIM_WAREHOUSE_PICK_TASKS") {
+      const count = typeof after?.taskIds === "object" && Array.isArray(after.taskIds) ? ` (${after.taskIds.length} tareas)` : "";
+      return `${actor} tomó tareas físicas de almacén${codePrefix}${count}.`;
+    }
+
     if (row.action === "CONFIRM_DIRECT_PICK") {
       const pickListCode = typeof after?.pickListCode === "string" ? ` lista ${after.pickListCode}` : "";
       const taskCount = typeof after?.taskCount === "number" ? ` (${after.taskCount} tareas confirmadas)` : "";
       return `${actor} confirmó picking directo${codePrefix}${pickListCode}${taskCount}.`;
+    }
+
+    if (row.action === "ASSIGN_WAREHOUSE_PICK_TASKS") {
+      const assignedTo = typeof after?.assignedToUserId === "string" ? ` al operador ${after.assignedToUserId}` : "";
+      return `${actor} asignó tareas físicas${codePrefix}${assignedTo}.`;
+    }
+
+    if (row.action === "CLAIM_WAREHOUSE_ASSEMBLY") {
+      const productionOrderId = typeof after?.productionOrderId === "string" ? ` (${after.productionOrderId})` : "";
+      return `${actor} tomó trabajo de ensamble${codePrefix}${productionOrderId}.`;
+    }
+
+    if (row.action === "COMPLETE_WAREHOUSE_ASSEMBLY") {
+      const productionOrderId = typeof after?.productionOrderId === "string" ? ` (${after.productionOrderId})` : "";
+      return `${actor} completó el ensamble${codePrefix}${productionOrderId} y lo devolvió al handoff.`;
+    }
+
+    if (row.action === "MARK_PREPARED_FOR_DELIVERY") {
+      const location = typeof after?.preparedForDeliveryLocationCode === "string" ? ` en ${after.preparedForDeliveryLocationCode}` : "";
+      return `${actor} marcó pedido${codePrefix} como preparado para entrega${location}.`;
+    }
+
+    if (row.action === "RESOLVE_OPERATIONAL_EXCEPTION") {
+      const resolution = typeof after?.resolution === "string" ? `: ${after.resolution}` : "";
+      return `${actor} resolvió una excepción${codePrefix}${resolution}.`;
     }
 
     if (row.action === "MARK_DELIVERED_TO_CUSTOMER") {
@@ -270,7 +321,7 @@ export default async function AuditPage({
                 <span>•</span>
                 <span>{row.entityType}</span>
                 <span>•</span>
-                <span>{row.action}</span>
+                <span>{auditActionLabel(row.action)}</span>
               </div>
               <p className="mt-2 text-sm text-[var(--text-primary)]">{describeAuditEvent(row)}</p>
               <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--text-secondary)]">
@@ -302,7 +353,7 @@ export default async function AuditPage({
                   <Td className="whitespace-nowrap">{new Date(row.createdAt).toLocaleString("es-MX")}</Td>
                   <Td className="font-semibold text-[var(--text-primary)]">{row.entityType}</Td>
                   <Td className="font-mono text-xs">{row.entityId ?? "--"}</Td>
-                  <Td>{row.action}</Td>
+                  <Td>{auditActionLabel(row.action)}</Td>
                   <Td>{formatActor(row)}</Td>
                   <Td>{row.source ?? "--"}</Td>
                   <Td className="text-center">{row.before ? "Disponible" : "--"}</Td>

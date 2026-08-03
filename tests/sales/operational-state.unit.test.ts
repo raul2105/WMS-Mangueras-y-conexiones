@@ -38,7 +38,7 @@ describe("operational UX state contract", () => {
         latestPickStatus: "COMPLETED",
         needsDeliveryPreparation: true,
       }),
-    ).toMatchObject({ key: "ready_to_prepare", label: "Separar para entrega" });
+    ).toMatchObject({ key: "ready_to_prepare", label: "Preparar para entrega", nextAction: "Confirmar preparado para entrega" });
   });
 
   it("keeps partial work actionable without a database", () => {

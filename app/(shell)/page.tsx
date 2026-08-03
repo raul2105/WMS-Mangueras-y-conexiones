@@ -10,6 +10,7 @@ import { FulfillmentKpiGrid } from "@/components/dashboard/fulfillment-kpi-grid"
 import { FulfillmentPriorityQueue } from "@/components/dashboard/fulfillment-priority-queue";
 import { FulfillmentAlertList } from "@/components/dashboard/fulfillment-alert-list";
 import { FulfillmentAnalyticsPanels } from "@/components/dashboard/fulfillment-analytics-panels";
+import { FulfillmentOperationalMetrics } from "@/components/dashboard/fulfillment-operational-metrics";
 import { getFulfillmentDashboardSnapshot } from "@/lib/dashboard/fulfillment-dashboard";
 import { ROLE_HOME } from "@/lib/rbac/route-access-map";
 import type { RoleCode } from "@/lib/rbac/permissions";
@@ -69,6 +70,7 @@ export default async function Home() {
             <FulfillmentAlertList alerts={snapshot.alerts} />
           </div>
           <FulfillmentKpiGrid kpis={snapshot.kpis} />
+          <FulfillmentOperationalMetrics metrics={snapshot.kpis.operationalMetrics} />
           <FulfillmentAnalyticsPanels analytics={snapshot.analytics} />
         </>
       ) : (
@@ -78,6 +80,7 @@ export default async function Home() {
             <FulfillmentAlertList alerts={snapshot.alerts} />
           </div>
           <FulfillmentKpiGrid kpis={snapshot.kpis} />
+          <FulfillmentOperationalMetrics metrics={snapshot.kpis.operationalMetrics} />
           <FulfillmentAnalyticsPanels analytics={snapshot.analytics} />
         </>
       )}

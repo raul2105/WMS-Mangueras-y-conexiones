@@ -4,6 +4,7 @@ import { redirect, notFound } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
+import { buildTechnicalSpecRows, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
 import { ProductSupplierBrandSelect } from "../../_components/ProductSupplierBrandSelect";
 import { CategorySubcategorySelect } from "../../_components/CategorySubcategorySelect";
@@ -36,6 +37,10 @@ async function updateProduct(id: string, formData: FormData) {
      const purchaseMoqRaw = String(formData.get("purchaseMoq") ?? "").trim();
       const priceRaw = String(formData.get("price") ?? "").trim();
   const attributesRaw = String(formData.get("attributes") ?? "").trim() || null;
+  const technicalSourceSupplier = String(formData.get("technicalSourceSupplier") ?? "").trim();
+  const technicalSourceDocument = String(formData.get("technicalSourceDocument") ?? "").trim();
+  const technicalSourceVersion = String(formData.get("technicalSourceVersion") ?? "").trim();
+  const technicalSourceUrl = String(formData.get("technicalSourceUrl") ?? "").trim();
   const imageFile = formData.get("imageFile");
 
   if (!name) {
@@ -46,6 +51,11 @@ async function updateProduct(id: string, formData: FormData) {
   const normalizedType = allowedTypes.has(type) ? type : null;
   if (!normalizedType) {
     redirect(`/catalog/${id}/edit?error=${encodeURIComponent("Tipo de producto inválido")}`);
+  }
+
+  const technicalValidation = validateTechnicalSpecRows(buildTechnicalSpecRows(normalizedType, attributesRaw));
+  if (!technicalValidation.valid) {
+    redirect(`/catalog/${id}/edit?error=${encodeURIComponent(`Especificaciones técnicas inválidas: ${technicalValidation.errors.join("; ")}`)}`);
   }
 
   const base_cost = baseCostRaw ? Number(baseCostRaw.replace(",", ".")) : null;
@@ -134,6 +144,30 @@ async function updateProduct(id: string, formData: FormData) {
   });
 
   await syncProductTechnicalAttributes(prisma, id, attributesRaw);
+  const technicalSource = technicalSourceSupplier && technicalSourceDocument
+    ? await prisma.productTechnicalSource.create({
+        data: {
+          supplierName: technicalSourceSupplier,
+          documentRef: technicalSourceDocument,
+          documentVersion: technicalSourceVersion || null,
+          sourceUrl: technicalSourceUrl || null,
+          status: "PENDING_REVIEW",
+        },
+        select: { id: true },
+      })
+    : null;
+  await syncProductTechnicalSpecs(prisma, id, normalizedType, attributesRaw, technicalSource?.id);
+  if (resolvedImageUrl && technicalSource) {
+    await prisma.productAsset.create({
+      data: {
+        productId: id,
+        url: resolvedImageUrl,
+        brandSnapshot: brand,
+        sourceId: technicalSource.id,
+        validationStatus: "PENDING",
+      },
+    });
+  }
 
     await createAuditLogSafe({
     entityType: "PRODUCT",
@@ -316,6 +350,14 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <span className="text-sm text-slate-400">Atributos técnicos (JSON)</span>
             <textarea name="attributes" rows={3} defaultValue={product.attributes ?? ""} className="w-full px-4 py-3 glass rounded-lg font-mono text-sm" placeholder='{"presion_psi": 3000, "material": "acero"}' />
           </label>
+          <div className="grid gap-3 rounded-xl border border-white/10 bg-white/5 p-4 md:col-span-2 md:grid-cols-2">
+            <p className="text-sm font-semibold text-white md:col-span-2">Nueva fuente técnica curada</p>
+            <label className="space-y-1"><span className="text-xs text-slate-400">Proveedor / marca fuente</span><input name="technicalSourceSupplier" className="w-full px-4 py-3 glass rounded-lg" placeholder="Gates, Parker, Dixon..." /></label>
+            <label className="space-y-1"><span className="text-xs text-slate-400">Documento o ficha</span><input name="technicalSourceDocument" className="w-full px-4 py-3 glass rounded-lg" placeholder="Código de catálogo / PDF" /></label>
+            <label className="space-y-1"><span className="text-xs text-slate-400">Versión / fecha</span><input name="technicalSourceVersion" className="w-full px-4 py-3 glass rounded-lg" placeholder="2026-01" /></label>
+            <label className="space-y-1"><span className="text-xs text-slate-400">URL de origen</span><input name="technicalSourceUrl" className="w-full px-4 py-3 glass rounded-lg" placeholder="https://..." /></label>
+            <p className="text-xs text-slate-500 md:col-span-2">Los cambios quedan pendientes de revisión antes de usarse como fuente de promesa o compatibilidad.</p>
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-3">

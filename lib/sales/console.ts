@@ -92,8 +92,8 @@ export function getSalesConsoleWorkType(input: {
       };
     case "preparar_entrega":
       return {
-        label: "Separar para entrega",
-        detail: "Surtido y ensambles terminados; falta registrar el área física de entrega.",
+        label: "Preparar para entrega",
+        detail: "Surtido y ensambles terminados; falta confirmar la preparación física.",
         variant: "accent",
       };
     case "listo_entrega":

@@ -12,6 +12,8 @@ type PendingLine = {
   id: string;
   sku: string;
   name: string;
+  ordered: number;
+  received: number;
   pending: number;
   unitLabel: string;
   step: number;
@@ -122,12 +124,25 @@ export function PurchaseReceiptForm({
         <div className="space-y-3">
           {lines.map((line) => (
             <article key={line.id} className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:items-end">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,1.2fr)_7rem] sm:items-end">
                 <div>
                   <p className="font-mono text-xs text-cyan-300">{line.sku}</p>
                   <p className="mt-1 text-sm font-medium text-white">{line.name}</p>
                 </div>
-                <p className="text-sm text-slate-300">Pendiente <span className="block text-lg font-semibold text-amber-300">{line.pending} {line.unitLabel}</span></p>
+                <dl className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="rounded-lg border border-white/10 px-2 py-2">
+                    <dt className="text-slate-400">Pedido</dt>
+                    <dd className="mt-1 font-semibold text-slate-100">{line.ordered} {line.unitLabel}</dd>
+                  </div>
+                  <div className="rounded-lg border border-white/10 px-2 py-2">
+                    <dt className="text-slate-400">Recibido</dt>
+                    <dd className="mt-1 font-semibold text-emerald-200">{line.received} {line.unitLabel}</dd>
+                  </div>
+                  <div className="rounded-lg border border-amber-300/30 bg-amber-300/5 px-2 py-2">
+                    <dt className="text-amber-200">Pendiente</dt>
+                    <dd className="mt-1 font-semibold text-amber-300">{line.pending} {line.unitLabel}</dd>
+                  </div>
+                </dl>
                 <label className="space-y-1">
                   <span className="text-sm text-slate-300">En buen estado</span>
                   <input name={`qty_${line.id}`} type="number" min="0" max={line.pending} step={line.step} defaultValue="0" inputMode="decimal" className="glass w-full rounded-lg px-3 py-2 text-right" />

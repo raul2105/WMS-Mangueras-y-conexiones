@@ -1,10 +1,29 @@
 import { expect, type Page } from "@playwright/test";
 
+const CREDENTIAL_ENV_BY_ROLE = {
+  SYSTEM_ADMIN: ["WMS_E2E_SYSTEM_ADMIN_EMAIL", "WMS_E2E_SYSTEM_ADMIN_PASSWORD"],
+  MANAGER: ["WMS_E2E_MANAGER_EMAIL", "WMS_E2E_MANAGER_PASSWORD"],
+  WAREHOUSE_OPERATOR: ["WMS_E2E_WAREHOUSE_OPERATOR_EMAIL", "WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD"],
+  SALES_EXECUTIVE: ["WMS_E2E_SALES_EXECUTIVE_EMAIL", "WMS_E2E_SALES_EXECUTIVE_PASSWORD"],
+} as const;
+
+function credentialFromEnv(role: keyof typeof CREDENTIAL_ENV_BY_ROLE) {
+  const [emailKey, passwordKey] = CREDENTIAL_ENV_BY_ROLE[role];
+  const email = process.env[emailKey];
+  const password = process.env[passwordKey];
+  if (!email || !password) {
+    throw new Error(
+      `Missing ${emailKey}/${passwordKey}. Configure role-specific E2E credentials in the local environment or GitHub Secrets.`,
+    );
+  }
+  return { email, password };
+}
+
 export const USERS = {
-  SYSTEM_ADMIN: { email: "admin@scmayher.com", password: "Admin123*" },
-  MANAGER: { email: "manager@scmayher.com", password: "Manager123*" },
-  WAREHOUSE_OPERATOR: { email: "operator@scmayher.com", password: "Operator123*" },
-  SALES_EXECUTIVE: { email: "sales@scmayher.com", password: "Sales123*" },
+  get SYSTEM_ADMIN() { return credentialFromEnv("SYSTEM_ADMIN"); },
+  get MANAGER() { return credentialFromEnv("MANAGER"); },
+  get WAREHOUSE_OPERATOR() { return credentialFromEnv("WAREHOUSE_OPERATOR"); },
+  get SALES_EXECUTIVE() { return credentialFromEnv("SALES_EXECUTIVE"); },
 } as const;
 
 export type RoleKey = keyof typeof USERS;
@@ -16,12 +35,20 @@ export const EXPECTED_HOME: Record<RoleKey, string> = {
   SALES_EXECUTIVE: "/home/sales",
 };
 
-export const EXPECTED_USER: Record<RoleKey, { name: string; email: string; navItems: number }> = {
-  SYSTEM_ADMIN: { name: "Admin Principal", email: "admin@scmayher.com", navItems: 8 },
-  MANAGER: { name: "Manager WMS", email: "manager@scmayher.com", navItems: 7 },
-  WAREHOUSE_OPERATOR: { name: "Operador Almacen", email: "operator@scmayher.com", navItems: 5 },
-  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", email: "sales@scmayher.com", navItems: 4 },
-};
+const EXPECTED_USER_META = {
+  SYSTEM_ADMIN: { name: "Admin Principal", navItems: 8 },
+  MANAGER: { name: "Manager WMS", navItems: 7 },
+  WAREHOUSE_OPERATOR: { name: "Operador Almacen", navItems: 5 },
+  SALES_EXECUTIVE: { name: "Ejecutivo Ventas", navItems: 4 },
+} as const;
+
+export const EXPECTED_USER = new Proxy({} as Record<RoleKey, { name: string; email: string; navItems: number }>, {
+  get(_target, propertyKey) {
+    if (typeof propertyKey !== "string" || !(propertyKey in EXPECTED_USER_META)) return undefined;
+    const role = propertyKey as RoleKey;
+    return { ...EXPECTED_USER_META[role], email: USERS[role].email };
+  },
+});
 
 export function buildUrlExpectation(path: string) {
   const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

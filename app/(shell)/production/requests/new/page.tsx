@@ -252,6 +252,7 @@ async function createSalesRequest(formData: FormData) {
       source: commercialPromise.source,
       status: validation.status,
       currentAvailable: validation.currentAvailable,
+      currentReserved: validation.currentReserved,
       validatedAt: validation.validatedAt,
       staleThresholdMinutes,
     };
@@ -406,8 +407,9 @@ export default async function NewProductionRequestPage({
     ? {
         ...promiseFromUrl,
         availableQuantity: currentPromiseAvailability.availableQuantity,
+        reservedQuantity: currentPromiseAvailability.reservedQuantity,
         status: computePromiseStatus(
-          { ...promiseFromUrl, availableQuantity: currentPromiseAvailability.availableQuantity },
+          { ...promiseFromUrl, availableQuantity: currentPromiseAvailability.availableQuantity, reservedQuantity: currentPromiseAvailability.reservedQuantity },
           { staleThresholdMinutes, requestedQuantity: quantity },
         ),
         staleThresholdMinutes,

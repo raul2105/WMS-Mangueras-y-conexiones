@@ -25,6 +25,8 @@ describe("role-specific operational surfaces", () => {
 
     expect(managerHome).toContain("OC por confirmar");
     expect(managerHome).toContain("Crear OC");
+    expect(managerHome).toContain("FulfillmentOperationalMetrics");
+    expect(read("app/(shell)/home/admin/page.tsx")).toContain("getFulfillmentDashboardSnapshot");
     expect(receive).toContain("Recepción (Entrada)");
     expect(receive).toContain('requirePermission("inventory.receive")');
   });

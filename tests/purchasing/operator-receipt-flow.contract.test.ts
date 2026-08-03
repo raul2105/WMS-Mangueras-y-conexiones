@@ -35,6 +35,9 @@ describe("operator safe receipt flow", () => {
 
     expect(form).toContain("defaultValue=\"0\"");
     expect(form).toContain("Recibir todo lo pendiente");
+    expect(form).toContain("Pedido");
+    expect(form).toContain("Recibido");
+    expect(form).toContain("Pendiente");
     expect(form).toContain("Registrar diferencia de esta línea");
     expect(form).toContain("role=\"dialog\"");
     expect(form).toContain("Confirmar recepción");

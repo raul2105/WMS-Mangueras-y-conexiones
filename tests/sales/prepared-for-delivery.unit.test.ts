@@ -4,6 +4,7 @@ import {
   getSalesOrderFlowStage,
   resolveSalesOrderPrimaryCta,
 } from "@/lib/sales/internal-orders";
+import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
 
 describe("prepared for delivery sales order contract", () => {
   const completedWork = {
@@ -29,6 +30,14 @@ describe("prepared for delivery sales order contract", () => {
       canMarkDelivered: false,
       deliveredBlockedReason: "El pedido debe estar preparado en el área de entrega",
     });
+  });
+
+  it("prefers physical warehouse ownership and keeps a legacy fallback during migration", () => {
+    expect(hasWarehouseFulfillmentOwnership({ warehouseAssigneeUserId: "warehouse-1" })).toBe(true);
+    expect(hasWarehouseFulfillmentOwnership({ warehouseClaimedByUserId: "warehouse-2" })).toBe(true);
+    expect(hasWarehouseFulfillmentOwnership({ assignedToUserId: "sales-1", pulledAt: new Date() })).toBe(true);
+    expect(hasWarehouseFulfillmentOwnership({ assignedToUserId: "sales-1", pulledAt: null })).toBe(false);
+    expect(hasWarehouseFulfillmentOwnership({})).toBe(false);
   });
 
   it("allows the warehouse operator to prepare a fully completed order", () => {

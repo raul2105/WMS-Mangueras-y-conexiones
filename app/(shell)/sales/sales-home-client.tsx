@@ -135,7 +135,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
     },
     {
       key: "prepararEntrega",
-      label: "Separar para entrega",
+      label: "Preparar para entrega",
       count: stats.prepararEntrega,
       description: "Surtido terminado; falta registrar el área de entrega",
       icon: Package,

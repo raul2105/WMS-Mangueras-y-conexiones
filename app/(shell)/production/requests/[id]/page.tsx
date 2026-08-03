@@ -41,6 +41,7 @@ import {
   summarizeProductionStatus,
 } from "@/lib/sales/internal-orders";
 import { getSalesConsoleTimelineItems } from "@/lib/sales/console";
+import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
 import {
   firstErrorMessage,
   salesInternalOrderAssignmentSchema,
@@ -508,6 +509,8 @@ export default async function ProductionRequestDetailPage({
       assignedToUserId: true,
       assignedAt: true,
       pulledAt: true,
+      warehouseAssigneeUserId: true,
+      warehouseClaimedByUserId: true,
       preparedForDeliveryAt: true,
       preparedForDeliveryNotes: true,
       deliveredToCustomerAt: true,
@@ -536,6 +539,8 @@ export default async function ProductionRequestDetailPage({
         },
       },
       assignedToUser: { select: { name: true, email: true } },
+      warehouseAssigneeUser: { select: { name: true, email: true } },
+      warehouseClaimedByUser: { select: { name: true, email: true } },
       preparedForDeliveryByUser: { select: { name: true, email: true } },
       preparedForDeliveryLocation: { select: { code: true, name: true } },
       confirmedByUser: { select: { name: true, email: true } },
@@ -773,9 +778,9 @@ export default async function ProductionRequestDetailPage({
     || sessionCtx.roles.includes("SYSTEM_ADMIN")
   );
   const canPrepareForDelivery =
-    canOperateDirectPick &&
+    (sessionCtx.roles.includes("WAREHOUSE_OPERATOR") || sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN")) &&
     orderStatus === "CONFIRMADA" &&
-    Boolean(order.assignedToUserId && order.pulledAt) &&
+    hasWarehouseFulfillmentOwnership(order) &&
     hasCompletedDirectPick &&
     hasCompletedConfiguredAssembly &&
     !order.preparedForDeliveryAt &&
@@ -858,7 +863,8 @@ export default async function ProductionRequestDetailPage({
                 <span className="text-[var(--text-muted)]">Etapa actual:</span>
                 <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
               </div>
-              <p>Compromiso: {formatDate(order.dueDate)} · Responsable: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
+              <p>Compromiso: {formatDate(order.dueDate)} · Responsable comercial: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
+              <p>Responsable físico: {order.warehouseAssigneeUser?.name ?? order.warehouseClaimedByUser?.name ?? order.warehouseAssigneeUser?.email ?? order.warehouseClaimedByUser?.email ?? "Sin asignar"}</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href="/production/requests" className={buttonStyles({ variant: "secondary" })}>
@@ -1096,7 +1102,7 @@ export default async function ProductionRequestDetailPage({
                 <div className="min-w-0">
                   <p className="font-semibold text-[var(--text-primary)]">Productos directos</p>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    {productLines.length.toLocaleString("es-MX")} {productLines.length === 1 ? "producto" : "productos"} para surtir y separar para entrega.
+                    {productLines.length.toLocaleString("es-MX")} {productLines.length === 1 ? "producto" : "productos"} para surtir y preparar para entrega.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -1338,6 +1344,7 @@ export default async function ProductionRequestDetailPage({
           <div className="space-y-4">
             {configuredLines.map((line: any) => {
               const linkedProduction = linkedProductionByLine.get(line.id);
+              const isCompleted = linkedProduction?.status === "COMPLETADA";
               return (
                 <article key={line.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--text-secondary)]">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1359,6 +1366,11 @@ export default async function ProductionRequestDetailPage({
                           </Link>
                           <p className="text-xs text-[var(--text-muted)]">{summarizeProductionStatus(linkedProduction.status)}</p>
                           <p className="text-xs text-[var(--text-muted)]">Picking: {linkedProduction.assemblyWorkOrder?.pickStatus ?? "--"}</p>
+                          <p className={isCompleted ? "text-xs text-[var(--status-success-text)]" : "text-xs text-[var(--status-warning-text)]"}>
+                            {isCompleted
+                              ? "Ensamble completo; incluido en la preparación del pedido."
+                              : "Ensamble pendiente; no se puede preparar el pedido todavía."}
+                          </p>
                         </>
                       ) : (
                         <p className="text-xs text-[var(--text-muted)]">Sin orden ligada</p>

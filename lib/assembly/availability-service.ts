@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
+import { getAssemblyCompatibilityDecision } from "@/lib/catalog/compatibility";
 import type {
   AssemblyAvailabilityPreview,
   AssemblyConfigInput,
@@ -144,4 +145,19 @@ export async function previewAssemblyAvailability(db: Db, input: AssemblyConfigI
     requirements,
     allocations,
   };
+}
+
+export async function validateAssemblyCompatibility(db: Db, input: AssemblyConfigInput) {
+  const decision = await getAssemblyCompatibilityDecision(db, [
+    input.entryFittingProductId,
+    input.hoseProductId,
+    input.exitFittingProductId,
+  ]);
+
+  if (decision.status === "blocked") {
+    const reason = decision.matchedRules[0]?.description || "La combinación de componentes tiene una regla técnica de bloqueo";
+    throw new InventoryServiceError("INCOMPATIBLE_COMPONENTS", reason);
+  }
+
+  return decision;
 }

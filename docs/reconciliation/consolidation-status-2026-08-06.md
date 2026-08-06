@@ -6,9 +6,9 @@
 |---|---|---|
 | `origin/main` | `33d4f3e` antes de consolidar | `git rev-parse origin/main` |
 | Rama vigente | `codex/plan-complete` publicada | PR #94 |
-| Commits a integrar | `3d19c10`, `65377f2` | `git log origin/main..codex/plan-complete` |
-| PR | Draft, dirigida a `main` | https://github.com/raul2105/WMS-Mangueras-y-conexiones/pull/94 |
-| GitHub Actions | Bloqueada hasta configurar credenciales E2E | workflow `AWS Read-only E2E (required)` |
+| Commit vigente | `716585e` | `git rev-parse HEAD` |
+| PR | Abierta, lista para fusión, dirigida a `main` | https://github.com/raul2105/WMS-Mangueras-y-conexiones/pull/94 |
+| GitHub Actions | Quality Gate y AWS Read-only E2E verdes en el SHA vigente | workflow `31129261492` |
 | Base operativa | PostgreSQL canónico en AWS | `.env`/runtime AWS y evidencia de reconciliación |
 
 ## Validación local
@@ -18,10 +18,11 @@
 - `npm run prisma:validate`: verde.
 - `npm run test:unit`: 42 archivos, 122 pruebas, verde.
 - `npm run build`: verde.
+- Pruebas PostgreSQL de flujo comercial–almacén sobre AWS RDS: 3 escenarios críticos verdes.
 
 ## Validación AWS
 
-La corrección acotada de reservas de `PI-2026-0010` y su verificación posterior están documentadas en `aws-reservation-reconciliation-2026-08-06.md`. La prueba AWS read-only requiere credenciales E2E por rol; la corrida local se detuvo antes del login porque esas variables no están configuradas en este entorno.
+La corrección acotada de reservas de `PI-2026-0010` y su verificación posterior están documentadas en `aws-reservation-reconciliation-2026-08-06.md`. El gate AWS read-only se ejecutó correctamente contra el ambiente publicado usando las credenciales E2E configuradas en GitHub Actions.
 
 No se creó una segunda base de datos, no se ejecutó una migración destructiva y no se modificó otro pedido.
 
@@ -45,10 +46,9 @@ Después de la limpieza conservadora, las excepciones remotas que permanecen son
 
 Las ramas locales cuyo tip ya estaba alcanzado por `origin/main` fueron eliminadas. No se eliminaron ramas divergentes.
 
-## Bloqueadores para merge
+## Estado de cierre
 
-1. Configurar en GitHub los secretos `WMS_E2E_SALES_EXECUTIVE_*` y `WMS_E2E_WAREHOUSE_OPERATOR_*`.
-2. Ejecutar `Quality Gate (required)` y `AWS Read-only E2E (required)` en PR #94.
-3. Confirmar que el SHA fusionado es el SHA desplegado en AWS.
-
-Hasta cumplir esos puntos, la PR permanece sin merge y KAN-128 no se declara finalizado.
+- `Quality Gate (required)`: verde en el SHA vigente.
+- `AWS Read-only E2E (required)`: verde en el SHA vigente.
+- Conversaciones de revisión: 0 hilos sin resolver.
+- La fusión queda sujeta únicamente a que GitHub reconozca los checks oficiales de la app configurada para la protección de `main`; no se usará bypass administrativo.

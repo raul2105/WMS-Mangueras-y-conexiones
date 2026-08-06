@@ -37,7 +37,12 @@ test.describe("KAN-128: AWS read-only operational evidence", () => {
         if (await legacyPicker.count() > 0) {
           await legacyPicker.click();
         } else {
-          await salesPage.getByRole("link", { name: "Crear pedido", exact: true }).click();
+          const singleCreateOrderLink = salesPage.getByRole("link", { name: "Crear pedido", exact: true }).first();
+          const href = await singleCreateOrderLink.getAttribute("href");
+          if (!href) throw new Error("The single warehouse order link has no href");
+          const promisedWarehouseCode = new URL(href, salesPage.url()).searchParams.get("warehouseCode");
+          expect(promisedWarehouseCode).toBe(warehouseCode);
+          await singleCreateOrderLink.click();
         }
       }
       const warehouseOption = salesPage.locator(`[data-testid="commercial-order-warehouse-${warehouseCode}"]:visible`).first();

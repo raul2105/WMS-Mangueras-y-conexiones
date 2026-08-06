@@ -2471,6 +2471,11 @@ export async function claimSalesRequestPickTasks(
       where: {
         id: { in: taskIds },
         claimedByUserId: null,
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+        OR: [
+          { assignmentMode: "AUTO_STANDARD" },
+          { assignmentMode: "MANAGER_REQUIRED", assignedToUserId: args.claimedByUserId },
+        ],
       },
       data: {
         claimedByUserId: args.claimedByUserId,
@@ -2656,10 +2661,19 @@ export async function requireManagerWarehouseAssignment(
     }
 
     const now = new Date();
-    await tx.salesInternalOrderPickTask.updateMany({
-      where: { id: { in: tasks.map((task) => task.id) } },
+    const updated = await tx.salesInternalOrderPickTask.updateMany({
+      where: {
+        id: { in: tasks.map((task) => task.id) },
+        assignedToUserId: null,
+        claimedByUserId: null,
+        assignmentMode: "AUTO_STANDARD",
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+      },
       data: { assignmentMode: "MANAGER_REQUIRED", lastActivityAt: now },
     });
+    if (updated.count !== tasks.length) {
+      throw new InventoryServiceError("TASK_ASSIGNMENT_CONFLICT", "Las tareas cambiaron mientras se solicitaba la asignación manual");
+    }
     await tx.salesInternalOrder.update({
       where: { id: order.id },
       data: { warehouseAssignmentMode: "MANUAL", warehouseAssigneeUserId: null, warehouseLastActivityAt: now },

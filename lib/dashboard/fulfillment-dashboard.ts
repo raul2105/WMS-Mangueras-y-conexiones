@@ -635,9 +635,15 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
 
     const openLinkedAssembly = linkedProduction.filter((row) => OPEN_ASSEMBLY_STATUSES.includes(row.status)).length;
 
+    const directPickCycles = recentOrderMetrics.flatMap((order) => {
+      const hasProductPickActivity = order.lines.some((line) => line.pickTasks.length > 0);
+      return hasProductPickActivity
+        ? [{ startAt: getWarehouseActivityStartAt(order), endAt: order.preparedForDeliveryAt }]
+        : [];
+    });
     const operationalMetrics = summarizeFulfillmentMetrics({
       pickTasks: recentOrderMetrics.flatMap((order) => order.lines.flatMap((line) => line.pickTasks)),
-      pickCycles: recentOrderMetrics.map((order) => ({ startAt: getWarehouseActivityStartAt(order), endAt: order.preparedForDeliveryAt })),
+      pickCycles: directPickCycles,
       assemblyCycles: recentAssemblyCycles.map((workOrder) => ({ startAt: workOrder.createdAt, endAt: workOrder.closedAt })),
     });
 

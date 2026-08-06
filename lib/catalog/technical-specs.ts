@@ -315,7 +315,13 @@ export async function promoteProductTechnicalSource(
       where: { sourceId: source.id },
       orderBy: [{ productId: "asc" }, { key: "asc" }],
     });
-    if (candidates.length === 0) throw new Error("La fuente no tiene especificaciones candidatas");
+    const pendingAssets = await tx.productAsset.findMany({
+      where: { sourceId: source.id, validationStatus: "PENDING" },
+      select: { productId: true },
+    });
+    if (candidates.length === 0 && pendingAssets.length === 0) {
+      throw new Error("La fuente no tiene especificaciones ni activos pendientes");
+    }
 
     const productIds = Array.from(new Set(candidates.map((candidate) => candidate.productId)));
     for (const productId of productIds) {
@@ -363,7 +369,11 @@ export async function promoteProductTechnicalSource(
       data: { status: "APPROVED", reviewedAt, reviewedByUserId: args.reviewerUserId },
     });
     await tx.productTechnicalSpecCandidate.deleteMany({ where: { sourceId: source.id } });
-    return { sourceId: source.id, productCount: productIds.length, specCount: candidates.length };
+    return {
+      sourceId: source.id,
+      productCount: new Set([...productIds, ...pendingAssets.map((asset) => asset.productId)]).size,
+      specCount: candidates.length,
+    };
   });
 }
 

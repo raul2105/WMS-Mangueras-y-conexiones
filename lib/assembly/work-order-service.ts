@@ -615,6 +615,7 @@ export async function closeAssemblyWorkOrderConsume(
           locationId: order.assemblyWorkOrder.wipLocationId,
           type: "OUT",
           operatorName: operatorName ?? null,
+          operatorUserId: operatorUserId ?? null,
           quantity: pendingToConsume,
           reference: order.code,
           notes: "Consumo final de ensamble",

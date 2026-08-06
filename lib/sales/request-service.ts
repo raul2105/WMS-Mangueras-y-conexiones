@@ -601,6 +601,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
       id: true,
       code: true,
       warehouseId: true,
+      warehouseAssignmentMode: true,
       lines: {
         where: {
           lineKind: "PRODUCT",
@@ -697,6 +698,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
         pickedQty: 0,
         shortQty: 0,
         status: "PENDING",
+        assignmentMode: order.warehouseAssignmentMode === "MANUAL" ? "MANAGER_REQUIRED" : "AUTO_STANDARD",
       },
     });
     sequence += 1;
@@ -2621,6 +2623,55 @@ export async function assignSalesRequestPickTasks(
     }, tx);
 
     return { assignedCount: updated.count, assignedToUserId: assignee.id };
+  });
+}
+
+export async function requireManagerWarehouseAssignment(
+  prisma: PrismaClient,
+  args: { orderId: string; reason: string; actorUserId: string },
+) {
+  const reason = args.reason.trim();
+  if (!reason) throw new InventoryServiceError("INVALID_REASON", "El motivo de asignación manual es obligatorio");
+
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: { id: true, code: true, status: true },
+    });
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (order.status === "CANCELADA") throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede asignar un pedido cancelado");
+
+    const tasks = await tx.salesInternalOrderPickTask.findMany({
+      where: {
+        orderLine: { orderId: order.id },
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+      },
+      select: { id: true, assignedToUserId: true, claimedByUserId: true },
+    });
+    if (tasks.length === 0) throw new InventoryServiceError("TASK_NOT_FOUND", "El pedido no tiene tareas abiertas para asignar");
+    if (tasks.some((task) => task.assignedToUserId || task.claimedByUserId)) {
+      throw new InventoryServiceError("TASK_ALREADY_CLAIMED", "No se puede cambiar el modo después de asignar o tomar tareas");
+    }
+
+    const now = new Date();
+    await tx.salesInternalOrderPickTask.updateMany({
+      where: { id: { in: tasks.map((task) => task.id) } },
+      data: { assignmentMode: "MANAGER_REQUIRED", lastActivityAt: now },
+    });
+    await tx.salesInternalOrder.update({
+      where: { id: order.id },
+      data: { warehouseAssignmentMode: "MANUAL", warehouseAssigneeUserId: null, warehouseLastActivityAt: now },
+    });
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "REQUIRE_MANAGER_WAREHOUSE_ASSIGNMENT",
+      actor: "system",
+      actorUserId: args.actorUserId,
+      source: "sales/request-service",
+      after: { taskCount: tasks.length, reason, warehouseAssignmentMode: "MANUAL" },
+    }, tx);
+    return { orderId: order.id, orderCode: order.code, taskCount: tasks.length };
   });
 }
 

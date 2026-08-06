@@ -133,6 +133,7 @@ model Product {
   equivalencesTo ProductEquivalence[]   @relation("EquivalenceTo")
   technicalAttributes ProductTechnicalAttribute[]
   technicalSpecs ProductTechnicalSpec[]
+  technicalSpecCandidates ProductTechnicalSpecCandidate[]
   assets ProductAsset[]
   compatibilityRulesFrom ProductCompatibilityRule[] @relation("ProductCompatibilityRuleFrom")
   compatibilityRulesTo ProductCompatibilityRule[] @relation("ProductCompatibilityRuleTo")
@@ -200,6 +201,26 @@ model ProductTechnicalSpec {
   @@index([key, normalizedValue])
 }
 
+model ProductTechnicalSpecCandidate {
+  id String @id @default(uuid())
+  productId String
+  sourceId String
+  family String
+  key String
+  value String
+  normalizedValue String?
+  unit String?
+  isSafetyCritical Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source ProductTechnicalSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, sourceId, key])
+  @@index([productId, sourceId])
+}
+
 model ProductTechnicalSource {
   id String @id @default(uuid())
   supplierName String
@@ -214,6 +235,7 @@ model ProductTechnicalSource {
 
   reviewedByUser User? @relation("ProductTechnicalSourceReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   specs ProductTechnicalSpec[]
+  specCandidates ProductTechnicalSpecCandidate[]
   assets ProductAsset[]
   compatibilityRules ProductCompatibilityRule[]
 

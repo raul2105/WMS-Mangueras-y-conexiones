@@ -56,9 +56,10 @@ async function moveReservedToWipInTx(args: {
   documentId: string;
   documentLineId: string;
   operatorName?: string | null;
+  operatorUserId?: string | null;
   taskId: string;
 }) {
-  const { tx, productId, fromLocationId, toWipLocationId, qty, reference, documentId, documentLineId, operatorName, taskId } = args;
+  const { tx, productId, fromLocationId, toWipLocationId, qty, reference, documentId, documentLineId, operatorName, operatorUserId, taskId } = args;
 
   const source = await tx.inventory.findUnique({
     where: { productId_locationId: { productId, locationId: fromLocationId } },
@@ -113,6 +114,7 @@ async function moveReservedToWipInTx(args: {
       locationId: fromLocationId,
       type: "TRANSFER",
       operatorName: operatorName ?? null,
+      operatorUserId: operatorUserId ?? null,
       quantity: qty,
       reference,
       notes: `Surtido a WIP (task ${taskId})`,
@@ -283,6 +285,7 @@ export async function confirmAssemblyPickTask(
         documentId: task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
         documentLineId: task.assemblyWorkOrderLine.id,
         operatorName: args.operatorName ?? null,
+        operatorUserId: args.operatorUserId ?? null,
         taskId: task.id,
       });
     }
@@ -373,6 +376,7 @@ export async function confirmAssemblyPickTask(
         sourceEntityType: "ASSEMBLY_ORDER",
         sourceEntityId: task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
         operatorName: args.operatorName ?? null,
+        operatorUserId: args.operatorUserId ?? null,
       });
       labelJobId = job.id;
       orderTraceId = trace.traceId;

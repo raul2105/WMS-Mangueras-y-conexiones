@@ -417,7 +417,10 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
             where: { lineKind: "PRODUCT" },
             select: {
               pickTasks: {
-                where: { status: { in: ["COMPLETED", "PARTIAL"] } },
+                where: {
+                  status: { in: ["COMPLETED", "PARTIAL"] },
+                  updatedAt: { gte: metricWindowStart, lte: now },
+                },
                 select: { requestedQty: true, pickedQty: true, shortQty: true, status: true, claimedAt: true, lastActivityAt: true },
               },
             },

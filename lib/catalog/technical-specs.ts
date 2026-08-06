@@ -1,4 +1,5 @@
 import { normalizeTechnicalText } from "@/lib/product-attributes";
+import type { PrismaClient } from "@prisma/client";
 
 export type TechnicalFamily = "HOSE" | "FITTING" | "ASSEMBLY" | "ACCESSORY";
 
@@ -239,6 +240,117 @@ type TechnicalSpecDbClient = {
     }) => Promise<unknown>;
   };
 };
+
+type TechnicalSpecCandidateDbClient = {
+  productTechnicalSpecCandidate: {
+    deleteMany: (args: { where: { productId: string; sourceId: string } }) => Promise<unknown>;
+    upsert: (args: {
+      where: { productId_sourceId_key: { productId: string; sourceId: string; key: string } };
+      create: {
+        productId: string;
+        sourceId: string;
+        family: string;
+        key: string;
+        value: string;
+        normalizedValue: string;
+        unit: string | null;
+        isSafetyCritical: boolean;
+      };
+      update: {
+        family: string;
+        value: string;
+        normalizedValue: string;
+        unit: string | null;
+        isSafetyCritical: boolean;
+      };
+    }) => Promise<unknown>;
+  };
+};
+
+export async function syncProductTechnicalSpecCandidates(
+  db: TechnicalSpecCandidateDbClient,
+  productId: string,
+  type: string,
+  attributesRaw: string | null | undefined,
+  sourceId: string,
+) {
+  const rows = buildTechnicalSpecRows(type, attributesRaw);
+  await db.productTechnicalSpecCandidate.deleteMany({ where: { productId, sourceId } });
+  for (const row of rows) {
+    await db.productTechnicalSpecCandidate.upsert({
+      where: { productId_sourceId_key: { productId, sourceId, key: row.key } },
+      create: { productId, sourceId, ...row },
+      update: {
+        family: row.family,
+        value: row.value,
+        normalizedValue: row.normalizedValue,
+        unit: row.unit,
+        isSafetyCritical: row.isSafetyCritical,
+      },
+    });
+  }
+}
+
+export async function promoteProductTechnicalSource(
+  prisma: PrismaClient,
+  args: { sourceId: string; reviewerUserId: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const source = await tx.productTechnicalSource.findUnique({
+      where: { id: args.sourceId },
+      select: { id: true, status: true },
+    });
+    if (!source) throw new Error("Fuente técnica no encontrada");
+    if (source.status !== "PENDING_REVIEW") {
+      throw new Error("Sólo una fuente pendiente puede aprobarse");
+    }
+
+    const candidates = await tx.productTechnicalSpecCandidate.findMany({
+      where: { sourceId: source.id },
+      orderBy: [{ productId: "asc" }, { key: "asc" }],
+    });
+    if (candidates.length === 0) throw new Error("La fuente no tiene especificaciones candidatas");
+
+    const productIds = Array.from(new Set(candidates.map((candidate) => candidate.productId)));
+    for (const productId of productIds) {
+      const rows = candidates.filter((candidate) => candidate.productId === productId);
+      const keys = rows.map((row) => row.key);
+      await tx.productTechnicalSpec.deleteMany({
+        where: { productId, ...(keys.length > 0 ? { key: { notIn: keys } } : {}) },
+      });
+      for (const row of rows) {
+        await tx.productTechnicalSpec.upsert({
+          where: { productId_key: { productId, key: row.key } },
+          create: {
+            productId,
+            family: row.family,
+            key: row.key,
+            value: row.value,
+            normalizedValue: row.normalizedValue,
+            unit: row.unit,
+            isSafetyCritical: row.isSafetyCritical,
+            sourceId: source.id,
+          },
+          update: {
+            family: row.family,
+            value: row.value,
+            normalizedValue: row.normalizedValue,
+            unit: row.unit,
+            isSafetyCritical: row.isSafetyCritical,
+            sourceId: source.id,
+          },
+        });
+      }
+    }
+
+    await tx.productTechnicalSource.update({
+      where: { id: source.id },
+      data: { status: "APPROVED", reviewedAt: new Date(), reviewedByUserId: args.reviewerUserId },
+    });
+    await tx.productTechnicalSpecCandidate.deleteMany({ where: { sourceId: source.id } });
+    return { sourceId: source.id, productCount: productIds.length, specCount: candidates.length };
+  });
+}
 
 export async function syncProductTechnicalSpecs(
   db: TechnicalSpecDbClient,

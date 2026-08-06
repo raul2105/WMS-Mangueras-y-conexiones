@@ -5,6 +5,8 @@ import { reconcileSalesRequestReservations } from "@/lib/sales/request-service";
 
 export const dynamic = "force-dynamic";
 
+const ALLOWED_APPLY_ORDER_CODE = "PI-2026-0010";
+
 /**
  * Explicitly disabled unless the operator enables it for a bounded maintenance run.
  * This endpoint is never part of the normal AWS E2E flow.
@@ -27,8 +29,8 @@ export async function POST(request: Request) {
   if (!orderCode || !reason) {
     return NextResponse.json({ error: "orderCode y reason son obligatorios" }, { status: 400 });
   }
-  if (mode === "APPLY" && !orderCode.startsWith("PI-2026-")) {
-    return NextResponse.json({ error: "APPLY requiere un pedido de evidencia explícito" }, { status: 400 });
+  if (mode === "APPLY" && orderCode !== ALLOWED_APPLY_ORDER_CODE) {
+    return NextResponse.json({ error: `APPLY sólo está autorizado para ${ALLOWED_APPLY_ORDER_CODE}` }, { status: 400 });
   }
 
   const order = await prisma.salesInternalOrder.findUnique({

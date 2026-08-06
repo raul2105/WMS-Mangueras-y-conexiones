@@ -5,7 +5,7 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
-import { buildTechnicalSpecRows, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
+import { buildTechnicalSpecRows, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
 import { ProductSupplierBrandSelect } from "../_components/ProductSupplierBrandSelect";
 import { CategorySubcategorySelect } from "../_components/CategorySubcategorySelect";
@@ -184,7 +184,11 @@ async function createProduct(formData: FormData) {
         select: { id: true },
       })
     : null;
-  await syncProductTechnicalSpecs(prisma, product.id, normalizedType, attributes, technicalSource?.id);
+  if (technicalSource) {
+    await syncProductTechnicalSpecCandidates(prisma, product.id, normalizedType, attributes, technicalSource.id);
+  } else {
+    await syncProductTechnicalSpecs(prisma, product.id, normalizedType, attributes, null);
+  }
   if (imageUrl && technicalSource) {
     await prisma.productAsset.create({
       data: {

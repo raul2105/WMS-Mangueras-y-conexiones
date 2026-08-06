@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
-import { assignSalesRequestPickTasks, claimSalesRequestPickTasks, confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList } from "@/lib/sales/request-service";
+import { assignSalesRequestPickTasks, claimSalesRequestPickTasks, confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList, requireManagerWarehouseAssignment } from "@/lib/sales/request-service";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
@@ -117,6 +117,31 @@ async function assignDirectPickTasks(formData: FormData) {
   }
 }
 
+async function requireManagerAssignment(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+  const sessionCtx = await getSessionContext();
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  if (!sessionCtx.user?.id || (!sessionCtx.roles.includes("MANAGER") && !sessionCtx.roles.includes("SYSTEM_ADMIN"))) {
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Solo un manager puede exigir asignación manual")}`);
+  }
+  if (!orderId || !reason) redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("El motivo de asignación manual es obligatorio")}`);
+
+  try {
+    const result = await requireManagerWarehouseAssignment(prisma, {
+      orderId,
+      reason,
+      actorUserId: sessionCtx.user.id,
+    });
+    redirect(`/production/fulfillment/${orderId}?ok=${encodeURIComponent(`Asignación manual activada (${result.taskCount} tareas)`)}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof InventoryServiceError ? error.message : "No fue posible activar la asignación manual";
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
 async function confirmDirectPick(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.fulfillment.confirm_direct_pick");
@@ -205,6 +230,7 @@ export default async function ProductionFulfillmentPage({
       id: true,
       code: true,
       status: true,
+      warehouseAssignmentMode: true,
       customerName: true,
       dueDate: true,
       warehouse: { select: { code: true, name: true } },
@@ -278,6 +304,9 @@ export default async function ProductionFulfillmentPage({
     activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
   const managerRequiredUnassignedTasks = actionableTasks.filter(
     (task) => task.assignmentMode === "MANAGER_REQUIRED" && !task.assignedToUserId && !task.claimedByUserId,
+  );
+  const autoStandardActionableTasks = actionableTasks.filter(
+    (task) => task.assignmentMode === "AUTO_STANDARD" && !task.assignedToUserId && !task.claimedByUserId,
   );
   const canAssignWarehouseTasks = sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN");
   const warehouseOperators = canAssignWarehouseTasks
@@ -378,6 +407,22 @@ export default async function ProductionFulfillmentPage({
               <button type="submit" className={buttonStyles()}>
                 Liberar surtido directo
               </button>
+            </form>
+          ) : null}
+          {canAssignWarehouseTasks && autoStandardActionableTasks.length > 0 && order.warehouseAssignmentMode !== "MANUAL" ? (
+            <form action={requireManagerAssignment} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 space-y-3">
+              <input type="hidden" name="orderId" value={order.id} />
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">¿Requiere asignación manual?</p>
+                <p className="text-xs text-[var(--text-secondary)]">Activa el modo Manager Required para impedir que otro operador tome estas tareas sin asignación.</p>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="min-w-64 flex-1 space-y-1">
+                  <span className="text-xs text-slate-400">Motivo</span>
+                  <input name="reason" required className="w-full px-3 py-2 glass rounded-lg" placeholder="Urgencia, cliente estratégico, ausencia..." />
+                </label>
+                <button type="submit" className={buttonStyles({ variant: "secondary" })}>Exigir asignación</button>
+              </div>
             </form>
           ) : null}
           {activePickList && activePickList.status !== "DRAFT" && unclaimedTasks.length > 0 ? (

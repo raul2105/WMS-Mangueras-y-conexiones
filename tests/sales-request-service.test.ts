@@ -14,6 +14,7 @@ import {
   markSalesRequestPreparedForDelivery,
   markSalesRequestDelivered,
   pullSalesRequestOrder,
+  requireManagerWarehouseAssignment,
   releaseSalesRequestPickList,
 } from "@/lib/sales/request-service";
 
@@ -187,6 +188,34 @@ afterAll(async () => {
 });
 
 describe("sales request service", () => {
+  it("switches open tasks to manager-required mode through an explicit audited transition", async () => {
+    const { order, productA } = await createRequestFixture();
+    const manager = await createUserWithRole({
+      email: "manager-mode-transition@scmayher.com",
+      name: "Manager mode",
+      roleCode: "MANAGER",
+    });
+
+    await addSalesRequestProductLine(prisma, { orderId: order.id, productId: productA.id, requestedQty: 2 });
+    const pickList = await prisma.salesInternalOrderPickList.findFirst({
+      where: { orderId: order.id },
+      include: { tasks: true },
+    });
+    expect(pickList?.tasks[0].assignmentMode).toBe("AUTO_STANDARD");
+
+    const result = await requireManagerWarehouseAssignment(prisma, {
+      orderId: order.id,
+      reason: "Cliente estratégico",
+      actorUserId: manager.id,
+    });
+
+    expect(result.taskCount).toBe(1);
+    const task = await prisma.salesInternalOrderPickTask.findUnique({ where: { id: pickList!.tasks[0].id } });
+    const updatedOrder = await prisma.salesInternalOrder.findUnique({ where: { id: order.id } });
+    expect(task?.assignmentMode).toBe("MANAGER_REQUIRED");
+    expect(updatedOrder?.warehouseAssignmentMode).toBe("MANUAL");
+  });
+
   it("assigns manager-required pick tasks only to an active warehouse operator and audits the ownership", async () => {
     const { order, productA } = await createRequestFixture();
     const manager = await createUserWithRole({
@@ -1666,7 +1695,7 @@ describe("sales request service", () => {
       deliveredByUserId: sales.id,
     });
 
-    const [deliveredOrder, completedProduction, auditEntries] = await Promise.all([
+    const [deliveredOrder, completedProduction, auditEntries, assemblyMovements] = await Promise.all([
       prisma.salesInternalOrder.findUnique({
         where: { id: order.id },
         select: {
@@ -1694,12 +1723,21 @@ describe("sales request service", () => {
         },
         select: { action: true },
       }),
+      prisma.inventoryMovement.findMany({
+        where: { documentType: "ASSEMBLY_ORDER", documentId: production.id },
+        orderBy: { createdAt: "asc" },
+        select: { type: true, operatorUserId: true },
+      }),
     ]);
 
     expect(deliveredOrder?.deliveredToCustomerAt).toBeTruthy();
     expect(deliveredOrder?.deliveredByUserId).toBe(sales.id);
     expect(deliveredOrder?.warehouseClaimedByUserId).toBe(warehouseOperator.id);
     expect(completedProduction?.status).toBe("COMPLETADA");
+    expect(assemblyMovements).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "TRANSFER", operatorUserId: warehouseOperator.id }),
+      expect.objectContaining({ type: "OUT", operatorUserId: warehouseOperator.id }),
+    ]));
     expect(auditEntries.map((row) => row.action)).toEqual(
       expect.arrayContaining([
         "PULL_REQUEST",

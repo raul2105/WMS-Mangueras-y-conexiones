@@ -36,7 +36,18 @@ export default async function ProductDetailPage({ params }: PageProps) {
             attributes: true,
             technicalSpecs: {
                 orderBy: { key: "asc" },
-                select: { family: true, key: true, value: true, unit: true, isSafetyCritical: true },
+                select: {
+                    family: true,
+                    key: true,
+                    value: true,
+                    unit: true,
+                    isSafetyCritical: true,
+                    source: { select: { status: true } },
+                },
+            },
+            technicalSpecCandidates: {
+                take: 1,
+                select: { id: true },
             },
             assets: {
                 where: { kind: "PRIMARY_IMAGE", validationStatus: "APPROVED" },
@@ -77,7 +88,10 @@ export default async function ProductDetailPage({ params }: PageProps) {
         }
     }
     const equivalents = await getEquivalentProducts(product.id, { limit: 6, inStockOnly: false });
-    const storedTechnicalRows = product.technicalSpecs.map((row) => ({
+    const publishedTechnicalSpecs = product.technicalSpecs.filter((row) => !row.source || row.source.status === "APPROVED");
+    const hasPendingTechnicalSpecs = product.technicalSpecs.some((row) => row.source?.status === "PENDING_REVIEW")
+        || product.technicalSpecCandidates.length > 0;
+    const storedTechnicalRows = publishedTechnicalSpecs.map((row) => ({
         family: row.family as "HOSE" | "FITTING" | "ASSEMBLY" | "ACCESSORY",
         key: row.key,
         value: row.value,
@@ -87,7 +101,9 @@ export default async function ProductDetailPage({ params }: PageProps) {
     }));
     const technicalRows = storedTechnicalRows.length > 0
         ? storedTechnicalRows
-        : buildTechnicalSpecRows(product.type, product.attributes);
+        : hasPendingTechnicalSpecs
+            ? []
+            : buildTechnicalSpecRows(product.type, product.attributes);
     const technicalCompleteness = getTechnicalCompleteness(product.type, technicalRows);
     const primaryAsset = product.assets[0] ?? null;
     const assetBrandMismatch = Boolean(primaryAsset?.brandSnapshot && product.brand && primaryAsset.brandSnapshot.toLowerCase() !== product.brand.toLowerCase());

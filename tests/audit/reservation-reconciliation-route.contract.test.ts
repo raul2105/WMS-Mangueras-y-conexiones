@@ -7,5 +7,7 @@ describe("reservation reconciliation maintenance endpoint", () => {
     expect(source).toContain('RESERVATION_RECONCILIATION_ENABLED !== "true"');
     expect(source).toContain('requirePermission("inventory.adjust")');
     expect(source).toContain('body?.mode === "APPLY"');
+    expect(source).toContain('ALLOWED_APPLY_ORDER_CODE = "PI-2026-0010"');
+    expect(source).toContain('orderCode !== ALLOWED_APPLY_ORDER_CODE');
   });
 });

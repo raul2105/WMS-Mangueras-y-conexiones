@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTechnicalSpecRows, getTechnicalCompleteness, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
+import { buildTechnicalSpecRows, getTechnicalCompleteness, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 
 describe("technical product specification contract", () => {
   it("maps legacy hose attributes into comparable canonical fields", () => {
@@ -87,5 +87,31 @@ describe("technical product specification contract", () => {
     expect(deletes).toEqual([
       { where: { productId: "product-1", key: { notIn: ["inner_diameter"] } } },
     ]);
+  });
+
+  it("stores pending source values as candidates instead of publishing them", async () => {
+    const deletes: unknown[] = [];
+    const upserts: unknown[] = [];
+    const db = {
+      productTechnicalSpecCandidate: {
+        deleteMany: async (args: unknown) => { deletes.push(args); },
+        upsert: async (args: unknown) => { upserts.push(args); },
+      },
+    };
+
+    await syncProductTechnicalSpecCandidates(
+      db,
+      "product-1",
+      "HOSE",
+      JSON.stringify({ inner_diameter: 12, working_pressure: 300 }),
+      "source-1",
+    );
+
+    expect(deletes).toEqual([{ where: { productId: "product-1", sourceId: "source-1" } }]);
+    expect(upserts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        where: { productId_sourceId_key: { productId: "product-1", sourceId: "source-1", key: "inner_diameter" } },
+      }),
+    ]));
   });
 });

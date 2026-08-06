@@ -31,7 +31,6 @@ export async function checkCurrentAvailability(
   const inventoryRows = await db.inventory.findMany({
     where: {
       productId,
-      available: { gt: 0 },
       location: {
         warehouseId,
         isActive: true,

@@ -91,4 +91,4 @@ KAN-128, KAN-131, KAN-132, KAN-133, KAN-134, KAN-130 y KAN-125 requieren además
 PR/SHA integrado, migración aplicada en el entorno objetivo y validación autenticada
 por rol. El runbook no autoriza escrituras ni limpieza sobre AWS por sí mismo.
 
-**KAN-128**: En progreso - reconciliación implementada; falta ejecutar `DRY_RUN`, aplicar únicamente la corrección autorizada para `PI-2026-0010` y completar el E2E AWS read-only.
+**KAN-128**: En progreso - el `DRY_RUN` y la corrección acotada para `PI-2026-0010` ya están documentados en `docs/reconciliation/aws-reservation-reconciliation-2026-08-06.md`. El E2E AWS de sólo lectura pasó en la corrida autenticada del 2026-08-06; queda pendiente repetirlo desde CI con los secretos por rol configurados y obtener validación operativa humana antes de cerrar Jira.

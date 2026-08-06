@@ -1,6 +1,8 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-08-05
+Fecha de corte: 2026-08-06
+
+> Este documento es la fuente consolidada vigente sólo para la fecha de corte indicada. Las evidencias anteriores a esta fecha se conservan como históricas y no sustituyen la trazabilidad release → SHA → ambiente → validación.
 
 ## Decision base
 

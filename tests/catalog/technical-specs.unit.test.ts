@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTechnicalSpecRows, getTechnicalCompleteness, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
+import { buildTechnicalSpecRows, getTechnicalCompleteness, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalAttributesJson, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 
 describe("technical product specification contract", () => {
   it("maps legacy hose attributes into comparable canonical fields", () => {
@@ -26,13 +26,21 @@ describe("technical product specification contract", () => {
     }));
 
     expect(rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ key: "working_pressure" }),
+      expect.objectContaining({ key: "working_pressure", value: "206.842719", unit: "bar" }),
+      expect.objectContaining({ key: "inner_diameter", value: "19.05", unit: "mm" }),
     ]));
     expect(validateTechnicalSpecRows(rows).valid).toBe(true);
     expect(validateTechnicalSpecRows([
       ...rows,
       { family: "HOSE", key: "burst_pressure", value: "1/0", normalizedValue: "1/0", unit: "bar", isSafetyCritical: true },
     ]).valid).toBe(false);
+  });
+
+  it("rejects malformed technical JSON instead of treating it as empty", () => {
+    expect(validateTechnicalAttributesJson('{"working_pressure": 300}').valid).toBe(true);
+    expect(validateTechnicalAttributesJson('{"working_pressure":').valid).toBe(false);
+    expect(validateTechnicalAttributesJson("[]").valid).toBe(false);
+    expect(validateTechnicalAttributesJson("").valid).toBe(true);
   });
 
   it("reports missing safety fields by product family", () => {

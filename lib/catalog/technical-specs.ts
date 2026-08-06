@@ -109,9 +109,95 @@ function parseAttributes(attributesRaw: string | null | undefined) {
   }
 }
 
+/**
+ * Validates the JSON envelope before a catalog form writes it.  Read paths keep
+ * the tolerant parser above so a legacy malformed record does not take down a
+ * product page, but write paths must never interpret malformed input as an
+ * intentional empty specification set.
+ */
+export function validateTechnicalAttributesJson(attributesRaw: string | null | undefined) {
+  const raw = String(attributesRaw ?? "").trim();
+  if (!raw) return { valid: true, error: null as string | null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { valid: false, error: "Las especificaciones técnicas deben ser un objeto JSON" };
+    }
+    return { valid: true, error: null as string | null };
+  } catch {
+    return { valid: false, error: "Las especificaciones técnicas contienen JSON inválido" };
+  }
+}
+
 function toText(value: unknown) {
   if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
   return value === null || value === undefined ? "" : String(value).trim();
+}
+
+type SourceUnit = "mm" | "cm" | "m" | "in" | "ft" | "bar" | "psi" | "mpa" | "kpa" | "c" | "f";
+
+function normalizeSourceUnit(unit: string | undefined): SourceUnit | null {
+  const normalized = String(unit ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[°º]/g, "")
+    .replace(/μ/g, "u");
+  if (["mm", "millimeter", "milimetro", "milímetros", "milimetros"].includes(normalized)) return "mm";
+  if (["cm", "centimeter", "centimetro", "centímetros", "centimetros"].includes(normalized)) return "cm";
+  if (["m", "meter", "metro", "metros"].includes(normalized)) return "m";
+  if (["in", "inch", "inches", "pulg", "pulgada", "pulgadas"].includes(normalized)) return "in";
+  if (["ft", "foot", "feet", "pie", "pies"].includes(normalized)) return "ft";
+  if (["bar", "bars"].includes(normalized)) return "bar";
+  if (["psi", "psig", "lb/in2", "lb/in²"].includes(normalized)) return "psi";
+  if (["mpa"].includes(normalized)) return "mpa";
+  if (["kpa"].includes(normalized)) return "kpa";
+  if (["c", "°c", "celsius"].includes(normalized)) return "c";
+  if (["f", "°f", "fahrenheit"].includes(normalized)) return "f";
+  return null;
+}
+
+function sourceUnitFromKey(normalizedKey: string) {
+  const suffix = normalizedKey.match(/(?:^|_)(psi|bar|mpa|kpa|mm|cm|in|inch|ft|m|c|f)$/)?.[1];
+  return normalizeSourceUnit(suffix);
+}
+
+function sourceMeasurement(value: string) {
+  const match = value.trim().match(/^(-?\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)?)\s*([^\s]+)?/);
+  if (!match) return null;
+  const numericRaw = match[1].replace(/\s/g, "").replace(",", ".");
+  const number = numericRaw.includes("/")
+    ? (() => {
+        const [numerator, denominator] = numericRaw.split("/").map(Number);
+        return denominator > 0 ? numerator / denominator : Number.NaN;
+      })()
+    : Number(numericRaw);
+  if (!Number.isFinite(number)) return null;
+  return { number, unit: normalizeSourceUnit(match[2]) };
+}
+
+function formatCanonicalNumber(value: number) {
+  return Number(value.toFixed(6)).toString();
+}
+
+function canonicalizeTechnicalValue(rawKey: string, key: string, value: string, canonicalUnit: string | undefined) {
+  if (!canonicalUnit) return { value, unit: null as string | null };
+  const measurement = sourceMeasurement(value);
+  const sourceUnit = sourceUnitFromKey(rawKey) ?? measurement?.unit;
+  if (!measurement || !sourceUnit) return { value, unit: canonicalUnit };
+
+  let converted = measurement.number;
+  if (canonicalUnit === "mm") {
+    converted = sourceUnit === "in" ? converted * 25.4 : sourceUnit === "cm" ? converted * 10 : sourceUnit === "m" ? converted * 1000 : sourceUnit === "ft" ? converted * 304.8 : converted;
+  } else if (canonicalUnit === "bar") {
+    converted = sourceUnit === "psi" ? converted * 0.0689475729 : sourceUnit === "mpa" ? converted * 10 : sourceUnit === "kpa" ? converted * 0.01 : converted;
+  } else if (canonicalUnit === "°C") {
+    converted = sourceUnit === "f" ? (converted - 32) * (5 / 9) : converted;
+  }
+
+  // Store the normalized number separately from the canonical unit. The
+  // catalog UI renders `value` and `unit` as two fields; embedding the unit in
+  // the value would display e.g. `206.84 bar bar`.
+  return { value: formatCanonicalNumber(converted), unit: canonicalUnit };
 }
 
 export function getTechnicalFieldDefinitions(type: string): TechnicalFieldDefinition[] {
@@ -130,15 +216,16 @@ export function buildTechnicalSpecRows(
   for (const [rawKey, rawValue] of Object.entries(parseAttributes(attributesRaw))) {
     const normalizedKey = normalizeTechnicalText(rawKey).replaceAll(" ", "_");
     const key = KEY_ALIASES[normalizedKey] ?? normalizedKey;
-    const value = toText(rawValue);
-    if (!value || rows.has(key)) continue;
+    const sourceValue = toText(rawValue);
+    if (!sourceValue || rows.has(key)) continue;
     const definition = definitionsByKey.get(key);
+    const canonical = canonicalizeTechnicalValue(normalizedKey, key, sourceValue, definition?.unit);
     rows.set(key, {
       family,
       key,
-      value,
-      normalizedValue: normalizeTechnicalText(value),
-      unit: definition?.unit ?? null,
+      value: canonical.value,
+      normalizedValue: normalizeTechnicalText(canonical.value),
+      unit: canonical.unit,
       isSafetyCritical: definition?.safetyCritical ?? false,
     });
   }

@@ -5,7 +5,7 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
-import { buildTechnicalSpecRows, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
+import { buildTechnicalSpecRows, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalAttributesJson, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
 import { ProductSupplierBrandSelect } from "../_components/ProductSupplierBrandSelect";
 import { CategorySubcategorySelect } from "../_components/CategorySubcategorySelect";
@@ -85,6 +85,10 @@ async function createProduct(formData: FormData) {
   }
   const hasTechnicalSource = hasTechnicalSourceSupplier && hasTechnicalSourceDocument;
 
+  const attributesJsonValidation = validateTechnicalAttributesJson(attributes);
+  if (!attributesJsonValidation.valid) {
+    redirect(`/catalog/new?error=${encodeURIComponent(attributesJsonValidation.error ?? "Especificaciones técnicas inválidas")}`);
+  }
   const technicalValidation = validateTechnicalSpecRows(buildTechnicalSpecRows(normalizedType, attributes));
   if (!technicalValidation.valid) {
     redirect(`/catalog/new?error=${encodeURIComponent(`Especificaciones técnicas inválidas: ${technicalValidation.errors.join("; ")}`)}`);

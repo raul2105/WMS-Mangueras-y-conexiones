@@ -319,7 +319,16 @@ export default async function ProductionFulfillmentPage({
         select: { id: true, name: true, email: true },
       })
     : [];
-  const unclaimedTasks = actionableTasks.filter((task) => !task.claimedByUserId);
+  // Only submit tasks this operator is allowed to claim. In manager-required
+  // mode another operator's assignment must remain invisible to this action;
+  // otherwise the service rejects the whole batch before the operator can take
+  // their own subset.
+  const claimableTasks = actionableTasks.filter(
+    (task) =>
+      !task.claimedByUserId &&
+      ((task.assignmentMode === "AUTO_STANDARD" && !task.assignedToUserId) ||
+        (task.assignmentMode === "MANAGER_REQUIRED" && task.assignedToUserId === actor.actorUserId)),
+  );
   const tasksClaimedByOther = actionableTasks.some((task) => task.claimedByUserId && task.claimedByUserId !== actor.actorUserId);
   const tasksClaimedByCurrent = actionableTasks.filter((task) => task.claimedByUserId === actor.actorUserId);
   // Un pedido sólo de ensamble no tiene lista de surtido directo. Esa etapa ausente
@@ -425,13 +434,13 @@ export default async function ProductionFulfillmentPage({
               </div>
             </form>
           ) : null}
-          {activePickList && activePickList.status !== "DRAFT" && unclaimedTasks.length > 0 ? (
+          {activePickList && activePickList.status !== "DRAFT" && claimableTasks.length > 0 ? (
             <form action={claimDirectPickTasks} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3">
               <input type="hidden" name="orderId" value={order.id} />
-              {unclaimedTasks.map((task) => <input key={task.id} type="hidden" name="claimTaskIds" value={task.id} />)}
+              {claimableTasks.map((task) => <input key={task.id} type="hidden" name="claimTaskIds" value={task.id} />)}
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">Tareas sin tomar: {unclaimedTasks.length}</p>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">Tareas disponibles para ti: {claimableTasks.length}</p>
                   <p className="text-xs text-[var(--text-secondary)]">Toma estas tareas antes de registrar cantidades físicas.</p>
                 </div>
                 <button type="submit" className={buttonStyles({ variant: "primary" })}>Tomar tareas</button>

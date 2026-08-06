@@ -7,10 +7,24 @@ const CREDENTIAL_ENV_BY_ROLE = {
   SALES_EXECUTIVE: ["WMS_E2E_SALES_EXECUTIVE_EMAIL", "WMS_E2E_SALES_EXECUTIVE_PASSWORD"],
 } as const;
 
+// The checked-in Prisma seed provides deterministic credentials for a local
+// checkout. CI/AWS always supplies role-specific secrets; this fallback exists
+// only for local E2E runs and can be disabled with WMS_E2E_USE_SEEDED_CREDENTIALS=0.
+const LOCAL_SEEDED_CREDENTIALS = {
+  SYSTEM_ADMIN: { email: "admin@scmayher.com", password: "Admin123*" },
+  MANAGER: { email: "manager@scmayher.com", password: "Manager123*" },
+  WAREHOUSE_OPERATOR: { email: "operator@scmayher.com", password: "Operator123*" },
+  SALES_EXECUTIVE: { email: "sales@scmayher.com", password: "Sales123*" },
+} as const;
+
 function credentialFromEnv(role: keyof typeof CREDENTIAL_ENV_BY_ROLE) {
   const [emailKey, passwordKey] = CREDENTIAL_ENV_BY_ROLE[role];
   const email = process.env[emailKey];
   const password = process.env[passwordKey];
+  if (email && password) return { email, password };
+  if (!process.env.CI && process.env.WMS_E2E_USE_SEEDED_CREDENTIALS !== "0") {
+    return LOCAL_SEEDED_CREDENTIALS[role];
+  }
   if (!email || !password) {
     throw new Error(
       `Missing ${emailKey}/${passwordKey}. Configure role-specific E2E credentials in the local environment or GitHub Secrets.`,

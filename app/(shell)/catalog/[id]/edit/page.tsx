@@ -133,7 +133,12 @@ async function updateProduct(id: string, formData: FormData) {
 
   const before = currentProduct;
 
-  const hasTechnicalSource = Boolean(technicalSourceSupplier && technicalSourceDocument);
+  const hasTechnicalSourceSupplier = Boolean(technicalSourceSupplier);
+  const hasTechnicalSourceDocument = Boolean(technicalSourceDocument);
+  if (hasTechnicalSourceSupplier !== hasTechnicalSourceDocument) {
+    redirect(`/catalog/${id}/edit?error=${encodeURIComponent("La fuente técnica requiere proveedor y documento")}`);
+  }
+  const hasTechnicalSource = hasTechnicalSourceSupplier && hasTechnicalSourceDocument;
   const replacingPublishedImage = Boolean(
     resolvedImageUrl
       && hasTechnicalSource

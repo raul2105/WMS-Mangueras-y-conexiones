@@ -162,6 +162,7 @@ export function buildCommercialPromiseFromSearchParams(searchParams: URLSearchPa
       warehouseName: searchParams.get("promiseWarehouseName"),
       requestedQuantity: searchParams.get("promiseRequestedQty"),
       availableQuantity: searchParams.get("promiseAvailableQty"),
+      reservedQuantity: optionalParam("promiseReservedQty"),
       checkedAt: searchParams.get("promiseCheckedAt"),
       source: searchParams.get("promiseSource"),
       // URLSearchParams returns strings. Do not use z.coerce.boolean here:
@@ -203,6 +204,7 @@ export function buildPromiseSearchParams(promise: CommercialAvailabilityPromise)
   params.set("promiseWarehouseName", promise.warehouseName);
   params.set("promiseRequestedQty", String(promise.requestedQuantity));
   params.set("promiseAvailableQty", String(promise.availableQuantity));
+  if (promise.reservedQuantity !== undefined) params.set("promiseReservedQty", String(promise.reservedQuantity));
   params.set("promiseCheckedAt", promise.checkedAt);
   params.set("promiseSource", promise.source);
   params.set("promiseIsSubstitute", String(promise.isSubstitute));

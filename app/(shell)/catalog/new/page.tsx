@@ -78,7 +78,12 @@ async function createProduct(formData: FormData) {
     : 0;
 
   const attributes = attributesRaw ? attributesRaw : null;
-  const hasTechnicalSource = Boolean(technicalSourceSupplier && technicalSourceDocument);
+  const hasTechnicalSourceSupplier = Boolean(technicalSourceSupplier);
+  const hasTechnicalSourceDocument = Boolean(technicalSourceDocument);
+  if (hasTechnicalSourceSupplier !== hasTechnicalSourceDocument) {
+    redirect(`/catalog/new?error=${encodeURIComponent("La fuente técnica requiere proveedor y documento")}`);
+  }
+  const hasTechnicalSource = hasTechnicalSourceSupplier && hasTechnicalSourceDocument;
 
   const technicalValidation = validateTechnicalSpecRows(buildTechnicalSpecRows(normalizedType, attributes));
   if (!technicalValidation.valid) {

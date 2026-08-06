@@ -321,7 +321,7 @@ export default async function ProductionFulfillmentPage({
     : [];
   const unclaimedTasks = actionableTasks.filter((task) => !task.claimedByUserId);
   const tasksClaimedByOther = actionableTasks.some((task) => task.claimedByUserId && task.claimedByUserId !== actor.actorUserId);
-  const allTasksClaimedByCurrent = actionableTasks.length > 0 && actionableTasks.every((task) => task.claimedByUserId === actor.actorUserId);
+  const tasksClaimedByCurrent = actionableTasks.filter((task) => task.claimedByUserId === actor.actorUserId);
   // Un pedido sólo de ensamble no tiene lista de surtido directo. Esa etapa ausente
   // se considera completa para llevar al operador al trabajo pendiente real.
   const directPickCompleted = !activePickList || activePickList.status === "COMPLETED";
@@ -476,9 +476,10 @@ export default async function ProductionFulfillmentPage({
               {activePickList.tasks.map((task) => {
                 const pendingQty = Math.max(0, task.reservedQty - task.pickedQty);
                 const isClosed = ["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status);
+                const isOwnedByCurrent = !isClosed && task.claimedByUserId === actor.actorUserId;
                 return (
                   <div key={task.id} className="surface rounded-lg p-4 grid grid-cols-1 gap-3 items-end md:grid-cols-7">
-                    {!isClosed ? <input type="hidden" name="taskIds" value={task.id} /> : null}
+                    {isOwnedByCurrent ? <input type="hidden" name="taskIds" value={task.id} /> : null}
                     <div className="md:col-span-2">
                       <p className="text-xs text-slate-400">Producto</p>
                       <p className="font-mono text-cyan-300">{task.orderLine.product?.sku ?? "--"}</p>
@@ -505,7 +506,7 @@ export default async function ProductionFulfillmentPage({
                         autoComplete="off"
                         placeholder="Escanea SKU o ubicación"
                         className="w-full px-3 py-2 glass rounded-lg"
-                        disabled={isClosed || activePickList.status === "DRAFT"}
+                        disabled={!isOwnedByCurrent || activePickList.status === "DRAFT"}
                       />
                     </label>
                     <label className="space-y-1">
@@ -518,7 +519,7 @@ export default async function ProductionFulfillmentPage({
                         step="0.0001"
                         defaultValue={isClosed ? task.pickedQty : pendingQty}
                         className="w-full px-3 py-2 glass rounded-lg"
-                        disabled={isClosed || activePickList.status === "DRAFT"}
+                        disabled={!isOwnedByCurrent || activePickList.status === "DRAFT"}
                       />
                     </label>
                     <label className="space-y-1">
@@ -527,7 +528,7 @@ export default async function ProductionFulfillmentPage({
                         name={`shortReason__${task.id}`}
                         defaultValue={task.shortReason ?? ""}
                         className="w-full px-3 py-2 glass rounded-lg"
-                        disabled={isClosed || activePickList.status === "DRAFT"}
+                        disabled={!isOwnedByCurrent || activePickList.status === "DRAFT"}
                       />
                     </label>
                     <div className="text-xs text-slate-400">
@@ -561,12 +562,12 @@ export default async function ProductionFulfillmentPage({
               </label>
               <button
                 type="submit"
-                className={buttonStyles({
-                  className: actionableTasks.length === 0 || activePickList.status === "DRAFT" || !allTasksClaimedByCurrent || tasksClaimedByOther ? "opacity-50" : "",
+                  className={buttonStyles({
+                  className: tasksClaimedByCurrent.length === 0 || activePickList.status === "DRAFT" ? "opacity-50" : "",
                 })}
-                disabled={actionableTasks.length === 0 || activePickList.status === "DRAFT" || !allTasksClaimedByCurrent || tasksClaimedByOther}
+                disabled={tasksClaimedByCurrent.length === 0 || activePickList.status === "DRAFT"}
               >
-                {tasksClaimedByOther ? "Tareas tomadas por otro operador" : !allTasksClaimedByCurrent ? "Toma las tareas para continuar" : "Confirmar surtido"}
+                {tasksClaimedByCurrent.length === 0 ? (tasksClaimedByOther ? "Tareas tomadas por otro operador" : "Toma las tareas para continuar") : "Confirmar surtido"}
               </button>
             </div>
           </form>

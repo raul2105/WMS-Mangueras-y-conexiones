@@ -78,6 +78,8 @@ const KEY_ALIASES: Record<string, string> = {
   presion: "working_pressure",
   presion_trabajo: "working_pressure",
   presion_de_trabajo: "working_pressure",
+  pressure_psi: "working_pressure",
+  working_pressure_bar: "working_pressure",
   presion_ruptura: "burst_pressure",
   temperatura_maxima: "temperature_max",
   temperatura_minima: "temperature_min",
@@ -162,8 +164,14 @@ export function getTechnicalFieldLabel(type: string, key: string) {
 
 function numericValue(row: TechnicalSpecRow) {
   const normalized = row.value.trim().replace(",", ".");
-  const match = normalized.match(/^-?\d+(?:\.\d+)?/);
-  return match ? Number(match[0]) : Number.NaN;
+  const match = normalized.match(/^-?\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)?/);
+  if (!match) return Number.NaN;
+  const value = match[0].replace(/\s/g, "");
+  if (!value.includes("/")) return Number(value);
+  const [numeratorRaw, denominatorRaw] = value.split("/");
+  const numerator = Number(numeratorRaw);
+  const denominator = Number(denominatorRaw);
+  return denominator > 0 ? numerator / denominator : Number.NaN;
 }
 
 /**
@@ -304,7 +312,7 @@ export async function promoteProductTechnicalSource(
 
     const source = await tx.productTechnicalSource.findUnique({
       where: { id: args.sourceId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, createdAt: true },
     });
     if (!source) throw new Error("Fuente técnica no encontrada");
     if (source.status !== "APPROVING") {
@@ -317,13 +325,44 @@ export async function promoteProductTechnicalSource(
     });
     const pendingAssets = await tx.productAsset.findMany({
       where: { sourceId: source.id, validationStatus: "PENDING" },
-      select: { productId: true },
+      select: { productId: true, url: true, kind: true, createdAt: true },
     });
     if (candidates.length === 0 && pendingAssets.length === 0) {
       throw new Error("La fuente no tiene especificaciones ni activos pendientes");
     }
 
     const productIds = Array.from(new Set(candidates.map((candidate) => candidate.productId)));
+    const affectedProductIds = Array.from(new Set([...productIds, ...pendingAssets.map((asset) => asset.productId)]));
+    const [currentSpecs, currentAssets] = affectedProductIds.length
+      ? await Promise.all([
+          tx.productTechnicalSpec.findMany({
+            where: { productId: { in: affectedProductIds }, sourceId: { not: null } },
+            select: { sourceId: true },
+          }),
+          tx.productAsset.findMany({
+            where: { productId: { in: affectedProductIds }, validationStatus: "APPROVED", sourceId: { not: null } },
+            select: { sourceId: true },
+          }),
+        ])
+      : [[], []];
+    const currentSourceIds = Array.from(new Set([
+      ...currentSpecs.map((row) => row.sourceId).filter((id): id is string => Boolean(id)),
+      ...currentAssets.map((row) => row.sourceId).filter((id): id is string => Boolean(id)),
+    ]));
+    if (currentSourceIds.length > 0) {
+      const newerApprovedSource = await tx.productTechnicalSource.findFirst({
+        where: {
+          id: { in: currentSourceIds },
+          status: "APPROVED",
+          createdAt: { gt: source.createdAt },
+        },
+        select: { id: true },
+      });
+      if (newerApprovedSource) {
+        throw new Error("La fuente técnica está obsoleta frente a una aprobación más reciente");
+      }
+    }
+
     for (const productId of productIds) {
       const rows = candidates.filter((candidate) => candidate.productId === productId);
       const keys = rows.map((row) => row.key);
@@ -363,6 +402,14 @@ export async function promoteProductTechnicalSource(
       where: { sourceId: source.id, validationStatus: "PENDING" },
       data: { validationStatus: "APPROVED", reviewedAt },
     });
+    for (const productId of new Set(pendingAssets.map((asset) => asset.productId))) {
+      const primaryAsset = pendingAssets
+        .filter((asset) => asset.productId === productId && asset.kind === "PRIMARY_IMAGE")
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
+      if (primaryAsset) {
+        await tx.product.update({ where: { id: productId }, data: { imageUrl: primaryAsset.url } });
+      }
+    }
 
     await tx.productTechnicalSource.update({
       where: { id: source.id },
@@ -371,7 +418,7 @@ export async function promoteProductTechnicalSource(
     await tx.productTechnicalSpecCandidate.deleteMany({ where: { sourceId: source.id } });
     return {
       sourceId: source.id,
-      productCount: new Set([...productIds, ...pendingAssets.map((asset) => asset.productId)]).size,
+      productCount: affectedProductIds.length,
       specCount: candidates.length,
     };
   });

@@ -18,6 +18,23 @@ describe("technical product specification contract", () => {
     ]));
   });
 
+  it("maps English import pressure keys and validates fractional dimensions", () => {
+    const rows = buildTechnicalSpecRows("HOSE", JSON.stringify({
+      inner_diameter: "3/4 in",
+      outer_diameter: "1 in",
+      pressure_psi: 3000,
+    }));
+
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "working_pressure" }),
+    ]));
+    expect(validateTechnicalSpecRows(rows).valid).toBe(true);
+    expect(validateTechnicalSpecRows([
+      ...rows,
+      { family: "HOSE", key: "burst_pressure", value: "1/0", normalizedValue: "1/0", unit: "bar", isSafetyCritical: true },
+    ]).valid).toBe(false);
+  });
+
   it("reports missing safety fields by product family", () => {
     const result = getTechnicalCompleteness("FITTING", [
       { key: "material" },

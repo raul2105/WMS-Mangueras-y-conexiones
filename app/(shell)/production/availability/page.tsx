@@ -137,6 +137,7 @@ export default async function ProductionAvailabilityPage({
         warehouseName: wh.warehouseName,
         requestedQuantity: 1, // Default to 1, could be enhanced with user input
         availableQuantity: wh.available,
+        reservedQuantity: wh.reserved,
         checkedAt: new Date().toISOString(),
         source: "availability",
         isSubstitute: false,

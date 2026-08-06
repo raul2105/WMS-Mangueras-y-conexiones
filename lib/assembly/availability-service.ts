@@ -150,6 +150,7 @@ export async function previewAssemblyAvailability(db: Db, input: AssemblyConfigI
 export async function validateAssemblyCompatibility(
   db: Parameters<typeof getAssemblyCompatibilityDecision>[0],
   input: AssemblyConfigInput,
+  options?: { allowReview?: boolean },
 ) {
   const decision = await getAssemblyCompatibilityDecision(db, [
     input.entryFittingProductId,
@@ -163,6 +164,7 @@ export async function validateAssemblyCompatibility(
   }
 
   if (decision.status === "review") {
+    if (options?.allowReview) return decision;
     const reason = decision.matchedRules.map((rule) => rule.description).filter(Boolean).join("; ")
       || "La combinación de componentes requiere revisión técnica";
     throw new InventoryServiceError("COMPATIBILITY_REVIEW_REQUIRED", reason);

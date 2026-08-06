@@ -162,8 +162,9 @@ async function createAssemblyOperationalRecordsInTx(args: {
   input: AssemblyConfigInput;
   requirements: ReturnType<typeof buildAssemblyRequirements>;
   preview: Awaited<ReturnType<typeof previewAssemblyAvailability>>;
+  compatibilityDecision: Awaited<ReturnType<typeof validateAssemblyCompatibility>>;
 }) {
-  const { tx, order, input, requirements, preview } = args;
+  const { tx, order, input, requirements, preview, compatibilityDecision } = args;
   const wipLocation = await ensureWarehouseWipLocation(tx, order.warehouseId);
 
   await tx.assemblyConfiguration.create({
@@ -285,6 +286,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
         warehouseId: order.warehouseId,
         requirements,
         allocations: preview.allocations,
+        compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+        compatibilityReviewRules: compatibilityDecision.matchedRules,
         pickListCode: pickCode,
       }),
       source: "assembly/work-order-service",
@@ -374,7 +377,9 @@ export async function configureAssemblyOrderExact(
       throw new InventoryServiceError("WAREHOUSE_MISMATCH", "Assembly configuration must use the order warehouse");
     }
 
-    await validateAssemblyCompatibility(tx, input);
+    const compatibilityDecision = await validateAssemblyCompatibility(tx, input, {
+      allowReview: Boolean(input.compatibilityReviewApproved),
+    });
     const preview = await previewAssemblyAvailability(tx, input);
     if (!preview.exact) {
       throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "Assembly order requires exact stock for all three components");
@@ -386,6 +391,7 @@ export async function configureAssemblyOrderExact(
       input,
       requirements,
       preview,
+      compatibilityDecision,
     });
 
     await tx.productionOrder.update({

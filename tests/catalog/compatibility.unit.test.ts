@@ -44,4 +44,24 @@ describe("technical compatibility contract", () => {
       assemblyQuantity: 1,
     })).rejects.toMatchObject({ code: "COMPATIBILITY_REVIEW_REQUIRED" });
   });
+
+  it("allows a warning only with an explicit review approval", async () => {
+    const db = {
+      productCompatibilityRule: {
+        findMany: async () => [{ ...baseRule, severity: "WARN" }],
+      },
+    };
+
+    const result = await validateAssemblyCompatibility(db, {
+      warehouseId: "warehouse-1",
+      entryFittingProductId: "entry",
+      hoseProductId: "hose",
+      exitFittingProductId: "exit",
+      hoseLength: 1,
+      assemblyQuantity: 1,
+    }, { allowReview: true });
+
+    expect(result.status).toBe("review");
+    expect(result.matchedRules).toHaveLength(1);
+  });
 });

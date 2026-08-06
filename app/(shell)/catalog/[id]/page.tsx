@@ -59,6 +59,10 @@ export default async function ProductDetailPage({ params }: PageProps) {
                 where: { active: true },
                 select: { ruleType: true, description: true, severity: true, compatibleProduct: { select: { sku: true, name: true } } },
             },
+            compatibilityRulesTo: {
+                where: { active: true },
+                select: { ruleType: true, description: true, severity: true, product: { select: { sku: true, name: true } } },
+            },
             category: { select: { id: true, name: true } },
             inventory: {
                 select: {
@@ -257,12 +261,17 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             este producto.
                         </p>
                     )}
-                    {product.compatibilityRulesFrom.length > 0 ? (
+                    {product.compatibilityRulesFrom.length > 0 || product.compatibilityRulesTo.length > 0 ? (
                         <div className="space-y-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4" data-testid="technical-compatibility-rules">
                             <p className="text-sm font-semibold text-red-200">Reglas de compatibilidad</p>
                             {product.compatibilityRulesFrom.map((rule) => (
                                 <p key={`${rule.ruleType}-${rule.compatibleProduct.sku}`} className="text-xs text-red-100">
                                     <span className="font-mono">{rule.compatibleProduct.sku}</span> · {rule.description} ({rule.severity})
+                                </p>
+                            ))}
+                            {product.compatibilityRulesTo.map((rule) => (
+                                <p key={`${rule.ruleType}-${rule.product.sku}`} className="text-xs text-red-100">
+                                    <span className="font-mono">{rule.product.sku}</span> · {rule.description} ({rule.severity})
                                 </p>
                             ))}
                         </div>

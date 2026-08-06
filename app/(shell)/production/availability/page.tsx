@@ -59,9 +59,12 @@ export default async function ProductionAvailabilityPage({
   const equivalentProductId = sp.equivalentProductId?.trim() ?? "";
   const hasSearchContext = Boolean(query || productId || sku || equivalentProductId);
 
-  const inventoryWhere: Prisma.InventoryWhereInput = selectedWarehouse
-    ? { location: { warehouse: { code: selectedWarehouse } } }
-    : {};
+  const inventoryLocationScope: Prisma.LocationWhereInput = {
+    isActive: true,
+    usageType: "STORAGE",
+    ...(selectedWarehouse ? { warehouse: { code: selectedWarehouse } } : {}),
+  };
+  const inventoryWhere: Prisma.InventoryWhereInput = { location: inventoryLocationScope };
   const where: Prisma.ProductWhereInput = {
     ...(productId ? { id: productId } : sku ? { sku } : query ? buildProductSearchWhere(query) : {}),
     ...(!hasSearchContext

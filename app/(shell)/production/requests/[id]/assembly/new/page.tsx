@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { previewAssemblyAvailability } from "@/lib/assembly/availability-service";
+import { getAssemblyCompatibilityDecision } from "@/lib/catalog/compatibility";
 import { getProductSearchSelection } from "@/lib/product-search";
 import AssemblyConfiguratorForm from "@/components/AssemblyConfiguratorForm";
 import { buttonStyles } from "@/components/ui/button";
@@ -43,6 +44,7 @@ async function createConfiguredAssembly(formData: FormData) {
   await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
+  const compatibilityReviewApproved = String(formData.get("compatibilityReviewApproved") ?? "") === "on";
   const parsed = salesInternalOrderAssemblyLineCreateSchema.safeParse({
     orderId,
     warehouseId: String(formData.get("warehouseId") ?? "").trim(),
@@ -69,6 +71,7 @@ async function createConfiguredAssembly(formData: FormData) {
       assemblyQuantity: parsed.data.assemblyQuantityRaw,
       sourceDocumentRef: parsed.data.sourceDocumentRef ?? null,
       notes: parsed.data.notes ?? null,
+      compatibilityReviewApproved,
     });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Ensamble configurado agregado al pedido")}`);
   } catch (error) {
@@ -152,6 +155,18 @@ export default async function NewRequestAssemblyLinePage({
       });
     } catch {
       preview = null;
+    }
+  }
+  let compatibilityDecision: Awaited<ReturnType<typeof getAssemblyCompatibilityDecision>> | null = null;
+  if (inputReady) {
+    try {
+      compatibilityDecision = await getAssemblyCompatibilityDecision(prisma, [
+        values.entryFittingProductId,
+        values.hoseProductId,
+        values.exitFittingProductId,
+      ]);
+    } catch {
+      compatibilityDecision = null;
     }
   }
 
@@ -256,6 +271,17 @@ export default async function NewRequestAssemblyLinePage({
           <p className="text-sm text-slate-400">
             La confirmación crea la línea configurada, genera la orden exacta ligada y aparta inventario para el ensamble.
           </p>
+          {compatibilityDecision?.status === "review" ? (
+            <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              <input type="checkbox" name="compatibilityReviewApproved" required className="mt-1" />
+              <span>
+                Revisé las advertencias de compatibilidad y autorizo agregar esta combinación.
+                <span className="mt-1 block text-xs text-amber-200/80">
+                  {compatibilityDecision.matchedRules.map((rule) => rule.description).filter(Boolean).join("; ")}
+                </span>
+              </span>
+            </label>
+          ) : null}
           <div className="flex justify-end">
             <button type="submit" className={buttonStyles({ className: !preview?.exact ? "opacity-50" : "" })} disabled={!preview?.exact}>
               Agregar al pedido

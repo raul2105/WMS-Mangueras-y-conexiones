@@ -37,6 +37,7 @@ type AssemblyLineInput = {
   assemblyQuantity: number;
   sourceDocumentRef?: string | null;
   notes?: string | null;
+  compatibilityReviewApproved?: boolean;
 };
 
 export type CreateSalesRequestDraftArgs = {
@@ -187,7 +188,12 @@ async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
   const scopedSalesRequirements = allSalesRequirements.filter((row) => requestedPairKeys.has(`${row.productId}:${row.locationId}`));
   const scope = Array.from(new Map(scopedSalesRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values())
     .map(({ productId, locationId }) => ({ productId, locationId }));
-  const productionReservations = await buildDesiredReservedByPair(tx, { scope });
+  // An empty scope means this order has no active direct-pick pairs (for
+  // example an assembly-only order). Do not pass that empty array to the
+  // helper, whose default semantics intentionally mean "all open orders".
+  const productionReservations = scope.length > 0
+    ? await buildDesiredReservedByPair(tx, { scope })
+    : new Map<string, number>();
   const aggregateRequirements = [
     ...scopedSalesRequirements,
     ...Array.from(productionReservations, ([pair, reservedQty]) => {
@@ -228,7 +234,10 @@ async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
 }
 
 function reservationMismatches(deltas: ReservationDelta[]) {
-  return deltas.filter((row) => row.delta !== 0);
+  // Hose quantities can be fractional; ignore IEEE-754 noise while retaining
+  // real reservation differences.
+  const epsilon = 1e-9;
+  return deltas.filter((row) => Math.abs(row.delta) > epsilon);
 }
 
 async function assertSalesRequestReservationConsistency(tx: Tx, orderId: string) {
@@ -988,6 +997,7 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
       assemblyQuantity: input.assemblyQuantity,
       sourceDocumentRef: input.sourceDocumentRef ?? null,
       notes: input.notes ?? null,
+      compatibilityReviewApproved: input.compatibilityReviewApproved,
     });
 
     await tx.productionOrder.update({

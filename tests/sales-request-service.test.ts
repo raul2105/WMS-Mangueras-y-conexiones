@@ -7,6 +7,7 @@ import { buildSalesRequestVisibilityWhere } from "@/lib/sales/visibility";
 import {
   addSalesRequestProductLine,
   assignSalesRequestPickTasks,
+  claimSalesRequestPickTasks,
   confirmSalesRequestOrder,
   confirmSalesRequestPickTasksBatch,
   createSalesRequestDraftHeader,
@@ -420,6 +421,19 @@ describe("sales request service", () => {
     expect(pickList?.status).toBe("RELEASED");
     expect(pickList?.tasks).toHaveLength(1);
 
+    await claimSalesRequestPickTasks(prisma, {
+      orderId: order.id,
+      taskIds: [pickList!.tasks[0].id],
+      claimedByUserId: operator.id,
+    });
+
+    await expect(confirmSalesRequestPickTasksBatch(prisma, {
+      orderId: order.id,
+      operatorName: "Operador surtido",
+      operatorUserId: operator.id,
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+    })).rejects.toMatchObject({ code: "SCAN_REQUIRED" });
+
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador surtido",
@@ -429,6 +443,7 @@ describe("sales request service", () => {
           taskId: pickList!.tasks[0].id,
           pickedQty: 2,
           shortReason: "FALTANTE_REAL",
+          scanRef: "SKU-SURT-01",
         },
       ],
     });
@@ -898,11 +913,12 @@ describe("sales request service", () => {
     });
     expect(pickList?.tasks.length).toBe(1);
 
-    await confirmSalesRequestPickTasksBatch(prisma, {
+    await expect(confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador sin toma previa",
-      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
-    });
+      operatorUserId: sales.id,
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2, scanRef: "SKU-SURT-01" }],
+    })).rejects.toMatchObject({ code: "TASK_NOT_CLAIMED" });
 
     await expect(
       markSalesRequestDelivered(prisma, {
@@ -931,6 +947,11 @@ describe("sales request service", () => {
       name: "Sales Deliver OK",
       roleCode: "SALES_EXECUTIVE",
     });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-deliver-ok@scmayher.com",
+      name: "Warehouse Deliver OK",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     await addSalesRequestProductLine(prisma, {
       orderId: order.id,
@@ -948,10 +969,17 @@ describe("sales request service", () => {
     });
     expect(pickList?.tasks.length).toBe(1);
 
+    await claimSalesRequestPickTasks(prisma, {
+      orderId: order.id,
+      taskIds: [pickList!.tasks[0].id],
+      claimedByUserId: warehouseOperator.id,
+    });
+
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador entrega",
-      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 4 }],
+      operatorUserId: warehouseOperator.id,
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 4, scanRef: "SKU-SURT-01" }],
     });
 
     await pullSalesRequestOrder(prisma, {
@@ -1086,6 +1114,11 @@ describe("sales request service", () => {
       name: "Sales Deliver Retry",
       roleCode: "SALES_EXECUTIVE",
     });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-deliver-retry@scmayher.com",
+      name: "Warehouse Deliver Retry",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     await addSalesRequestProductLine(prisma, {
       orderId: order.id,
@@ -1098,10 +1131,12 @@ describe("sales request service", () => {
       where: { orderId: order.id },
       include: { tasks: true },
     });
+    await claimSalesRequestPickTasks(prisma, { orderId: order.id, taskIds: [pickList!.tasks[0].id], claimedByUserId: warehouseOperator.id });
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador retry",
-      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+      operatorUserId: warehouseOperator.id,
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2, scanRef: "SKU-SURT-01" }],
     });
     await pullSalesRequestOrder(prisma, {
       orderId: order.id,
@@ -1165,6 +1200,11 @@ describe("sales request service", () => {
       name: "Sales Deliver Rollback",
       roleCode: "SALES_EXECUTIVE",
     });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-deliver-rollback@scmayher.com",
+      name: "Warehouse Deliver Rollback",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     await addSalesRequestProductLine(prisma, {
       orderId: order.id,
@@ -1177,10 +1217,12 @@ describe("sales request service", () => {
       where: { orderId: order.id },
       include: { tasks: true },
     });
+    await claimSalesRequestPickTasks(prisma, { orderId: order.id, taskIds: [pickList!.tasks[0].id], claimedByUserId: warehouseOperator.id });
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador rollback",
-      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+      operatorUserId: warehouseOperator.id,
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2, scanRef: "SKU-SURT-01" }],
     });
     await pullSalesRequestOrder(prisma, {
       orderId: order.id,
@@ -1247,6 +1289,11 @@ describe("sales request service", () => {
       name: "Sales Deliver Race",
       roleCode: "SALES_EXECUTIVE",
     });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-deliver-race@scmayher.com",
+      name: "Warehouse Deliver Race",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     await addSalesRequestProductLine(prisma, {
       orderId: order.id,
@@ -1259,10 +1306,12 @@ describe("sales request service", () => {
       where: { orderId: order.id },
       include: { tasks: true },
     });
+    await claimSalesRequestPickTasks(prisma, { orderId: order.id, taskIds: [pickList!.tasks[0].id], claimedByUserId: warehouseOperator.id });
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador race",
-      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+      operatorUserId: warehouseOperator.id,
+      tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2, scanRef: "SKU-SURT-01" }],
     });
     await pullSalesRequestOrder(prisma, {
       orderId: order.id,
@@ -1324,6 +1373,11 @@ describe("sales request service", () => {
       name: "Sales Deliver Shared B",
       roleCode: "SALES_EXECUTIVE",
     });
+    const warehouseOperator = await createUserWithRole({
+      email: "warehouse-deliver-shared@scmayher.com",
+      name: "Warehouse Deliver Shared",
+      roleCode: "WAREHOUSE_OPERATOR",
+    });
 
     const { warehouse, productA } = await createRequestFixture();
     const orderA = await createSalesRequestDraftHeader(prisma, {
@@ -1353,10 +1407,12 @@ describe("sales request service", () => {
         where: { orderId: order.id },
         include: { tasks: true },
       });
+      await claimSalesRequestPickTasks(prisma, { orderId: order.id, taskIds: [pickList!.tasks[0].id], claimedByUserId: warehouseOperator.id });
       await confirmSalesRequestPickTasksBatch(prisma, {
         orderId: order.id,
         operatorName: `Operador ${order.code}`,
-        tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2 }],
+        operatorUserId: warehouseOperator.id,
+        tasks: [{ taskId: pickList!.tasks[0].id, pickedQty: 2, scanRef: "SKU-SURT-01" }],
       });
     }
 
@@ -1577,10 +1633,17 @@ describe("sales request service", () => {
     });
     expect(directPickList?.tasks.length).toBe(1);
 
+    await claimSalesRequestPickTasks(prisma, {
+      orderId: order.id,
+      taskIds: [directPickList!.tasks[0].id],
+      claimedByUserId: warehouseOperator.id,
+    });
+
     await confirmSalesRequestPickTasksBatch(prisma, {
       orderId: order.id,
       operatorName: "Operador Full Flow",
-      tasks: [{ taskId: directPickList!.tasks[0].id, pickedQty: 1 }],
+      operatorUserId: warehouseOperator.id,
+      tasks: [{ taskId: directPickList!.tasks[0].id, pickedQty: 1, scanRef: "SKU-SURT-01" }],
     });
 
     await releaseAssemblyPickList(prisma, production.id);

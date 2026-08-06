@@ -8,6 +8,7 @@ import { getAssemblyQuantityPolicy, getQuantityPolicy, quantityValidationMessage
 import { getNextSalesInternalOrderCode, getNextSalesPickListCode } from "@/lib/sales/internal-orders";
 import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
 import { calculateReservationDeltas, type ReservationDelta } from "@/lib/sales/reservation-reconciliation";
+import { buildDesiredReservedByPair } from "@/lib/reservation-policy";
 
 type Tx = Prisma.TransactionClient;
 
@@ -145,7 +146,7 @@ async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
     throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
   }
 
-  const requirements = order.pickLists.flatMap((pickList) =>
+  const currentOrderRequirements = order.pickLists.flatMap((pickList) =>
     pickList.tasks.flatMap((task) =>
       task.orderLine.productId
         ? [{
@@ -158,8 +159,42 @@ async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
         : [],
     ),
   );
+  const allSalesTasks = await tx.salesInternalOrderPickTask.findMany({
+    where: {
+      pickList: { status: { in: [...RESERVATION_PICK_LIST_STATUSES] } },
+      orderLine: { productId: { not: null } },
+    },
+    select: {
+      reservedQty: true,
+      pickedQty: true,
+      shortQty: true,
+      sourceLocationId: true,
+      orderLine: { select: { orderId: true, productId: true } },
+    },
+  });
+  const allSalesRequirements = allSalesTasks.flatMap((task) =>
+    task.orderLine.productId
+      ? [{
+          productId: task.orderLine.productId,
+          locationId: task.sourceLocationId,
+          reservedQty: task.reservedQty,
+          pickedQty: task.pickedQty,
+          shortQty: task.shortQty,
+        }]
+      : [],
+  );
+  const scope = Array.from(new Map(allSalesRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values())
+    .map(({ productId, locationId }) => ({ productId, locationId }));
+  const productionReservations = await buildDesiredReservedByPair(tx, { scope });
+  const aggregateRequirements = [
+    ...allSalesRequirements,
+    ...Array.from(productionReservations, ([pair, reservedQty]) => {
+      const [productId, locationId] = pair.split(":");
+      return { productId, locationId, reservedQty, pickedQty: 0, shortQty: 0 };
+    }),
+  ];
   const inventoryKeys = Array.from(
-    new Map(requirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values(),
+    new Map(aggregateRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values(),
   );
   const inventory = inventoryKeys.length
     ? await tx.inventory.findMany({
@@ -173,7 +208,20 @@ async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
   return {
     orderId: order.id,
     orderCode: order.code,
-    deltas: calculateReservationDeltas(requirements, inventory),
+    deltas: calculateReservationDeltas(aggregateRequirements, inventory),
+    otherExpectedByKey: new Map(
+      aggregateRequirements.map((row) => `${row.productId}:${row.locationId}`)
+        .map((pair) => {
+          const [productId, locationId] = pair.split(":");
+          const aggregateExpected = aggregateRequirements
+            .filter((row) => row.productId === productId && row.locationId === locationId)
+            .reduce((sum, row) => sum + Math.max(0, row.reservedQty - row.pickedQty - row.shortQty), 0);
+          const currentExpected = currentOrderRequirements
+            .filter((row) => row.productId === productId && row.locationId === locationId)
+            .reduce((sum, row) => sum + Math.max(0, row.reservedQty - row.pickedQty - row.shortQty), 0);
+          return [pair, Math.max(0, aggregateExpected - currentExpected)] as const;
+        }),
+    ),
   };
 }
 
@@ -187,7 +235,7 @@ async function assertSalesRequestReservationConsistency(tx: Tx, orderId: string)
   if (mismatches.length > 0) {
     throw new InventoryServiceError(
       "RESERVATION_MISMATCH",
-      `La reserva real no coincide con la tarea de surtido (${mismatches.map((row) => `${row.expected - row.actual}`).join(", ")})`,
+      `La reserva real no coincide con las reservas activas (${mismatches.map((row) => `${row.productId}/${row.locationId}: esperada ${row.expected}, real ${row.actual}`).join(", ")})`,
     );
   }
   return state;
@@ -231,6 +279,13 @@ export async function reconcileSalesRequestReservations(
       throw new InventoryServiceError(
         "RESERVATION_OVERALLOCATED",
         "La reserva real excede la requerida; no se libera automáticamente para evitar afectar otra operación",
+      );
+    }
+    const ambiguous = mismatches.filter((row) => row.delta > 0 && (before.otherExpectedByKey.get(`${row.productId}:${row.locationId}`) ?? 0) > 0);
+    if (ambiguous.length > 0) {
+      throw new InventoryServiceError(
+        "RESERVATION_SCOPE_AMBIGUOUS",
+        "No se puede reparar automáticamente una reserva compartida por otros pedidos u órdenes de producción",
       );
     }
 
@@ -2581,6 +2636,10 @@ export async function confirmSalesRequestPickTasksBatch(
   const perf = startPerf("sales.confirm_pick_tasks_batch");
   const inventoryService = getInventoryService(prisma);
 
+  if (!args.operatorUserId) {
+    throw new InventoryServiceError("OPERATOR_REQUIRED", "Se requiere un operador autenticado para confirmar tareas");
+  }
+
   return prisma.$transaction(async (tx) => {
     const loadPerf = startPerf("sales.confirm_pick_tasks_batch.load_tasks");
     const dbTasks = await tx.salesInternalOrderPickTask.findMany({
@@ -2617,6 +2676,7 @@ export async function confirmSalesRequestPickTasksBatch(
     loadPerf.end({ taskCount: dbTasks.length });
 
     const taskById = new Map(dbTasks.map((task) => [task.id, task]));
+    const inputByTaskId = new Map(args.tasks.map((task) => [task.taskId, task]));
     for (const task of args.tasks) {
       const dbTask = taskById.get(task.taskId);
       if (!dbTask || dbTask.orderLine.orderId !== args.orderId) {
@@ -2631,11 +2691,15 @@ export async function confirmSalesRequestPickTasksBatch(
       if (dbTask.status === "COMPLETED" || dbTask.status === "PARTIAL" || dbTask.status === "CANCELLED") {
         throw new InventoryServiceError("TASK_CLOSED", "Una o más tareas ya están cerradas");
       }
-      if (dbTask.claimedByUserId && dbTask.claimedByUserId !== args.operatorUserId) {
-        throw new InventoryServiceError("TASK_ALREADY_CLAIMED", "La tarea está tomada por otro operador");
+      if (dbTask.claimedByUserId !== args.operatorUserId) {
+        throw new InventoryServiceError("TASK_NOT_CLAIMED", "La tarea debe ser tomada por el operador antes de confirmar el surtido");
       }
-      const scanRef = args.tasks.find((task) => task.taskId === dbTask.id)?.scanRef?.trim().toLowerCase();
-      if (scanRef && scanRef !== dbTask.sourceLocation.code.toLowerCase() && scanRef !== dbTask.orderLine.product?.sku.toLowerCase()) {
+      const pending = Math.max(0, dbTask.reservedQty - dbTask.pickedQty);
+      const scanRef = inputByTaskId.get(dbTask.id)?.scanRef?.trim().toLowerCase();
+      if (pending > 0 && !scanRef) {
+        throw new InventoryServiceError("SCAN_REQUIRED", "Se requiere escanear la ubicación o el SKU antes de confirmar el surtido");
+      }
+      if (pending > 0 && scanRef !== dbTask.sourceLocation.code.toLowerCase() && scanRef !== dbTask.orderLine.product?.sku?.toLowerCase()) {
         throw new InventoryServiceError("INVALID_SCAN", "El escaneo no coincide con la ubicación o el SKU de la tarea");
       }
     }

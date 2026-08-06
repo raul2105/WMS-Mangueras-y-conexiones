@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Table, TableEmptyRow, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import { auditActionLabel } from "@/lib/audit/action-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -29,27 +30,6 @@ function formatActor(row: {
 
 function formatQuantity(value: unknown) {
   return typeof value === "number" ? value.toLocaleString("es-MX") : null;
-}
-
-function auditActionLabel(action: string) {
-  const labels: Record<string, string> = {
-    CONFIRM_REQUEST: "Confirmar pedido",
-    ADD_PRODUCT_LINE: "Agregar producto al pedido",
-    ADD_CONFIGURED_ASSEMBLY_LINE: "Agregar ensamble al pedido",
-    REBUILD_DIRECT_PICKLIST: "Regenerar surtido directo",
-    RELEASE_DIRECT_PICKLIST: "Liberar surtido directo",
-    CLAIM_WAREHOUSE_PICK_TASKS: "Tomar tareas de almacén",
-    ASSIGN_WAREHOUSE_PICK_TASKS: "Asignar tareas a almacén",
-    CONFIRM_DIRECT_PICK: "Confirmar surtido físico",
-    CLAIM_WAREHOUSE_ASSEMBLY: "Tomar componentes de ensamble",
-    COMPLETE_WAREHOUSE_ASSEMBLY: "Completar ensamble en almacén",
-    MARK_PREPARED_FOR_DELIVERY: "Marcar preparado para entrega",
-    RESOLVE_OPERATIONAL_EXCEPTION: "Resolver excepción operativa",
-    REVALIDATE_COMMERCIAL_PROMISE: "Revalidar promesa comercial",
-    RESERVE_STOCK: "Reservar inventario",
-    MARK_DELIVERED_TO_CUSTOMER: "Registrar entrega al cliente",
-  };
-  return labels[action] ?? action.replaceAll("_", " ").toLowerCase();
 }
 
 function describeAuditEvent(row: {
@@ -136,7 +116,12 @@ function describeAuditEvent(row: {
     }
 
     if (row.action === "ASSIGN_WAREHOUSE_PICK_TASKS") {
-      const assignedTo = typeof after?.assignedToUserId === "string" ? ` al operador ${after.assignedToUserId}` : "";
+      const assignee = typeof after?.assigneeName === "string"
+        ? after.assigneeName
+        : typeof after?.warehouseAssigneeUserId === "string"
+          ? after.warehouseAssigneeUserId
+          : null;
+      const assignedTo = assignee ? ` al operador ${assignee}` : "";
       return `${actor} asignó tareas físicas${codePrefix}${assignedTo}.`;
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeFulfillmentMetrics } from "@/lib/dashboard/fulfillment-dashboard";
+import { getWarehouseActivityStartAt, summarizeFulfillmentMetrics } from "@/lib/dashboard/fulfillment-dashboard";
 
 describe("fulfillment operational metrics", () => {
   it("calculates fill-rate, exactitud and cycles using closed work only", () => {
@@ -30,5 +30,17 @@ describe("fulfillment operational metrics", () => {
     expect(result.pickAccuracyPercent).toBeNull();
     expect(result.averagePickCycleHours).toBeNull();
     expect(result.averageAssemblyCycleHours).toBeNull();
+  });
+
+  it("starts pick cycles at the earliest warehouse activity instead of commercial pull", () => {
+    const activity = getWarehouseActivityStartAt({
+      warehouseClaimedAt: new Date("2026-07-31T09:00:00.000Z"),
+      lines: [{ pickTasks: [
+        { claimedAt: new Date("2026-07-31T10:00:00.000Z"), lastActivityAt: new Date("2026-07-31T10:30:00.000Z") },
+        { claimedAt: new Date("2026-07-31T08:30:00.000Z"), lastActivityAt: null },
+      ] }],
+    });
+
+    expect(activity).toEqual(new Date("2026-07-31T08:30:00.000Z"));
   });
 });

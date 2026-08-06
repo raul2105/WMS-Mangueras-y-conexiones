@@ -11,7 +11,7 @@ function key(productId: string, locationId: string) {
   return `${productId}:${locationId}`;
 }
 
-async function buildDesiredReservedByPair(
+export async function buildDesiredReservedByPair(
   tx: TxClient,
   opts?: { scope?: ReservationScope[]; excludeOrderId?: string }
 ) {

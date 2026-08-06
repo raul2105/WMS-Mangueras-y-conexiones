@@ -86,7 +86,19 @@ async function updateProduct(id: string, formData: FormData) {
 
   const currentProduct = await prisma.product.findUnique({
     where: { id },
-    select: { sku: true, name: true, type: true, brand: true },
+    select: {
+      sku: true,
+      name: true,
+      type: true,
+      brand: true,
+      imageUrl: true,
+      assets: {
+        where: { kind: "PRIMARY_IMAGE", validationStatus: "APPROVED" },
+        orderBy: { updatedAt: "desc" },
+        take: 1,
+        select: { url: true },
+      },
+    },
   });
 
   if (!currentProduct) {
@@ -120,6 +132,16 @@ async function updateProduct(id: string, formData: FormData) {
 
   const before = currentProduct;
 
+  const hasTechnicalSource = Boolean(technicalSourceSupplier && technicalSourceDocument);
+  const replacingPublishedImage = Boolean(
+    resolvedImageUrl
+      && hasTechnicalSource
+      && resolvedImageUrl !== currentProduct.imageUrl,
+  );
+  const publishedImageUrl = replacingPublishedImage
+    ? currentProduct.assets[0]?.url ?? currentProduct.imageUrl ?? null
+    : resolvedImageUrl;
+
   await prisma.product.update({
     where: { id },
     data: {
@@ -131,7 +153,7 @@ async function updateProduct(id: string, formData: FormData) {
       purchaseUnitLabel,
       purchaseUnitFactor,
       referenceCode: referenceCode || null,
-      imageUrl: resolvedImageUrl || null,
+      imageUrl: publishedImageUrl || null,
       subcategory,
       base_cost: Number.isFinite(base_cost ?? NaN) ? base_cost : null,
       purchaseMoq: Number.isFinite(purchaseMoq ?? NaN) ? purchaseMoq : null,
@@ -144,7 +166,7 @@ async function updateProduct(id: string, formData: FormData) {
   });
 
   await syncProductTechnicalAttributes(prisma, id, attributesRaw);
-  const technicalSource = technicalSourceSupplier && technicalSourceDocument
+  const technicalSource = hasTechnicalSource
     ? await prisma.productTechnicalSource.create({
         data: {
           supplierName: technicalSourceSupplier,
@@ -157,7 +179,7 @@ async function updateProduct(id: string, formData: FormData) {
       })
     : null;
   await syncProductTechnicalSpecs(prisma, id, normalizedType, attributesRaw, technicalSource?.id);
-  if (resolvedImageUrl && technicalSource) {
+  if (replacingPublishedImage && resolvedImageUrl && technicalSource) {
     await prisma.productAsset.create({
       data: {
         productId: id,

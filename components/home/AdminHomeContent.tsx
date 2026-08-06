@@ -6,6 +6,7 @@ import { Users, Shield, Database, AlertTriangle, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { FulfillmentOperationalMetrics } from '@/components/dashboard/fulfillment-operational-metrics';
 import type { FulfillmentOperationalMetrics as FulfillmentOperationalMetricsData } from '@/lib/dashboard/fulfillment-dashboard';
+import { auditActionLabel } from '@/lib/audit/action-labels';
 
 interface AdminHomeContentProps {
   activeUsersCount: number;
@@ -27,20 +28,6 @@ function formatTimeAgo(date: Date | string): string {
   if (diffMins < 60) return `hace ${diffMins} min`;
   if (diffHours < 24) return `hace ${diffHours} h`;
   return `hace ${diffDays} d`;
-}
-
-function auditActionLabel(action: string): string {
-  const labels: Record<string, string> = {
-    CONFIRM_REQUEST: "Confirmar pedido",
-    ADD_PRODUCT_LINE: "Agregar producto al pedido",
-    ADD_CONFIGURED_ASSEMBLY_LINE: "Agregar ensamble al pedido",
-    REBUILD_DIRECT_PICKLIST: "Regenerar surtido directo",
-    RELEASE_DIRECT_PICKLIST: "Liberar surtido directo",
-    CLAIM_WAREHOUSE_PICK_TASKS: "Tomar tareas de almacén",
-    CONFIRM_DIRECT_PICK: "Confirmar surtido físico",
-    RESERVE_STOCK: "Reservar inventario",
-  };
-  return labels[action] ?? action.replaceAll('_', ' ').toLowerCase();
 }
 
 export function AdminHomeContent({ 

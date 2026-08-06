@@ -48,8 +48,10 @@ describe("technical product specification contract", () => {
 
   it("persists technical fields idempotently without deleting the product history", async () => {
     const upserts: unknown[] = [];
+    const deletes: unknown[] = [];
     const db = {
       productTechnicalSpec: {
+        deleteMany: async (args: unknown) => { deletes.push(args); },
         upsert: async (args: unknown) => { upserts.push(args); },
       },
     };
@@ -63,8 +65,27 @@ describe("technical product specification contract", () => {
     );
 
     expect(upserts.length).toBeGreaterThan(0);
+    expect(deletes).toEqual([
+      { where: { productId: "product-1", key: { notIn: expect.any(Array) } } },
+    ]);
     expect(upserts).toEqual(expect.arrayContaining([
       expect.objectContaining({ where: { productId_key: { productId: "product-1", key: "inner_diameter" } } }),
     ]));
+  });
+
+  it("deletes obsolete technical fields when the source no longer contains them", async () => {
+    const deletes: unknown[] = [];
+    const db = {
+      productTechnicalSpec: {
+        deleteMany: async (args: unknown) => { deletes.push(args); },
+        upsert: async () => undefined,
+      },
+    };
+
+    await syncProductTechnicalSpecs(db, "product-1", "HOSE", JSON.stringify({ inner_diameter: 12 }), null);
+
+    expect(deletes).toEqual([
+      { where: { productId: "product-1", key: { notIn: ["inner_diameter"] } } },
+    ]);
   });
 });

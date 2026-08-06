@@ -59,6 +59,11 @@ type FulfillmentMetricPickTask = {
   status: string;
 };
 
+type WarehouseActivitySource = {
+  warehouseClaimedAt?: Date | null;
+  lines: Array<{ pickTasks: Array<{ claimedAt?: Date | null; lastActivityAt?: Date | null }> }>;
+};
+
 type FulfillmentMetricCycle = {
   startAt: Date | null;
   endAt: Date | null;
@@ -73,6 +78,27 @@ function averageDurationHours(cycles: FulfillmentMetricCycle[]) {
 
   if (durations.length === 0) return null;
   return Math.round((durations.reduce((sum, value) => sum + value, 0) / durations.length) * 10) / 10;
+}
+
+export function getWarehouseActivityStartAt(source: WarehouseActivitySource) {
+  const taskActivity = source.lines
+    .flatMap((line) => line.pickTasks.flatMap((task) => [task.claimedAt, task.lastActivityAt]))
+    .filter((value): value is Date => value instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+  return [source.warehouseClaimedAt, taskActivity]
+    .filter((value): value is Date => value instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+}
+
+function getWarehouseOwnershipId(order: {
+  warehouseAssigneeUserId: string | null;
+  warehouseClaimedByUserId: string | null;
+  assignedToUserId: string | null;
+  pulledAt: Date | null;
+}) {
+  return order.warehouseAssigneeUserId
+    ?? order.warehouseClaimedByUserId
+    ?? (order.assignedToUserId && order.pulledAt ? order.assignedToUserId : null);
 }
 
 export function summarizeFulfillmentMetrics(input: {
@@ -368,18 +394,31 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       }),
       prisma.salesInternalOrder.findMany({
         where: {
-          createdAt: { gte: metricWindowStart, lte: now },
           status: { not: "BORRADOR" },
+          OR: [
+            { preparedForDeliveryAt: { gte: metricWindowStart, lte: now } },
+            {
+              lines: {
+                some: {
+                  lineKind: "PRODUCT",
+                  pickTasks: {
+                    some: { status: { in: ["COMPLETED", "PARTIAL"] }, updatedAt: { gte: metricWindowStart, lte: now } },
+                  },
+                },
+              },
+            },
+          ],
         },
         select: {
+          warehouseClaimedAt: true,
           pulledAt: true,
           preparedForDeliveryAt: true,
           lines: {
             where: { lineKind: "PRODUCT" },
             select: {
               pickTasks: {
-                where: { status: { not: "CANCELLED" } },
-                select: { requestedQty: true, pickedQty: true, shortQty: true, status: true },
+                where: { status: { in: ["COMPLETED", "PARTIAL"] } },
+                select: { requestedQty: true, pickedQty: true, shortQty: true, status: true, claimedAt: true, lastActivityAt: true },
               },
             },
           },
@@ -387,7 +426,6 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       }),
       prisma.assemblyWorkOrder.findMany({
         where: {
-          createdAt: { gte: metricWindowStart, lte: now },
           closedAt: { gte: metricWindowStart, lte: now },
         },
         select: { createdAt: true, closedAt: true },
@@ -440,7 +478,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       const signals = evaluateFulfillmentSignals({
         dueDate: order.dueDate,
         orderUpdatedAt: order.updatedAt,
-        assignedToUserId: order.warehouseAssigneeUserId ?? order.warehouseClaimedByUserId,
+        assignedToUserId: getWarehouseOwnershipId(order),
         hasProductLines,
         hasAssemblyLines: assemblyLines.length > 0,
         latestPickStatus: latestPick?.status ?? null,
@@ -481,7 +519,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       const presetEvaluation = evaluateOperationalPresets(
         {
           dueDate: order.dueDate,
-          assignedToUserId: order.warehouseAssigneeUserId ?? order.warehouseClaimedByUserId,
+          assignedToUserId: getWarehouseOwnershipId(order),
           flowStage: flowNarrative.flowStage,
           isPartial: signals.isPartial,
           isUnreleased: signals.isUnreleased,
@@ -573,7 +611,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         evaluateFulfillmentSignals({
           dueDate: order.dueDate,
           orderUpdatedAt: order.updatedAt,
-          assignedToUserId: order.warehouseAssigneeUserId ?? order.warehouseClaimedByUserId,
+          assignedToUserId: getWarehouseOwnershipId(order),
           hasProductLines,
           hasAssemblyLines: assemblyLines.length > 0,
           latestPickStatus: latestPick?.status ?? null,
@@ -596,7 +634,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
 
     const operationalMetrics = summarizeFulfillmentMetrics({
       pickTasks: recentOrderMetrics.flatMap((order) => order.lines.flatMap((line) => line.pickTasks)),
-      pickCycles: recentOrderMetrics.map((order) => ({ startAt: order.pulledAt, endAt: order.preparedForDeliveryAt })),
+      pickCycles: recentOrderMetrics.map((order) => ({ startAt: getWarehouseActivityStartAt(order), endAt: order.preparedForDeliveryAt })),
       assemblyCycles: recentAssemblyCycles.map((workOrder) => ({ startAt: workOrder.createdAt, endAt: workOrder.closedAt })),
     });
 

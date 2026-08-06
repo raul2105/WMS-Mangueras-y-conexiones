@@ -39,7 +39,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                 select: { family: true, key: true, value: true, unit: true, isSafetyCritical: true },
             },
             assets: {
-                where: { kind: "PRIMARY_IMAGE" },
+                where: { kind: "PRIMARY_IMAGE", validationStatus: "APPROVED" },
                 orderBy: { updatedAt: "desc" },
                 take: 1,
                 select: { url: true, brandSnapshot: true, validationStatus: true },
@@ -175,7 +175,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                         <ProductImage
                             sku={product.sku}
-                            imageUrl={primaryAsset?.validationStatus === "APPROVED" ? primaryAsset.url : product.imageUrl}
+                            imageUrl={primaryAsset?.url ?? product.imageUrl}
                             name={product.name}
                             size={320}
                             className="aspect-square w-full rounded-xl"

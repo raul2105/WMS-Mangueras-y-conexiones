@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluateCompatibilityRules } from "@/lib/catalog/compatibility";
+import { validateAssemblyCompatibility } from "@/lib/assembly/availability-service";
 
 describe("technical compatibility contract", () => {
   const baseRule = {
@@ -25,5 +26,22 @@ describe("technical compatibility contract", () => {
 
   it("allows combinations with no explicit rule", () => {
     expect(evaluateCompatibilityRules(["entry", "hose"], []).status).toBe("allowed");
+  });
+
+  it("blocks assembly configuration until a warning rule is explicitly handled", async () => {
+    const db = {
+      productCompatibilityRule: {
+        findMany: async () => [{ ...baseRule, severity: "WARN" }],
+      },
+    };
+
+    await expect(validateAssemblyCompatibility(db, {
+      warehouseId: "warehouse-1",
+      entryFittingProductId: "entry",
+      hoseProductId: "hose",
+      exitFittingProductId: "exit",
+      hoseLength: 1,
+      assemblyQuantity: 1,
+    })).rejects.toMatchObject({ code: "COMPATIBILITY_REVIEW_REQUIRED" });
   });
 });

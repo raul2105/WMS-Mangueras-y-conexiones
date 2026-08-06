@@ -215,6 +215,7 @@ export function validateTechnicalSpecRows(rows: TechnicalSpecRow[]): TechnicalVa
 
 type TechnicalSpecDbClient = {
   productTechnicalSpec: {
+    deleteMany: (args: { where: { productId: string; key?: { notIn: string[] } } }) => Promise<unknown>;
     upsert: (args: {
       where: { productId_key: { productId: string; key: string } };
       create: {
@@ -247,6 +248,13 @@ export async function syncProductTechnicalSpecs(
   sourceId?: string | null,
 ) {
   const rows = buildTechnicalSpecRows(type, attributesRaw);
+  const keys = rows.map((row) => row.key);
+  await db.productTechnicalSpec.deleteMany({
+    where: {
+      productId,
+      ...(keys.length > 0 ? { key: { notIn: keys } } : {}),
+    },
+  });
   for (const row of rows) {
     await db.productTechnicalSpec.upsert({
       where: { productId_key: { productId, key: row.key } },

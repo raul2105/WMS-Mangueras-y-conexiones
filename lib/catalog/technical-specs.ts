@@ -1,4 +1,4 @@
-import { normalizeTechnicalText } from "@/lib/product-attributes";
+import { normalizeTechnicalText, syncProductTechnicalAttributes } from "@/lib/product-attributes";
 import type { PrismaClient } from "@prisma/client";
 
 export type TechnicalFamily = "HOSE" | "FITTING" | "ASSEMBLY" | "ACCESSORY";
@@ -296,12 +296,18 @@ export async function promoteProductTechnicalSource(
   args: { sourceId: string; reviewerUserId: string },
 ) {
   return prisma.$transaction(async (tx) => {
+    const claimed = await tx.productTechnicalSource.updateMany({
+      where: { id: args.sourceId, status: "PENDING_REVIEW" },
+      data: { status: "APPROVING" },
+    });
+    if (claimed.count !== 1) throw new Error("La fuente técnica ya fue procesada o no está pendiente");
+
     const source = await tx.productTechnicalSource.findUnique({
       where: { id: args.sourceId },
       select: { id: true, status: true },
     });
     if (!source) throw new Error("Fuente técnica no encontrada");
-    if (source.status !== "PENDING_REVIEW") {
+    if (source.status !== "APPROVING") {
       throw new Error("Sólo una fuente pendiente puede aprobarse");
     }
 
@@ -341,11 +347,20 @@ export async function promoteProductTechnicalSource(
           },
         });
       }
+      const publishedAttributes = JSON.stringify(Object.fromEntries(rows.map((row) => [row.key, row.value])));
+      await tx.product.update({ where: { id: productId }, data: { attributes: publishedAttributes } });
+      await syncProductTechnicalAttributes(tx, productId, publishedAttributes);
     }
+
+    const reviewedAt = new Date();
+    await tx.productAsset.updateMany({
+      where: { sourceId: source.id, validationStatus: "PENDING" },
+      data: { validationStatus: "APPROVED", reviewedAt },
+    });
 
     await tx.productTechnicalSource.update({
       where: { id: source.id },
-      data: { status: "APPROVED", reviewedAt: new Date(), reviewedByUserId: args.reviewerUserId },
+      data: { status: "APPROVED", reviewedAt, reviewedByUserId: args.reviewerUserId },
     });
     await tx.productTechnicalSpecCandidate.deleteMany({ where: { sourceId: source.id } });
     return { sourceId: source.id, productCount: productIds.length, specCount: candidates.length };

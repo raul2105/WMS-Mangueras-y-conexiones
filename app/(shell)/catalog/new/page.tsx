@@ -78,6 +78,7 @@ async function createProduct(formData: FormData) {
     : 0;
 
   const attributes = attributesRaw ? attributesRaw : null;
+  const hasTechnicalSource = Boolean(technicalSourceSupplier && technicalSourceDocument);
 
   const technicalValidation = validateTechnicalSpecRows(buildTechnicalSpecRows(normalizedType, attributes));
   if (!technicalValidation.valid) {
@@ -144,7 +145,7 @@ async function createProduct(formData: FormData) {
       base_cost: Number.isFinite(base_cost) ? base_cost : null,
       price: Number.isFinite(price) ? price : null,
       purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
-      attributes,
+      attributes: hasTechnicalSource ? null : attributes,
       categoryId: category?.id ?? null,
       primarySupplierId,
       supplierBrandId,
@@ -171,7 +172,9 @@ async function createProduct(formData: FormData) {
     select: { id: true },
   });
 
-  await syncProductTechnicalAttributes(prisma, product.id, attributes);
+  if (!hasTechnicalSource) {
+    await syncProductTechnicalAttributes(prisma, product.id, attributes);
+  }
   const technicalSource = technicalSourceSupplier && technicalSourceDocument
     ? await prisma.productTechnicalSource.create({
         data: {

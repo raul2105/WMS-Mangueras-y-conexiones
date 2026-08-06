@@ -92,6 +92,7 @@ async function updateProduct(id: string, formData: FormData) {
       type: true,
       brand: true,
       imageUrl: true,
+      attributes: true,
       assets: {
         where: { kind: "PRIMARY_IMAGE", validationStatus: "APPROVED" },
         orderBy: { updatedAt: "desc" },
@@ -158,14 +159,16 @@ async function updateProduct(id: string, formData: FormData) {
       base_cost: Number.isFinite(base_cost ?? NaN) ? base_cost : null,
       purchaseMoq: Number.isFinite(purchaseMoq ?? NaN) ? purchaseMoq : null,
       price: Number.isFinite(price ?? NaN) ? price : null,
-      attributes: attributesRaw,
+      attributes: hasTechnicalSource ? currentProduct.attributes : attributesRaw,
       categoryId: categoryId ?? null,
       primarySupplierId,
       supplierBrandId,
     },
   });
 
-  await syncProductTechnicalAttributes(prisma, id, attributesRaw);
+  if (!hasTechnicalSource) {
+    await syncProductTechnicalAttributes(prisma, id, attributesRaw);
+  }
   const technicalSource = hasTechnicalSource
     ? await prisma.productTechnicalSource.create({
         data: {

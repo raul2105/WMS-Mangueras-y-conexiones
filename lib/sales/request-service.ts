@@ -183,11 +183,13 @@ async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
         }]
       : [],
   );
-  const scope = Array.from(new Map(allSalesRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values())
+  const requestedPairKeys = new Set(currentOrderRequirements.map((row) => `${row.productId}:${row.locationId}`));
+  const scopedSalesRequirements = allSalesRequirements.filter((row) => requestedPairKeys.has(`${row.productId}:${row.locationId}`));
+  const scope = Array.from(new Map(scopedSalesRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values())
     .map(({ productId, locationId }) => ({ productId, locationId }));
   const productionReservations = await buildDesiredReservedByPair(tx, { scope });
   const aggregateRequirements = [
-    ...allSalesRequirements,
+    ...scopedSalesRequirements,
     ...Array.from(productionReservations, ([pair, reservedQty]) => {
       const [productId, locationId] = pair.split(":");
       return { productId, locationId, reservedQty, pickedQty: 0, shortQty: 0 };

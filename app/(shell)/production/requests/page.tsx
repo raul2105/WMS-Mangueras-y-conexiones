@@ -56,6 +56,17 @@ const PAGE_SIZE = 50;
 const STALE_HOURS = 4;
 const OPEN_ASSEMBLY_STATUSES = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO"]);
 const BUSINESS_TIMEZONE = "America/Mexico_City";
+
+function getWarehouseOwnershipId(order: {
+  warehouseClaimedByUserId?: string | null;
+  warehouseAssigneeUserId?: string | null;
+  assignedToUserId?: string | null;
+  pulledAt?: Date | null;
+}) {
+  return order.warehouseClaimedByUserId
+    ?? order.warehouseAssigneeUserId
+    ?? (order.assignedToUserId && order.pulledAt ? order.assignedToUserId : null);
+}
 const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
   overdue: "Vencidos",
   today: "Vencen hoy",
@@ -429,7 +440,7 @@ export default async function ProductionRequestsPage({
         const signals = evaluateFulfillmentSignals({
           dueDate: candidate.dueDate,
           orderUpdatedAt: candidate.updatedAt,
-          assignedToUserId: candidate.assignedToUserId,
+          assignedToUserId: getWarehouseOwnershipId(candidate),
           hasProductLines,
           hasAssemblyLines,
           latestPickStatus: latestPick?.status ?? null,
@@ -464,7 +475,7 @@ export default async function ProductionRequestsPage({
         const presetEvaluation = evaluateOperationalPresets(
           {
             dueDate: candidate.dueDate,
-            assignedToUserId: candidate.assignedToUserId,
+            assignedToUserId: getWarehouseOwnershipId(candidate),
             flowStage,
             isPartial: signals.isPartial,
             isUnreleased: signals.isUnreleased,

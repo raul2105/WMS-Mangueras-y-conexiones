@@ -11,6 +11,7 @@ import { assignSalesRequestPickTasks, claimSalesRequestPickTasks, confirmSalesRe
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
+import { formatBusinessDate } from "@/lib/business-date";
 import {
   firstErrorMessage,
   salesOrderPickConfirmSchema,
@@ -328,7 +329,7 @@ export default async function ProductionFulfillmentPage({
           <p className="font-mono text-cyan-300">{order.code}</p>
           <p>Cliente: {order.customerName ?? "--"}</p>
           <p>Almacen: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</p>
-          <p>Fecha compromiso: {order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
+          <p>Fecha compromiso: {order.dueDate ? formatBusinessDate(order.dueDate) : "--"}</p>
           <p>Estado del pedido: {order.status}</p>
         </div>
         <div className="space-y-3">

@@ -31,6 +31,19 @@ Si alguno falta, sólo se ejecutan pruebas locales, lectura o contratos unitario
 | V7 | Excepción | Faltante, ensamble incompleto o excepción abierta bloquean preparación y entrega; resolución queda auditada | Excepción, motivo, resolución, intento bloqueado | KAN-127, KAN-130 |
 | V8 | Idempotencia y concurrencia | Repetir preparar/entregar no duplica eventos ni movimientos; dos claims no se pisan | Conteo de registros y auditorías | KAN-127, KAN-132 |
 
+### V1 (reconciliación controlada; no es un E2E de escritura en CI)
+
+| Componente | Path |
+|---|---|
+| **Regla** | `reservedQty - pickedQty - shortQty` debe coincidir con `Inventory.reserved` por producto y ubicación |
+| **Servicio** | `reconcileSalesRequestReservations` con `DRY_RUN` o `APPLY` explícito |
+| **Endpoint** | `/api/admin/reconciliation/sales-reservations`, deshabilitado por defecto y protegido por `inventory.adjust` |
+| **Pedido acotado** | `PI-2026-0010`; no se corrigen otros pedidos automáticamente |
+| **E2E** | `tests/e2e/kan128-aws-readonly-evidence.spec.ts` sólo lectura; no crea ni elimina datos AWS |
+| **Pruebas de lógica** | `tests/sales/reservation-reconciliation.unit.test.ts` |
+
+> **Estado**: la prueba V1 anterior que escribía directamente con Prisma fue retirada. Primero se ejecuta `DRY_RUN`, después la corrección acotada y finalmente el E2E AWS de sólo lectura.
+
 ## Indicadores L07 que deben contrastarse
 
 El dashboard reporta una ventana móvil de 30 días:
@@ -77,3 +90,5 @@ Resultado: corregido / pendiente / bloqueado
 KAN-128, KAN-131, KAN-132, KAN-133, KAN-134, KAN-130 y KAN-125 requieren además
 PR/SHA integrado, migración aplicada en el entorno objetivo y validación autenticada
 por rol. El runbook no autoriza escrituras ni limpieza sobre AWS por sí mismo.
+
+**KAN-128**: En progreso - reconciliación implementada; falta ejecutar `DRY_RUN`, aplicar únicamente la corrección autorizada para `PI-2026-0010` y completar el E2E AWS read-only.

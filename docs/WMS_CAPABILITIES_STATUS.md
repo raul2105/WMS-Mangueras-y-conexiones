@@ -1,6 +1,6 @@
 # WMS Capabilities Status
 
-Fecha de corte: 2026-05-27
+Fecha de corte: 2026-08-05
 
 ## Decision base
 
@@ -121,6 +121,15 @@ Regla de gate pre `KAN-54+`:
 - `KAN-29`: release/bootstrap PostgreSQL-only reconciliado. Evidencia base: `PR #20` mergeado, bloqueo explicito de SQLite por default en `scripts/release/build-release.ps1`, y `prisma.config.ts` alineado al schema canonico PostgreSQL.
 - `KAN-49`: administracion de usuarios para `SYSTEM_ADMIN` ya validada en `main` y cerrada en Jira el 2026-05-05. Evidencia base: PR mergeado `#19`, GitHub Actions CI run `#55` en `success`, cobertura PostgreSQL en `tests/users/admin-service.integration.test.ts` y `tests/users/auth-login.integration.test.ts`, y guardas RBAC de rutas `/users*`.
 - `KAN-77`: orden generica reconciliada como capacidad operativa real. Evidencia base: servicio generico operativo (`lib/production/generic-order-service.ts`), UI minima de alta/detalle generica, suite PostgreSQL KAN-77 en verde, `test:regression:postgres` en verde, `build` en verde y eliminacion de `lib/inventory-service.js` legacy por riesgo de lock transaccional.
+- `KAN-128`: precisión de disponibilidad y promesa comercial reconciliada. Evidencia base:
+  - `lib/sales/availability-promise.ts` + `lib/sales/availability-validator.ts`: contrato CommercialAvailabilityPromise con `reservedQuantity`, validación server-side.
+  - `app/(shell)/production/requests/new/page.tsx`: revalidación de promesa al crear pedido, auditoría `REVALIDATE_COMMERCIAL_PROMISE`.
+  - `lib/business-date.ts`: zona horaria comercial `America/Mexico_City` para fecha canónica (CloudFront UTC vs localhost), `parseDueDate` normaliza fechas plain `YYYY-MM-DD` a UTC midnight.
+  - UI: `formatBusinessDate` usado en 5 componentes (fulfillment, page, customers, priority-queue, OrderSummary).
+  - Tests: unitarios `tests/sales/availability-promise.unit.test.ts` (3), E2E `tests/e2e/kan128-availability-promise-accuracy.spec.ts` (11), AWS read-only `tests/e2e/kan128-aws-readonly-evidence.spec.ts`.
+  - Validación AWS (2026-08-03): V2 (pedido directo), V3 (ensamble), V4 (mixto), V7 (gate faltante), V8 (idempotencia/concurrencia) - todos verdes en `https://d2b1ltxtvypxr4.cloudfront.net`.
+  - V1 (promesa con reserva existente): reconciliación controlada implementada en `lib/sales/request-service.ts`; la prueba de persistencia debe ejecutarse sobre AWS sólo mediante el endpoint de mantenimiento habilitado temporalmente. No se considera validada aún.
+  - `npm run typecheck`, `npm run lint` y `npm run test:unit` pasan localmente. La validación PostgreSQL completa y el E2E AWS autenticado siguen pendientes; no se usan como hechos históricos.
 
 ## Pendiente tecnico inmediato
 

@@ -59,10 +59,11 @@ test.describe("KAN-128: AWS read-only operational evidence", () => {
     const warehousePage = await warehouseContext.newPage();
     try {
       await loginAs(warehousePage, "WAREHOUSE_OPERATOR");
-      await warehousePage.goto("/production/requests?queue=unreleased");
+      await warehousePage.goto("/production/requests?stage=en_surtido");
 
       await expect(warehousePage.getByRole("link", { name: orderCode, exact: true })).toBeVisible();
-      await expect(warehousePage.getByRole("link", { name: "Operar surtido" })).toBeVisible();
+      const orderCard = warehousePage.getByTestId("request-card").filter({ hasText: orderCode }).first();
+      await expect(orderCard).toContainText("Operador Almacen");
     } finally {
       await warehouseContext.close();
     }

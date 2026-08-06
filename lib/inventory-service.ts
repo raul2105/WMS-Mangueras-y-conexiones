@@ -554,7 +554,7 @@ export class InventoryService {
         );
       }
 
-      await tx.inventoryMovement.create({
+      const movement = await tx.inventoryMovement.create({
         select: { id: true },
         data: {
           productId,
@@ -589,7 +589,7 @@ export class InventoryService {
         payload: { productId, locationId, quantity: existing.quantity, reserved: newReserved, available: newAvailable },
       }, tx);
 
-      return { quantity: existing.quantity, reserved: newReserved, available: newAvailable };
+      return { quantity: existing.quantity, reserved: newReserved, available: newAvailable, movementId: movement.id };
     });
   }
 
@@ -871,4 +871,3 @@ export class InventoryService {
 }
 
 export default InventoryService;
-

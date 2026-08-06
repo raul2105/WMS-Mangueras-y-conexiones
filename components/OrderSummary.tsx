@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { SectionCard } from "@/components/ui/section-card";
 import { cn } from "@/lib/cn";
+import { formatBusinessDate } from "@/lib/business-date";
 
 export type CommercialPromiseStatus =
   | "promise_safe"
@@ -372,12 +373,7 @@ function OrderSummaryContent({
           </p>
           <p className={cn("text-sm", missingFields.includes("dueDate") ? "text-[var(--status-warning-text)]" : "text-[var(--text-primary)]")}>
             {dueDate ? (
-              new Date(dueDate).toLocaleDateString("es-MX", {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })
+              formatBusinessDate(dueDate)
             ) : (
               <span className="text-[var(--text-muted)]">Fecha pendiente</span>
             )}
@@ -507,7 +503,7 @@ function OrderSummaryMobileContent({
           <div>
             <p className="text-xs text-slate-400">Fecha</p>
             <p className={cn("text-sm font-medium", !dueDate ? "text-slate-400" : "text-white")}>
-              {dueDate ? new Date(dueDate).toLocaleDateString("es-MX", { day: "numeric", month: "short" }) : "Fecha pendiente"}
+              {dueDate ? formatBusinessDate(dueDate) : "Fecha pendiente"}
             </p>
           </div>
           <div>

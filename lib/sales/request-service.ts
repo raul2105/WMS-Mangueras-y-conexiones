@@ -7,6 +7,7 @@ import { startPerf } from "@/lib/perf";
 import { getAssemblyQuantityPolicy, getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 import { getNextSalesInternalOrderCode, getNextSalesPickListCode } from "@/lib/sales/internal-orders";
 import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
+import { calculateReservationDeltas, type ReservationDelta } from "@/lib/sales/reservation-reconciliation";
 
 type Tx = Prisma.TransactionClient;
 
@@ -100,6 +101,187 @@ function getInventoryService(prisma: PrismaClient) {
     scoped[inventoryServiceSymbol] = new InventoryService(prisma);
   }
   return scoped[inventoryServiceSymbol]!;
+}
+
+const RESERVATION_PICK_LIST_STATUSES = ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] as const;
+
+type ReservationReconciliationMode = "DRY_RUN" | "APPLY";
+
+export type SalesRequestReservationReconciliationResult = {
+  orderId: string;
+  orderCode: string;
+  mode: ReservationReconciliationMode;
+  alreadyConsistent: boolean;
+  repaired: boolean;
+  deltas: ReservationDelta[];
+  movementIds: string[];
+  auditId: string | null;
+};
+
+async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
+  const order = await tx.salesInternalOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      code: true,
+      pickLists: {
+        where: { status: { in: [...RESERVATION_PICK_LIST_STATUSES] } },
+        select: {
+          tasks: {
+            select: {
+              reservedQty: true,
+              pickedQty: true,
+              shortQty: true,
+              sourceLocationId: true,
+              orderLine: { select: { productId: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+  }
+
+  const requirements = order.pickLists.flatMap((pickList) =>
+    pickList.tasks.flatMap((task) =>
+      task.orderLine.productId
+        ? [{
+            productId: task.orderLine.productId,
+            locationId: task.sourceLocationId,
+            reservedQty: task.reservedQty,
+            pickedQty: task.pickedQty,
+            shortQty: task.shortQty,
+          }]
+        : [],
+    ),
+  );
+  const inventoryKeys = Array.from(
+    new Map(requirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values(),
+  );
+  const inventory = inventoryKeys.length
+    ? await tx.inventory.findMany({
+        where: {
+          OR: inventoryKeys.map((row) => ({ productId: row.productId, locationId: row.locationId })),
+        },
+        select: { productId: true, locationId: true, reserved: true },
+      })
+    : [];
+
+  return {
+    orderId: order.id,
+    orderCode: order.code,
+    deltas: calculateReservationDeltas(requirements, inventory),
+  };
+}
+
+function reservationMismatches(deltas: ReservationDelta[]) {
+  return deltas.filter((row) => row.delta !== 0);
+}
+
+async function assertSalesRequestReservationConsistency(tx: Tx, orderId: string) {
+  const state = await loadSalesRequestReservationState(tx, orderId);
+  const mismatches = reservationMismatches(state.deltas);
+  if (mismatches.length > 0) {
+    throw new InventoryServiceError(
+      "RESERVATION_MISMATCH",
+      `La reserva real no coincide con la tarea de surtido (${mismatches.map((row) => `${row.expected - row.actual}`).join(", ")})`,
+    );
+  }
+  return state;
+}
+
+export async function reconcileSalesRequestReservations(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    mode: ReservationReconciliationMode;
+    actorUserId?: string | null;
+    reason: string;
+  },
+): Promise<SalesRequestReservationReconciliationResult> {
+  const reason = args.reason.trim();
+  if (!reason) {
+    throw new InventoryServiceError("REASON_REQUIRED", "El motivo de reconciliación es obligatorio");
+  }
+  if (args.mode === "APPLY" && !args.actorUserId) {
+    throw new InventoryServiceError("ACTOR_REQUIRED", "La aplicación de una reconciliación requiere un usuario autenticado");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const before = await loadSalesRequestReservationState(tx, args.orderId);
+    const mismatches = reservationMismatches(before.deltas);
+    if (args.mode === "DRY_RUN" || mismatches.length === 0) {
+      return {
+        orderId: before.orderId,
+        orderCode: before.orderCode,
+        mode: args.mode,
+        alreadyConsistent: mismatches.length === 0,
+        repaired: false,
+        deltas: before.deltas,
+        movementIds: [],
+        auditId: null,
+      };
+    }
+
+    const overReserved = mismatches.filter((row) => row.delta < 0);
+    if (overReserved.length > 0) {
+      throw new InventoryServiceError(
+        "RESERVATION_OVERALLOCATED",
+        "La reserva real excede la requerida; no se libera automáticamente para evitar afectar otra operación",
+      );
+    }
+
+    const inventoryService = getInventoryService(prisma);
+    const movementIds: string[] = [];
+    for (const row of mismatches) {
+      const result = await inventoryService.reserveStock(row.productId, row.locationId, row.delta, {
+        tx,
+        reference: before.orderCode,
+        notes: reason,
+        actor: "reservation-reconciliation",
+        actorUserId: args.actorUserId ?? null,
+        operatorUserId: args.actorUserId ?? null,
+        source: "sales/reservation-reconciliation",
+        documentType: "SALES_INTERNAL_ORDER",
+        documentId: before.orderId,
+      });
+      if (result.movementId) movementIds.push(result.movementId);
+    }
+
+    const after = await loadSalesRequestReservationState(tx, args.orderId);
+    const remaining = reservationMismatches(after.deltas);
+    if (remaining.length > 0) {
+      throw new InventoryServiceError("RESERVATION_RECONCILIATION_FAILED", "La reconciliación no dejó las reservas consistentes");
+    }
+
+    const audit = await tx.auditLog.create({
+      data: {
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: before.orderId,
+        action: "RECONCILE_ORDER_RESERVATIONS",
+        actor: "reservation-reconciliation",
+        actorUserId: args.actorUserId ?? null,
+        source: "sales/reservation-reconciliation",
+        before: JSON.stringify({ deltas: before.deltas, reason }),
+        after: JSON.stringify({ deltas: after.deltas, movementIds }),
+      },
+      select: { id: true },
+    });
+
+    return {
+      orderId: before.orderId,
+      orderCode: before.orderCode,
+      mode: args.mode,
+      alreadyConsistent: false,
+      repaired: true,
+      deltas: after.deltas,
+      movementIds,
+      auditId: audit.id,
+    };
+  });
 }
 
 async function ensureEditableOrder(tx: Tx, orderId: string) {
@@ -1148,6 +1330,7 @@ export async function markSalesRequestPreparedForDelivery(
     });
 
     if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    await assertSalesRequestReservationConsistency(tx, order.id);
     if (order.status !== "CONFIRMADA" || order.deliveredToCustomerAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no está disponible para preparar entrega");
     }
@@ -2155,6 +2338,8 @@ export async function releaseSalesRequestPickList(prisma: PrismaClient, orderId:
       throw new InventoryServiceError("PICKLIST_NOT_FOUND", "No hay una lista de surtido directa en borrador");
     }
 
+    await assertSalesRequestReservationConsistency(tx, order.id);
+
     await tx.salesInternalOrderPickList.update({
       where: { id: pickList.id },
       data: {
@@ -2454,6 +2639,8 @@ export async function confirmSalesRequestPickTasksBatch(
         throw new InventoryServiceError("INVALID_SCAN", "El escaneo no coincide con la ubicación o el SKU de la tarea");
       }
     }
+
+    await assertSalesRequestReservationConsistency(tx, args.orderId);
 
     const moveByKey = new Map<string, { productId: string; fromLocationId: string; toLocationId: string; qty: number; reference: string }>();
     const releaseByKey = new Map<string, { productId: string; locationId: string; qty: number; reference: string }>();

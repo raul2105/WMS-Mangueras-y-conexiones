@@ -3,6 +3,7 @@ import type { Prisma, ProductionOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 import { isProductionOpsFilter, type ProductionOpsFilter } from "@/lib/dashboard/fulfillment-dashboard";
+import { formatBusinessDate } from "@/lib/business-date";
 
 export const dynamic = "force-dynamic";
 
@@ -325,7 +326,7 @@ export default async function ProductionPage({
                     <td className="py-3 text-slate-400">{order.customerName ?? "--"}</td>
                     <td className="py-3 text-slate-300">{order.priority}</td>
                     <td className="py-3 text-slate-400">
-                      {order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}
+                      {order.dueDate ? formatBusinessDate(order.dueDate) : "--"}
                     </td>
                     <td className="py-3 text-right">
                       <Link href={actionHref} className="text-cyan-400 hover:text-cyan-300">

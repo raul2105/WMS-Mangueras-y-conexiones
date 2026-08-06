@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/section-card";
 import { Table, TableEmptyRow, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import { formatBusinessDate } from "@/lib/business-date";
 import type { FulfillmentQueueRow } from "@/lib/dashboard/fulfillment-dashboard";
 
 type Props = {
@@ -55,7 +56,7 @@ export function FulfillmentPriorityQueue({ rows }: Props) {
                   </Td>
                   <Td>{row.customerName}</Td>
                   <Td>{row.warehouseName}</Td>
-                  <Td>{row.dueDate ? row.dueDate.toLocaleDateString("es-MX") : "--"}</Td>
+                  <Td>{row.dueDate ? formatBusinessDate(row.dueDate) : "--"}</Td>
                   <Td>{row.pickStatus}</Td>
                   <Td>{row.assemblyStatusLabel}</Td>
                   <Td>

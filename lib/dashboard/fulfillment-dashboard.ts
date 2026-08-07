@@ -61,7 +61,8 @@ type FulfillmentMetricPickTask = {
 
 type WarehouseActivitySource = {
   warehouseClaimedAt?: Date | null;
-  lines: Array<{ pickTasks: Array<{ claimedAt?: Date | null; lastActivityAt?: Date | null }> }>;
+  pulledAt?: Date | null;
+  lines: Array<{ lineKind?: string; pickTasks: Array<{ claimedAt?: Date | null; lastActivityAt?: Date | null }> }>;
 };
 
 type FulfillmentMetricCycle = {
@@ -88,6 +89,22 @@ export function getWarehouseActivityStartAt(source: WarehouseActivitySource) {
   return [source.warehouseClaimedAt, taskActivity]
     .filter((value): value is Date => value instanceof Date)
     .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+}
+
+export function getDirectPickActivityStartAt(source: WarehouseActivitySource) {
+  const productLines = source.lines.filter((line) => line.lineKind === "PRODUCT");
+  const taskActivity = productLines
+    .flatMap((line) => line.pickTasks.flatMap((task) => [task.claimedAt, task.lastActivityAt]))
+    .filter((value): value is Date => value instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+  if (taskActivity) return taskActivity;
+
+  // Legacy direct-only orders may not have task timestamps.  Never use the
+  // order-level warehouse claim for mixed orders because assembly confirmation
+  // also writes it; omitting the cycle is safer than reporting assembly time
+  // as direct picking time.
+  const hasAssemblyLines = source.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+  return hasAssemblyLines ? null : source.warehouseClaimedAt ?? source.pulledAt ?? null;
 }
 
 function getWarehouseOwnershipId(order: {
@@ -414,8 +431,8 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
           pulledAt: true,
           preparedForDeliveryAt: true,
           lines: {
-            where: { lineKind: "PRODUCT" },
             select: {
+              lineKind: true,
               pickTasks: {
                 where: {
                   status: { in: ["COMPLETED", "PARTIAL"] },
@@ -636,9 +653,10 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
     const openLinkedAssembly = linkedProduction.filter((row) => OPEN_ASSEMBLY_STATUSES.includes(row.status)).length;
 
     const directPickCycles = recentOrderMetrics.flatMap((order) => {
-      const hasProductPickActivity = order.lines.some((line) => line.pickTasks.length > 0);
-      return hasProductPickActivity
-        ? [{ startAt: getWarehouseActivityStartAt(order), endAt: order.preparedForDeliveryAt }]
+      const hasProductPickActivity = order.lines.some((line) => line.lineKind === "PRODUCT" && line.pickTasks.length > 0);
+      const startAt = getDirectPickActivityStartAt(order);
+      return hasProductPickActivity && startAt
+        ? [{ startAt, endAt: order.preparedForDeliveryAt }]
         : [];
     });
     const operationalMetrics = summarizeFulfillmentMetrics({

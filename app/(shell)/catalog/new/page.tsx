@@ -5,7 +5,7 @@ import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
 import { createAuditLogSafe } from "@/lib/audit-log";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
-import { buildTechnicalSpecRows, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalAttributesJson, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
+import { buildTechnicalSpecRows, supersedePendingTechnicalSourcesForProduct, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalAttributesJson, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
 import { ProductSupplierBrandSelect } from "../_components/ProductSupplierBrandSelect";
 import { CategorySubcategorySelect } from "../_components/CategorySubcategorySelect";
@@ -182,6 +182,7 @@ async function createProduct(formData: FormData) {
   });
 
   if (!hasTechnicalSource) {
+    await supersedePendingTechnicalSourcesForProduct(prisma, product.id);
     await syncProductTechnicalAttributes(prisma, product.id, attributes);
   }
   const technicalSource = technicalSourceSupplier && technicalSourceDocument

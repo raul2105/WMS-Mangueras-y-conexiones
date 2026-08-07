@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWarehouseActivityStartAt, summarizeFulfillmentMetrics } from "@/lib/dashboard/fulfillment-dashboard";
+import { getDirectPickActivityStartAt, getWarehouseActivityStartAt, summarizeFulfillmentMetrics } from "@/lib/dashboard/fulfillment-dashboard";
 
 describe("fulfillment operational metrics", () => {
   it("calculates fill-rate, exactitud and cycles using closed work only", () => {
@@ -42,5 +42,25 @@ describe("fulfillment operational metrics", () => {
     });
 
     expect(activity).toEqual(new Date("2026-07-31T08:30:00.000Z"));
+  });
+
+  it("does not use an assembly claim as the start of a mixed direct-pick cycle", () => {
+    const activity = getDirectPickActivityStartAt({
+      warehouseClaimedAt: new Date("2026-07-31T09:00:00.000Z"),
+      pulledAt: new Date("2026-07-31T07:00:00.000Z"),
+      lines: [
+        { lineKind: "PRODUCT", pickTasks: [{ claimedAt: new Date("2026-07-31T10:00:00.000Z"), lastActivityAt: null }] },
+        { lineKind: "CONFIGURED_ASSEMBLY", pickTasks: [] },
+      ],
+    });
+
+    expect(activity).toEqual(new Date("2026-07-31T10:00:00.000Z"));
+    expect(getDirectPickActivityStartAt({
+      warehouseClaimedAt: new Date("2026-07-31T09:00:00.000Z"),
+      lines: [
+        { lineKind: "PRODUCT", pickTasks: [] },
+        { lineKind: "CONFIGURED_ASSEMBLY", pickTasks: [] },
+      ],
+    })).toBeNull();
   });
 });

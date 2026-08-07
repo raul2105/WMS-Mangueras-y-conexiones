@@ -25,6 +25,25 @@ export type TechnicalValidationResult = {
   errors: string[];
 };
 
+/**
+ * A direct catalog edit supersedes any still-pending source that contains the
+ * product.  Without this boundary an older source could later be approved and
+ * overwrite values that were deliberately published without a source.
+ */
+export async function supersedePendingTechnicalSourcesForProduct(prisma: PrismaClient, productId: string) {
+  return prisma.productTechnicalSource.updateMany({
+    where: {
+      status: "PENDING_REVIEW",
+      OR: [
+        { specCandidates: { some: { productId } } },
+        { assets: { some: { productId } } },
+        { compatibilityRules: { some: { OR: [{ productId }, { compatibleProductId: productId }] } } },
+      ],
+    },
+    data: { status: "SUPERSEDED", reviewedAt: new Date() },
+  });
+}
+
 const COMMON_FIELDS: TechnicalFieldDefinition[] = [
   { key: "material", label: "Material", required: true, safetyCritical: true },
   { key: "standard", label: "Norma / estándar", required: false, safetyCritical: true },

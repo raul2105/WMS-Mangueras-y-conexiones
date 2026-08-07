@@ -33,7 +33,7 @@ export const SALES_ORDER_FLOW_STAGE_LABELS: Record<
   captura: "Captura",
   por_asignar: "Por asignar",
   en_surtido: "En surtido",
-  preparar_entrega: "Separar para entrega",
+  preparar_entrega: "Preparar para entrega",
   listo_entrega: "Preparado para entrega",
   entregado: "Entregado",
   cancelado: "Cancelado",

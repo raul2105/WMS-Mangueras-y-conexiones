@@ -4,12 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, ClipboardList, Flag, ShoppingCart, Truck, Users } from 'lucide-react';
 import Link from 'next/link';
+import { FulfillmentOperationalMetrics } from '@/components/dashboard/fulfillment-operational-metrics';
+import type { FulfillmentOperationalMetrics as FulfillmentOperationalMetricsData } from '@/lib/dashboard/fulfillment-dashboard';
 
 interface ManagerHomeContentProps {
   overdueOrders: number;
   activeBlockers: number;
   purchaseDrafts: number;
   purchaseAttention: number;
+  operationalMetrics: FulfillmentOperationalMetricsData;
 }
 
 export function ManagerHomeContent({ 
@@ -17,6 +20,7 @@ export function ManagerHomeContent({
   activeBlockers,
   purchaseDrafts,
   purchaseAttention,
+  operationalMetrics,
 }: ManagerHomeContentProps) {
   const stats = [
     { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-red-600', href: '/production/requests?queue=overdue', live: true },
@@ -49,6 +53,8 @@ export function ManagerHomeContent({
           </Link>
         ))}
       </div>
+
+      <FulfillmentOperationalMetrics metrics={operationalMetrics} />
 
       {/* Manager decisions, not warehouse execution. */}
       <Card>

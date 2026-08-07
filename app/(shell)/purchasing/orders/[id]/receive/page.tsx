@@ -352,6 +352,8 @@ export default async function ReceivePage({
       id: line.id,
       sku: line.product.sku,
       name: line.product.name,
+      ordered: line.qtyOrdered,
+      received: line.qtyReceived,
       pending: line.qtyOrdered - line.qtyReceived,
       unitLabel: line.purchaseUnitLabel ?? line.product.unitLabel,
       step: getPurchaseUnitPolicy({ ...line.product, purchaseUnitLabel: line.purchaseUnitLabel, purchaseUnitFactor: line.purchaseUnitFactor }).increment,

@@ -15,6 +15,8 @@ describe("mixed order work surface", () => {
     expect(detail).toContain("Ensamble {index + 1}");
     expect(detail).toContain("Surtir productos");
     expect(detail).toContain("Continuar ensamble");
+    expect(detail).toContain("Ensamble completo; incluido en la preparación del pedido.");
+    expect(detail).toContain("Ensamble pendiente; no se puede preparar el pedido todavía.");
   });
 
   it("keeps the next physical step visible when direct picking finishes", () => {

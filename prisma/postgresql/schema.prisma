@@ -23,6 +23,10 @@ model User {
   confirmedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderConfirmedBy")
   cancelledSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderCancelledBy")
   assignedSalesOrders  SalesInternalOrder[] @relation("SalesInternalOrderAssignedTo")
+  warehouseAssignedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderWarehouseAssignee")
+  warehouseClaimedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderWarehouseClaimer")
+  assignedSalesOrderPickTasks SalesInternalOrderPickTask[] @relation("SalesInternalOrderPickTaskAssignee")
+  claimedSalesOrderPickTasks SalesInternalOrderPickTask[] @relation("SalesInternalOrderPickTaskClaimer")
   preparedSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderPreparedForDeliveryBy")
   deliveredSalesOrders SalesInternalOrder[] @relation("SalesInternalOrderDeliveredBy")
   reportedSalesOrderExceptions SalesInternalOrderException[] @relation("SalesInternalOrderExceptionReportedBy")
@@ -30,6 +34,7 @@ model User {
   requestedSalesOrderReturns SalesInternalOrderReturn[] @relation("SalesInternalOrderReturnRequestedBy")
   receivedSalesOrderReturns SalesInternalOrderReturn[] @relation("SalesInternalOrderReturnReceivedBy")
   completedSalesOrderReturns SalesInternalOrderReturn[] @relation("SalesInternalOrderReturnCompletedBy")
+  reviewedProductTechnicalSources ProductTechnicalSource[] @relation("ProductTechnicalSourceReviewer")
 
   inventoryMovements InventoryMovement[] @relation("MovementOperatorUser")
   traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
@@ -127,6 +132,11 @@ model Product {
   equivalencesFrom ProductEquivalence[] @relation("EquivalenceFrom")
   equivalencesTo ProductEquivalence[]   @relation("EquivalenceTo")
   technicalAttributes ProductTechnicalAttribute[]
+  technicalSpecs ProductTechnicalSpec[]
+  technicalSpecCandidates ProductTechnicalSpecCandidate[]
+  assets ProductAsset[]
+  compatibilityRulesFrom ProductCompatibilityRule[] @relation("ProductCompatibilityRuleFrom")
+  compatibilityRulesTo ProductCompatibilityRule[] @relation("ProductCompatibilityRuleTo")
   productionOrderItems ProductionOrderItem[]
   salesInternalOrderLines SalesInternalOrderLine[]
   salesInternalOrderReturnItems SalesInternalOrderReturnItem[]
@@ -168,6 +178,109 @@ model ProductTechnicalAttribute {
   @@index([keyNormalized])
   @@index([keyNormalized, valueNormalized])
   @@index([valueNormalized])
+}
+
+model ProductTechnicalSpec {
+  id String @id @default(uuid())
+  productId String
+  family String
+  key String
+  value String
+  normalizedValue String?
+  unit String?
+  isSafetyCritical Boolean @default(false)
+  sourceId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source ProductTechnicalSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, key])
+  @@index([productId, family])
+  @@index([key, normalizedValue])
+}
+
+model ProductTechnicalSpecCandidate {
+  id String @id @default(uuid())
+  productId String
+  sourceId String
+  family String
+  key String
+  value String
+  normalizedValue String?
+  unit String?
+  isSafetyCritical Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source ProductTechnicalSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, sourceId, key])
+  @@index([productId, sourceId])
+}
+
+model ProductTechnicalSource {
+  id String @id @default(uuid())
+  supplierName String
+  documentRef String
+  documentVersion String?
+  sourceUrl String?
+  status String @default("DRAFT")
+  reviewedAt DateTime?
+  reviewedByUserId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reviewedByUser User? @relation("ProductTechnicalSourceReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  specs ProductTechnicalSpec[]
+  specCandidates ProductTechnicalSpecCandidate[]
+  assets ProductAsset[]
+  compatibilityRules ProductCompatibilityRule[]
+
+  @@index([supplierName, status])
+  @@index([reviewedByUserId])
+}
+
+model ProductAsset {
+  id String @id @default(uuid())
+  productId String
+  kind String @default("PRIMARY_IMAGE")
+  url String
+  brandSnapshot String?
+  validationStatus String @default("PENDING")
+  sourceId String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source ProductTechnicalSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([productId, kind, validationStatus])
+  @@index([sourceId])
+}
+
+model ProductCompatibilityRule {
+  id String @id @default(uuid())
+  productId String
+  compatibleProductId String
+  ruleType String
+  description String
+  severity String @default("BLOCK")
+  active Boolean @default(true)
+  sourceId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation("ProductCompatibilityRuleFrom", fields: [productId], references: [id], onDelete: Cascade)
+  compatibleProduct Product @relation("ProductCompatibilityRuleTo", fields: [compatibleProductId], references: [id], onDelete: Cascade)
+  source ProductTechnicalSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, compatibleProductId, ruleType])
+  @@index([productId, active])
+  @@index([compatibleProductId, active])
 }
 
 model ProductEquivalence {
@@ -598,6 +711,11 @@ model SalesInternalOrder {
   confirmedByUserId String?
   cancelledByUserId String?
   assignedToUserId String?
+  warehouseAssignmentMode String @default("AUTO_STANDARD")
+  warehouseAssigneeUserId String?
+  warehouseClaimedByUserId String?
+  warehouseClaimedAt DateTime?
+  warehouseLastActivityAt DateTime?
   preparedForDeliveryByUserId String?
   preparedForDeliveryLocationId String?
   deliveredByUserId String?
@@ -624,6 +742,8 @@ model SalesInternalOrder {
   confirmedByUser User? @relation("SalesInternalOrderConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
   cancelledByUser User? @relation("SalesInternalOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   assignedToUser User? @relation("SalesInternalOrderAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  warehouseAssigneeUser User? @relation("SalesInternalOrderWarehouseAssignee", fields: [warehouseAssigneeUserId], references: [id], onDelete: SetNull)
+  warehouseClaimedByUser User? @relation("SalesInternalOrderWarehouseClaimer", fields: [warehouseClaimedByUserId], references: [id], onDelete: SetNull)
   preparedForDeliveryByUser User? @relation("SalesInternalOrderPreparedForDeliveryBy", fields: [preparedForDeliveryByUserId], references: [id], onDelete: SetNull)
   preparedForDeliveryLocation Location? @relation("SalesInternalOrderPreparedForDeliveryLocation", fields: [preparedForDeliveryLocationId], references: [id], onDelete: SetNull)
   deliveredByUser User? @relation("SalesInternalOrderDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
@@ -635,6 +755,10 @@ model SalesInternalOrder {
   @@index([status, createdAt])
   @@index([requestedByUserId])
   @@index([assignedToUserId])
+  @@index([warehouseAssigneeUserId])
+  @@index([warehouseClaimedByUserId])
+  @@index([warehouseAssignmentMode, warehouseId])
+  @@index([warehouseLastActivityAt])
   @@index([preparedForDeliveryAt])
   @@index([preparedForDeliveryLocationId])
   @@index([deliveredToCustomerAt])
@@ -806,6 +930,11 @@ model SalesInternalOrderPickTask {
   pickedQty Float @default(0)
   shortQty Float @default(0)
   status PickTaskStatus @default(PENDING)
+  assignmentMode String @default("AUTO_STANDARD")
+  assignedToUserId String?
+  claimedByUserId String?
+  claimedAt DateTime?
+  lastActivityAt DateTime?
   shortReason String?
   notes String?
 
@@ -813,6 +942,8 @@ model SalesInternalOrderPickTask {
   orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
   sourceLocation Location @relation("SalesOrderPickTaskSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
   targetLocation Location @relation("SalesOrderPickTaskTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  assignedToUser User? @relation("SalesInternalOrderPickTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  claimedByUser User? @relation("SalesInternalOrderPickTaskClaimer", fields: [claimedByUserId], references: [id], onDelete: SetNull)
   operationalExceptions SalesInternalOrderException[]
 
   createdAt DateTime @default(now())
@@ -822,6 +953,8 @@ model SalesInternalOrderPickTask {
   @@index([orderLineId])
   @@index([sourceLocationId, status])
   @@index([targetLocationId, status])
+  @@index([assignedToUserId, status])
+  @@index([claimedByUserId, status])
 }
 
 enum AssemblyAvailabilityStatus {

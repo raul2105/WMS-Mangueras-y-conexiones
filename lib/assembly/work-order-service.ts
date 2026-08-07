@@ -1,8 +1,9 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { reconcileProductionReservations } from "@/lib/reservation-policy";
-import { buildAssemblyRequirements, previewAssemblyAvailability } from "@/lib/assembly/availability-service";
+import { buildAssemblyRequirements, previewAssemblyAvailability, validateAssemblyCompatibility } from "@/lib/assembly/availability-service";
 import type { AssemblyConfigInput, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 
 type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
@@ -161,8 +162,9 @@ async function createAssemblyOperationalRecordsInTx(args: {
   input: AssemblyConfigInput;
   requirements: ReturnType<typeof buildAssemblyRequirements>;
   preview: Awaited<ReturnType<typeof previewAssemblyAvailability>>;
+  compatibilityDecision: Awaited<ReturnType<typeof validateAssemblyCompatibility>>;
 }) {
-  const { tx, order, input, requirements, preview } = args;
+  const { tx, order, input, requirements, preview, compatibilityDecision } = args;
   const wipLocation = await ensureWarehouseWipLocation(tx, order.warehouseId);
 
   await tx.assemblyConfiguration.create({
@@ -284,6 +286,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
         warehouseId: order.warehouseId,
         requirements,
         allocations: preview.allocations,
+        compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+        compatibilityReviewRules: compatibilityDecision.matchedRules,
         pickListCode: pickCode,
       }),
       source: "assembly/work-order-service",
@@ -373,6 +377,9 @@ export async function configureAssemblyOrderExact(
       throw new InventoryServiceError("WAREHOUSE_MISMATCH", "Assembly configuration must use the order warehouse");
     }
 
+    const compatibilityDecision = await validateAssemblyCompatibility(tx, input, {
+      allowReview: Boolean(input.compatibilityReviewApproved),
+    });
     const preview = await previewAssemblyAvailability(tx, input);
     if (!preview.exact) {
       throw new InventoryServiceError("INSUFFICIENT_AVAILABLE", "Assembly order requires exact stock for all three components");
@@ -384,6 +391,7 @@ export async function configureAssemblyOrderExact(
       input,
       requirements,
       preview,
+      compatibilityDecision,
     });
 
     await tx.productionOrder.update({
@@ -517,7 +525,8 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
 export async function closeAssemblyWorkOrderConsume(
   prisma: Db,
   productionOrderId: string,
-  operatorName?: string | null
+  operatorName?: string | null,
+  operatorUserId?: string | null,
 ) {
   return withDbTransaction(prisma, async (tx) => {
     const order = await tx.productionOrder.findUnique({
@@ -527,6 +536,8 @@ export async function closeAssemblyWorkOrderConsume(
         code: true,
         kind: true,
         status: true,
+        sourceDocumentType: true,
+        sourceDocumentId: true,
         items: {
           select: {
             productId: true,
@@ -610,6 +621,7 @@ export async function closeAssemblyWorkOrderConsume(
           locationId: order.assemblyWorkOrder.wipLocationId,
           type: "OUT",
           operatorName: operatorName ?? null,
+          operatorUserId: operatorUserId ?? null,
           quantity: pendingToConsume,
           reference: order.code,
           notes: "Consumo final de ensamble",
@@ -642,6 +654,31 @@ export async function closeAssemblyWorkOrderConsume(
       where: { id: order.id },
       data: { status: "COMPLETADA" },
     });
+
+    if (operatorUserId && order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId) {
+      const activityAt = new Date();
+      await tx.salesInternalOrder.update({
+        where: { id: order.sourceDocumentId },
+        data: {
+          warehouseClaimedByUserId: operatorUserId,
+          warehouseClaimedAt: activityAt,
+          warehouseLastActivityAt: activityAt,
+        },
+      });
+      await createAuditLogSafeWithDb({
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: order.sourceDocumentId,
+        action: "COMPLETE_WAREHOUSE_ASSEMBLY",
+        actor: operatorName ?? "system",
+        actorUserId: operatorUserId,
+        source: "assembly/work-order-service",
+        after: {
+          productionOrderId: order.id,
+          warehouseClaimedByUserId: operatorUserId,
+          status: "COMPLETADA",
+        },
+      }, tx);
+    }
 
     const scopedFromItems = dedupeReservationScope(order.items);
     // Fallback: keep reconciliation scoped if items were not persisted in this flow.

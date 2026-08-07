@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parseBusinessDate } from "@/lib/business-date";
+import { parseBusinessDate, normalizeToBusinessTimezone } from "@/lib/business-date";
 
 const requiredText = (label: string) =>
   z.string().trim().min(1, `${label} es obligatorio`);
@@ -124,7 +124,14 @@ export function parsePriority(value?: string, fallback = 3) {
 }
 
 export function parseDueDate(value?: string) {
-  return parseBusinessDate(value);
+  const parsed = parseBusinessDate(value);
+  if (!parsed) return null;
+  // For plain YYYY-MM-DD dates, keep as UTC midnight (calendar date)
+  // Only normalize to business timezone if the input has timezone info
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return parsed;
+  }
+  return normalizeToBusinessTimezone(parsed);
 }
 
 export function firstErrorMessage(error: z.ZodError) {

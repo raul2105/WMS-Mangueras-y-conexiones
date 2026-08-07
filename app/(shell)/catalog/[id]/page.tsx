@@ -5,6 +5,7 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import ProductImage from "@/components/ProductImage";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
 import { buttonStyles } from "@/components/ui/button";
+import { buildTechnicalSpecRows, getTechnicalCompleteness, getTechnicalFieldLabel } from "@/lib/catalog/technical-specs";
 import {
     buildCommercialRequestHref,
     buildCommercialSearchHref,
@@ -33,6 +34,35 @@ export default async function ProductDetailPage({ params }: PageProps) {
             subcategory: true,
             price: true,
             attributes: true,
+            technicalSpecs: {
+                orderBy: { key: "asc" },
+                select: {
+                    family: true,
+                    key: true,
+                    value: true,
+                    unit: true,
+                    isSafetyCritical: true,
+                    source: { select: { status: true } },
+                },
+            },
+            technicalSpecCandidates: {
+                take: 1,
+                select: { id: true },
+            },
+            assets: {
+                where: { kind: "PRIMARY_IMAGE", validationStatus: "APPROVED" },
+                orderBy: { updatedAt: "desc" },
+                take: 1,
+                select: { url: true, brandSnapshot: true, validationStatus: true },
+            },
+            compatibilityRulesFrom: {
+                where: { active: true },
+                select: { ruleType: true, description: true, severity: true, compatibleProduct: { select: { sku: true, name: true } } },
+            },
+            compatibilityRulesTo: {
+                where: { active: true },
+                select: { ruleType: true, description: true, severity: true, product: { select: { sku: true, name: true } } },
+            },
             category: { select: { id: true, name: true } },
             inventory: {
                 select: {
@@ -62,9 +92,28 @@ export default async function ProductDetailPage({ params }: PageProps) {
         }
     }
     const equivalents = await getEquivalentProducts(product.id, { limit: 6, inStockOnly: false });
+    const publishedTechnicalSpecs = product.technicalSpecs.filter((row) => !row.source || row.source.status === "APPROVED");
+    const hasPendingTechnicalSpecs = product.technicalSpecs.some((row) => row.source?.status === "PENDING_REVIEW")
+        || product.technicalSpecCandidates.length > 0;
+    const storedTechnicalRows = publishedTechnicalSpecs.map((row) => ({
+        family: row.family as "HOSE" | "FITTING" | "ASSEMBLY" | "ACCESSORY",
+        key: row.key,
+        value: row.value,
+        normalizedValue: row.value.toLowerCase(),
+        unit: row.unit,
+        isSafetyCritical: row.isSafetyCritical,
+    }));
+    const technicalRows = storedTechnicalRows.length > 0
+        ? storedTechnicalRows
+        : hasPendingTechnicalSpecs
+            ? []
+            : buildTechnicalSpecRows(product.type, product.attributes);
+    const technicalCompleteness = getTechnicalCompleteness(product.type, technicalRows);
+    const primaryAsset = product.assets[0] ?? null;
+    const assetBrandMismatch = Boolean(primaryAsset?.brandSnapshot && product.brand && primaryAsset.brandSnapshot.toLowerCase() !== product.brand.toLowerCase());
 
     return (
-        <div className="mx-auto max-w-6xl space-y-6">
+        <div className="mx-auto max-w-6xl space-y-6 overflow-x-hidden">
             <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Link href="/catalog" className="hover:text-white">Catálogo comercial</Link>
                 <span>/</span>
@@ -81,6 +130,11 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             {product.subcategory ? ` · ${product.subcategory}` : ""}
                             {product.referenceCode ? ` · Ref. ${product.referenceCode}` : ""}
                         </p>
+                        {assetBrandMismatch ? (
+                            <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200" role="alert">
+                                La imagen publicada indica “{primaryAsset?.brandSnapshot}”, pero el producto está registrado como “{product.brand}”. Validar asset antes de prometer.
+                            </p>
+                        ) : null}
                     </div>
 
                     <p className="max-w-2xl text-sm leading-relaxed text-slate-300">
@@ -141,7 +195,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                         <ProductImage
                             sku={product.sku}
-                            imageUrl={product.imageUrl}
+                            imageUrl={primaryAsset?.url ?? product.imageUrl}
                             name={product.name}
                             size={320}
                             className="aspect-square w-full rounded-xl"
@@ -175,19 +229,27 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             decisión comercial ya está arriba.
                         </p>
                     </div>
-                    {attributes && Object.keys(attributes).length > 0 ? (
+                    <div className={`rounded-xl border px-4 py-3 text-sm ${technicalCompleteness.complete ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`} data-testid="technical-completeness">
+                        <p className="font-semibold">Ficha técnica {technicalCompleteness.complete ? "completa" : "incompleta"}</p>
+                        <p className="mt-1 text-xs opacity-90">
+                            {technicalCompleteness.complete
+                                ? `${technicalCompleteness.availableCount} de ${technicalCompleteness.requiredCount} campos críticos disponibles.`
+                                : `Faltan: ${technicalCompleteness.missing.join(", ")}.`}
+                        </p>
+                    </div>
+                    {technicalRows.length > 0 || (attributes && Object.keys(attributes).length > 0) ? (
                         <div className="overflow-hidden rounded-xl border border-white/10">
                             <div className="divide-y divide-white/5 text-sm">
-                                {Object.entries(attributes).map(([key, val], idx) => (
+                                {technicalRows.map((row, idx) => (
                                     <div
-                                        key={key}
+                                        key={row.key}
                                         className={`flex items-center justify-between gap-4 px-4 py-3 ${idx % 2 === 0 ? "bg-white/5" : ""}`}
                                     >
                                         <span className="text-slate-400 font-medium capitalize">
-                                            {key.replaceAll("_", " ")}
+                                            {getTechnicalFieldLabel(product.type, row.key)}
                                         </span>
                                         <span className="text-right font-mono text-white">
-                                            {Array.isArray(val) ? val.join(", ") : String(val)}
+                                            {row.value}{row.unit ? ` ${row.unit}` : ""}
                                         </span>
                                     </div>
                                 ))}
@@ -199,6 +261,21 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             este producto.
                         </p>
                     )}
+                    {product.compatibilityRulesFrom.length > 0 || product.compatibilityRulesTo.length > 0 ? (
+                        <div className="space-y-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4" data-testid="technical-compatibility-rules">
+                            <p className="text-sm font-semibold text-red-200">Reglas de compatibilidad</p>
+                            {product.compatibilityRulesFrom.map((rule) => (
+                                <p key={`${rule.ruleType}-${rule.compatibleProduct.sku}`} className="text-xs text-red-100">
+                                    <span className="font-mono">{rule.compatibleProduct.sku}</span> · {rule.description} ({rule.severity})
+                                </p>
+                            ))}
+                            {product.compatibilityRulesTo.map((rule) => (
+                                <p key={`${rule.ruleType}-${rule.product.sku}`} className="text-xs text-red-100">
+                                    <span className="font-mono">{rule.product.sku}</span> · {rule.description} ({rule.severity})
+                                </p>
+                            ))}
+                        </div>
+                    ) : null}
                 </section>
 
                 <section className="glass-card space-y-4">

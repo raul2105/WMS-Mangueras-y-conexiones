@@ -59,6 +59,7 @@ async function confirmAssemblyBatch(formData: FormData) {
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
   await requireAssemblyExecutePermission(orderId);
+  const sessionCtx = await getSessionContext();
 
   const operatorName = String(formData.get("operatorName") ?? "").trim();
   const taskIds = formData
@@ -66,7 +67,7 @@ async function confirmAssemblyBatch(formData: FormData) {
     .map((value) => String(value).trim())
     .filter(Boolean);
 
-  if (!orderId || !operatorName) {
+  if (!orderId || !operatorName || !sessionCtx.user?.id) {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent("Datos de surtido invalidos")}`);
   }
 
@@ -89,6 +90,7 @@ async function confirmAssemblyBatch(formData: FormData) {
       const result = await confirmAssemblyPickTasksBatch(prisma, {
         productionOrderId: orderId,
         operatorName,
+        operatorUserId: sessionCtx.user.id,
         tasks,
       });
       processedCount = result.processedCount;
@@ -118,7 +120,7 @@ async function confirmAssemblyBatch(formData: FormData) {
       orderState?.assemblyWorkOrder?.consumptionStatus !== "CONSUMED";
 
     if (canAutoClose) {
-      await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName);
+      await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName, sessionCtx.user.id);
       autoClosed = true;
     }
   } catch (error) {

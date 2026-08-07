@@ -56,9 +56,10 @@ async function moveReservedToWipInTx(args: {
   documentId: string;
   documentLineId: string;
   operatorName?: string | null;
+  operatorUserId?: string | null;
   taskId: string;
 }) {
-  const { tx, productId, fromLocationId, toWipLocationId, qty, reference, documentId, documentLineId, operatorName, taskId } = args;
+  const { tx, productId, fromLocationId, toWipLocationId, qty, reference, documentId, documentLineId, operatorName, operatorUserId, taskId } = args;
 
   const source = await tx.inventory.findUnique({
     where: { productId_locationId: { productId, locationId: fromLocationId } },
@@ -113,6 +114,7 @@ async function moveReservedToWipInTx(args: {
       locationId: fromLocationId,
       type: "TRANSFER",
       operatorName: operatorName ?? null,
+      operatorUserId: operatorUserId ?? null,
       quantity: qty,
       reference,
       notes: `Surtido a WIP (task ${taskId})`,
@@ -217,7 +219,7 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
 
 export async function confirmAssemblyPickTask(
   prisma: PrismaClient,
-  args: { taskId: string; pickedQty: number; shortReason?: string | null; operatorName?: string | null }
+  args: { taskId: string; pickedQty: number; shortReason?: string | null; operatorName?: string | null; operatorUserId?: string | null }
 ) {
   if (!Number.isFinite(args.pickedQty) || args.pickedQty < 0) {
     throw new InventoryServiceError("INVALID_QTY", "Picked quantity must be zero or greater");
@@ -248,7 +250,7 @@ export async function confirmAssemblyPickTask(
             assemblyWorkOrderId: true,
             assemblyWorkOrder: {
               select: {
-                productionOrder: { select: { id: true, code: true } },
+                productionOrder: { select: { id: true, code: true, sourceDocumentType: true, sourceDocumentId: true } },
               },
             },
           },
@@ -283,6 +285,7 @@ export async function confirmAssemblyPickTask(
         documentId: task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
         documentLineId: task.assemblyWorkOrderLine.id,
         operatorName: args.operatorName ?? null,
+        operatorUserId: args.operatorUserId ?? null,
         taskId: task.id,
       });
     }
@@ -338,6 +341,32 @@ export async function confirmAssemblyPickTask(
 
     await recomputePickStates(tx, task.pickList.assemblyWorkOrderId);
 
+    const sourceDocument = task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder;
+    if (args.operatorUserId && sourceDocument.sourceDocumentType === "SalesInternalOrder" && sourceDocument.sourceDocumentId) {
+      const activityAt = new Date();
+      await tx.salesInternalOrder.update({
+        where: { id: sourceDocument.sourceDocumentId },
+        data: {
+          warehouseClaimedByUserId: args.operatorUserId,
+          warehouseClaimedAt: activityAt,
+          warehouseLastActivityAt: activityAt,
+        },
+      });
+      await createAuditLogSafeWithDb({
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: sourceDocument.sourceDocumentId,
+        action: "CLAIM_WAREHOUSE_ASSEMBLY",
+        actor: args.operatorName ?? "system",
+        actorUserId: args.operatorUserId,
+        source: "assembly/picking-service",
+        after: {
+          productionOrderId: sourceDocument.id,
+          taskId: task.id,
+          warehouseClaimedByUserId: args.operatorUserId,
+        },
+      }, tx);
+    }
+
     let labelJobId: string | null = null;
     let orderTraceId: string | null = null;
     if (movementId) {
@@ -347,6 +376,7 @@ export async function confirmAssemblyPickTask(
         sourceEntityType: "ASSEMBLY_ORDER",
         sourceEntityId: task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
         operatorName: args.operatorName ?? null,
+        operatorUserId: args.operatorUserId ?? null,
       });
       labelJobId = job.id;
       orderTraceId = trace.traceId;
@@ -390,6 +420,7 @@ export async function confirmAssemblyPickTasksBatch(
   args: {
     productionOrderId: string;
     operatorName: string;
+    operatorUserId?: string | null;
     tasks: Array<{ taskId: string; pickedQty?: number | null; shortReason?: string | null }>;
   }
 ) {
@@ -457,6 +488,7 @@ export async function confirmAssemblyPickTasksBatch(
       pickedQty,
       shortReason: task.shortReason ?? null,
       operatorName: args.operatorName,
+      operatorUserId: args.operatorUserId,
     });
     results.push(result);
   }

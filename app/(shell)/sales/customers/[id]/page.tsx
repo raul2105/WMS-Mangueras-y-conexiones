@@ -5,6 +5,7 @@ import type { SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { getSessionContext } from "@/lib/auth/session-context";
+import { formatBusinessDate } from "@/lib/business-date";
 import { SALES_INTERNAL_ORDER_STATUS_LABELS, SALES_INTERNAL_ORDER_STATUS_STYLES } from "@/lib/sales/internal-orders";
 
 export const dynamic = "force-dynamic";
@@ -162,7 +163,7 @@ export default async function CustomerDetailPage({
                       </span>
                     </td>
                     <td className="py-2 text-slate-300">{order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "—"}</td>
-                    <td className="py-2 text-slate-400">{order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "—"}</td>
+                    <td className="py-2 text-slate-400">{order.dueDate ? formatBusinessDate(order.dueDate) : "—"}</td>
                     <td className="py-2 text-slate-400">{new Date(order.createdAt).toLocaleDateString("es-MX")}</td>
                   </tr>
                 ))}

@@ -7,10 +7,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
-import { confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList } from "@/lib/sales/request-service";
+import { assignSalesRequestPickTasks, claimSalesRequestPickTasks, confirmSalesRequestPickTasksBatch, releaseSalesRequestPickList, requireManagerWarehouseAssignment } from "@/lib/sales/request-service";
 import { summarizePickListStatus } from "@/lib/sales/internal-orders";
 import { startPerf } from "@/lib/perf";
 import { getRequestId } from "@/lib/request-meta";
+import { formatBusinessDate } from "@/lib/business-date";
 import {
   firstErrorMessage,
   salesOrderPickConfirmSchema,
@@ -23,7 +24,8 @@ export const dynamic = "force-dynamic";
 const directPickTaskConfirmSchema = z.object({
   taskId: z.string().trim().min(1, "Tarea es obligatoria"),
   pickedQty: z.number().finite().min(0, "Cantidad surtida invalida").nullable(),
-  shortReason: z.string().trim().nullable(),
+      shortReason: z.string().trim().nullable(),
+      scanRef: z.string().trim().nullable(),
 });
 
 function isNextRedirectError(error: unknown) {
@@ -66,6 +68,80 @@ async function releaseDirectPick(formData: FormData) {
   redirect(`/production/fulfillment/${orderId}?ok=${encodeURIComponent("Surtido directo liberado")}`);
 }
 
+async function claimDirectPickTasks(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const taskIds = formData.getAll("claimTaskIds").map((value) => String(value).trim()).filter(Boolean);
+  const sessionCtx = await getSessionContext();
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  if (!orderId || !sessionCtx.user?.id) redirect("/production");
+
+  try {
+    const result = await claimSalesRequestPickTasks(prisma, {
+      orderId,
+      taskIds,
+      claimedByUserId: sessionCtx.user.id,
+    });
+    redirect(`/production/fulfillment/${orderId}?ok=${encodeURIComponent(`Tareas tomadas (${result.claimedCount})`)}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof InventoryServiceError ? error.message : "No fue posible tomar las tareas";
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function assignDirectPickTasks(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const taskIds = formData.getAll("assignTaskIds").map((value) => String(value).trim()).filter(Boolean);
+  const assigneeUserId = String(formData.get("assigneeUserId") ?? "").trim();
+  const sessionCtx = await getSessionContext();
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  if (!sessionCtx.user?.id || (!sessionCtx.roles.includes("MANAGER") && !sessionCtx.roles.includes("SYSTEM_ADMIN"))) {
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Solo un manager puede asignar tareas de almacén")}`);
+  }
+  if (!orderId || !assigneeUserId) redirect("/production");
+
+  try {
+    const result = await assignSalesRequestPickTasks(prisma, {
+      orderId,
+      taskIds,
+      assignedToUserId: assigneeUserId,
+      assignedByUserId: sessionCtx.user.id,
+    });
+    redirect(`/production/fulfillment/${orderId}?ok=${encodeURIComponent(`Tareas asignadas (${result.assignedCount})`)}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof InventoryServiceError ? error.message : "No fue posible asignar las tareas";
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function requireManagerAssignment(formData: FormData) {
+  "use server";
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+  const sessionCtx = await getSessionContext();
+  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  if (!sessionCtx.user?.id || (!sessionCtx.roles.includes("MANAGER") && !sessionCtx.roles.includes("SYSTEM_ADMIN"))) {
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("Solo un manager puede exigir asignación manual")}`);
+  }
+  if (!orderId || !reason) redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent("El motivo de asignación manual es obligatorio")}`);
+
+  try {
+    const result = await requireManagerWarehouseAssignment(prisma, {
+      orderId,
+      reason,
+      actorUserId: sessionCtx.user.id,
+    });
+    redirect(`/production/fulfillment/${orderId}?ok=${encodeURIComponent(`Asignación manual activada (${result.taskCount} tareas)`)}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof InventoryServiceError ? error.message : "No fue posible activar la asignación manual";
+    redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
 async function confirmDirectPick(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.fulfillment.confirm_direct_pick");
@@ -105,6 +181,7 @@ async function confirmDirectPick(formData: FormData) {
       taskId,
       pickedQty: pickedRaw === "" ? null : Number(pickedRaw),
       shortReason: String(formData.get(`shortReason__${taskId}`) ?? "").trim() || null,
+      scanRef: String(formData.get(`scanRef__${taskId}`) ?? "").trim() || null,
     });
     if (!parsedTask.success) {
       redirect(`/production/fulfillment/${orderId}?error=${encodeURIComponent(firstErrorMessage(parsedTask.error))}`);
@@ -145,6 +222,7 @@ export default async function ProductionFulfillmentPage({
   const { id } = await params;
   const sp = await searchParams;
   const actor = resolveAuthenticatedActor(await getSessionContext());
+  const sessionCtx = await getSessionContext();
 
   const order = await prisma.salesInternalOrder.findUnique({
     where: { id },
@@ -152,6 +230,7 @@ export default async function ProductionFulfillmentPage({
       id: true,
       code: true,
       status: true,
+      warehouseAssignmentMode: true,
       customerName: true,
       dueDate: true,
       warehouse: { select: { code: true, name: true } },
@@ -174,6 +253,11 @@ export default async function ProductionFulfillmentPage({
               pickedQty: true,
               shortQty: true,
               status: true,
+              assignmentMode: true,
+              assignedToUserId: true,
+              claimedByUserId: true,
+              claimedAt: true,
+              lastActivityAt: true,
               shortReason: true,
               sourceLocation: { select: { code: true, name: true } },
               targetLocation: { select: { code: true, name: true } },
@@ -218,6 +302,35 @@ export default async function ProductionFulfillmentPage({
   const activePickList = order.pickLists.find((pickList) => pickList.status !== "CANCELLED") ?? null;
   const actionableTasks =
     activePickList?.tasks.filter((task) => !["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) ?? [];
+  const managerRequiredUnassignedTasks = actionableTasks.filter(
+    (task) => task.assignmentMode === "MANAGER_REQUIRED" && !task.assignedToUserId && !task.claimedByUserId,
+  );
+  const autoStandardActionableTasks = actionableTasks.filter(
+    (task) => task.assignmentMode === "AUTO_STANDARD" && !task.assignedToUserId && !task.claimedByUserId,
+  );
+  const canAssignWarehouseTasks = sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN");
+  const warehouseOperators = canAssignWarehouseTasks
+    ? await prisma.user.findMany({
+        where: {
+          isActive: true,
+          userRoles: { some: { role: { code: "WAREHOUSE_OPERATOR", isActive: true } } },
+        },
+        orderBy: [{ name: "asc" }, { email: "asc" }],
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  // Only submit tasks this operator is allowed to claim. In manager-required
+  // mode another operator's assignment must remain invisible to this action;
+  // otherwise the service rejects the whole batch before the operator can take
+  // their own subset.
+  const claimableTasks = actionableTasks.filter(
+    (task) =>
+      !task.claimedByUserId &&
+      ((task.assignmentMode === "AUTO_STANDARD" && !task.assignedToUserId) ||
+        (task.assignmentMode === "MANAGER_REQUIRED" && task.assignedToUserId === actor.actorUserId)),
+  );
+  const tasksClaimedByOther = actionableTasks.some((task) => task.claimedByUserId && task.claimedByUserId !== actor.actorUserId);
+  const tasksClaimedByCurrent = actionableTasks.filter((task) => task.claimedByUserId === actor.actorUserId);
   // Un pedido sólo de ensamble no tiene lista de surtido directo. Esa etapa ausente
   // se considera completa para llevar al operador al trabajo pendiente real.
   const directPickCompleted = !activePickList || activePickList.status === "COMPLETED";
@@ -243,10 +356,10 @@ export default async function ProductionFulfillmentPage({
       />
 
       {sp.error ? (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{sp.error}</div>
+        <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{sp.error}</div>
       ) : null}
       {sp.ok ? (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{sp.ok}</div>
+        <div role="status" aria-live="polite" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{sp.ok}</div>
       ) : null}
 
       <section className="op-panel grid gap-4 lg:grid-cols-[1fr_1fr]">
@@ -254,7 +367,7 @@ export default async function ProductionFulfillmentPage({
           <p className="font-mono text-cyan-300">{order.code}</p>
           <p>Cliente: {order.customerName ?? "--"}</p>
           <p>Almacen: {order.warehouse ? `${order.warehouse.code} - ${order.warehouse.name}` : "--"}</p>
-          <p>Fecha compromiso: {order.dueDate ? new Date(order.dueDate).toLocaleDateString("es-MX") : "--"}</p>
+          <p>Fecha compromiso: {order.dueDate ? formatBusinessDate(order.dueDate) : "--"}</p>
           <p>Estado del pedido: {order.status}</p>
         </div>
         <div className="space-y-3">
@@ -305,6 +418,55 @@ export default async function ProductionFulfillmentPage({
               </button>
             </form>
           ) : null}
+          {canAssignWarehouseTasks && autoStandardActionableTasks.length > 0 && order.warehouseAssignmentMode !== "MANUAL" ? (
+            <form action={requireManagerAssignment} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 space-y-3">
+              <input type="hidden" name="orderId" value={order.id} />
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">¿Requiere asignación manual?</p>
+                <p className="text-xs text-[var(--text-secondary)]">Activa el modo Manager Required para impedir que otro operador tome estas tareas sin asignación.</p>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="min-w-64 flex-1 space-y-1">
+                  <span className="text-xs text-slate-400">Motivo</span>
+                  <input name="reason" required className="w-full px-3 py-2 glass rounded-lg" placeholder="Urgencia, cliente estratégico, ausencia..." />
+                </label>
+                <button type="submit" className={buttonStyles({ variant: "secondary" })}>Exigir asignación</button>
+              </div>
+            </form>
+          ) : null}
+          {activePickList && activePickList.status !== "DRAFT" && claimableTasks.length > 0 ? (
+            <form action={claimDirectPickTasks} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3">
+              <input type="hidden" name="orderId" value={order.id} />
+              {claimableTasks.map((task) => <input key={task.id} type="hidden" name="claimTaskIds" value={task.id} />)}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">Tareas disponibles para ti: {claimableTasks.length}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">Toma estas tareas antes de registrar cantidades físicas.</p>
+                </div>
+                <button type="submit" className={buttonStyles({ variant: "primary" })}>Tomar tareas</button>
+              </div>
+            </form>
+          ) : null}
+          {canAssignWarehouseTasks && managerRequiredUnassignedTasks.length > 0 ? (
+            <form action={assignDirectPickTasks} className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-3">
+              <input type="hidden" name="orderId" value={order.id} />
+              {managerRequiredUnassignedTasks.map((task) => <input key={task.id} type="hidden" name="assignTaskIds" value={task.id} />)}
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">Asignación requerida: {managerRequiredUnassignedTasks.length} tareas</p>
+                <p className="text-xs text-[var(--text-secondary)]">El manager debe asignar estas tareas a un operador antes de que pueda tomarlas.</p>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="min-w-64 flex-1 space-y-1">
+                  <span className="text-xs text-slate-400">Operador responsable</span>
+                  <select name="assigneeUserId" required className="w-full px-3 py-2 glass rounded-lg">
+                    <option value="">Selecciona un operador</option>
+                    {warehouseOperators.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}
+                  </select>
+                </label>
+                <button type="submit" className={buttonStyles({ variant: "primary" })}>Asignar tareas</button>
+              </div>
+            </form>
+          ) : null}
         </div>
       </section>
 
@@ -323,9 +485,10 @@ export default async function ProductionFulfillmentPage({
               {activePickList.tasks.map((task) => {
                 const pendingQty = Math.max(0, task.reservedQty - task.pickedQty);
                 const isClosed = ["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status);
+                const isOwnedByCurrent = !isClosed && task.claimedByUserId === actor.actorUserId;
                 return (
                   <div key={task.id} className="surface rounded-lg p-4 grid grid-cols-1 gap-3 items-end md:grid-cols-7">
-                    {!isClosed ? <input type="hidden" name="taskIds" value={task.id} /> : null}
+                    {isOwnedByCurrent ? <input type="hidden" name="taskIds" value={task.id} /> : null}
                     <div className="md:col-span-2">
                       <p className="text-xs text-slate-400">Producto</p>
                       <p className="font-mono text-cyan-300">{task.orderLine.product?.sku ?? "--"}</p>
@@ -345,6 +508,17 @@ export default async function ProductionFulfillmentPage({
                       <p className="text-xs text-slate-500">{task.targetLocation.name}</p>
                     </div>
                     <label className="space-y-1">
+                      <span className="text-xs text-slate-400">Escaneo SKU / ubicación</span>
+                      <input
+                        name={`scanRef__${task.id}`}
+                        inputMode="search"
+                        autoComplete="off"
+                        placeholder="Escanea SKU o ubicación"
+                        className="w-full px-3 py-2 glass rounded-lg"
+                        disabled={!isOwnedByCurrent || activePickList.status === "DRAFT"}
+                      />
+                    </label>
+                    <label className="space-y-1">
                       <span className="text-xs text-slate-400">Cantidad surtida</span>
                       <input
                         name={`pickedQty__${task.id}`}
@@ -354,7 +528,7 @@ export default async function ProductionFulfillmentPage({
                         step="0.0001"
                         defaultValue={isClosed ? task.pickedQty : pendingQty}
                         className="w-full px-3 py-2 glass rounded-lg"
-                        disabled={isClosed || activePickList.status === "DRAFT"}
+                        disabled={!isOwnedByCurrent || activePickList.status === "DRAFT"}
                       />
                     </label>
                     <label className="space-y-1">
@@ -363,10 +537,12 @@ export default async function ProductionFulfillmentPage({
                         name={`shortReason__${task.id}`}
                         defaultValue={task.shortReason ?? ""}
                         className="w-full px-3 py-2 glass rounded-lg"
-                        disabled={isClosed || activePickList.status === "DRAFT"}
+                        disabled={!isOwnedByCurrent || activePickList.status === "DRAFT"}
                       />
                     </label>
                     <div className="text-xs text-slate-400">
+                      <span className="font-semibold text-slate-200">{task.claimedByUserId === actor.actorUserId ? "Tomada por ti" : task.claimedByUserId ? "Tomada por otro operador" : task.assignmentMode === "MANAGER_REQUIRED" && task.assignedToUserId ? "Asignada a operador" : task.assignmentMode === "MANAGER_REQUIRED" ? "Requiere asignación" : "Sin tomar"}</span>
+                      <br />
                       Estado: <span className="text-slate-200">{task.status}</span>
                       <br />
                       Req: <span className="text-slate-200">{task.requestedQty}</span>
@@ -395,12 +571,12 @@ export default async function ProductionFulfillmentPage({
               </label>
               <button
                 type="submit"
-                className={buttonStyles({
-                  className: actionableTasks.length === 0 || activePickList.status === "DRAFT" ? "opacity-50" : "",
+                  className={buttonStyles({
+                  className: tasksClaimedByCurrent.length === 0 || activePickList.status === "DRAFT" ? "opacity-50" : "",
                 })}
-                disabled={actionableTasks.length === 0 || activePickList.status === "DRAFT"}
+                disabled={tasksClaimedByCurrent.length === 0 || activePickList.status === "DRAFT"}
               >
-                Confirmar surtido
+                {tasksClaimedByCurrent.length === 0 ? (tasksClaimedByOther ? "Tareas tomadas por otro operador" : "Toma las tareas para continuar") : "Confirmar surtido"}
               </button>
             </div>
           </form>

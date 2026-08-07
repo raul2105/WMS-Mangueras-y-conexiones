@@ -177,7 +177,7 @@ export function NewOrderForm({
         </Badge>
       </div>
       <p className="mt-1 text-[var(--text-secondary)]">
-        {commercialPromise.warehouseCode} · Disponible ahora: <span className="font-semibold text-[var(--text-primary)]" data-testid="commercial-promise-available-qty">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span>
+        {commercialPromise.warehouseCode} · Solicitado: <span className="font-semibold text-[var(--text-primary)]" data-testid="commercial-promise-requested-qty">{commercialPromise.requestedQuantity.toLocaleString("es-MX")}</span> · Disponible al verificar: <span className="font-semibold text-[var(--text-primary)]" data-testid="commercial-promise-available-qty">{commercialPromise.availableQuantity.toLocaleString("es-MX")}</span>{commercialPromise.reservedQuantity !== undefined ? <> · Reservado: <span className="font-semibold text-[var(--text-primary)]" data-testid="commercial-promise-reserved-qty">{commercialPromise.reservedQuantity.toLocaleString("es-MX")}</span></> : null}
       </p>
       {commercialPromise.status === "stale" ? (
         <p className="mt-1 text-xs text-[var(--status-warning-text)]">

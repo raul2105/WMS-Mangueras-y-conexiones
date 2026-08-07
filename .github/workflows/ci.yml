@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'codex/**' ]
   pull_request:
     branches: [ main, develop ]
   schedule:
@@ -65,6 +65,14 @@ jobs:
       WMS_KAN128_PRODUCT_SKU: DEV-ASM-HOSE-DN10-R2AT
       WMS_KAN128_WAREHOUSE_CODE: WH-02
       WMS_KAN128_ORDER_CODE: PI-2026-0010
+      WMS_E2E_SYSTEM_ADMIN_EMAIL: ${{ secrets.WMS_E2E_SYSTEM_ADMIN_EMAIL }}
+      WMS_E2E_SYSTEM_ADMIN_PASSWORD: ${{ secrets.WMS_E2E_SYSTEM_ADMIN_PASSWORD }}
+      WMS_E2E_MANAGER_EMAIL: ${{ secrets.WMS_E2E_MANAGER_EMAIL }}
+      WMS_E2E_MANAGER_PASSWORD: ${{ secrets.WMS_E2E_MANAGER_PASSWORD }}
+      WMS_E2E_WAREHOUSE_OPERATOR_EMAIL: ${{ secrets.WMS_E2E_WAREHOUSE_OPERATOR_EMAIL }}
+      WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD: ${{ secrets.WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD }}
+      WMS_E2E_SALES_EXECUTIVE_EMAIL: ${{ secrets.WMS_E2E_SALES_EXECUTIVE_EMAIL }}
+      WMS_E2E_SALES_EXECUTIVE_PASSWORD: ${{ secrets.WMS_E2E_SALES_EXECUTIVE_PASSWORD }}
 
     steps:
       - name: Checkout code
@@ -81,6 +89,14 @@ jobs:
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+
+      - name: Verify AWS E2E credentials are configured
+        shell: bash
+        run: |
+          test -n "$WMS_E2E_SALES_EXECUTIVE_EMAIL" || (echo "Missing WMS_E2E_SALES_EXECUTIVE_EMAIL" && exit 1)
+          test -n "$WMS_E2E_SALES_EXECUTIVE_PASSWORD" || (echo "Missing WMS_E2E_SALES_EXECUTIVE_PASSWORD" && exit 1)
+          test -n "$WMS_E2E_WAREHOUSE_OPERATOR_EMAIL" || (echo "Missing WMS_E2E_WAREHOUSE_OPERATOR_EMAIL" && exit 1)
+          test -n "$WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD" || (echo "Missing WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD" && exit 1)
 
       - name: Run AWS read-only KAN-128 evidence gate
         run: npx playwright test tests/e2e/kan128-aws-readonly-evidence.spec.ts --config=playwright.aws-readonly.config.ts --project=chromium
@@ -130,4 +146,3 @@ jobs:
 
       - name: Run staging Mobile PWA smoke tests
         run: npm run smoke:published
-

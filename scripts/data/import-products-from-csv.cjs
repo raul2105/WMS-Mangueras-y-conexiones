@@ -33,7 +33,7 @@ function usage() {
     "  - attributes must be a JSON object when provided, and cannot be mixed with attr_* columns",
     "  - referenceCode can be used for scanning/labeling (optional)",
     "  - imageUrl stores a reference image URL (optional)",
-    "  - Import is idempotent: products upsert by sku; inventory is replaced per sku.",
+    "  - Import is idempotent: products upsert by sku; inventory changes are additive/reconciled only for locations present in the file.",
   ].join("\n");
 }
 
@@ -583,17 +583,9 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
       existingByLocation.delete(locationId);
     }
 
-    for (const leftover of existingByLocation.values()) {
-      if (leftover.quantity !== 0) {
-        await adjustInventoryWithMovement(prismaToUse, {
-          productId: product.id,
-          locationId: leftover.locationId,
-          delta: -leftover.quantity,
-          reason: "Import CSV cleanup",
-        });
-        inventoryRowsUpdated++;
-      }
-    }
+    // Locations omitted from the file are intentionally preserved. A catalog
+    // import must never zero live AWS inventory merely because a source file
+    // is partial; explicit stock corrections use the inventory adjustment flow.
 
     upsertedProducts++;
   }

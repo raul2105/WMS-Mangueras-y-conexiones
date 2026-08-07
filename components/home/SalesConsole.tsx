@@ -59,7 +59,7 @@ function getNextAction(flowStage: string): string {
     case "en_surtido":
       return "Seguimiento surtido";
     case "preparar_entrega":
-      return "Separar para entrega";
+      return "Preparar para entrega";
     case "listo_entrega":
       return "Coordinar entrega";
     case "entregado":

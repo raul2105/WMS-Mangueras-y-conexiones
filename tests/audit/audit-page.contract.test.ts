@@ -13,6 +13,8 @@ describe("audit page narrative contract", () => {
     expect(content).toContain("describeAuditEvent");
     expect(content).toContain("registró una recepción de inventario");
     expect(content).toContain("confirmó surtido directo");
+    expect(content).toContain("completó el ensamble");
+    expect(content).toContain("preparado para entrega");
     expect(content).toContain("Actor:");
   });
 });

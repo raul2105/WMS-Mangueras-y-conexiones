@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { AdminHomeContent } from '@/components/home/AdminHomeContent';
 import { AdminHomeSkeleton } from '@/components/home/AdminHomeSkeleton';
 import { listUsers } from '@/lib/users/admin-service';
+import { getFulfillmentDashboardSnapshot } from '@/lib/dashboard/fulfillment-dashboard';
 import prisma from '@/lib/prisma';
 
 export default async function AdminHomePage() {
@@ -14,7 +15,7 @@ export default async function AdminHomePage() {
   }
 
   // Fetch real data
-  const [usersResult, traceCount, auditPendingCountResult, recentAudits] = await Promise.all([
+  const [usersResult, traceCount, auditPendingCountResult, recentAudits, fulfillmentSnapshot] = await Promise.all([
     listUsers({ isActive: "active", pageSize: 1 }),
     prisma.traceRecord.count(),
     prisma.auditLog.count(),
@@ -23,6 +24,7 @@ export default async function AdminHomePage() {
       take: 5,
       select: { id: true, action: true, actor: true, createdAt: true, entityType: true, entityId: true }
     }),
+    getFulfillmentDashboardSnapshot({ role: "SYSTEM_ADMIN", staleHours: 4 }),
   ]);
 
   const activeUsersCount = usersResult.total;
@@ -38,6 +40,7 @@ export default async function AdminHomePage() {
           auditTotalCount={auditTotalCount}
           tracesRecentCount={tracesRecentCount}
           recentAudits={recentAudits}
+          operationalMetrics={fulfillmentSnapshot.kpis.operationalMetrics}
         />
       </Suspense>
     </div>

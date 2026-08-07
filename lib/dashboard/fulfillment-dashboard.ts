@@ -37,8 +37,109 @@ export type FulfillmentKpiSet = {
   dueToday: number;
   activeDirectPicks: number;
   openLinkedAssembly: number;
-  relevantInboundPurchaseOrders: number;
+  inboundPurchaseOrders: number;
+  operationalMetrics: FulfillmentOperationalMetrics;
 };
+
+export type FulfillmentOperationalMetrics = {
+  periodDays: number;
+  fillRatePercent: number | null;
+  pickAccuracyPercent: number | null;
+  averagePickCycleHours: number | null;
+  averageAssemblyCycleHours: number | null;
+  measuredPickTasks: number;
+  measuredPickCycles: number;
+  measuredAssemblyCycles: number;
+};
+
+type FulfillmentMetricPickTask = {
+  requestedQty: number;
+  pickedQty: number;
+  shortQty: number;
+  status: string;
+};
+
+type WarehouseActivitySource = {
+  warehouseClaimedAt?: Date | null;
+  pulledAt?: Date | null;
+  lines: Array<{ lineKind?: string; pickTasks: Array<{ claimedAt?: Date | null; lastActivityAt?: Date | null }> }>;
+};
+
+type FulfillmentMetricCycle = {
+  startAt: Date | null;
+  endAt: Date | null;
+};
+
+const OPERATIONAL_METRICS_WINDOW_DAYS = 30;
+
+function averageDurationHours(cycles: FulfillmentMetricCycle[]) {
+  const durations = cycles
+    .filter((cycle): cycle is { startAt: Date; endAt: Date } => cycle.startAt instanceof Date && cycle.endAt instanceof Date && cycle.endAt.getTime() >= cycle.startAt.getTime())
+    .map((cycle) => (cycle.endAt.getTime() - cycle.startAt.getTime()) / 3_600_000);
+
+  if (durations.length === 0) return null;
+  return Math.round((durations.reduce((sum, value) => sum + value, 0) / durations.length) * 10) / 10;
+}
+
+export function getWarehouseActivityStartAt(source: WarehouseActivitySource) {
+  const taskActivity = source.lines
+    .flatMap((line) => line.pickTasks.flatMap((task) => [task.claimedAt, task.lastActivityAt]))
+    .filter((value): value is Date => value instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+  return [source.warehouseClaimedAt, taskActivity]
+    .filter((value): value is Date => value instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+}
+
+export function getDirectPickActivityStartAt(source: WarehouseActivitySource) {
+  const productLines = source.lines.filter((line) => line.lineKind === "PRODUCT");
+  const taskActivity = productLines
+    .flatMap((line) => line.pickTasks.flatMap((task) => [task.claimedAt, task.lastActivityAt]))
+    .filter((value): value is Date => value instanceof Date)
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+  if (taskActivity) return taskActivity;
+
+  // Legacy direct-only orders may not have task timestamps.  Never use the
+  // order-level warehouse claim for mixed orders because assembly confirmation
+  // also writes it; omitting the cycle is safer than reporting assembly time
+  // as direct picking time.
+  const hasAssemblyLines = source.lines.some((line) => line.lineKind === "CONFIGURED_ASSEMBLY");
+  return hasAssemblyLines ? null : source.warehouseClaimedAt ?? source.pulledAt ?? null;
+}
+
+function getWarehouseOwnershipId(order: {
+  warehouseAssigneeUserId: string | null;
+  warehouseClaimedByUserId: string | null;
+  assignedToUserId: string | null;
+  pulledAt: Date | null;
+}) {
+  return order.warehouseAssigneeUserId
+    ?? order.warehouseClaimedByUserId
+    ?? (order.assignedToUserId && order.pulledAt ? order.assignedToUserId : null);
+}
+
+export function summarizeFulfillmentMetrics(input: {
+  pickTasks: FulfillmentMetricPickTask[];
+  pickCycles: FulfillmentMetricCycle[];
+  assemblyCycles: FulfillmentMetricCycle[];
+  periodDays?: number;
+}): FulfillmentOperationalMetrics {
+  const measuredPickTasks = input.pickTasks.filter((task) => ["COMPLETED", "PARTIAL"].includes(task.status));
+  const requestedQty = measuredPickTasks.reduce((sum, task) => sum + Math.max(0, task.requestedQty), 0);
+  const pickedQty = measuredPickTasks.reduce((sum, task) => sum + Math.max(0, Math.min(task.pickedQty, task.requestedQty)), 0);
+  const exactTasks = measuredPickTasks.filter((task) => task.shortQty <= 0);
+
+  return {
+    periodDays: input.periodDays ?? OPERATIONAL_METRICS_WINDOW_DAYS,
+    fillRatePercent: requestedQty > 0 ? Math.round(Math.min(100, (pickedQty / requestedQty) * 100) * 10) / 10 : null,
+    pickAccuracyPercent: measuredPickTasks.length > 0 ? Math.round((exactTasks.length / measuredPickTasks.length) * 1000) / 10 : null,
+    averagePickCycleHours: averageDurationHours(input.pickCycles),
+    averageAssemblyCycleHours: averageDurationHours(input.assemblyCycles),
+    measuredPickTasks: measuredPickTasks.length,
+    measuredPickCycles: input.pickCycles.filter((cycle) => cycle.startAt instanceof Date && cycle.endAt instanceof Date).length,
+    measuredAssemblyCycles: input.assemblyCycles.filter((cycle) => cycle.startAt instanceof Date && cycle.endAt instanceof Date).length,
+  };
+}
 
 export type FulfillmentQueueRow = {
   orderId: string;
@@ -267,13 +368,14 @@ function toDateKey(date: Date | null) {
 const loadFulfillmentDashboardSnapshot = unstable_cache(
   async (nowIso: string, staleHours: number, role: DashboardRole): Promise<FulfillmentDashboardSnapshot> => {
     const now = new Date(nowIso);
+    const metricWindowStart = new Date(now.getTime() - OPERATIONAL_METRICS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
     const orderWhere: Prisma.SalesInternalOrderWhereInput = {
       status: "CONFIRMADA",
       deliveredToCustomerAt: null,
     };
 
-    const [orders, inboundPoCount] = await Promise.all([
+    const [orders, inboundPoCount, recentOrderMetrics, recentAssemblyCycles] = await Promise.all([
       prisma.salesInternalOrder.findMany({
         where: orderWhere,
         select: {
@@ -284,6 +386,9 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
           dueDate: true,
           updatedAt: true,
           assignedToUserId: true,
+          warehouseAssignmentMode: true,
+          warehouseAssigneeUserId: true,
+          warehouseClaimedByUserId: true,
           pulledAt: true,
           warehouse: { select: { code: true, name: true } },
           lines: { select: { id: true, lineKind: true } },
@@ -303,6 +408,47 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         where: {
           status: { in: ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] },
         },
+      }),
+      prisma.salesInternalOrder.findMany({
+        where: {
+          status: { not: "BORRADOR" },
+          OR: [
+            { preparedForDeliveryAt: { gte: metricWindowStart, lte: now } },
+            {
+              lines: {
+                some: {
+                  lineKind: "PRODUCT",
+                  pickTasks: {
+                    some: { status: { in: ["COMPLETED", "PARTIAL"] }, updatedAt: { gte: metricWindowStart, lte: now } },
+                  },
+                },
+              },
+            },
+          ],
+        },
+        select: {
+          warehouseClaimedAt: true,
+          pulledAt: true,
+          preparedForDeliveryAt: true,
+          lines: {
+            select: {
+              lineKind: true,
+              pickTasks: {
+                where: {
+                  status: { in: ["COMPLETED", "PARTIAL"] },
+                  updatedAt: { gte: metricWindowStart, lte: now },
+                },
+                select: { requestedQty: true, pickedQty: true, shortQty: true, status: true, claimedAt: true, lastActivityAt: true },
+              },
+            },
+          },
+        },
+      }),
+      prisma.assemblyWorkOrder.findMany({
+        where: {
+          closedAt: { gte: metricWindowStart, lte: now },
+        },
+        select: { createdAt: true, closedAt: true },
       }),
     ]);
 
@@ -352,7 +498,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       const signals = evaluateFulfillmentSignals({
         dueDate: order.dueDate,
         orderUpdatedAt: order.updatedAt,
-        assignedToUserId: order.assignedToUserId,
+        assignedToUserId: getWarehouseOwnershipId(order),
         hasProductLines,
         hasAssemblyLines: assemblyLines.length > 0,
         latestPickStatus: latestPick?.status ?? null,
@@ -393,7 +539,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       const presetEvaluation = evaluateOperationalPresets(
         {
           dueDate: order.dueDate,
-          assignedToUserId: order.assignedToUserId,
+          assignedToUserId: getWarehouseOwnershipId(order),
           flowStage: flowNarrative.flowStage,
           isPartial: signals.isPartial,
           isUnreleased: signals.isUnreleased,
@@ -485,7 +631,7 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
         evaluateFulfillmentSignals({
           dueDate: order.dueDate,
           orderUpdatedAt: order.updatedAt,
-          assignedToUserId: order.assignedToUserId,
+          assignedToUserId: getWarehouseOwnershipId(order),
           hasProductLines,
           hasAssemblyLines: assemblyLines.length > 0,
           latestPickStatus: latestPick?.status ?? null,
@@ -505,6 +651,19 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
     }).length;
 
     const openLinkedAssembly = linkedProduction.filter((row) => OPEN_ASSEMBLY_STATUSES.includes(row.status)).length;
+
+    const directPickCycles = recentOrderMetrics.flatMap((order) => {
+      const hasProductPickActivity = order.lines.some((line) => line.lineKind === "PRODUCT" && line.pickTasks.length > 0);
+      const startAt = getDirectPickActivityStartAt(order);
+      return hasProductPickActivity && startAt
+        ? [{ startAt, endAt: order.preparedForDeliveryAt }]
+        : [];
+    });
+    const operationalMetrics = summarizeFulfillmentMetrics({
+      pickTasks: recentOrderMetrics.flatMap((order) => order.lines.flatMap((line) => line.pickTasks)),
+      pickCycles: directPickCycles,
+      assemblyCycles: recentAssemblyCycles.map((workOrder) => ({ startAt: workOrder.createdAt, endAt: workOrder.closedAt })),
+    });
 
     const alerts: FulfillmentAlert[] = [
       {
@@ -598,7 +757,8 @@ const loadFulfillmentDashboardSnapshot = unstable_cache(
       dueToday: Array.from(signalMap.values()).filter((row) => row.isDueToday).length,
       activeDirectPicks,
       openLinkedAssembly,
-      relevantInboundPurchaseOrders: inboundPoCount,
+      inboundPurchaseOrders: inboundPoCount,
+      operationalMetrics,
     };
 
     const queue = role === "SYSTEM_ADMIN" ? queueRows.slice(0, 25) : queueRows.slice(0, 50);

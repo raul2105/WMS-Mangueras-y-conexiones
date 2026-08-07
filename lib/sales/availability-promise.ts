@@ -36,6 +36,8 @@ export interface CommercialAvailabilityPromise {
   requestedQuantity: number;
   /** Available quantity at check time */
   availableQuantity: number;
+  /** Quantity already reserved at check time, when available from the source */
+  reservedQuantity?: number;
   /** ISO timestamp when availability was checked */
   checkedAt: string;
   /** Source of the promise context */
@@ -137,6 +139,7 @@ const commercialPromiseSchema = z.object({
   warehouseName: z.string().min(1),
   requestedQuantity: z.coerce.number().positive(),
   availableQuantity: z.coerce.number().nonnegative(),
+  reservedQuantity: z.coerce.number().nonnegative().optional(),
   checkedAt: z.string().datetime(),
   source: z.enum(["catalog", "availability", "equivalences", "manual", "substitute"]),
   isSubstitute: z.boolean().default(false),
@@ -159,6 +162,7 @@ export function buildCommercialPromiseFromSearchParams(searchParams: URLSearchPa
       warehouseName: searchParams.get("promiseWarehouseName"),
       requestedQuantity: searchParams.get("promiseRequestedQty"),
       availableQuantity: searchParams.get("promiseAvailableQty"),
+      reservedQuantity: optionalParam("promiseReservedQty"),
       checkedAt: searchParams.get("promiseCheckedAt"),
       source: searchParams.get("promiseSource"),
       // URLSearchParams returns strings. Do not use z.coerce.boolean here:
@@ -200,6 +204,7 @@ export function buildPromiseSearchParams(promise: CommercialAvailabilityPromise)
   params.set("promiseWarehouseName", promise.warehouseName);
   params.set("promiseRequestedQty", String(promise.requestedQuantity));
   params.set("promiseAvailableQty", String(promise.availableQuantity));
+  if (promise.reservedQuantity !== undefined) params.set("promiseReservedQty", String(promise.reservedQuantity));
   params.set("promiseCheckedAt", promise.checkedAt);
   params.set("promiseSource", promise.source);
   params.set("promiseIsSubstitute", String(promise.isSubstitute));

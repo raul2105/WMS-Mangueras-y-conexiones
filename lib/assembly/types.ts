@@ -15,6 +15,8 @@ export type AssemblyConfigInput = {
   assemblyQuantity: number;
   sourceDocumentRef?: string | null;
   notes?: string | null;
+  /** Required when an active WARN compatibility rule was reviewed by the operator. */
+  compatibilityReviewApproved?: boolean;
 };
 
 export type AssemblyRequirement = {

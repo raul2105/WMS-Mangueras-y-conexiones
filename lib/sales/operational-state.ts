@@ -89,9 +89,9 @@ export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause
   if (signals.needsDeliveryPreparation) {
     return {
       key: "ready_to_prepare",
-      label: "Separar para entrega",
-      description: "Surtido y ensamble terminados; falta registrar el área física de entrega.",
-      nextAction: "Registrar área de entrega",
+      label: "Preparar para entrega",
+      description: "Surtido y ensamble terminados; falta confirmar la preparación física.",
+      nextAction: "Confirmar preparado para entrega",
       variant: "accent",
     };
   }

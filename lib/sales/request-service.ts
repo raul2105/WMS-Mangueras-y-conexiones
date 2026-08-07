@@ -6,6 +6,9 @@ import { InventoryService, InventoryServiceError } from "@/lib/inventory-service
 import { startPerf } from "@/lib/perf";
 import { getAssemblyQuantityPolicy, getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 import { getNextSalesInternalOrderCode, getNextSalesPickListCode } from "@/lib/sales/internal-orders";
+import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
+import { calculateReservationDeltas, type ReservationDelta } from "@/lib/sales/reservation-reconciliation";
+import { buildDesiredReservedByPair } from "@/lib/reservation-policy";
 
 type Tx = Prisma.TransactionClient;
 
@@ -34,6 +37,7 @@ type AssemblyLineInput = {
   assemblyQuantity: number;
   sourceDocumentRef?: string | null;
   notes?: string | null;
+  compatibilityReviewApproved?: boolean;
 };
 
 export type CreateSalesRequestDraftArgs = {
@@ -99,6 +103,251 @@ function getInventoryService(prisma: PrismaClient) {
     scoped[inventoryServiceSymbol] = new InventoryService(prisma);
   }
   return scoped[inventoryServiceSymbol]!;
+}
+
+const RESERVATION_PICK_LIST_STATUSES = ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] as const;
+
+type ReservationReconciliationMode = "DRY_RUN" | "APPLY";
+
+export type SalesRequestReservationReconciliationResult = {
+  orderId: string;
+  orderCode: string;
+  mode: ReservationReconciliationMode;
+  alreadyConsistent: boolean;
+  repaired: boolean;
+  deltas: ReservationDelta[];
+  movementIds: string[];
+  auditId: string | null;
+};
+
+async function loadSalesRequestReservationState(tx: Tx, orderId: string) {
+  const order = await tx.salesInternalOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      code: true,
+      pickLists: {
+        where: { status: { in: [...RESERVATION_PICK_LIST_STATUSES] } },
+        select: {
+          tasks: {
+            select: {
+              reservedQty: true,
+              pickedQty: true,
+              shortQty: true,
+              sourceLocationId: true,
+              orderLine: { select: { productId: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+  }
+
+  const currentOrderRequirements = order.pickLists.flatMap((pickList) =>
+    pickList.tasks.flatMap((task) =>
+      task.orderLine.productId
+        ? [{
+            productId: task.orderLine.productId,
+            locationId: task.sourceLocationId,
+            reservedQty: task.reservedQty,
+            pickedQty: task.pickedQty,
+            shortQty: task.shortQty,
+          }]
+        : [],
+    ),
+  );
+  const allSalesTasks = await tx.salesInternalOrderPickTask.findMany({
+    where: {
+      pickList: { status: { in: [...RESERVATION_PICK_LIST_STATUSES] } },
+      orderLine: { productId: { not: null } },
+    },
+    select: {
+      reservedQty: true,
+      pickedQty: true,
+      shortQty: true,
+      sourceLocationId: true,
+      orderLine: { select: { orderId: true, productId: true } },
+    },
+  });
+  const allSalesRequirements = allSalesTasks.flatMap((task) =>
+    task.orderLine.productId
+      ? [{
+          productId: task.orderLine.productId,
+          locationId: task.sourceLocationId,
+          reservedQty: task.reservedQty,
+          pickedQty: task.pickedQty,
+          shortQty: task.shortQty,
+        }]
+      : [],
+  );
+  const requestedPairKeys = new Set(currentOrderRequirements.map((row) => `${row.productId}:${row.locationId}`));
+  const scopedSalesRequirements = allSalesRequirements.filter((row) => requestedPairKeys.has(`${row.productId}:${row.locationId}`));
+  const scope = Array.from(new Map(scopedSalesRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values())
+    .map(({ productId, locationId }) => ({ productId, locationId }));
+  // An empty scope means this order has no active direct-pick pairs (for
+  // example an assembly-only order). Do not pass that empty array to the
+  // helper, whose default semantics intentionally mean "all open orders".
+  const productionReservations = scope.length > 0
+    ? await buildDesiredReservedByPair(tx, { scope })
+    : new Map<string, number>();
+  const aggregateRequirements = [
+    ...scopedSalesRequirements,
+    ...Array.from(productionReservations, ([pair, reservedQty]) => {
+      const [productId, locationId] = pair.split(":");
+      return { productId, locationId, reservedQty, pickedQty: 0, shortQty: 0 };
+    }),
+  ];
+  const inventoryKeys = Array.from(
+    new Map(aggregateRequirements.map((row) => [`${row.productId}:${row.locationId}`, row])).values(),
+  );
+  const inventory = inventoryKeys.length
+    ? await tx.inventory.findMany({
+        where: {
+          OR: inventoryKeys.map((row) => ({ productId: row.productId, locationId: row.locationId })),
+        },
+        select: { productId: true, locationId: true, reserved: true },
+      })
+    : [];
+
+  return {
+    orderId: order.id,
+    orderCode: order.code,
+    deltas: calculateReservationDeltas(aggregateRequirements, inventory),
+    otherExpectedByKey: new Map(
+      aggregateRequirements.map((row) => `${row.productId}:${row.locationId}`)
+        .map((pair) => {
+          const [productId, locationId] = pair.split(":");
+          const aggregateExpected = aggregateRequirements
+            .filter((row) => row.productId === productId && row.locationId === locationId)
+            .reduce((sum, row) => sum + Math.max(0, row.reservedQty - row.pickedQty - row.shortQty), 0);
+          const currentExpected = currentOrderRequirements
+            .filter((row) => row.productId === productId && row.locationId === locationId)
+            .reduce((sum, row) => sum + Math.max(0, row.reservedQty - row.pickedQty - row.shortQty), 0);
+          return [pair, Math.max(0, aggregateExpected - currentExpected)] as const;
+        }),
+    ),
+  };
+}
+
+function reservationMismatches(deltas: ReservationDelta[]) {
+  // Hose quantities can be fractional; ignore IEEE-754 noise while retaining
+  // real reservation differences.
+  const epsilon = 1e-9;
+  return deltas.filter((row) => Math.abs(row.delta) > epsilon);
+}
+
+async function assertSalesRequestReservationConsistency(tx: Tx, orderId: string) {
+  const state = await loadSalesRequestReservationState(tx, orderId);
+  const mismatches = reservationMismatches(state.deltas);
+  if (mismatches.length > 0) {
+    throw new InventoryServiceError(
+      "RESERVATION_MISMATCH",
+      `La reserva real no coincide con las reservas activas (${mismatches.map((row) => `${row.productId}/${row.locationId}: esperada ${row.expected}, real ${row.actual}`).join(", ")})`,
+    );
+  }
+  return state;
+}
+
+export async function reconcileSalesRequestReservations(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    mode: ReservationReconciliationMode;
+    actorUserId?: string | null;
+    reason: string;
+  },
+): Promise<SalesRequestReservationReconciliationResult> {
+  const reason = args.reason.trim();
+  if (!reason) {
+    throw new InventoryServiceError("REASON_REQUIRED", "El motivo de reconciliación es obligatorio");
+  }
+  if (args.mode === "APPLY" && !args.actorUserId) {
+    throw new InventoryServiceError("ACTOR_REQUIRED", "La aplicación de una reconciliación requiere un usuario autenticado");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const before = await loadSalesRequestReservationState(tx, args.orderId);
+    const mismatches = reservationMismatches(before.deltas);
+    if (args.mode === "DRY_RUN" || mismatches.length === 0) {
+      return {
+        orderId: before.orderId,
+        orderCode: before.orderCode,
+        mode: args.mode,
+        alreadyConsistent: mismatches.length === 0,
+        repaired: false,
+        deltas: before.deltas,
+        movementIds: [],
+        auditId: null,
+      };
+    }
+
+    const overReserved = mismatches.filter((row) => row.delta < 0);
+    if (overReserved.length > 0) {
+      throw new InventoryServiceError(
+        "RESERVATION_OVERALLOCATED",
+        "La reserva real excede la requerida; no se libera automáticamente para evitar afectar otra operación",
+      );
+    }
+    const ambiguous = mismatches.filter((row) => row.delta > 0 && (before.otherExpectedByKey.get(`${row.productId}:${row.locationId}`) ?? 0) > 0);
+    if (ambiguous.length > 0) {
+      throw new InventoryServiceError(
+        "RESERVATION_SCOPE_AMBIGUOUS",
+        "No se puede reparar automáticamente una reserva compartida por otros pedidos u órdenes de producción",
+      );
+    }
+
+    const inventoryService = getInventoryService(prisma);
+    const movementIds: string[] = [];
+    for (const row of mismatches) {
+      const result = await inventoryService.reserveStock(row.productId, row.locationId, row.delta, {
+        tx,
+        reference: before.orderCode,
+        notes: reason,
+        actor: "reservation-reconciliation",
+        actorUserId: args.actorUserId ?? null,
+        operatorUserId: args.actorUserId ?? null,
+        source: "sales/reservation-reconciliation",
+        documentType: "SALES_INTERNAL_ORDER",
+        documentId: before.orderId,
+      });
+      if (result.movementId) movementIds.push(result.movementId);
+    }
+
+    const after = await loadSalesRequestReservationState(tx, args.orderId);
+    const remaining = reservationMismatches(after.deltas);
+    if (remaining.length > 0) {
+      throw new InventoryServiceError("RESERVATION_RECONCILIATION_FAILED", "La reconciliación no dejó las reservas consistentes");
+    }
+
+    const audit = await tx.auditLog.create({
+      data: {
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: before.orderId,
+        action: "RECONCILE_ORDER_RESERVATIONS",
+        actor: "reservation-reconciliation",
+        actorUserId: args.actorUserId ?? null,
+        source: "sales/reservation-reconciliation",
+        before: JSON.stringify({ deltas: before.deltas, reason }),
+        after: JSON.stringify({ deltas: after.deltas, movementIds }),
+      },
+      select: { id: true },
+    });
+
+    return {
+      orderId: before.orderId,
+      orderCode: before.orderCode,
+      mode: args.mode,
+      alreadyConsistent: false,
+      repaired: true,
+      deltas: after.deltas,
+      movementIds,
+      auditId: audit.id,
+    };
+  });
 }
 
 async function ensureEditableOrder(tx: Tx, orderId: string) {
@@ -363,6 +612,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
       id: true,
       code: true,
       warehouseId: true,
+      warehouseAssignmentMode: true,
       lines: {
         where: {
           lineKind: "PRODUCT",
@@ -459,6 +709,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
         pickedQty: 0,
         shortQty: 0,
         status: "PENDING",
+        assignmentMode: order.warehouseAssignmentMode === "MANUAL" ? "MANAGER_REQUIRED" : "AUTO_STANDARD",
       },
     });
     sequence += 1;
@@ -746,6 +997,7 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
       assemblyQuantity: input.assemblyQuantity,
       sourceDocumentRef: input.sourceDocumentRef ?? null,
       notes: input.notes ?? null,
+      compatibilityReviewApproved: input.compatibilityReviewApproved,
     });
 
     await tx.productionOrder.update({
@@ -1129,6 +1381,8 @@ export async function markSalesRequestPreparedForDelivery(
         warehouseId: true,
         assignedToUserId: true,
         pulledAt: true,
+        warehouseAssigneeUserId: true,
+        warehouseClaimedByUserId: true,
         preparedForDeliveryAt: true,
         lines: { select: { id: true, lineKind: true } },
         pickLists: {
@@ -1145,11 +1399,12 @@ export async function markSalesRequestPreparedForDelivery(
     });
 
     if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    await assertSalesRequestReservationConsistency(tx, order.id);
     if (order.status !== "CONFIRMADA" || order.deliveredToCustomerAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no está disponible para preparar entrega");
     }
-    if (!order.assignedToUserId || !order.pulledAt) {
-      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido debe estar tomado y asignado antes de prepararlo");
+    if (!hasWarehouseFulfillmentOwnership(order)) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido debe tener responsable físico de almacén antes de prepararlo");
     }
     if (!order.warehouseId) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no tiene almacén asignado");
@@ -1210,8 +1465,11 @@ export async function markSalesRequestPreparedForDelivery(
       where: {
         id: order.id,
         status: "CONFIRMADA",
-        assignedToUserId: { not: null },
-        pulledAt: { not: null },
+        OR: [
+          { warehouseAssigneeUserId: { not: null } },
+          { warehouseClaimedByUserId: { not: null } },
+          { assignedToUserId: { not: null }, pulledAt: { not: null } },
+        ],
         deliveredToCustomerAt: null,
         preparedForDeliveryAt: null,
       },
@@ -2149,12 +2407,18 @@ export async function releaseSalesRequestPickList(prisma: PrismaClient, orderId:
       throw new InventoryServiceError("PICKLIST_NOT_FOUND", "No hay una lista de surtido directa en borrador");
     }
 
+    await assertSalesRequestReservationConsistency(tx, order.id);
+
     await tx.salesInternalOrderPickList.update({
       where: { id: pickList.id },
       data: {
         status: "RELEASED",
         releasedAt: new Date(),
       },
+    });
+    await tx.salesInternalOrder.update({
+      where: { id: order.id },
+      data: { warehouseLastActivityAt: new Date() },
     });
 
     await createAuditLogSafeWithDb({
@@ -2168,17 +2432,290 @@ export async function releaseSalesRequestPickList(prisma: PrismaClient, orderId:
   });
 }
 
+export async function claimSalesRequestPickTasks(
+  prisma: PrismaClient,
+  args: { orderId: string; taskIds: string[]; claimedByUserId: string },
+) {
+  const taskIds = Array.from(new Set(args.taskIds.map((id) => id.trim()).filter(Boolean)));
+  if (taskIds.length === 0) {
+    throw new InventoryServiceError("TASK_NOT_FOUND", "Selecciona al menos una tarea de surtido");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const tasks = await tx.salesInternalOrderPickTask.findMany({
+      where: {
+        id: { in: taskIds },
+        orderLine: { orderId: args.orderId },
+      },
+      select: {
+        id: true,
+        status: true,
+        assignmentMode: true,
+        assignedToUserId: true,
+        claimedByUserId: true,
+        pickListId: true,
+        pickList: { select: { status: true, code: true } },
+      },
+    });
+
+    if (tasks.length !== taskIds.length) {
+      throw new InventoryServiceError("TASK_NOT_FOUND", "Una o más tareas no pertenecen al pedido");
+    }
+    for (const task of tasks) {
+      if (["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) {
+        throw new InventoryServiceError("TASK_CLOSED", "Una o más tareas ya están cerradas");
+      }
+      if (task.pickList.status === "DRAFT") {
+        throw new InventoryServiceError("INVALID_ORDER_STATE", "Libera la lista de surtido antes de tomar tareas");
+      }
+      if (task.assignmentMode === "MANAGER_REQUIRED" && task.assignedToUserId !== args.claimedByUserId) {
+        throw new InventoryServiceError("TASK_NOT_ASSIGNED", "Esta tarea requiere asignación del manager");
+      }
+      if (task.claimedByUserId && task.claimedByUserId !== args.claimedByUserId) {
+        throw new InventoryServiceError("TASK_ALREADY_CLAIMED", "Una o más tareas ya fueron tomadas por otro operador");
+      }
+    }
+
+    const now = new Date();
+    const claimed = await tx.salesInternalOrderPickTask.updateMany({
+      where: {
+        id: { in: taskIds },
+        claimedByUserId: null,
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+        OR: [
+          { assignmentMode: "AUTO_STANDARD" },
+          { assignmentMode: "MANAGER_REQUIRED", assignedToUserId: args.claimedByUserId },
+        ],
+      },
+      data: {
+        claimedByUserId: args.claimedByUserId,
+        claimedAt: now,
+        lastActivityAt: now,
+      },
+    });
+    if (claimed.count !== taskIds.length) {
+      throw new InventoryServiceError("TASK_ALREADY_CLAIMED", "Una o más tareas fueron tomadas mientras confirmabas");
+    }
+
+    const pickListIds = Array.from(new Set(tasks.map((task) => task.pickListId)));
+    await tx.salesInternalOrderPickList.updateMany({
+      where: { id: { in: pickListIds }, status: "RELEASED" },
+      data: { status: "IN_PROGRESS" },
+    });
+    await tx.salesInternalOrder.update({
+      where: { id: args.orderId },
+      data: {
+        warehouseClaimedByUserId: args.claimedByUserId,
+        warehouseClaimedAt: now,
+        warehouseLastActivityAt: now,
+      },
+    });
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: args.orderId,
+      action: "CLAIM_WAREHOUSE_PICK_TASKS",
+      actor: "system",
+      actorUserId: args.claimedByUserId,
+      source: "sales/request-service",
+      after: { taskIds, pickListIds },
+    }, tx);
+
+    return { claimedCount: claimed.count };
+  });
+}
+
+export async function assignSalesRequestPickTasks(
+  prisma: PrismaClient,
+  args: { orderId: string; taskIds: string[]; assignedToUserId: string; assignedByUserId: string },
+) {
+  const taskIds = Array.from(new Set(args.taskIds.map((id) => id.trim()).filter(Boolean)));
+  if (taskIds.length === 0) {
+    throw new InventoryServiceError("TASK_NOT_FOUND", "Selecciona al menos una tarea de surtido");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const [order, assignee, tasks] = await Promise.all([
+      tx.salesInternalOrder.findUnique({
+        where: { id: args.orderId },
+        select: { id: true, code: true, status: true, warehouseAssigneeUserId: true },
+      }),
+      tx.user.findUnique({
+        where: { id: args.assignedToUserId },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          userRoles: {
+            where: { role: { code: "WAREHOUSE_OPERATOR", isActive: true } },
+            select: { roleId: true },
+          },
+        },
+      }),
+      tx.salesInternalOrderPickTask.findMany({
+        where: {
+          id: { in: taskIds },
+          orderLine: { orderId: args.orderId },
+        },
+        select: {
+          id: true,
+          status: true,
+          assignmentMode: true,
+          assignedToUserId: true,
+          claimedByUserId: true,
+          pickListId: true,
+          pickList: { select: { code: true } },
+        },
+      }),
+    ]);
+
+    if (!order) {
+      throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    }
+    if (order.status === "CANCELADA") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se pueden asignar tareas de un pedido cancelado");
+    }
+    if (!assignee || !assignee.isActive || assignee.userRoles.length === 0) {
+      throw new InventoryServiceError("INVALID_ASSIGNEE", "Solo un operador de almacén activo puede recibir tareas");
+    }
+    if (tasks.length !== taskIds.length) {
+      throw new InventoryServiceError("TASK_NOT_FOUND", "Una o más tareas no pertenecen al pedido");
+    }
+
+    for (const task of tasks) {
+      if (task.assignmentMode !== "MANAGER_REQUIRED") {
+        throw new InventoryServiceError("INVALID_ASSIGNMENT_MODE", "La tarea no requiere asignación manual del responsable");
+      }
+      if (["COMPLETED", "PARTIAL", "CANCELLED"].includes(task.status)) {
+        throw new InventoryServiceError("TASK_CLOSED", "Una o más tareas ya están cerradas");
+      }
+      if (task.claimedByUserId) {
+        throw new InventoryServiceError("TASK_ALREADY_CLAIMED", "No se puede reasignar una tarea que ya fue tomada");
+      }
+      if (task.assignedToUserId) {
+        throw new InventoryServiceError("TASK_ALREADY_ASSIGNED", "Una o más tareas ya tienen operador asignado");
+      }
+    }
+
+    const now = new Date();
+    const updated = await tx.salesInternalOrderPickTask.updateMany({
+      where: {
+        id: { in: taskIds },
+        assignedToUserId: null,
+        claimedByUserId: null,
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+        assignmentMode: "MANAGER_REQUIRED",
+      },
+      data: { assignedToUserId: assignee.id, lastActivityAt: now },
+    });
+    if (updated.count !== taskIds.length) {
+      throw new InventoryServiceError("TASK_ASSIGNMENT_CONFLICT", "Las tareas cambiaron mientras se asignaban");
+    }
+
+    await tx.salesInternalOrder.update({
+      where: { id: order.id },
+      data: {
+        warehouseAssigneeUserId: assignee.id,
+        warehouseAssignmentMode: "MANUAL",
+        warehouseLastActivityAt: now,
+      },
+    });
+
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "ASSIGN_WAREHOUSE_PICK_TASKS",
+      actor: "system",
+      actorUserId: args.assignedByUserId,
+      source: "sales/request-service",
+      before: {
+        warehouseAssigneeUserId: order.warehouseAssigneeUserId,
+        taskIds,
+      },
+      after: {
+        warehouseAssigneeUserId: assignee.id,
+        assigneeName: assignee.name,
+        taskIds,
+        pickListIds: Array.from(new Set(tasks.map((task) => task.pickListId))),
+      },
+    }, tx);
+
+    return { assignedCount: updated.count, assignedToUserId: assignee.id };
+  });
+}
+
+export async function requireManagerWarehouseAssignment(
+  prisma: PrismaClient,
+  args: { orderId: string; reason: string; actorUserId: string },
+) {
+  const reason = args.reason.trim();
+  if (!reason) throw new InventoryServiceError("INVALID_REASON", "El motivo de asignación manual es obligatorio");
+
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: { id: true, code: true, status: true },
+    });
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (order.status === "CANCELADA") throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede asignar un pedido cancelado");
+
+    const tasks = await tx.salesInternalOrderPickTask.findMany({
+      where: {
+        orderLine: { orderId: order.id },
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+      },
+      select: { id: true, assignedToUserId: true, claimedByUserId: true },
+    });
+    if (tasks.length === 0) throw new InventoryServiceError("TASK_NOT_FOUND", "El pedido no tiene tareas abiertas para asignar");
+    if (tasks.some((task) => task.assignedToUserId || task.claimedByUserId)) {
+      throw new InventoryServiceError("TASK_ALREADY_CLAIMED", "No se puede cambiar el modo después de asignar o tomar tareas");
+    }
+
+    const now = new Date();
+    const updated = await tx.salesInternalOrderPickTask.updateMany({
+      where: {
+        id: { in: tasks.map((task) => task.id) },
+        assignedToUserId: null,
+        claimedByUserId: null,
+        assignmentMode: "AUTO_STANDARD",
+        status: { notIn: ["COMPLETED", "PARTIAL", "CANCELLED"] },
+      },
+      data: { assignmentMode: "MANAGER_REQUIRED", lastActivityAt: now },
+    });
+    if (updated.count !== tasks.length) {
+      throw new InventoryServiceError("TASK_ASSIGNMENT_CONFLICT", "Las tareas cambiaron mientras se solicitaba la asignación manual");
+    }
+    await tx.salesInternalOrder.update({
+      where: { id: order.id },
+      data: { warehouseAssignmentMode: "MANUAL", warehouseAssigneeUserId: null, warehouseLastActivityAt: now },
+    });
+    await createAuditLogSafeWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "REQUIRE_MANAGER_WAREHOUSE_ASSIGNMENT",
+      actor: "system",
+      actorUserId: args.actorUserId,
+      source: "sales/request-service",
+      after: { taskCount: tasks.length, reason, warehouseAssignmentMode: "MANUAL" },
+    }, tx);
+    return { orderId: order.id, orderCode: order.code, taskCount: tasks.length };
+  });
+}
+
 export async function confirmSalesRequestPickTasksBatch(
   prisma: PrismaClient,
   args: {
     orderId: string;
     operatorName: string;
     operatorUserId?: string | null;
-    tasks: Array<{ taskId: string; pickedQty?: number | null; shortReason?: string | null }>;
+    tasks: Array<{ taskId: string; pickedQty?: number | null; shortReason?: string | null; scanRef?: string | null }>;
   }
 ) {
   const perf = startPerf("sales.confirm_pick_tasks_batch");
   const inventoryService = getInventoryService(prisma);
+
+  if (!args.operatorUserId) {
+    throw new InventoryServiceError("OPERATOR_REQUIRED", "Se requiere un operador autenticado para confirmar tareas");
+  }
 
   return prisma.$transaction(async (tx) => {
     const loadPerf = startPerf("sales.confirm_pick_tasks_batch.load_tasks");
@@ -2190,7 +2727,9 @@ export async function confirmSalesRequestPickTasksBatch(
         pickedQty: true,
         shortQty: true,
         status: true,
+        claimedByUserId: true,
         sourceLocationId: true,
+        sourceLocation: { select: { code: true } },
         targetLocationId: true,
         pickListId: true,
         orderLineId: true,
@@ -2198,6 +2737,7 @@ export async function confirmSalesRequestPickTasksBatch(
           select: {
             orderId: true,
             productId: true,
+            product: { select: { sku: true } },
           },
         },
         pickList: {
@@ -2213,6 +2753,7 @@ export async function confirmSalesRequestPickTasksBatch(
     loadPerf.end({ taskCount: dbTasks.length });
 
     const taskById = new Map(dbTasks.map((task) => [task.id, task]));
+    const inputByTaskId = new Map(args.tasks.map((task) => [task.taskId, task]));
     for (const task of args.tasks) {
       const dbTask = taskById.get(task.taskId);
       if (!dbTask || dbTask.orderLine.orderId !== args.orderId) {
@@ -2227,7 +2768,20 @@ export async function confirmSalesRequestPickTasksBatch(
       if (dbTask.status === "COMPLETED" || dbTask.status === "PARTIAL" || dbTask.status === "CANCELLED") {
         throw new InventoryServiceError("TASK_CLOSED", "Una o más tareas ya están cerradas");
       }
+      if (dbTask.claimedByUserId !== args.operatorUserId) {
+        throw new InventoryServiceError("TASK_NOT_CLAIMED", "La tarea debe ser tomada por el operador antes de confirmar el surtido");
+      }
+      const pending = Math.max(0, dbTask.reservedQty - dbTask.pickedQty);
+      const scanRef = inputByTaskId.get(dbTask.id)?.scanRef?.trim().toLowerCase();
+      if (pending > 0 && !scanRef) {
+        throw new InventoryServiceError("SCAN_REQUIRED", "Se requiere escanear la ubicación o el SKU antes de confirmar el surtido");
+      }
+      if (pending > 0 && scanRef !== dbTask.sourceLocation.code.toLowerCase() && scanRef !== dbTask.orderLine.product?.sku?.toLowerCase()) {
+        throw new InventoryServiceError("INVALID_SCAN", "El escaneo no coincide con la ubicación o el SKU de la tarea");
+      }
     }
+
+    await assertSalesRequestReservationConsistency(tx, args.orderId);
 
     const moveByKey = new Map<string, { productId: string; fromLocationId: string; toLocationId: string; qty: number; reference: string }>();
     const releaseByKey = new Map<string, { productId: string; locationId: string; qty: number; reference: string }>();
@@ -2327,6 +2881,7 @@ export async function confirmSalesRequestPickTasksBatch(
           shortQty: update.shortQty,
           status: update.status,
           shortReason: update.shortReason,
+          lastActivityAt: new Date(),
         },
       });
     }
@@ -2386,6 +2941,10 @@ export async function confirmSalesRequestPickTasksBatch(
         },
       });
     }
+    await tx.salesInternalOrder.update({
+      where: { id: args.orderId },
+      data: { warehouseLastActivityAt: new Date() },
+    });
     pickListPerf.end({ pickListCount: pickListIds.length });
 
     await createAuditLogSafeWithDb({

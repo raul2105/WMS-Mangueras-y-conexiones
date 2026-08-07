@@ -56,6 +56,17 @@ const PAGE_SIZE = 50;
 const STALE_HOURS = 4;
 const OPEN_ASSEMBLY_STATUSES = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO"]);
 const BUSINESS_TIMEZONE = "America/Mexico_City";
+
+function getWarehouseOwnershipId(order: {
+  warehouseClaimedByUserId?: string | null;
+  warehouseAssigneeUserId?: string | null;
+  assignedToUserId?: string | null;
+  pulledAt?: Date | null;
+}) {
+  return order.warehouseClaimedByUserId
+    ?? order.warehouseAssigneeUserId
+    ?? (order.assignedToUserId && order.pulledAt ? order.assignedToUserId : null);
+}
 const QUEUE_LABELS: Record<FulfillmentQueueFilter, string> = {
   overdue: "Vencidos",
   today: "Vencen hoy",
@@ -247,6 +258,9 @@ export default async function ProductionRequestsPage({
     dueDate: true,
     assignedToUserId: true,
     assignedAt: true,
+    warehouseAssigneeUserId: true,
+    warehouseClaimedByUserId: true,
+    warehouseClaimedAt: true,
     pulledAt: true,
     preparedForDeliveryAt: true,
     deliveredToCustomerAt: true,
@@ -263,6 +277,8 @@ export default async function ProductionRequestsPage({
       },
     },
     assignedToUser: { select: { name: true, email: true } },
+    warehouseAssigneeUser: { select: { name: true, email: true } },
+    warehouseClaimedByUser: { select: { name: true, email: true } },
     _count: { select: { lines: true, pickLists: true } },
     lines: {
       orderBy: { createdAt: "asc" },
@@ -344,6 +360,8 @@ export default async function ProductionRequestsPage({
         dueDate: true,
         updatedAt: true,
         assignedToUserId: true,
+        warehouseAssigneeUserId: true,
+        warehouseClaimedByUserId: true,
         pulledAt: true,
         preparedForDeliveryAt: true,
         deliveredToCustomerAt: true,
@@ -422,7 +440,7 @@ export default async function ProductionRequestsPage({
         const signals = evaluateFulfillmentSignals({
           dueDate: candidate.dueDate,
           orderUpdatedAt: candidate.updatedAt,
-          assignedToUserId: candidate.assignedToUserId,
+          assignedToUserId: getWarehouseOwnershipId(candidate),
           hasProductLines,
           hasAssemblyLines,
           latestPickStatus: latestPick?.status ?? null,
@@ -457,7 +475,7 @@ export default async function ProductionRequestsPage({
         const presetEvaluation = evaluateOperationalPresets(
           {
             dueDate: candidate.dueDate,
-            assignedToUserId: candidate.assignedToUserId,
+            assignedToUserId: getWarehouseOwnershipId(candidate),
             flowStage,
             isPartial: signals.isPartial,
             isUnreleased: signals.isUnreleased,
@@ -850,7 +868,7 @@ export default async function ProductionRequestsPage({
       <section className="space-y-3">
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
           <div
-            className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex flex-wrap gap-2 pb-1"
             data-testid="requests-quick-filters"
           >
             {quickFilters.map((filter) => (
@@ -894,7 +912,7 @@ export default async function ProductionRequestsPage({
             className="group mt-3 rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2"
             data-testid="requests-more-filters"
           >
-            <summary className="cursor-pointer list-none text-sm font-semibold text-[var(--text-primary)]">
+            <summary className="cursor-pointer list-none rounded-md text-sm font-semibold text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
               Más filtros
             </summary>
             <div className="mt-3 space-y-4">
@@ -1146,9 +1164,6 @@ export default async function ProductionRequestsPage({
                       <Badge variant={getStatusBadgeVariant(orderStatus)}>
                         {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
                       </Badge>
-                      <Badge variant={flowNarrative.flowBadgeVariant}>
-                        {flowNarrative.flowStageLabel}
-                      </Badge>
                       <Badge variant={operationalState.variant}>
                         {operationalState.label}
                       </Badge>
@@ -1173,7 +1188,8 @@ export default async function ProductionRequestsPage({
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                       <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {flowNarrative.nextRecommendedAction.label}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Compromiso:</span> {formatDate(order.dueDate)}</span>
-                      <span><span className="font-medium text-[var(--text-primary)]">Responsable:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span>
+                      <span><span className="font-medium text-[var(--text-primary)]">Owner comercial:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span>
+                      <span><span className="font-medium text-[var(--text-primary)]">Tarea física:</span> {order.warehouseClaimedByUser ? (order.warehouseClaimedByUser.name ?? order.warehouseClaimedByUser.email ?? "Tomada") : order.warehouseAssigneeUser ? (order.warehouseAssigneeUser.name ?? order.warehouseAssigneeUser.email ?? "Asignada") : "Sin tomar"}</span>
                     </div>
                     <p className="text-xs text-[var(--text-muted)]">{operationalState.description}</p>
                     <div className="flex flex-wrap gap-2">
@@ -1597,7 +1613,7 @@ export default async function ProductionRequestsPage({
                             {SALES_INTERNAL_ORDER_STATUS_LABELS[orderStatus]}
                           </Badge>
                         </td>
-                        <td className="py-3 text-[var(--text-muted)]">
+                        <td className="py-3 text-[var(--text-muted)]" data-label="Owner comercial">
                           <Badge variant={flowNarrative.flowBadgeVariant}>
                             {flowNarrative.flowStageLabel}
                           </Badge>

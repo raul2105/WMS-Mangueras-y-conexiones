@@ -24,9 +24,34 @@ test.describe("KAN-128: AWS read-only operational evidence", () => {
       await salesPage.goto(`/production/availability?q=${encodeURIComponent(productSku)}&sku=${encodeURIComponent(productSku)}&source=catalog`);
 
       await expect(salesPage.getByRole("heading", { name: /Disponibilidad comercial/i })).toBeVisible();
-      const createOrder = salesPage.getByRole("link", { name: new RegExp(`Crear pedido.*${warehouseCode}`, "i") });
-      await expect(createOrder).toBeVisible();
-      await createOrder.click();
+      const warehousePicker = salesPage.locator("details").filter({ hasText: "Elegir almacén" }).first();
+      if (await warehousePicker.count() > 0) {
+        const stablePicker = salesPage.locator('[data-testid="choose-warehouse"]:visible').first();
+        if (await stablePicker.count() > 0) {
+          await stablePicker.click();
+        } else {
+          await salesPage.locator("summary:visible", { hasText: "Elegir almacén" }).first().click();
+        }
+      } else {
+        const legacyPicker = salesPage.getByRole("button", { name: "Elegir almacén", exact: true });
+        if (await legacyPicker.count() > 0) {
+          await legacyPicker.click();
+        } else {
+          const singleCreateOrderLink = salesPage.getByRole("link", { name: "Crear pedido", exact: true }).first();
+          const href = await singleCreateOrderLink.getAttribute("href");
+          if (!href) throw new Error("The single warehouse order link has no href");
+          const promisedWarehouseCode = new URL(href, salesPage.url()).searchParams.get("warehouseCode");
+          expect(promisedWarehouseCode).toBe(warehouseCode);
+          await singleCreateOrderLink.click();
+        }
+      }
+      const warehouseOption = salesPage.locator(`[data-testid="commercial-order-warehouse-${warehouseCode}"]:visible`).first();
+      const fallbackWarehouseOption = salesPage.locator("a:visible").filter({ hasText: warehouseCode }).last();
+      if (await warehouseOption.count() > 0) {
+        await warehouseOption.click();
+      } else if (await fallbackWarehouseOption.count() > 0) {
+        await fallbackWarehouseOption.click();
+      }
 
       await expect(salesPage).toHaveURL(/\/production\/requests\/new/);
       await expect(salesPage.getByTestId("commercial-promise-section")).toBeVisible();
@@ -39,10 +64,11 @@ test.describe("KAN-128: AWS read-only operational evidence", () => {
     const warehousePage = await warehouseContext.newPage();
     try {
       await loginAs(warehousePage, "WAREHOUSE_OPERATOR");
-      await warehousePage.goto("/production/requests?queue=unreleased");
+      await warehousePage.goto("/production/requests?stage=en_surtido");
 
       await expect(warehousePage.getByRole("link", { name: orderCode, exact: true })).toBeVisible();
-      await expect(warehousePage.getByRole("link", { name: "Operar surtido" })).toBeVisible();
+      const orderCard = warehousePage.getByTestId("request-card").filter({ hasText: orderCode }).first();
+      await expect(orderCard).toContainText("Operador Almacen");
     } finally {
       await warehouseContext.close();
     }

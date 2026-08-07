@@ -11,7 +11,7 @@ function key(productId: string, locationId: string) {
   return `${productId}:${locationId}`;
 }
 
-async function buildDesiredReservedByPair(
+export async function buildDesiredReservedByPair(
   tx: TxClient,
   opts?: { scope?: ReservationScope[]; excludeOrderId?: string }
 ) {
@@ -92,6 +92,23 @@ async function buildDesiredReservedByPair(
   const desiredByKey = new Map<string, number>();
 
   for (const order of openOrders) {
+    const assemblyLines = order.assemblyWorkOrder?.lines ?? [];
+    if (assemblyLines.length > 0) {
+      // Assembly reservations are represented by pick tasks.  Prefer their
+      // still-pending quantities even when legacy ProductionOrderItem rows
+      // also exist; picked/WIP quantities are no longer reserved.
+      for (const line of assemblyLines) {
+        for (const task of line.pickTasks) {
+          const pendingReserved = Math.max(0, task.reservedQty - task.pickedQty);
+          if (pendingReserved <= 0) continue;
+          const pairKey = key(line.productId, task.sourceLocationId);
+          if (scopeSet && !scopeSet.has(pairKey)) continue;
+          desiredByKey.set(pairKey, (desiredByKey.get(pairKey) ?? 0) + pendingReserved);
+        }
+      }
+      continue;
+    }
+
     if (order.items.length > 0) {
       for (const item of order.items) {
         const pairKey = key(item.productId, item.locationId);
@@ -101,16 +118,6 @@ async function buildDesiredReservedByPair(
       continue;
     }
 
-    const legacyLines = order.assemblyWorkOrder?.lines ?? [];
-    for (const line of legacyLines) {
-      for (const task of line.pickTasks) {
-        const pendingReserved = Math.max(0, task.reservedQty - task.pickedQty);
-        if (pendingReserved <= 0) continue;
-        const pairKey = key(line.productId, task.sourceLocationId);
-        if (scopeSet && !scopeSet.has(pairKey)) continue;
-        desiredByKey.set(pairKey, (desiredByKey.get(pairKey) ?? 0) + pendingReserved);
-      }
-    }
   }
 
   return desiredByKey;

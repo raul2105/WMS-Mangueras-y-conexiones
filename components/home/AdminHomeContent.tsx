@@ -4,12 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Users, Shield, Database, AlertTriangle, Settings } from 'lucide-react';
 import Link from 'next/link';
+import { FulfillmentOperationalMetrics } from '@/components/dashboard/fulfillment-operational-metrics';
+import type { FulfillmentOperationalMetrics as FulfillmentOperationalMetricsData } from '@/lib/dashboard/fulfillment-dashboard';
+import { auditActionLabel } from '@/lib/audit/action-labels';
 
 interface AdminHomeContentProps {
   activeUsersCount: number;
   auditTotalCount: number;
   tracesRecentCount: number;
   recentAudits?: Array<{ id: string; action: string; actor: string | null; createdAt: Date | string; entityType?: string }>;
+  operationalMetrics: FulfillmentOperationalMetricsData;
 }
 
 function formatTimeAgo(date: Date | string): string {
@@ -30,7 +34,8 @@ export function AdminHomeContent({
   activeUsersCount, 
   auditTotalCount, 
   tracesRecentCount,
-  recentAudits = []
+  recentAudits = [],
+  operationalMetrics,
 }: AdminHomeContentProps) {
   const stats = [
     { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
@@ -68,6 +73,8 @@ export function AdminHomeContent({
         ))}
       </div>
 
+      <FulfillmentOperationalMetrics metrics={operationalMetrics} />
+
       {/* Recent Audit */}
       <Card>
         <CardHeader>
@@ -86,7 +93,7 @@ export function AdminHomeContent({
             {(recentAudits && recentAudits.length > 0 ? recentAudits : []).map((audit) => (
               <div key={audit.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div className="min-w-0">
-                  <p className="break-words font-medium">{audit.action}</p>
+                  <p className="break-words font-medium">{auditActionLabel(audit.action)}</p>
                   <p className="text-sm text-gray-500">
                     {audit.actor ?? 'Sistema'} · {formatTimeAgo(audit.createdAt)}
                   </p>

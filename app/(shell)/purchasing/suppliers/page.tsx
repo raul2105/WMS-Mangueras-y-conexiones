@@ -42,70 +42,74 @@ export default async function SuppliersPage({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
         <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-            Proveedores
-          </h1>
-          <p className="text-slate-400 mt-1">Catálogo de proveedores y productos vinculados.</p>
+          <h1 className="text-3xl font-bold text-[var(--text-primary)]">Proveedores</h1>
+          <p className="mt-1 text-[var(--text-secondary)]">Catálogo de proveedores y productos vinculados.</p>
         </div>
         <div className="flex gap-3">
-          <Link href="/purchasing" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Compras</Link>
+          <Link href="/purchasing" className="btn-secondary">← Compras</Link>
           <Link href="/purchasing/suppliers/new" className="btn-primary">+ Nuevo Proveedor</Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-cyan-400">{totalCount}</p>
-          <p className="text-sm text-slate-400 mt-1">Total proveedores</p>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+        <div className="op-panel text-center">
+          <p className="text-3xl font-bold text-[var(--text-accent)]">{totalCount}</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">Total proveedores</p>
         </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-emerald-400">{activeCount}</p>
-          <p className="text-sm text-slate-400 mt-1">Activos</p>
+        <div className="op-panel text-center">
+          <p className="text-3xl font-bold text-[var(--status-success-text)]">{activeCount}</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">Activos</p>
         </div>
-        <div className="glass-card text-center">
-          <p className="text-3xl font-bold text-slate-400">{totalCount - activeCount}</p>
-          <p className="text-sm text-slate-400 mt-1">Inactivos</p>
+        <div className="op-panel text-center">
+          <p className="text-3xl font-bold text-[var(--text-muted)]">{totalCount - activeCount}</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">Inactivos</p>
         </div>
       </div>
 
       {totalCount === 0 ? (
-        <div className="glass-card text-center py-12">
-          <p className="text-slate-500 mb-4">No hay proveedores registrados.</p>
+        <div className="op-panel py-12 text-center">
+          <p className="mb-4 text-[var(--text-muted)]">No hay proveedores registrados.</p>
           <Link href="/purchasing/suppliers/new" className="btn-primary">+ Agregar primer proveedor</Link>
         </div>
       ) : (
-        <div className="glass-card overflow-x-auto">
+        <div className="op-panel overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-slate-400 border-b border-white/10">
-                <th className="text-left py-3">Código</th>
-                <th className="text-left py-3">Nombre</th>
-                <th className="text-left py-3">RFC</th>
-                <th className="text-left py-3">Email</th>
-                <th className="text-right py-3">Productos</th>
-                <th className="text-right py-3">OCs</th>
-                <th className="text-center py-3">Estado</th>
+              <tr className="border-b border-[var(--border-default)] text-[var(--text-secondary)]">
+                <th className="py-3 text-left">Código</th>
+                <th className="py-3 text-left">Nombre</th>
+                <th className="py-3 text-left">RFC</th>
+                <th className="py-3 text-left">Email</th>
+                <th className="py-3 text-right">Productos</th>
+                <th className="py-3 text-right">OCs</th>
+                <th className="py-3 text-center">Estado</th>
                 <th className="py-3"></th>
               </tr>
             </thead>
             <tbody>
               {suppliers.map((supplier) => (
-                <tr key={supplier.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 font-mono text-cyan-400 text-xs">{supplier.code}</td>
-                  <td className="py-3 font-medium text-white">{supplier.name}</td>
-                  <td className="py-3 text-slate-400">{supplier.taxId ?? "—"}</td>
-                  <td className="py-3 text-slate-400 text-xs">{supplier.email ?? "—"}</td>
-                  <td className="py-3 text-right text-slate-300">{supplier._count.products}</td>
-                  <td className="py-3 text-right text-slate-300">{supplier._count.purchaseOrders}</td>
+                <tr key={supplier.id} className="border-b border-[var(--border-soft)] hover:bg-[var(--table-hover)]">
+                  <td className="py-3 font-mono text-xs text-[var(--text-accent)]">{supplier.code}</td>
+                  <td className="py-3 font-medium text-[var(--text-primary)]">{supplier.name}</td>
+                  <td className="py-3 text-[var(--text-secondary)]">{supplier.taxId ?? "—"}</td>
+                  <td className="py-3 text-xs text-[var(--text-secondary)]">{supplier.email ?? "—"}</td>
+                  <td className="py-3 text-right text-[var(--text-primary)]">{supplier._count.products}</td>
+                  <td className="py-3 text-right text-[var(--text-primary)]">{supplier._count.purchaseOrders}</td>
                   <td className="py-3 text-center">
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${supplier.isActive ? "text-emerald-400 bg-emerald-500/20" : "text-red-400 bg-red-500/20"}`}>
+                    <span
+                      className={`inline-flex rounded-[var(--radius-sm)] border px-2 py-0.5 text-xs font-bold ${
+                        supplier.isActive
+                          ? "border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)]"
+                          : "border-[var(--status-neutral-border)] bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)]"
+                      }`}
+                    >
                       {supplier.isActive ? "Activo" : "Inactivo"}
                     </span>
                   </td>
                   <td className="py-3 text-right">
-                    <Link href={`/purchasing/suppliers/${supplier.id}`} className="text-xs text-cyan-400 hover:underline">
+                    <Link href={`/purchasing/suppliers/${supplier.id}`} className="text-xs text-[var(--text-accent)] hover:underline">
                       Ver →
                     </Link>
                   </td>
@@ -120,16 +124,14 @@ export default async function SuppliersPage({
         <div className="mt-4 flex items-center justify-between gap-3 text-sm">
           <Link
             href={buildHref(Math.max(1, safePage - 1))}
-            className={`px-4 py-2 glass rounded-lg ${safePage <= 1 ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
+            className={`btn-secondary ${safePage <= 1 ? "pointer-events-none opacity-40" : ""}`}
           >
             ← Anterior
           </Link>
-          <span className="text-slate-500">
-            Página {safePage} de {totalPages}
-          </span>
+          <span className="text-[var(--text-muted)]">Página {safePage} de {totalPages}</span>
           <Link
             href={buildHref(Math.min(totalPages, safePage + 1))}
-            className={`px-4 py-2 glass rounded-lg ${safePage >= totalPages ? "pointer-events-none opacity-40" : "text-slate-300 hover:text-white"}`}
+            className={`btn-secondary ${safePage >= totalPages ? "pointer-events-none opacity-40" : ""}`}
           >
             Siguiente →
           </Link>

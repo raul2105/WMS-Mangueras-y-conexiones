@@ -40,14 +40,14 @@ export default async function PurchaseOrderDocumentPage({
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Documento oficial de OC</h1>
-            <p className="text-sm text-slate-400">Revisión del documento oficial congelado.</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">Documento oficial de OC</h1>
+            <p className="text-sm text-[var(--text-secondary)]">Revisión del documento oficial congelado.</p>
           </div>
-          <Link href={`/purchasing/orders/${id}`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+          <Link href={`/purchasing/orders/${id}`} className="btn-secondary">
             ← Volver a la OC
           </Link>
         </div>
-        <div className="glass-card border border-amber-500/30 text-amber-100 text-sm">
+        <div className="op-panel border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-text)] text-sm">
           No existe un documento oficial persistido para esta OC. Revisión requerida.
         </div>
       </div>
@@ -62,14 +62,14 @@ export default async function PurchaseOrderDocumentPage({
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Documento oficial de OC</h1>
-            <p className="text-sm text-slate-400">No fue posible leer el snapshot persistido.</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">Documento oficial de OC</h1>
+            <p className="text-sm text-[var(--text-secondary)]">No fue posible leer el snapshot persistido.</p>
           </div>
-          <Link href={`/purchasing/orders/${id}`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+          <Link href={`/purchasing/orders/${id}`} className="btn-secondary">
             ← Volver a la OC
           </Link>
         </div>
-        <div className="glass-card border border-red-500/30 text-red-100 text-sm">
+        <div className="op-panel border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-text)] text-sm">
           El snapshot oficial está corrupto o es inválido. Revisión requerida.
         </div>
       </div>
@@ -82,13 +82,13 @@ export default async function PurchaseOrderDocumentPage({
     <div className="max-w-5xl mx-auto space-y-6 print:max-w-none print:space-y-4">
       <div className="flex items-start justify-between gap-4 print:hidden">
         <div>
-          <h1 className="text-2xl font-bold">Orden de Compra oficial</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Orden de Compra oficial</h1>
+          <p className="text-sm text-[var(--text-secondary)]">
             Vista congelada para revisión de la orden {snapshot.purchaseOrder.folio} v{snapshot.documentVersion}
           </p>
         </div>
         <div className="flex gap-3">
-          <Link href={`/purchasing/orders/${id}`} className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">
+          <Link href={`/purchasing/orders/${id}`} className="btn-secondary">
             ← Volver
           </Link>
           <PurchaseOrderDocumentPrintButton />
@@ -98,76 +98,76 @@ export default async function PurchaseOrderDocumentPage({
         </div>
       </div>
 
-      <div className="glass-card print:shadow-none print:border print:border-black/20">
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-3">
+      <div className="op-panel print:shadow-none print:border print:border-black/20">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--border-soft)] pb-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Orden de Compra</p>
-            <h2 className="text-3xl font-bold font-mono mt-1">{snapshot.purchaseOrder.folio}</h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">Orden de Compra</p>
+            <h2 className="text-3xl font-bold font-mono mt-1 text-[var(--text-primary)]">{snapshot.purchaseOrder.folio}</h2>
+            <p className="text-sm text-[var(--text-secondary)] mt-1">
               Fecha de emisión {new Date(snapshot.generatedAt).toLocaleString("es-MX")} · Versión v{snapshot.documentVersion}
             </p>
           </div>
-          <div className="text-right text-sm text-slate-300">
-            <p className="font-semibold text-slate-200">{supplierLines.primary}</p>
+          <div className="text-right text-sm text-[var(--text-secondary)]">
+            <p className="font-semibold text-[var(--text-primary)]">{supplierLines.primary}</p>
             {supplierLines.secondary ? <p>{supplierLines.secondary}</p> : null}
-            <p className="text-xs text-slate-500">Código: {snapshot.supplier.code}</p>
+            <p className="text-xs text-[var(--text-muted)]">Código: {snapshot.supplier.code}</p>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4 mt-4">
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Fecha esperada / entrega solicitada</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Fecha esperada / entrega solicitada</p>
             <p>{formatDate(snapshot.purchaseOrder.expectedDate)}</p>
           </div>
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Estado</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Estado</p>
             <p>{snapshot.purchaseOrder.status}</p>
           </div>
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Moneda</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Moneda</p>
             <p>{snapshot.totals.currency}</p>
           </div>
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Creada</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Creada</p>
             <p>{new Date(snapshot.purchaseOrder.createdAt).toLocaleString("es-MX")}</p>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 mt-4">
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Comprador</p>
-            <p className="text-slate-200">WMS Mangueras y Conexiones</p>
-            <p className="text-slate-400">RFC: Por definir</p>
-            <p className="text-slate-400">Dirección: Por definir</p>
-            <p className="text-slate-400">Contacto: Por definir</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Comprador</p>
+            <p className="text-[var(--text-primary)]">WMS Mangueras y Conexiones</p>
+            <p className="text-[var(--text-secondary)]">RFC: Por definir</p>
+            <p className="text-[var(--text-secondary)]">Dirección: Por definir</p>
+            <p className="text-[var(--text-secondary)]">Contacto: Por definir</p>
           </div>
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Proveedor</p>
-            <p className="text-slate-200">{supplierLines.primary}</p>
-            {supplierLines.secondary ? <p className="text-slate-400">{supplierLines.secondary}</p> : null}
-            <p className="text-slate-400">RFC: {snapshot.supplier.taxId ?? "—"}</p>
-            <p className="text-slate-400">Correo: {snapshot.supplier.email ?? "—"}</p>
-            <p className="text-slate-400">Teléfono: {snapshot.supplier.phone ?? "—"}</p>
-            <p className="text-slate-400">Dirección: {snapshot.supplier.address ?? "—"}</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Proveedor</p>
+            <p className="text-[var(--text-primary)]">{supplierLines.primary}</p>
+            {supplierLines.secondary ? <p className="text-[var(--text-secondary)]">{supplierLines.secondary}</p> : null}
+            <p className="text-[var(--text-secondary)]">RFC: {snapshot.supplier.taxId ?? "—"}</p>
+            <p className="text-[var(--text-secondary)]">Correo: {snapshot.supplier.email ?? "—"}</p>
+            <p className="text-[var(--text-secondary)]">Teléfono: {snapshot.supplier.phone ?? "—"}</p>
+            <p className="text-[var(--text-secondary)]">Dirección: {snapshot.supplier.address ?? "—"}</p>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 mt-4">
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Entrega y términos</p>
-            <p className="text-slate-200">Dirección de entrega: {snapshot.purchaseOrder.deliveryAddressSnapshot ?? "—"}</p>
-            <p className="text-slate-200">Términos de pago: {snapshot.supplier.paymentTerms ?? "—"}</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Entrega y términos</p>
+            <p className="text-[var(--text-primary)]">Dirección de entrega: {snapshot.purchaseOrder.deliveryAddressSnapshot ?? "—"}</p>
+            <p className="text-[var(--text-primary)]">Términos de pago: {snapshot.supplier.paymentTerms ?? "—"}</p>
           </div>
           <div className="space-y-1 text-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Notas</p>
-            <p className="text-slate-200 mt-1">{snapshot.purchaseOrder.notes ?? "—"}</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--text-muted)]">Notas</p>
+            <p className="text-[var(--text-primary)] mt-1">{snapshot.purchaseOrder.notes ?? "—"}</p>
           </div>
         </div>
 
         <div className="mt-5 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-slate-400">
+              <tr className="border-b border-[var(--border-soft)] text-[var(--text-secondary)]">
                 <th className="py-2 text-left">SKU</th>
                 <th className="py-2 text-left">Producto</th>
                 <th className="py-2 text-right">Cantidad</th>
@@ -178,11 +178,11 @@ export default async function PurchaseOrderDocumentPage({
             </thead>
             <tbody>
               {snapshot.lines.map((line) => (
-                <tr key={line.productId} className="border-b border-white/5">
-                  <td className="py-2 font-mono text-cyan-400 text-xs">{line.sku}</td>
-                  <td className="py-2 text-slate-200">{line.name}</td>
+                <tr key={line.productId} className="border-b border-[var(--border-soft)]">
+                  <td className="py-2 font-mono text-[var(--text-accent)] text-xs">{line.sku}</td>
+                  <td className="py-2 text-[var(--text-primary)]">{line.name}</td>
                   <td className="py-2 text-right">{line.qtyOrdered}</td>
-                  <td className="py-2 text-center text-slate-400">{line.unitLabel}</td>
+                  <td className="py-2 text-center text-[var(--text-secondary)]">{line.unitLabel}</td>
                   <td className="py-2 text-right">{money(line.unitPrice, line.currency)}</td>
                   <td className="py-2 text-right">{money(line.subtotal, line.currency)}</td>
                 </tr>
@@ -192,9 +192,9 @@ export default async function PurchaseOrderDocumentPage({
         </div>
 
         <div className="mt-5 flex justify-end">
-          <div className="w-full max-w-xs rounded-lg border border-white/10 p-4">
+          <div className="op-surface w-full max-w-xs p-4">
             <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Subtotal</span>
+              <span className="text-[var(--text-secondary)]">Subtotal</span>
               <span>{money(snapshot.totals.subtotal, snapshot.totals.currency)}</span>
             </div>
             <div className="mt-2 flex justify-between text-base font-semibold">

@@ -119,7 +119,6 @@ async function receiveItems(orderId: string, formData: FormData) {
       continue;
     }
 
-    // Validate discrepancy schema
     const lineParsed = purchaseReceiptLineDiscrepancySchema.safeParse({
       lineId: line.id,
       qtyReceived: qty,
@@ -168,7 +167,6 @@ async function receiveItems(orderId: string, formData: FormData) {
           notes,
         },
       });
-      // Map lineId -> qtyOrdered for concurrency-safe conditional update
       const qtyOrderedMap = new Map(order.lines.map(l => [l.id, l.qtyOrdered]));
 
       for (const item of linesToReceive) {
@@ -187,8 +185,6 @@ async function receiveItems(orderId: string, formData: FormData) {
         });
 
         const qtyOrderedForLine = qtyOrderedMap.get(item.lineId) ?? 0;
-        // Conditional update: only increment if qtyReceived + item.qty <= qtyOrdered
-        // where qtyReceived (current) <= qtyOrdered - item.qty
         const maxAllowedCurrent = qtyOrderedForLine - item.qtyReceived;
         const updated = await tx.purchaseOrderLine.updateMany({
           where: {
@@ -328,36 +324,36 @@ export default async function ReceivePage({
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-        <Link href={RECEIPT_QUEUE_HREF} className="glass w-fit rounded-lg px-4 py-2 text-slate-200 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">
+        <Link href={RECEIPT_QUEUE_HREF} className="btn-secondary w-fit">
           ← Recepciones
         </Link>
         <div className="min-w-0">
           <h1 className="text-2xl font-bold">Recibir Mercancía</h1>
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-[var(--text-secondary)]">
             {order.folio} · {order.supplier.code} — {order.supplier.businessName ?? order.supplier.name}
           </p>
         </div>
       </div>
 
       {sp.error ? (
-        <div className="glass-card border border-red-500/30 text-sm text-red-200">{sp.error}</div>
+        <div className="rounded-[var(--radius-md)] border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-3 text-sm text-[var(--status-danger-text)]">{sp.error}</div>
       ) : null}
 
-      <p className="text-sm text-slate-300">Usuario autenticado: {actor.actorName ?? "Usuario autenticado"}</p>
+      <p className="text-sm text-[var(--text-secondary)]">Usuario autenticado: {actor.actorName ?? "Usuario autenticado"}</p>
       <PurchaseReceiptForm
         action={receiveItemsBound}
         cancelHref={RECEIPT_QUEUE_HREF}
         locations={locations.map((location) => ({ id: location.id, code: location.code, warehouseName: location.warehouse.name }))}
-    lines={pendingLines.map((line) => ({
-      id: line.id,
-      sku: line.product.sku,
-      name: line.product.name,
-      ordered: line.qtyOrdered,
-      received: line.qtyReceived,
-      pending: line.qtyOrdered - line.qtyReceived,
-      unitLabel: line.purchaseUnitLabel ?? line.product.unitLabel,
-      step: getPurchaseUnitPolicy({ ...line.product, purchaseUnitLabel: line.purchaseUnitLabel, purchaseUnitFactor: line.purchaseUnitFactor }).increment,
-    }))}
+        lines={pendingLines.map((line) => ({
+          id: line.id,
+          sku: line.product.sku,
+          name: line.product.name,
+          ordered: line.qtyOrdered,
+          received: line.qtyReceived,
+          pending: line.qtyOrdered - line.qtyReceived,
+          unitLabel: line.purchaseUnitLabel ?? line.product.unitLabel,
+          step: getPurchaseUnitPolicy({ ...line.product, purchaseUnitLabel: line.purchaseUnitLabel, purchaseUnitFactor: line.purchaseUnitFactor }).increment,
+        }))}
       />
     </div>
   );

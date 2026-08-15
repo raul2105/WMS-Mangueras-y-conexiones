@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { pageGuard } from "@/components/rbac/PageGuard";
@@ -17,6 +18,7 @@ import { getPurchaseOrderOperationalState } from "@/lib/purchasing/purchase-orde
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
+const RECEIVABLE_STATUSES = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] as const;
 
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
@@ -40,7 +42,7 @@ type SearchParams = { status?: string; page?: string };
 type PurchaseOrderSearchParams = SearchParams & { preset?: string };
 
 function canReceivePurchaseOrder(status: string) {
-  return status === "CONFIRMADA" || status === "EN_TRANSITO" || status === "PARCIAL";
+  return RECEIVABLE_STATUSES.includes(status as (typeof RECEIVABLE_STATUSES)[number]);
 }
 
 function parsePage(value: string | undefined) {
@@ -87,7 +89,18 @@ export default async function PurchaseOrdersPage({
   const currentPage = parsePage(sp.page);
 
   const presetWhere = buildPurchaseOrderPresetWhere(presetFilter);
-  const where = statusFilter ? { status: statusFilter } : presetWhere;
+  const receiverTodayWhere: Prisma.PurchaseOrderWhereInput = {
+    AND: [
+      buildPurchaseOrderPresetWhere("por_recibir_hoy"),
+      { status: { in: [...RECEIVABLE_STATUSES] } },
+    ],
+  };
+  const effectivePresetWhere: Prisma.PurchaseOrderWhereInput =
+    !canManagePurchasing && presetFilter === "por_recibir_hoy" ? receiverTodayWhere : presetWhere;
+  const where: Prisma.PurchaseOrderWhereInput = statusFilter ? { status: statusFilter } : effectivePresetWhere;
+  const dueTodayWhere = canManagePurchasing
+    ? buildPurchaseOrderPresetWhere("por_recibir_hoy")
+    : receiverTodayWhere;
 
   const [
     orders,
@@ -112,7 +125,7 @@ export default async function PurchaseOrdersPage({
         status: true,
         expectedDate: true,
         supplier: { select: { name: true, code: true, businessName: true } },
-        _count: { select: { lines: true, receipts: true } },
+        _count: { select: { receipts: true } },
         lines: { select: { qtyOrdered: true, qtyReceived: true } },
       },
     }),
@@ -124,7 +137,7 @@ export default async function PurchaseOrdersPage({
     prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("parciales") }),
     prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("recibidas") }),
     prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("vencidas") }),
-    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("por_recibir_hoy") }),
+    prisma.purchaseOrder.count({ where: dueTodayWhere }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));

@@ -181,7 +181,7 @@ export default async function PurchasingPage() {
         }
       >
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <Link href="/purchasing/orders?preset=vencidas" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
+          <Link href={isOperatorView ? "/purchasing/orders?preset=por_recibir" : "/purchasing/orders?preset=vencidas"} className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
             <p className="text-sm font-semibold text-[var(--text-primary)]">{isOperatorView ? "Recepciones pendientes" : `Vencidas (${overdueCount})`}</p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">{isOperatorView ? "Recibe materiales contra una OC y registra diferencias." : "Compromisos cuya fecha esperada ya venció y siguen abiertos."}</p>
           </Link>

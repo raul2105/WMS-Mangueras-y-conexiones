@@ -40,7 +40,7 @@ test.describe("KAN-128: AWS read-only operational evidence", () => {
           const singleCreateOrderLink = salesPage.getByRole("link", { name: "Crear pedido", exact: true }).first();
           const href = await singleCreateOrderLink.getAttribute("href");
           if (!href) throw new Error("The single warehouse order link has no href");
-          const promisedWarehouseCode = new URL(href, salesPage.url()).searchParams.get("warehouseCode");
+          const promisedWarehouseCode = new URL(href, salesPage.url()).searchParams.get("promiseWarehouseCode");
           expect(promisedWarehouseCode).toBe(warehouseCode);
           await singleCreateOrderLink.click();
         }

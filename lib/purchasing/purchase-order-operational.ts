@@ -1,4 +1,4 @@
-import { getMexicoCityDayBounds } from "@/lib/purchasing/purchase-order-presets";
+import { getMexicoCityPurchaseDateBounds } from "@/lib/purchasing/purchase-order-presets";
 
 export type PurchaseOrderOperationalTone = "neutral" | "accent" | "success" | "warning" | "danger";
 
@@ -39,7 +39,7 @@ export function getPurchaseOrderOperationalState(
 ): PurchaseOrderOperationalState {
   const receivedPercent = getPurchaseOrderReceivedPercent(order.lines);
   const expectedDate = toDate(order.expectedDate);
-  const { start, end } = getMexicoCityDayBounds(now);
+  const { start, end } = getMexicoCityPurchaseDateBounds(now);
   const isOpen = OPEN_STATUSES.has(order.status);
   const isOverdue = Boolean(isOpen && expectedDate && expectedDate < start);
   const isDueToday = Boolean(isOpen && expectedDate && expectedDate >= start && expectedDate < end);
@@ -69,18 +69,6 @@ export function getPurchaseOrderOperationalState(
     };
   }
 
-  if (hasNoLines) {
-    return {
-      receivedPercent,
-      riskLabel: "Sin líneas",
-      riskTone: "danger",
-      nextAction: "Corregir líneas de OC",
-      priority: 1,
-      isOverdue,
-      isDueToday,
-    };
-  }
-
   if (isOverdue) {
     return {
       receivedPercent,
@@ -88,6 +76,18 @@ export function getPurchaseOrderOperationalState(
       riskTone: "danger",
       nextAction: order.status === "PARCIAL" ? "Completar recepción vencida" : "Atender vencimiento",
       priority: 0,
+      isOverdue,
+      isDueToday,
+    };
+  }
+
+  if (hasNoLines) {
+    return {
+      receivedPercent,
+      riskLabel: "Sin líneas",
+      riskTone: "danger",
+      nextAction: "Corregir líneas de OC",
+      priority: 1,
       isOverdue,
       isDueToday,
     };

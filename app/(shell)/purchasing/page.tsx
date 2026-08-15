@@ -37,6 +37,8 @@ const STATUS_COLORS: Record<string, "neutral" | "accent" | "success" | "warning"
   CANCELADA: "danger",
 };
 
+const RECEIVABLE_STATUSES = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] as const;
+
 function formatDate(value: Date | string | null | undefined) {
   if (!value) return "Sin fecha";
   const date = value instanceof Date ? value : new Date(value);
@@ -44,7 +46,7 @@ function formatDate(value: Date | string | null | undefined) {
 }
 
 function canReceivePurchaseOrder(status: string) {
-  return status === "CONFIRMADA" || status === "EN_TRANSITO" || status === "PARCIAL";
+  return RECEIVABLE_STATUSES.includes(status as (typeof RECEIVABLE_STATUSES)[number]);
 }
 
 export default async function PurchasingPage() {
@@ -60,8 +62,16 @@ export default async function PurchasingPage() {
     sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.receive");
 
   const priorityOrdersWhere: Prisma.PurchaseOrderWhereInput = isOperatorView
-    ? { status: { in: ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] } }
-    : { status: { in: ["BORRADOR", "CONFIRMADA", "EN_TRANSITO", "PARCIAL"] } };
+    ? { status: { in: [...RECEIVABLE_STATUSES] } }
+    : { status: { in: ["BORRADOR", ...RECEIVABLE_STATUSES] } };
+  const dueTodayWhere: Prisma.PurchaseOrderWhereInput = isOperatorView
+    ? {
+        AND: [
+          buildPurchaseOrderPresetWhere("por_recibir_hoy"),
+          { status: { in: [...RECEIVABLE_STATUSES] } },
+        ],
+      }
+    : buildPurchaseOrderPresetWhere("por_recibir_hoy");
 
   const [
     totalSuppliers,
@@ -74,7 +84,6 @@ export default async function PurchasingPage() {
     prisma.purchaseOrder.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.purchaseOrder.findMany({
       where: priorityOrdersWhere,
-      take: 30,
       orderBy: [{ expectedDate: "asc" }, { createdAt: "desc" }],
       select: {
         id: true,
@@ -86,7 +95,7 @@ export default async function PurchasingPage() {
       },
     }),
     prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("vencidas") }),
-    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("por_recibir_hoy") }),
+    prisma.purchaseOrder.count({ where: dueTodayWhere }),
   ]);
 
   const countsByStatus = Object.fromEntries(statusCounts.map((s) => [s.status, s._count._all]));

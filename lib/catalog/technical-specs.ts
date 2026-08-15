@@ -300,10 +300,25 @@ export function validateTechnicalSpecRows(rows: TechnicalSpecRow[]): TechnicalVa
     "angle",
     "hose_length",
   ]);
+  const positivePhysicalKeys = new Set([
+    "inner_diameter",
+    "outer_diameter",
+    "working_pressure",
+    "burst_pressure",
+    "bend_radius",
+    "port_size",
+    "hose_length",
+  ]);
 
   for (const row of rows) {
-    if (numericKeys.has(row.key) && !Number.isFinite(numericValue(row))) {
+    if (!numericKeys.has(row.key)) continue;
+    const value = numericValue(row);
+    if (!Number.isFinite(value)) {
       errors.push(`${row.key}: debe contener un valor numérico válido`);
+      continue;
+    }
+    if (positivePhysicalKeys.has(row.key) && value <= 0) {
+      errors.push(`${row.key}: debe ser mayor que cero`);
     }
   }
 

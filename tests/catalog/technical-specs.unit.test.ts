@@ -71,6 +71,30 @@ describe("technical product specification contract", () => {
     ]));
   });
 
+  it("rejects nonpositive physical measurements while allowing valid temperatures and zero-degree angles", () => {
+    const invalidRows = buildTechnicalSpecRows("HOSE", JSON.stringify({
+      inner_diameter: 0,
+      working_pressure: -50,
+      temperature_min: -40,
+      temperature_max: 0,
+    }));
+
+    const invalidResult = validateTechnicalSpecRows(invalidRows);
+    expect(invalidResult.valid).toBe(false);
+    expect(invalidResult.errors).toEqual(expect.arrayContaining([
+      "inner_diameter: debe ser mayor que cero",
+      "working_pressure: debe ser mayor que cero",
+    ]));
+
+    const allowedRows = buildTechnicalSpecRows("FITTING", JSON.stringify({
+      port_size: 12,
+      working_pressure: 100,
+      temperature_max: -20,
+      angle: 0,
+    }));
+    expect(validateTechnicalSpecRows(allowedRows).valid).toBe(true);
+  });
+
   it("persists technical fields idempotently without deleting the product history", async () => {
     const upserts: unknown[] = [];
     const deletes: unknown[] = [];

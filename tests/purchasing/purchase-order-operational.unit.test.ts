@@ -43,6 +43,15 @@ describe("purchase order operational state", () => {
     expect(overdue.priority).toBeLessThan(scheduled.priority);
   });
 
+  it("surfaces an open order without lines as a blocking data risk", () => {
+    const state = getPurchaseOrderOperationalState(order({ lines: [] }), NOW);
+
+    expect(state.riskLabel).toBe("Sin líneas");
+    expect(state.riskTone).toBe("danger");
+    expect(state.nextAction).toBe("Corregir líneas de OC");
+    expect(state.priority).toBe(1);
+  });
+
   it("makes partial and due-today work explicit", () => {
     const partial = getPurchaseOrderOperationalState(order({
       status: "PARCIAL",

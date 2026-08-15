@@ -13,6 +13,7 @@ import {
   getPurchaseOrderPresetLabel,
   isPurchaseOrderPresetFilter,
 } from "@/lib/purchasing/purchase-order-presets";
+import { getPurchaseOrderOperationalState } from "@/lib/purchasing/purchase-order-operational";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
@@ -52,6 +53,13 @@ function formatDate(value: Date | string | null | undefined) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("es-MX");
+}
+
+function managerActionLabel(status: string, nextAction: string) {
+  if (status === "BORRADOR") return "Completar OC";
+  if (status === "RECIBIDA") return "Ver evidencia";
+  if (status === "CANCELADA") return "Ver historial";
+  return nextAction;
 }
 
 export default async function PurchaseOrdersPage({
@@ -95,7 +103,7 @@ export default async function PurchaseOrdersPage({
   ] = await Promise.all([
     prisma.purchaseOrder.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ expectedDate: "asc" }, { createdAt: "desc" }],
       skip: (currentPage - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       select: {
@@ -139,6 +147,7 @@ export default async function PurchaseOrdersPage({
           { key: "confirmadas", label: `Por enviar o recibir (${confirmedCount})` },
           { key: "en_transito", label: `${getPurchaseOrderPresetLabel("en_transito")} (${transitCount})` },
           { key: "recepcion_parcial", label: `${getPurchaseOrderPresetLabel("recepcion_parcial")} (${partialCount})` },
+          { key: "por_recibir_hoy", label: `${getPurchaseOrderPresetLabel("por_recibir_hoy")} (${dueTodayCount})` },
           { key: "vencidas", label: `${getPurchaseOrderPresetLabel("vencidas")} (${overdueCount})` },
           { key: "recibidas", label: `Cerradas (${receivedCount})` },
         ]
@@ -157,7 +166,7 @@ export default async function PurchaseOrdersPage({
         title={canManagePurchasing ? "Órdenes de compra" : "Trabajo de recepción"}
         description={
           canManagePurchasing
-            ? "Revisa las órdenes que requieren una decisión y continúa con su siguiente acción."
+            ? "Revisa riesgo, avance y siguiente acción sin abrir cada orden individualmente."
             : "Selecciona la mercancía que vas a recibir o continúa una recepción parcial."
         }
         meta={`${filteredCount} ${filteredCount === 1 ? "orden" : "órdenes"}`}
@@ -252,9 +261,7 @@ export default async function PurchaseOrdersPage({
         >
           <div className="grid gap-3 md:hidden">
             {orders.map((order) => {
-              const totalOrdered = order.lines.reduce((sum, line) => sum + line.qtyOrdered, 0);
-              const totalReceived = order.lines.reduce((sum, line) => sum + line.qtyReceived, 0);
-              const pct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
+              const operational = getPurchaseOrderOperationalState(order);
 
               return (
                 <article
@@ -290,23 +297,27 @@ export default async function PurchaseOrdersPage({
                       <p className="text-[var(--text-secondary)]">{formatDate(order.expectedDate)}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-[var(--text-muted)]">Líneas</p>
-                      <p className="font-semibold text-[var(--text-primary)]">{order._count.lines}</p>
+                      <p className="text-xs text-[var(--text-muted)]">% recibido</p>
+                      <p className="font-semibold text-[var(--status-info)]">{operational.receivedPercent}%</p>
                     </div>
                     <div>
-                      <p className="text-xs text-[var(--text-muted)]">% recibido</p>
-                      <p className="font-semibold text-[var(--status-info)]">{pct}%</p>
+                      <p className="text-xs text-[var(--text-muted)]">Riesgo</p>
+                      <Badge variant={operational.riskTone} size="sm">{operational.riskLabel}</Badge>
                     </div>
                     <div>
                       <p className="text-xs text-[var(--text-muted)]">Recepciones</p>
                       <p className="font-semibold text-[var(--text-primary)]">{order._count.receipts}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-xs text-[var(--text-muted)]">Siguiente acción</p>
+                      <p className="font-semibold text-[var(--text-primary)]">{operational.nextAction}</p>
                     </div>
                   </div>
 
                   <div className="mt-4 space-y-2">
                     {canManagePurchasing ? (
                       <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ size: "sm", fullWidth: true })}>
-                        Abrir orden
+                        {managerActionLabel(order.status, operational.nextAction)}
                       </Link>
                     ) : null}
                     {!canManagePurchasing && canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (
@@ -325,23 +336,22 @@ export default async function PurchaseOrdersPage({
 
           <div className="hidden md:block">
             <TableWrap dense striped label="Listado de órdenes de compra" className="rounded-none border-0 shadow-none">
-              <Table className="min-w-[760px]">
+              <Table className="min-w-[980px]">
                 <thead>
                   <tr>
                     <Th>Folio</Th>
                     <Th>Proveedor</Th>
                     <Th>Estado</Th>
                     <Th>Fecha esperada</Th>
-                    <Th className="text-right">Líneas</Th>
                     <Th className="text-right">% recibido</Th>
+                    <Th>Riesgo</Th>
+                    <Th>Siguiente acción</Th>
                     <Th className="text-right">Acción</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {orders.map((order) => {
-                    const totalOrdered = order.lines.reduce((sum, line) => sum + line.qtyOrdered, 0);
-                    const totalReceived = order.lines.reduce((sum, line) => sum + line.qtyReceived, 0);
-                    const pct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
+                    const operational = getPurchaseOrderOperationalState(order);
 
                     return (
                       <TableRow key={order.id}>
@@ -364,13 +374,14 @@ export default async function PurchaseOrdersPage({
                           </Badge>
                         </Td>
                         <Td className="text-sm text-[var(--text-secondary)]">{formatDate(order.expectedDate)}</Td>
-                        <Td className="text-right font-semibold text-[var(--text-primary)]">{order._count.lines}</Td>
-                        <Td className="text-right font-semibold text-[var(--status-info)]">{pct}%</Td>
+                        <Td className="text-right font-semibold text-[var(--status-info)]">{operational.receivedPercent}%</Td>
+                        <Td><Badge variant={operational.riskTone} size="sm">{operational.riskLabel}</Badge></Td>
+                        <Td className="text-sm text-[var(--text-secondary)]">{operational.nextAction}</Td>
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
                             {canManagePurchasing ? (
                               <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ size: "sm" })}>
-                                Abrir orden
+                                {managerActionLabel(order.status, operational.nextAction)}
                               </Link>
                             ) : null}
                             {!canManagePurchasing && canReceivePurchasing && canReceivePurchaseOrder(order.status) ? (

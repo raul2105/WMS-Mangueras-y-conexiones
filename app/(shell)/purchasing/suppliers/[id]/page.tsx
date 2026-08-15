@@ -103,9 +103,7 @@ async function addBrand(supplierId: string, formData: FormData) {
   }
 
   try {
-    await prisma.supplierBrand.create({
-      data: { supplierId, name: parsed.data.name },
-    });
+    await prisma.supplierBrand.create({ data: { supplierId, name: parsed.data.name } });
   } catch {
     redirect(`/purchasing/suppliers/${supplierId}?error=${encodeURIComponent("Ya existe una marca con ese nombre para este proveedor")}`);
   }
@@ -213,61 +211,48 @@ export default async function SupplierDetailPage({
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Link href="/purchasing/suppliers" className="px-4 py-2 glass rounded-lg text-slate-300 hover:text-white">← Proveedores</Link>
+          <Link href="/purchasing/suppliers" className="btn-secondary">← Proveedores</Link>
           <div>
-            <h1 className="text-2xl font-bold">{supplier.businessName ?? supplier.name}</h1>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">{supplier.businessName ?? supplier.name}</h1>
             {supplier.legalName && supplier.legalName !== (supplier.businessName ?? supplier.name) && (
-              <p className="text-sm text-slate-400">{supplier.legalName}</p>
+              <p className="text-sm text-[var(--text-secondary)]">{supplier.legalName}</p>
             )}
-            <p className="text-xs text-slate-400 font-mono">{supplier.code}</p>
+            <p className="text-xs text-[var(--text-muted)] font-mono">{supplier.code}</p>
           </div>
         </div>
         <form action={toggleActiveBound}>
           <input type="hidden" name="isActive" value={String(supplier.isActive)} />
           <button
             type="submit"
-            className={`text-xs px-3 py-1.5 rounded-lg glass border ${supplier.isActive ? "border-red-500/30 text-red-300 hover:bg-red-500/10" : "border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"}`}
+            className={`text-xs px-3 py-1.5 rounded-lg border ${supplier.isActive ? "border-[var(--status-danger-border)] text-[var(--status-danger-text)] hover:bg-[var(--status-danger-bg)]" : "border-[var(--status-success-border)] text-[var(--status-success-text)] hover:bg-[var(--status-success-bg)]"}`}
           >
             {supplier.isActive ? "Desactivar" : "Activar"}
           </button>
         </form>
       </div>
 
-      {sp.error && <div className="glass-card border border-red-500/30 text-red-200 text-sm">{sp.error}</div>}
-      {sp.ok === "1" && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Producto vinculado correctamente.</div>}
-      {sp.ok === "brand" && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Marca agregada correctamente.</div>}
-      {sp.ok === "terms" && <div className="glass-card border border-green-500/30 text-green-200 text-sm">Términos de pago actualizados correctamente.</div>}
+      {sp.error && <div className="op-panel border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-text)] text-sm">{sp.error}</div>}
+      {sp.ok === "1" && <div className="op-panel border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)] text-sm">Producto vinculado correctamente.</div>}
+      {sp.ok === "brand" && <div className="op-panel border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)] text-sm">Marca agregada correctamente.</div>}
+      {sp.ok === "terms" && <div className="op-panel border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)] text-sm">Términos de pago actualizados correctamente.</div>}
 
-      {/* Info del proveedor */}
-      <div className="glass-card grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <p className="text-xs text-slate-400">RFC</p>
-          <p className="text-slate-200">{supplier.taxId ?? "—"}</p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-400">Email</p>
-          <p className="text-slate-200">{supplier.email ?? "—"}</p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-400">Teléfono</p>
-          <p className="text-slate-200">{supplier.phone ?? "—"}</p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-400">OCs registradas</p>
-          <p className="text-slate-200">{supplier._count.purchaseOrders}</p>
-        </div>
+      <div className="op-panel grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div><p className="op-label">RFC</p><p className="text-[var(--text-primary)]">{supplier.taxId ?? "—"}</p></div>
+        <div><p className="op-label">Email</p><p className="text-[var(--text-primary)]">{supplier.email ?? "—"}</p></div>
+        <div><p className="op-label">Teléfono</p><p className="text-[var(--text-primary)]">{supplier.phone ?? "—"}</p></div>
+        <div><p className="op-label">OCs registradas</p><p className="text-[var(--text-primary)]">{supplier._count.purchaseOrders}</p></div>
         {supplier.address && (
           <div className="col-span-full">
-            <p className="text-xs text-slate-400">Dirección</p>
-            <p className="text-slate-200">{supplier.address}</p>
+            <p className="op-label">Dirección</p>
+            <p className="text-[var(--text-primary)]">{supplier.address}</p>
           </div>
         )}
       </div>
 
-      <form action={updatePaymentTermsBound} className="glass-card space-y-4">
+      <form action={updatePaymentTermsBound} className="op-panel space-y-4">
         <div>
-          <h2 className="text-lg font-bold">Términos de pago</h2>
-          <p className="text-sm text-slate-400 mt-1">Este valor se copia a nuevas órdenes de compra y se congela en el documento oficial.</p>
+          <h2 className="text-lg font-bold text-[var(--text-primary)]">Términos de pago</h2>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Este valor se copia a nuevas órdenes de compra y se congela en el documento oficial.</p>
         </div>
         <textarea
           name="paymentTerms"
@@ -275,29 +260,26 @@ export default async function SupplierDetailPage({
           defaultValue={supplier.paymentTerms ?? ""}
           maxLength={500}
           placeholder="Contado, 30 días, transferencia..."
-          className="w-full px-3 py-2 glass rounded-lg text-sm min-h-[96px]"
+          className="op-field w-full min-h-[96px]"
         />
         <div className="flex justify-end">
-          <button type="submit" className="btn-primary text-sm py-2 px-4">
-            Guardar términos
-          </button>
+          <button type="submit" className="btn-primary text-sm py-2 px-4">Guardar términos</button>
         </div>
       </form>
 
-      {/* Marcas del proveedor */}
-      <div className="glass-card space-y-4">
-        <h2 className="text-lg font-bold border-b border-white/10 pb-2">
+      <div className="op-panel space-y-4">
+        <h2 className="text-lg font-bold text-[var(--text-primary)] border-b border-[var(--border-soft)] pb-2">
           Marcas Registradas
-          <span className="text-sm text-slate-400 font-normal ml-2">({supplier.brands.length})</span>
+          <span className="text-sm text-[var(--text-muted)] font-normal ml-2">({supplier.brands.length})</span>
         </h2>
 
         {supplier.brands.length === 0 ? (
-          <p className="text-slate-500 text-sm">Sin marcas registradas. Agrega la primera marca.</p>
+          <p className="text-[var(--text-muted)] text-sm">Sin marcas registradas. Agrega la primera marca.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-slate-400 border-b border-white/10">
+                <tr className="text-[var(--text-secondary)] border-b border-[var(--border-soft)]">
                   <th className="text-left py-2">Marca</th>
                   <th className="text-left py-2">Estado</th>
                   <th className="py-2"></th>
@@ -308,23 +290,21 @@ export default async function SupplierDetailPage({
                   const toggleBrandBound = toggleBrand.bind(null, brand.id, id);
                   const deleteBrandBound = deleteBrand.bind(null, brand.id, id);
                   return (
-                    <tr key={brand.id} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="py-2 text-slate-200">{brand.name}</td>
+                    <tr key={brand.id} className="border-b border-[var(--border-soft)] hover:bg-[var(--table-hover)]">
+                      <td className="py-2 text-[var(--text-primary)]">{brand.name}</td>
                       <td className="py-2">
-                        <span className={`text-xs px-2 py-0.5 rounded ${brand.isActive ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-500/20 text-slate-400"}`}>
+                        <span className={brand.isActive ? "op-badge op-badge-success" : "op-badge op-badge-neutral"}>
                           {brand.isActive ? "Activa" : "Inactiva"}
                         </span>
                       </td>
                       <td className="py-2 text-right flex items-center justify-end gap-3">
                         <form action={toggleBrandBound} className="inline">
-                          <button type="submit" className="text-xs text-slate-400 hover:text-white hover:underline">
+                          <button type="submit" className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline">
                             {brand.isActive ? "Desactivar" : "Activar"}
                           </button>
                         </form>
                         <form action={deleteBrandBound} className="inline">
-                          <button type="submit" className="text-xs text-red-400 hover:text-red-300 hover:underline">
-                            Eliminar
-                          </button>
+                          <button type="submit" className="text-xs text-[var(--status-danger-text)] hover:underline">Eliminar</button>
                         </form>
                       </td>
                     </tr>
@@ -335,29 +315,28 @@ export default async function SupplierDetailPage({
           </div>
         )}
 
-        <form action={addBrandBound} className="border-t border-white/10 pt-4 flex items-end gap-3">
+        <form action={addBrandBound} className="border-t border-[var(--border-soft)] pt-4 flex items-end gap-3">
           <label className="space-y-1 flex-1">
-            <span className="text-xs text-slate-400">Nueva marca *</span>
-            <input name="brandName" required maxLength={100} placeholder="Continental, Gates, Parker…" className="w-full px-3 py-2 glass rounded-lg text-sm" />
+            <span className="op-label">Nueva marca *</span>
+            <input name="brandName" required maxLength={100} placeholder="Continental, Gates, Parker…" className="op-field w-full" />
           </label>
           <button type="submit" className="btn-primary text-sm py-2 px-4">Agregar</button>
         </form>
       </div>
 
-      {/* Productos vinculados */}
-      <div className="glass-card space-y-4">
-        <h2 className="text-lg font-bold border-b border-white/10 pb-2">
+      <div className="op-panel space-y-4">
+        <h2 className="text-lg font-bold text-[var(--text-primary)] border-b border-[var(--border-soft)] pb-2">
           Productos Vinculados
-          <span className="text-sm text-slate-400 font-normal ml-2">({supplier.products.length})</span>
+          <span className="text-sm text-[var(--text-muted)] font-normal ml-2">({supplier.products.length})</span>
         </h2>
 
         {supplier.products.length === 0 ? (
-          <p className="text-slate-500 text-sm">Sin productos vinculados.</p>
+          <p className="text-[var(--text-muted)] text-sm">Sin productos vinculados.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-slate-400 border-b border-white/10">
+                <tr className="text-[var(--text-secondary)] border-b border-[var(--border-soft)]">
                   <th className="text-left py-2">SKU</th>
                   <th className="text-left py-2">Producto</th>
                   <th className="text-left py-2">Clave Proveedor</th>
@@ -368,22 +347,20 @@ export default async function SupplierDetailPage({
               </thead>
               <tbody>
                 {supplier.products.map((sp) => (
-                  <tr key={sp.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="py-2 font-mono text-cyan-400 text-xs">{sp.product.sku}</td>
-                    <td className="py-2 text-slate-300">{sp.product.name}</td>
-                    <td className="py-2 text-slate-400 text-xs">{sp.supplierSku ?? "—"}</td>
-                    <td className="py-2 text-right text-slate-300">
+                  <tr key={sp.id} className="border-b border-[var(--border-soft)] hover:bg-[var(--table-hover)]">
+                    <td className="py-2 font-mono text-[var(--text-accent)] text-xs">{sp.product.sku}</td>
+                    <td className="py-2 text-[var(--text-primary)]">{sp.product.name}</td>
+                    <td className="py-2 text-[var(--text-secondary)] text-xs">{sp.supplierSku ?? "—"}</td>
+                    <td className="py-2 text-right text-[var(--text-primary)]">
                       {sp.unitPrice != null ? `$${sp.unitPrice.toLocaleString("es-MX", { minimumFractionDigits: 2 })} ${sp.currency}` : "—"}
                     </td>
-                    <td className="py-2 text-right text-slate-400">
+                    <td className="py-2 text-right text-[var(--text-secondary)]">
                       {sp.leadTimeDays != null ? `${sp.leadTimeDays} días` : "—"}
                     </td>
                     <td className="py-2 text-right">
                       <form action={unlinkProductBound} className="inline">
                         <input type="hidden" name="supplierProductId" value={sp.id} />
-                        <button type="submit" className="text-xs text-red-400 hover:text-red-300 hover:underline">
-                          Desvincular
-                        </button>
+                        <button type="submit" className="text-xs text-[var(--status-danger-text)] hover:underline">Desvincular</button>
                       </form>
                     </td>
                   </tr>
@@ -393,14 +370,13 @@ export default async function SupplierDetailPage({
           </div>
         )}
 
-        {/* Form vincular producto */}
         {availableProducts.length > 0 && (
-          <form action={linkProductBound} className="border-t border-white/10 pt-4">
-            <h3 className="text-sm font-semibold text-slate-300 mb-3">Vincular producto</h3>
+          <form action={linkProductBound} className="border-t border-[var(--border-soft)] pt-4">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">Vincular producto</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-slate-400">Producto *</span>
-                <select name="productId" required className="w-full px-3 py-2 glass rounded-lg text-sm">
+                <span className="op-label">Producto *</span>
+                <select name="productId" required className="op-field w-full">
                   <option value="">Seleccionar…</option>
                   {availableProducts.map((p) => (
                     <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>
@@ -408,16 +384,16 @@ export default async function SupplierDetailPage({
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Clave Proveedor</span>
-                <input name="supplierSku" maxLength={50} placeholder="ABC-123" className="w-full px-3 py-2 glass rounded-lg text-sm" />
+                <span className="op-label">Clave Proveedor</span>
+                <input name="supplierSku" maxLength={50} placeholder="ABC-123" className="op-field w-full" />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Precio unitario (MXN)</span>
-                <input name="unitPrice" type="number" step="0.01" min="0" placeholder="0.00" className="w-full px-3 py-2 glass rounded-lg text-sm" />
+                <span className="op-label">Precio unitario (MXN)</span>
+                <input name="unitPrice" type="number" step="0.01" min="0" placeholder="0.00" className="op-field w-full" />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-slate-400">Lead Time (días)</span>
-                <input name="leadTimeDays" type="number" min="0" placeholder="7" className="w-full px-3 py-2 glass rounded-lg text-sm" />
+                <span className="op-label">Lead Time (días)</span>
+                <input name="leadTimeDays" type="number" min="0" placeholder="7" className="op-field w-full" />
               </label>
               <div className="flex items-end">
                 <button type="submit" className="btn-primary text-sm py-2 px-4">Vincular</button>

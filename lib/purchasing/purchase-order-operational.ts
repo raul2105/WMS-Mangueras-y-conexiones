@@ -43,6 +43,7 @@ export function getPurchaseOrderOperationalState(
   const isOpen = OPEN_STATUSES.has(order.status);
   const isOverdue = Boolean(isOpen && expectedDate && expectedDate < start);
   const isDueToday = Boolean(isOpen && expectedDate && expectedDate >= start && expectedDate < end);
+  const hasNoLines = isOpen && (order.lines?.length ?? 0) === 0;
 
   if (order.status === "RECIBIDA") {
     return {
@@ -65,6 +66,18 @@ export function getPurchaseOrderOperationalState(
       priority: 100,
       isOverdue: false,
       isDueToday: false,
+    };
+  }
+
+  if (hasNoLines) {
+    return {
+      receivedPercent,
+      riskLabel: "Sin líneas",
+      riskTone: "danger",
+      nextAction: "Corregir líneas de OC",
+      priority: 1,
+      isOverdue,
+      isDueToday,
     };
   }
 

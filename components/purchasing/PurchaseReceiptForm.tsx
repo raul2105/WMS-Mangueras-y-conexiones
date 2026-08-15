@@ -82,15 +82,15 @@ export function PurchaseReceiptForm({
 
   return (
     <form ref={formRef} action={action} onSubmit={openReview} className="space-y-5">
-      <section className="glass-card space-y-4">
+      <section className="op-panel space-y-4">
         <div>
-          <h2 className="border-b border-white/10 pb-2 text-base font-bold">Datos de recepción</h2>
-          <p className="mt-2 text-sm text-slate-300">Selecciona la zona donde estás contando la mercancía.</p>
+          <h2 className="border-b border-[var(--border-default)] pb-2 text-base font-bold">Datos de recepción</h2>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">Selecciona la zona donde estás contando la mercancía.</p>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="space-y-1">
-            <span className="text-sm text-slate-300">Zona de recepción *</span>
-            <select name="locationId" required className="glass w-full rounded-lg px-4 py-3">
+            <span className="op-label">Zona de recepción *</span>
+            <select name="locationId" required className="op-field px-4 py-3">
               <option value="">Seleccionar zona de recepción…</option>
               {locations.map((location) => (
                 <option key={location.id} value={location.id}>
@@ -100,63 +100,63 @@ export function PurchaseReceiptForm({
             </select>
           </label>
           <label className="space-y-1">
-            <span className="text-sm text-slate-300">Remisión / factura</span>
-            <input name="referenceDoc" maxLength={100} placeholder="REM-2026-001" className="glass w-full rounded-lg px-4 py-3" />
+            <span className="op-label">Remisión / factura</span>
+            <input name="referenceDoc" maxLength={100} placeholder="REM-2026-001" className="op-field px-4 py-3" />
           </label>
         </div>
         <label className="block space-y-1">
-          <span className="text-sm text-slate-300">Notas de recepción</span>
-          <textarea name="notes" placeholder="Observaciones generales de transporte o entrega" className="glass min-h-[96px] w-full rounded-lg px-4 py-3" />
+          <span className="op-label">Notas de recepción</span>
+          <textarea name="notes" placeholder="Observaciones generales de transporte o entrega" className="op-field min-h-[96px] px-4 py-3" />
         </label>
       </section>
 
-      <section className="glass-card space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-3">
+      <section className="op-panel space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border-default)] pb-3">
           <div>
-            <h2 className="text-base font-bold">Artículos pendientes <span className="font-normal text-slate-300">({lines.length} líneas)</span></h2>
-            <p className="mt-1 text-sm text-slate-300">Escribe lo contado físicamente. Ninguna línea se recibe hasta confirmar el resumen.</p>
+            <h2 className="text-base font-bold">Artículos pendientes <span className="font-normal text-[var(--text-secondary)]">({lines.length} líneas)</span></h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">Escribe lo contado físicamente. Ninguna línea se recibe hasta confirmar el resumen.</p>
           </div>
-          <button type="button" onClick={receiveAllPending} className="rounded-lg border border-cyan-400/40 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">
+          <button type="button" onClick={receiveAllPending} className="btn-secondary">
             Recibir todo lo pendiente
           </button>
         </div>
 
         <div className="space-y-3">
           {lines.map((line) => (
-            <article key={line.id} className="rounded-xl border border-white/10 bg-slate-950/20 p-3">
+            <article key={line.id} className="op-surface p-3">
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,1.2fr)_7rem] sm:items-end">
                 <div>
-                  <p className="font-mono text-xs text-cyan-300">{line.sku}</p>
-                  <p className="mt-1 text-sm font-medium text-white">{line.name}</p>
+                  <p className="font-mono text-xs text-[var(--text-accent)]">{line.sku}</p>
+                  <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{line.name}</p>
                 </div>
                 <dl className="grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg border border-white/10 px-2 py-2">
-                    <dt className="text-slate-400">Pedido</dt>
-                    <dd className="mt-1 font-semibold text-slate-100">{line.ordered} {line.unitLabel}</dd>
+                  <div className="op-surface-muted px-2 py-2">
+                    <dt className="text-[var(--text-muted)]">Pedido</dt>
+                    <dd className="mt-1 font-semibold text-[var(--text-primary)]">{line.ordered} {line.unitLabel}</dd>
                   </div>
-                  <div className="rounded-lg border border-white/10 px-2 py-2">
-                    <dt className="text-slate-400">Recibido</dt>
-                    <dd className="mt-1 font-semibold text-emerald-200">{line.received} {line.unitLabel}</dd>
+                  <div className="op-surface-muted px-2 py-2">
+                    <dt className="text-[var(--text-muted)]">Recibido</dt>
+                    <dd className="mt-1 font-semibold text-[var(--status-success-text)]">{line.received} {line.unitLabel}</dd>
                   </div>
-                  <div className="rounded-lg border border-amber-300/30 bg-amber-300/5 px-2 py-2">
-                    <dt className="text-amber-200">Pendiente</dt>
-                    <dd className="mt-1 font-semibold text-amber-300">{line.pending} {line.unitLabel}</dd>
+                  <div className="rounded-[var(--radius-md)] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-2 py-2">
+                    <dt className="text-[var(--status-warning-text)]">Pendiente</dt>
+                    <dd className="mt-1 font-semibold text-[var(--status-warning-text)]">{line.pending} {line.unitLabel}</dd>
                   </div>
                 </dl>
                 <label className="space-y-1">
-                  <span className="text-sm text-slate-300">En buen estado</span>
-                  <input name={`qty_${line.id}`} type="number" min="0" max={line.pending} step={line.step} defaultValue="0" inputMode="decimal" className="glass w-full rounded-lg px-3 py-2 text-right" />
+                  <span className="op-label">En buen estado</span>
+                  <input name={`qty_${line.id}`} type="number" min="0" max={line.pending} step={line.step} defaultValue="0" inputMode="decimal" className="op-field px-3 py-2 text-right" />
                 </label>
               </div>
-              <details className="mt-3 rounded-lg border border-white/10 p-3">
-                <summary className="cursor-pointer text-sm font-medium text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">Registrar diferencia de esta línea</summary>
+              <details className="op-surface-muted mt-3 p-3">
+                <summary className="op-interactive cursor-pointer rounded-[var(--radius-sm)] text-sm font-medium text-[var(--text-primary)]">Registrar diferencia de esta línea</summary>
                 <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <label className="text-xs text-slate-300">Dañado<input name={`dmg_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="glass mt-1 w-full rounded-lg px-2 py-2 text-right" /></label>
-                  <label className="text-xs text-slate-300">Faltante<input name={`missing_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="glass mt-1 w-full rounded-lg px-2 py-2 text-right" /></label>
-                  <label className="text-xs text-slate-300">Rechazado<input name={`rejected_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="glass mt-1 w-full rounded-lg px-2 py-2 text-right" /></label>
-                  <label className="text-xs text-slate-300">Sobrante<input name={`surplus_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="glass mt-1 w-full rounded-lg px-2 py-2 text-right" /></label>
+                  <label className="op-label">Dañado<input name={`dmg_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="op-field mt-1 px-2 py-2 text-right" /></label>
+                  <label className="op-label">Faltante<input name={`missing_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="op-field mt-1 px-2 py-2 text-right" /></label>
+                  <label className="op-label">Rechazado<input name={`rejected_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="op-field mt-1 px-2 py-2 text-right" /></label>
+                  <label className="op-label">Sobrante<input name={`surplus_${line.id}`} type="number" min="0" step={line.step} defaultValue="0" inputMode="decimal" className="op-field mt-1 px-2 py-2 text-right" /></label>
                 </div>
-                <label className="mt-3 block text-xs text-slate-300">Motivo de la diferencia<textarea name={`reason_${line.id}`} maxLength={500} placeholder="Ej. empaque dañado o faltante del proveedor" className="glass mt-1 min-h-20 w-full rounded-lg px-3 py-2" /></label>
+                <label className="op-label mt-3 block">Motivo de la diferencia<textarea name={`reason_${line.id}`} maxLength={500} placeholder="Ej. empaque dañado o faltante del proveedor" className="op-field mt-1 min-h-20 px-3 py-2" /></label>
               </details>
             </article>
           ))}
@@ -164,24 +164,24 @@ export function PurchaseReceiptForm({
       </section>
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-        <a href={cancelHref} className="rounded-lg border border-white/20 px-4 py-2 text-center text-slate-100 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">Cancelar</a>
+        <a href={cancelHref} className="btn-secondary">Cancelar</a>
         <button type="submit" className="btn-primary">Revisar recepción</button>
       </div>
 
       {reviewOpen && review ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="receipt-review-title" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/75 p-4 sm:place-items-center">
-          <div className="w-full max-w-md rounded-2xl border border-cyan-300/30 bg-slate-900 p-5 shadow-2xl">
-            <h2 id="receipt-review-title" className="text-lg font-semibold text-white">Confirmar recepción</h2>
-            <dl className="mt-4 space-y-2 text-sm text-slate-200">
-              <div className="flex justify-between gap-4"><dt>Zona</dt><dd className="text-right font-medium">{review.location}</dd></div>
-              <div className="flex justify-between gap-4"><dt>Líneas con recepción</dt><dd className="font-medium">{review.lines}</dd></div>
-              <div className="flex justify-between gap-4"><dt>Total bueno</dt><dd className="font-medium">{review.total}</dd></div>
-              <div className="flex justify-between gap-4"><dt>Líneas con diferencia</dt><dd className="font-medium">{review.discrepancyLines}</dd></div>
-              <div className="flex justify-between gap-4"><dt>Unidades con diferencia</dt><dd className="font-medium">{review.discrepancyUnits}</dd></div>
+        <div role="dialog" aria-modal="true" aria-labelledby="receipt-review-title" className="fixed inset-0 z-50 grid place-items-end bg-[var(--bg-overlay)] p-4 sm:place-items-center">
+          <div className="op-panel w-full max-w-md p-5 shadow-2xl">
+            <h2 id="receipt-review-title" className="text-lg font-semibold text-[var(--text-primary)]">Confirmar recepción</h2>
+            <dl className="mt-4 space-y-2 text-sm text-[var(--text-secondary)]">
+              <div className="flex justify-between gap-4"><dt>Zona</dt><dd className="text-right font-medium text-[var(--text-primary)]">{review.location}</dd></div>
+              <div className="flex justify-between gap-4"><dt>Líneas con recepción</dt><dd className="font-medium text-[var(--text-primary)]">{review.lines}</dd></div>
+              <div className="flex justify-between gap-4"><dt>Total bueno</dt><dd className="font-medium text-[var(--status-success-text)]">{review.total}</dd></div>
+              <div className="flex justify-between gap-4"><dt>Líneas con diferencia</dt><dd className="font-medium text-[var(--status-warning-text)]">{review.discrepancyLines}</dd></div>
+              <div className="flex justify-between gap-4"><dt>Unidades con diferencia</dt><dd className="font-medium text-[var(--status-warning-text)]">{review.discrepancyUnits}</dd></div>
             </dl>
-            <p className="mt-4 text-sm text-slate-300">Al confirmar, las piezas en buen estado entrarán al inventario y se prepararán sus etiquetas.</p>
+            <p className="mt-4 text-sm text-[var(--text-secondary)]">Al confirmar, las piezas en buen estado entrarán al inventario y se prepararán sus etiquetas.</p>
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button type="button" onClick={() => setReviewOpen(false)} className="rounded-lg border border-white/20 px-4 py-2 text-slate-100 hover:bg-white/10">Volver a revisar</button>
+              <button type="button" onClick={() => setReviewOpen(false)} className="btn-secondary">Volver a revisar</button>
               <button type="button" onClick={confirmReceipt} className="btn-primary">Confirmar recepción</button>
             </div>
           </div>

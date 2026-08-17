@@ -42,16 +42,20 @@
 - `npm run build`: verde.
 - `npm run build:opennext`: terminó con código 0; Windows reportó una advertencia no bloqueante al instalar dependencias de image optimization.
 - `npm run env:postgres:check` y `npm run env:postgres:tcp`: verdes; el entorno conectado es RDS de desarrollo `wms-web-dev-pg...`.
-- `npx prisma migrate status --schema prisma/postgresql/schema.prisma`: confirmó pendiente `20260817100000_add_replenishment_governance`; no se aplicó sobre RDS.
-- Navegador local autenticado con fixture de administrador: `/purchasing/orders` y `/purchasing/orders/new` cargaron correctamente; `/purchasing` mostró error controlado porque la tabla `ReplenishmentProposal` no existe aún.
-- Evidencia visual guardada en `visual-purchasing-2026-08-17.png`, `visual-purchasing-orders-2026-08-17.png` y `visual-new-purchase-order-2026-08-17.png`.
+- `npx prisma migrate deploy --schema prisma/postgresql/schema.prisma`: aplicó `20260817100000_add_replenishment_governance` en RDS de desarrollo.
+- `npx prisma migrate status --schema prisma/postgresql/schema.prisma`: confirmó el esquema al día.
+- `npm run test:postgres`: 80 archivos, 413 pruebas verdes y 14 omitidas por diseño; la corrida usó esquemas aislados y limpió los esquemas de esta ejecución.
+- El fixture de `tests/customers/customer-service.test.ts` se homologó para incluir `auditLog` y hacer visible la auditoría obligatoria también en mocks.
+- La corrida local del gate AWS con credenciales sembradas fue bloqueada por `Credenciales invalidas`; la corrida oficial con secretos de GitHub pasó en [CI 32052951269](https://github.com/raul2105/WMS-Mangueras-y-conexiones/actions/runs/32052951269), incluido `AWS Read-only E2E (required)`.
+- Navegador local autenticado con fixture de administrador: `/purchasing/orders` y `/purchasing/orders/new` cargaron correctamente; la captura previa de `/purchasing` registró el bloqueo por migración antes de aplicarla.
+- Evidencia visual guardada en `visual-purchasing-2026-08-17.png`, `visual-purchasing-orders-2026-08-17.png`, `visual-new-purchase-order-2026-08-17.png` y `visual-purchasing-post-migration-2026-08-17.png`; la pantalla principal ya renderiza después de la migración.
 
 ## Gaps que siguen abiertos
 
-1. Aplicar y verificar la migración `20260817100000_add_replenishment_governance` en un PostgreSQL controlado; no se aplicó a AWS.
-2. Ejecutar pruebas PostgreSQL con esquema aislado y evidencia de rollback, concurrencia y persistencia de propuestas; requiere autorización para crear datos de prueba.
+1. Ejecutar la prueba específica de generación persistente de propuestas de reabasto sobre RDS después de la migración, con política y datos de prueba identificados.
+2. Mantener vigilancia de los 271 esquemas `t_run_*` antiguos existentes antes de esta corrida; no pertenecen a la ejecución actual y no fueron eliminados.
 3. Completar el flujo de aprobación de propuestas y conversión a orden de compra; el dashboard ya muestra la worklist activa.
 4. Revisar transaccionalidad de los formularios de catálogo y proveedores existentes que todavía usan el alias legacy de auditoría fuera de una transacción local.
-5. Ejecutar E2E autenticado V1–V8 con credenciales Manager/System Admin contra un despliegue que incluya la migración; no se realizó en esta rama.
+5. Ejecutar E2E autenticado completo V1–V8 contra el SHA de esta rama; el gate AWS oficial que pasó valida el escenario read-only KAN-128 sobre `main` publicado, no esta rama.
 6. Completar la captura visual por rol y resolver el bloqueo de `/purchasing`; la revisión actual es parcial y no constituye aceptación UX final.
 7. Reconciliar en Jira KAN-86/KAN-87 con la rama/PR que corresponda y no cerrar KAN-125, KAN-127, KAN-128, KAN-133 ni los tickets finalizados cuya evidencia actual aún no exista.

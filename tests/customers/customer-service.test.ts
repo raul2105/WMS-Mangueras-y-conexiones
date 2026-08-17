@@ -18,6 +18,7 @@ function makePrismaMock(options: {
   count?: (args: AnyRecord) => Promise<number>;
   create?: (args: AnyRecord) => Promise<any>;
   update?: (args: AnyRecord) => Promise<any>;
+  auditLogCreate?: (args: AnyRecord) => Promise<any>;
 }) {
   const customer = {
     findFirst: options.findFirst ?? (async () => null),
@@ -28,9 +29,13 @@ function makePrismaMock(options: {
     update: options.update ?? (async () => null),
   };
 
-  const tx = { customer };
+  const auditLog = {
+    create: options.auditLogCreate ?? (async () => null),
+  };
+  const tx = { customer, auditLog };
   return {
     customer,
+    auditLog,
     $transaction: async <T>(callback: (txClient: AnyRecord) => Promise<T>) => callback(tx),
   } as unknown as PrismaClient;
 }

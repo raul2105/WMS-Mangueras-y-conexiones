@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const vitestCli = path.join(repoRoot, "node_modules", "vitest", "vitest.mjs");
 const args = process.argv.slice(2);
 const runId = process.env.WMS_TEST_RUN_ID || `run_${Date.now()}_${randomUUID().slice(0, 8)}`;
+const normalizedRunId = runId.replace(/[^a-zA-Z0-9_]/g, "_");
 const forceSerial = process.env.WMS_POSTGRES_FORCE_SERIAL === "1";
 const hasWorkerOverride = args.some((arg) => arg === "--maxWorkers" || arg.startsWith("--maxWorkers="));
 const finalArgs = forceSerial && !hasWorkerOverride ? ["--maxWorkers=1", ...args] : args;
@@ -28,15 +29,24 @@ async function cleanupIsolatedSchemas() {
     datasources: { db: { url: adminUrl } },
   });
 
+  const schemaPattern = `^t_${normalizedRunId}_w[0-9]+$`;
   try {
     const rows = await prisma.$queryRawUnsafe(
-      "SELECT nspname FROM pg_namespace WHERE nspname LIKE $1 ESCAPE '\\'",
-      `t_${runId}_w%`
+      "SELECT nspname FROM pg_namespace WHERE nspname ~ $1",
+      schemaPattern
     );
-    for (const row of rows) {
-      if (!row?.nspname) continue;
-      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${row.nspname}" CASCADE`);
+    const schemaNames = rows.map((row) => row?.nspname).filter(Boolean);
+    for (const schemaName of schemaNames) {
+      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
     }
+    const remaining = await prisma.$queryRawUnsafe(
+      "SELECT nspname FROM pg_namespace WHERE nspname ~ $1",
+      schemaPattern
+    );
+    if (remaining.length > 0) {
+      throw new Error(`Persisten ${remaining.length} esquemas aislados despues de la limpieza`);
+    }
+    return schemaNames.length;
   } finally {
     await prisma.$disconnect();
   }
@@ -54,11 +64,14 @@ async function main() {
     stdio: "inherit",
   });
 
+  let cleanupError = null;
   try {
-    await cleanupIsolatedSchemas();
+    const cleanedCount = await cleanupIsolatedSchemas();
+    console.log(`[test] cleaned ${cleanedCount} isolated schemas for ${runId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[test] failed to cleanup isolated schemas for ${runId}: ${message}`);
+    cleanupError = error;
   }
 
   if (result.error) {
@@ -66,7 +79,8 @@ async function main() {
     process.exit(1);
   }
 
-  process.exit(result.status ?? 0);
+  if (cleanupError) process.exit(1);
+  process.exit(result.status ?? 1);
 }
 
 void main();

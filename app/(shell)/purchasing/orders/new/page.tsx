@@ -6,7 +6,7 @@ import {
   purchaseOrderCreateSchema,
   firstErrorMessage,
 } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -86,37 +86,41 @@ async function createOrder(formData: FormData) {
   const year = new Date().getFullYear();
   const folio = `OC-${year}-${String(count + 1).padStart(4, "0")}`;
 
-  const order = await prisma.$transaction(async (tx) => tx.purchaseOrder.create({
-    data: {
-      folio,
-      supplierId: parsed.data.supplierId,
-      deliveryWarehouseId: frozenFields.deliveryWarehouseId,
-      expectedDate: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
-      notes: parsed.data.notes ?? null,
-      deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
-      paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
-      lines: {
-        create: parsedLines.data.map((line) => {
-          const product = productById.get(line.productId)!;
-          return {
-            productId: line.productId,
-            qtyOrdered: line.qtyOrdered,
-            unitPrice: line.unitPrice ?? supplierPriceByProduct.get(line.productId) ?? null,
-            purchaseUnitLabel: product.purchaseUnitLabel ?? product.unitLabel,
-            purchaseUnitFactor: product.purchaseUnitFactor,
-          };
-        }),
+  const order = await prisma.$transaction(async (tx) => {
+    const createdOrder = await tx.purchaseOrder.create({
+      data: {
+        folio,
+        supplierId: parsed.data.supplierId,
+        deliveryWarehouseId: frozenFields.deliveryWarehouseId,
+        expectedDate: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
+        notes: parsed.data.notes ?? null,
+        deliveryAddressSnapshot: frozenFields.deliveryAddressSnapshot,
+        paymentTermsSnapshot: frozenFields.paymentTermsSnapshot,
+        lines: {
+          create: parsedLines.data.map((line) => {
+            const product = productById.get(line.productId)!;
+            return {
+              productId: line.productId,
+              qtyOrdered: line.qtyOrdered,
+              unitPrice: line.unitPrice ?? supplierPriceByProduct.get(line.productId) ?? null,
+              purchaseUnitLabel: product.purchaseUnitLabel ?? product.unitLabel,
+              purchaseUnitFactor: product.purchaseUnitFactor,
+            };
+          }),
+        },
       },
-    },
-    select: { id: true, folio: true },
-  }));
+      select: { id: true, folio: true },
+    });
 
-  await createAuditLogSafe({
-    entityType: "PURCHASE_ORDER",
-    entityId: order.id,
-    action: "CREATE",
-    after: JSON.stringify({ folio: order.folio, supplierId }),
-    source: "purchasing/orders/new",
+    await createAuditLogSafeWithDb({
+      entityType: "PURCHASE_ORDER",
+      entityId: createdOrder.id,
+      action: "CREATE",
+      after: JSON.stringify({ folio: createdOrder.folio, supplierId }),
+      source: "purchasing/orders/new",
+    }, tx);
+
+    return createdOrder;
   });
 
   const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");

@@ -11,6 +11,12 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
+import { buildPurchaseOrderPresetWhere } from "@/lib/purchasing/purchase-order-presets";
+import {
+  comparePurchaseOrderOperationalPriority,
+  getPurchaseOrderOperationalState,
+} from "@/lib/purchasing/purchase-order-operational";
+import { ReplenishmentProposalApproval } from "@/components/purchasing/ReplenishmentProposalApproval";
 
 export const revalidate = 30;
 
@@ -23,7 +29,7 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELADA: "Cancelada",
 };
 
-const STATUS_COLORS: Record<string, string> = {
+const STATUS_COLORS: Record<string, "neutral" | "accent" | "success" | "warning" | "danger"> = {
   BORRADOR: "neutral",
   CONFIRMADA: "accent",
   EN_TRANSITO: "warning",
@@ -31,6 +37,18 @@ const STATUS_COLORS: Record<string, string> = {
   PARCIAL: "warning",
   CANCELADA: "danger",
 };
+
+const RECEIVABLE_STATUSES = ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] as const;
+
+function formatDate(value: Date | string | null | undefined) {
+  if (!value) return "Sin fecha";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "Sin fecha" : date.toLocaleDateString("es-MX");
+}
+
+function canReceivePurchaseOrder(status: string) {
+  return RECEIVABLE_STATUSES.includes(status as (typeof RECEIVABLE_STATUSES)[number]);
+}
 
 export default async function PurchasingPage() {
   await pageGuard("purchasing.view");
@@ -41,32 +59,73 @@ export default async function PurchasingPage() {
     !sessionCtx.isSystemAdmin;
   const canManagePurchasing =
     sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.manage");
-  const recentOrdersWhere: Prisma.PurchaseOrderWhereInput = isOperatorView
-    ? { status: { in: ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] } }
-    : {};
+  const canReceivePurchasing =
+    sessionCtx.isSystemAdmin || sessionCtx.permissions.includes("purchasing.receive");
+
+  const priorityOrdersWhere: Prisma.PurchaseOrderWhereInput = isOperatorView
+    ? { status: { in: [...RECEIVABLE_STATUSES] } }
+    : { status: { in: ["BORRADOR", ...RECEIVABLE_STATUSES] } };
+  const dueTodayWhere: Prisma.PurchaseOrderWhereInput = isOperatorView
+    ? {
+        AND: [
+          buildPurchaseOrderPresetWhere("por_recibir_hoy"),
+          { status: { in: [...RECEIVABLE_STATUSES] } },
+        ],
+      }
+    : buildPurchaseOrderPresetWhere("por_recibir_hoy");
+
   const [
     totalSuppliers,
     statusCounts,
-    recentOrders,
+    candidateOrders,
+    overdueCount,
+    dueTodayCount,
+    replenishmentProposals,
   ] = await Promise.all([
     prisma.supplier.count({ where: { isActive: true } }),
     prisma.purchaseOrder.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.purchaseOrder.findMany({
-      where: recentOrdersWhere,
-      take: 8,
-      orderBy: { createdAt: "desc" },
+      where: priorityOrdersWhere,
+      orderBy: [{ expectedDate: "asc" }, { createdAt: "desc" }],
       select: {
         id: true,
         folio: true,
         status: true,
+        expectedDate: true,
         supplier: { select: { name: true } },
-        _count: { select: { lines: true } },
+        lines: { select: { qtyOrdered: true, qtyReceived: true } },
       },
     }),
+    prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("vencidas") }),
+    prisma.purchaseOrder.count({ where: dueTodayWhere }),
+    canManagePurchasing
+      ? prisma.replenishmentProposal.findMany({
+          where: { status: { in: ["PROPOSED", "BLOCKED"] } },
+          orderBy: [{ status: "asc" }, { generatedAt: "desc" }],
+          take: 8,
+          select: {
+            id: true,
+            status: true,
+            recommendedQuantity: true,
+            availableStock: true,
+            reason: true,
+            generatedAt: true,
+            product: { select: { sku: true, name: true } },
+            warehouse: { select: { code: true, name: true } },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   const countsByStatus = Object.fromEntries(statusCounts.map((s) => [s.status, s._count._all]));
-  const openCount = (countsByStatus["CONFIRMADA"] ?? 0) + (countsByStatus["EN_TRANSITO"] ?? 0) + (countsByStatus["PARCIAL"] ?? 0);
+  const openCount =
+    (countsByStatus["CONFIRMADA"] ?? 0) +
+    (countsByStatus["EN_TRANSITO"] ?? 0) +
+    (countsByStatus["PARCIAL"] ?? 0);
+  const partialCount = countsByStatus["PARCIAL"] ?? 0;
+  const priorityOrders = candidateOrders
+    .sort((left, right) => comparePurchaseOrderOperationalPriority(left, right))
+    .slice(0, 8);
 
   return (
     <div className="space-y-5">
@@ -75,7 +134,7 @@ export default async function PurchasingPage() {
         description={
           isOperatorView
             ? "Registra mercancía recibida y reporta diferencias físicas."
-            : "Gestiona proveedores, órdenes de compra y compromisos de abastecimiento."
+            : "Prioriza vencimientos, recepciones y compromisos de abastecimiento desde una sola cola operativa."
         }
         meta={`${openCount.toLocaleString("es-MX")} OCs activas`}
         actions={
@@ -92,7 +151,7 @@ export default async function PurchasingPage() {
         }
       />
 
-      <div className={`grid grid-cols-2 gap-4 ${isOperatorView ? "md:grid-cols-2" : "md:grid-cols-4"}`}>
+      <div className={`grid grid-cols-2 gap-4 ${isOperatorView ? "md:grid-cols-2" : "md:grid-cols-3 xl:grid-cols-6"}`}>
         <StatCard
           label={isOperatorView ? "Por recibir" : "OCs activas"}
           value={(isOperatorView
@@ -103,58 +162,134 @@ export default async function PurchasingPage() {
         />
         <StatCard
           label={isOperatorView ? "Recepción parcial" : "En tránsito"}
-          value={(isOperatorView
-            ? (countsByStatus["PARCIAL"] ?? 0)
-            : (countsByStatus["EN_TRANSITO"] ?? 0)).toLocaleString("es-MX")}
+          value={(isOperatorView ? partialCount : (countsByStatus["EN_TRANSITO"] ?? 0)).toLocaleString("es-MX")}
           tone="warning"
           icon={<InventoryIcon className="h-5 w-5" />}
         />
-        {!isOperatorView ? <StatCard
-          label="Borradores"
-          value={(countsByStatus["BORRADOR"] ?? 0).toLocaleString("es-MX")}
-          icon={<BoxIcon className="h-5 w-5" />}
-        /> : null}
-        {!isOperatorView ? <StatCard
-          label="Proveedores"
-          value={totalSuppliers.toLocaleString("es-MX")}
-          tone="success"
-          icon={<WarehouseIcon className="h-5 w-5" />}
-        /> : null}
+        {!isOperatorView ? (
+          <StatCard
+            label="Parciales"
+            value={partialCount.toLocaleString("es-MX")}
+            tone="warning"
+            icon={<InventoryIcon className="h-5 w-5" />}
+          />
+        ) : null}
+        {!isOperatorView ? (
+          <StatCard
+            label="Vencidas"
+            value={overdueCount.toLocaleString("es-MX")}
+            tone="warning"
+            icon={<BoxIcon className="h-5 w-5" />}
+          />
+        ) : null}
+        {!isOperatorView ? (
+          <StatCard
+            label="Por recibir hoy"
+            value={dueTodayCount.toLocaleString("es-MX")}
+            tone="accent"
+            icon={<PurchasingIcon className="h-5 w-5" />}
+          />
+        ) : null}
+        {!isOperatorView ? (
+          <StatCard
+            label="Proveedores"
+            value={totalSuppliers.toLocaleString("es-MX")}
+            tone="success"
+            icon={<WarehouseIcon className="h-5 w-5" />}
+          />
+        ) : null}
       </div>
 
       <SectionCard
-        title={isOperatorView ? "Recepción física" : "Decisiones de abastecimiento"}
+        title={isOperatorView ? "Recepción física" : "Alertas y accesos operativos"}
         description={
           isOperatorView
             ? "Abre una orden confirmada para recibir, ubicar material o reportar una diferencia."
-            : "Crea y confirma OCs, consulta proveedores y vigila compromisos de compra."
+            : "Entra directo a las excepciones que requieren decisión antes de revisar el historial completo."
         }
       >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Link href="/purchasing/orders" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
-            <p className="text-sm font-semibold text-[var(--text-primary)]">{isOperatorView ? "Recepciones pendientes" : "Órdenes de compra"}</p>
-            <p className="mt-1 text-sm text-[var(--text-muted)]">{isOperatorView ? "Recibe materiales contra una OC y registra diferencias." : "Crear, confirmar, dar seguimiento y cerrar órdenes."}</p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Link href={isOperatorView ? "/purchasing/orders?preset=por_recibir" : "/purchasing/orders?preset=vencidas"} className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">{isOperatorView ? "Recepciones pendientes" : `Vencidas (${overdueCount})`}</p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">{isOperatorView ? "Recibe materiales contra una OC y registra diferencias." : "Compromisos cuya fecha esperada ya venció y siguen abiertos."}</p>
           </Link>
+          <Link href="/purchasing/orders?preset=por_recibir_hoy" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Por recibir hoy ({dueTodayCount})</p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Recepciones que deben coordinarse durante la jornada actual.</p>
+          </Link>
+          {!isOperatorView ? (
+            <Link href="/purchasing/orders?preset=recepcion_parcial" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Recepciones parciales ({partialCount})</p>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">Órdenes con material pendiente por completar.</p>
+            </Link>
+          ) : null}
           {!isOperatorView ? (
             <Link href="/purchasing/suppliers" className="surface rounded-[var(--radius-lg)] p-4 transition-colors hover:border-[var(--border-strong)]">
               <p className="text-sm font-semibold text-[var(--text-primary)]">Proveedores</p>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">Gestiona proveedores, precios y tiempos de entrega.</p>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">Consulta datos, precios y tiempos de entrega.</p>
             </Link>
           ) : null}
         </div>
       </SectionCard>
 
+      {!isOperatorView ? (
+        <SectionCard
+          title="Propuestas de reabasto"
+          description="Señales min–max con inventario disponible, consumo reciente y entradas comprometidas. Requieren decisión antes de crear una OC."
+        >
+          {replenishmentProposals.length === 0 ? (
+            <EmptyState compact title="Sin propuestas activas" description="No hay productos debajo de mínimo o con una política inválida registrada." />
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {replenishmentProposals.map((proposal) => (
+                <article key={proposal.id} className="surface rounded-[var(--radius-lg)] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs text-[var(--text-muted)]">{proposal.product.sku}</p>
+                      <p className="mt-1 line-clamp-2 text-sm font-semibold text-[var(--text-primary)]">{proposal.product.name}</p>
+                    </div>
+                    <Badge variant={proposal.status === "BLOCKED" ? "danger" : "warning"} size="sm">
+                      {proposal.status === "BLOCKED" ? "Bloqueada" : "Propuesta"}
+                    </Badge>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Almacén</dt>
+                      <dd className="font-semibold text-[var(--text-primary)]">{proposal.warehouse.code}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Sugerido</dt>
+                      <dd className="font-semibold text-[var(--status-info)]">{proposal.recommendedQuantity}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Disponible</dt>
+                      <dd className="font-semibold text-[var(--text-primary)]">{proposal.availableStock}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{proposal.reason}</p>
+                  {proposal.status === "PROPOSED" ? <ReplenishmentProposalApproval proposalId={proposal.id} /> : null}
+                </article>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
+
       <SectionCard
-        title={isOperatorView ? "Órdenes por recibir" : "Órdenes recientes"}
-        description={isOperatorView ? "Consulta solo las órdenes relevantes para recepción física." : "Últimas órdenes creadas en el módulo de compras."}
+        title={isOperatorView ? "Cola de recepción" : "Cola priorizada de compras"}
+        description={
+          isOperatorView
+            ? "Primero aparecen vencidas, parciales y recepciones comprometidas para hoy."
+            : "Ordenada por vencimiento, recepción parcial, compromiso de hoy y estado operativo."
+        }
         actions={
           <Link href="/purchasing/orders" className={buttonStyles({ variant: "ghost", size: "sm" })}>
             Ver todas
           </Link>
         }
       >
-        {recentOrders.length === 0 ? (
-          <EmptyState compact title="Sin órdenes recientes" description="Aún no hay órdenes de compra registradas." />
+        {priorityOrders.length === 0 ? (
+          <EmptyState compact title="Sin trabajo pendiente" description="No hay órdenes abiertas que requieran atención." />
         ) : (
           <TableWrap striped>
             <Table>
@@ -163,28 +298,43 @@ export default async function PurchasingPage() {
                   <Th>Folio</Th>
                   <Th>Proveedor</Th>
                   <Th>Estado</Th>
-                  <Th className="text-right">Líneas</Th>
-                  <Th className="text-right">Accion</Th>
+                  <Th>Fecha esperada</Th>
+                  <Th className="text-right">Recibido</Th>
+                  <Th>Riesgo</Th>
+                  <Th>Siguiente acción</Th>
+                  <Th className="text-right">Acción</Th>
                 </tr>
               </thead>
               <tbody>
-                {recentOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <Td className="font-mono text-xs text-[var(--text-primary)]">{order.folio}</Td>
-                    <Td>{order.supplier.name}</Td>
-                    <Td>
-                      <Badge variant={(STATUS_COLORS[order.status] as "neutral" | "accent" | "success" | "warning" | "danger") ?? "neutral"}>
-                        {STATUS_LABELS[order.status] ?? order.status}
-                      </Badge>
-                    </Td>
-                    <Td className="text-right font-semibold text-[var(--text-primary)]">{order._count.lines}</Td>
-                    <Td className="text-right">
-                      <Link href={`/purchasing/orders/${order.id}`} className={buttonStyles({ variant: "ghost", size: "sm" })}>
-                        Ver detalle
-                      </Link>
-                    </Td>
-                  </TableRow>
-                ))}
+                {priorityOrders.map((order) => {
+                  const operational = getPurchaseOrderOperationalState(order);
+                  const receiveNow = canReceivePurchasing && canReceivePurchaseOrder(order.status);
+                  return (
+                    <TableRow key={order.id}>
+                      <Td className="font-mono text-xs text-[var(--text-primary)]">{order.folio}</Td>
+                      <Td>{order.supplier.name}</Td>
+                      <Td>
+                        <Badge variant={STATUS_COLORS[order.status] ?? "neutral"}>
+                          {STATUS_LABELS[order.status] ?? order.status}
+                        </Badge>
+                      </Td>
+                      <Td>{formatDate(order.expectedDate)}</Td>
+                      <Td className="text-right font-semibold text-[var(--text-primary)]">{operational.receivedPercent}%</Td>
+                      <Td>
+                        <Badge variant={operational.riskTone}>{operational.riskLabel}</Badge>
+                      </Td>
+                      <Td className="text-[var(--text-secondary)]">{operational.nextAction}</Td>
+                      <Td className="text-right">
+                        <Link
+                          href={receiveNow ? `/purchasing/orders/${order.id}/receive` : `/purchasing/orders/${order.id}`}
+                          className={buttonStyles({ variant: receiveNow ? "primary" : "ghost", size: "sm" })}
+                        >
+                          {receiveNow ? "Recibir" : order.status === "BORRADOR" ? "Completar OC" : "Abrir orden"}
+                        </Link>
+                      </Td>
+                    </TableRow>
+                  );
+                })}
               </tbody>
             </Table>
           </TableWrap>

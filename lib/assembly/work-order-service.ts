@@ -178,6 +178,11 @@ async function createAssemblyOperationalRecordsInTx(args: {
       totalHoseRequired: input.hoseLength * input.assemblyQuantity,
       sourceDocumentRef: input.sourceDocumentRef ?? null,
       notes: input.notes ?? null,
+      compatibilityStatus: compatibilityDecision.status.toUpperCase(),
+      compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+      compatibilityReviewRules: compatibilityDecision.matchedRules.length > 0
+        ? JSON.stringify(compatibilityDecision.matchedRules)
+        : null,
     },
   });
 

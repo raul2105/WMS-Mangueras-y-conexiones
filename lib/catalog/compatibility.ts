@@ -4,6 +4,12 @@ export type CompatibilityRuleRecord = {
   ruleType: string;
   description: string;
   severity: string;
+  source?: {
+    supplierName: string;
+    documentRef: string;
+    documentVersion: string | null;
+    status: string;
+  } | null;
 };
 
 export type CompatibilityDecision = {
@@ -41,6 +47,7 @@ type CompatibilityDb = {
         active: boolean;
         productId: { in: string[] };
         compatibleProductId: { in: string[] };
+        source: { status: "APPROVED" };
       };
       select: {
         productId: true;
@@ -48,6 +55,14 @@ type CompatibilityDb = {
         ruleType: true;
         description: true;
         severity: true;
+        source: {
+          select: {
+            supplierName: true,
+            documentRef: true,
+            documentVersion: true,
+            status: true,
+          },
+        },
       };
     }) => Promise<CompatibilityRuleRecord[]>;
   };
@@ -67,6 +82,7 @@ export async function getAssemblyCompatibilityDecision(
       active: true,
       productId: { in: uniqueProductIds },
       compatibleProductId: { in: uniqueProductIds },
+      source: { status: "APPROVED" },
     },
     select: {
       productId: true,
@@ -74,6 +90,14 @@ export async function getAssemblyCompatibilityDecision(
       ruleType: true,
       description: true,
       severity: true,
+      source: {
+        select: {
+          supplierName: true,
+          documentRef: true,
+          documentVersion: true,
+          status: true,
+        },
+      },
     },
   });
   return evaluateCompatibilityRules(uniqueProductIds, rules);

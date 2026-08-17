@@ -80,7 +80,10 @@ export async function loginAs(
   // This avoids flaky first-request failures while webpack compiles auth routes.
   await page.request.get("/api/auth/session");
   await page.request.get("/api/auth/csrf");
-  await page.goto(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
+  const cacheBuster = process.env.WMS_E2E_NO_CACHE === "1"
+    ? `&e2eNonce=${Date.now()}`
+    : "";
+  await page.goto(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}${cacheBuster}`);
   if (await page.getByLabel("Email").isVisible()) {
     await page.getByLabel("Email").fill(user.email);
     await page.getByLabel("Contrasena").fill(user.password);

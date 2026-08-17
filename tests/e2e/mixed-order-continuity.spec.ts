@@ -23,8 +23,13 @@ const fixture = {
 };
 
 async function loginFresh(page: Page, role: "MANAGER" | "SALES_EXECUTIVE" | "WAREHOUSE_OPERATOR", callbackUrl: string) {
-  await page.getByRole("link", { name: "Cerrar sesión" }).click();
-  await expect(page).toHaveURL(/\/login/);
+  // CloudFront may serve the logout redirect from cache while the auth
+  // session cookie remains in the browser context. Isolate each role switch
+  // explicitly so the browser evidence cannot be attributed to the previous
+  // actor.
+  await page.context().clearCookies();
+  await page.goto(`/logout?e2eNonce=${Date.now()}`);
+  await page.context().clearCookies();
   await loginAs(page, role, callbackUrl, callbackUrl);
 }
 
@@ -169,6 +174,8 @@ test.describe.serial("mixed sales order continuity", () => {
     await page.getByRole("link", { name: "Descargar lista de surtido" }).click();
     expect((await pickDownload).suggestedFilename()).toMatch(/^surtido-.*\.pdf$/);
     await page.getByRole("button", { name: "Liberar surtido directo" }).click();
+    await page.getByRole("button", { name: "Tomar tareas" }).click();
+    await page.locator('input[name^="scanRef__"]').first().fill(fixture.directSku);
     await page.getByRole("button", { name: "Confirmar surtido" }).click();
     await expect(page.getByTestId("fulfillment-next-action")).toContainText("Surtido directo terminado");
     await page.goto(`/production/requests/${directOrder.id}`);
@@ -182,7 +189,9 @@ test.describe.serial("mixed sales order continuity", () => {
     await expect(page.getByTestId("prepared-for-delivery-summary")).toContainText("Preparado para entrega");
 
     await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
-    await page.getByRole("button", { name: "Entregado al cliente" }).click();
+    await page.getByLabel("Recibió *").fill("Cliente QA directo");
+    await page.getByLabel("Método de entrega *").fill("Entrega directa");
+    await page.getByRole("button", { name: "Confirmar entrega al cliente" }).click();
     const deliveryDownload = page.waitForEvent("download");
     await page.getByRole("link", { name: "Descargar comprobante de entrega" }).click();
     expect((await deliveryDownload).suggestedFilename()).toMatch(/^entrega-.*\.pdf$/);
@@ -261,7 +270,9 @@ test.describe.serial("mixed sales order continuity", () => {
     await expect(page.getByTestId("prepared-for-delivery-summary")).toContainText("Preparado para entrega");
 
     await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${assemblyOrder.id}`);
-    await page.getByRole("button", { name: "Entregado al cliente" }).click();
+    await page.getByLabel("Recibió *").fill("Cliente QA ensamble");
+    await page.getByLabel("Método de entrega *").fill("Entrega directa");
+    await page.getByRole("button", { name: "Confirmar entrega al cliente" }).click();
     await expect(page.getByRole("link", { name: "Descargar comprobante de entrega" })).toBeVisible();
     const finalOrder = await prisma.salesInternalOrder.findUniqueOrThrow({
       where: { id: assemblyOrder.id },
@@ -319,6 +330,8 @@ test.describe.serial("mixed sales order continuity", () => {
 
     await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${order.id}`);
     await page.getByRole("button", { name: "Liberar surtido directo" }).click();
+    await page.getByRole("button", { name: "Tomar tareas" }).click();
+    await page.locator('input[name^="scanRef__"]').first().fill(fixture.directSku);
     await page.getByRole("button", { name: "Confirmar surtido" }).click();
     const continueAssembly = page.getByRole("link", { name: /Continuar ensamble/ });
     await expect(page.getByTestId("fulfillment-next-action")).toContainText("Continuar ensamble");
@@ -354,9 +367,11 @@ test.describe.serial("mixed sales order continuity", () => {
 
     await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${order.id}`);
     await expect(page.getByText("Preparado para entrega", { exact: true }).first()).toBeVisible();
+    await page.getByLabel("Recibió *").fill("Cliente QA mixto");
+    await page.getByLabel("Método de entrega *").fill("Entrega directa");
     await Promise.all([
       page.waitForURL(/\?ok=/),
-      page.getByRole("button", { name: "Entregado al cliente" }).click(),
+      page.getByRole("button", { name: "Confirmar entrega al cliente" }).click(),
     ]);
 
     const [finalOrder, finalAssembly] = await Promise.all([

@@ -52,15 +52,15 @@ test.describe("RBAC en navegador por rol", () => {
   }) => {
     await loginAs(page, "WAREHOUSE_OPERATOR");
     await expectForbidden(page, "/users");
-    await expectAllowed(page, "/inventory/adjust", /Ajuste de Inventario/i);
+    await expectForbidden(page, "/inventory/adjust");
     await expectAllowed(page, "/inventory/transfer", /Transferencia Interna/i);
     await expectAllowed(page, "/inventory/pick", /Picking/i);
     await expectForbidden(page, "/audit");
-    await expectAllowed(page, "/production/requests", /Cockpit de ejecución/i);
+    await expectAllowed(page, "/production/requests", /Trabajo de almacén/i);
     await expect(page.getByRole("link", { name: /\+ Nuevo pedido/i })).toHaveCount(
       0,
     );
-    await expectAllowed(page, "/purchasing/orders", /^Órdenes de compra$/i);
+    await expectAllowed(page, "/purchasing/orders", /Trabajo de recepción/i);
     await expect(page.getByRole("link", { name: /\+ Nueva OC/i })).toHaveCount(
       0,
     );
@@ -105,13 +105,13 @@ test.describe("RBAC en navegador por rol", () => {
     );
     await page.goto("/production/requests");
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Mis pedidos/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Pedidos$/i }),
     ).toBeVisible();
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Clientes y seguimiento/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Clientes$/i }),
     ).toBeVisible();
     await expect(
-      page.getByTestId("desktop-main-nav").getByRole("link", { name: /Cat[aá]logo comercial/i }),
+      page.getByTestId("desktop-main-nav").getByRole("link", { name: /^Catálogo$/i }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /^Disponibilidad\s/i }),

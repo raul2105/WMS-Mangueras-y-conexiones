@@ -41,6 +41,10 @@
 - `git diff --check`: verde.
 - `npm run build`: verde.
 - `npm run build:opennext`: terminó con código 0; Windows reportó una advertencia no bloqueante al instalar dependencias de image optimization.
+- `npm run env:postgres:check` y `npm run env:postgres:tcp`: verdes; el entorno conectado es RDS de desarrollo `wms-web-dev-pg...`.
+- `npx prisma migrate status --schema prisma/postgresql/schema.prisma`: confirmó pendiente `20260817100000_add_replenishment_governance`; no se aplicó sobre RDS.
+- Navegador local autenticado con fixture de administrador: `/purchasing/orders` y `/purchasing/orders/new` cargaron correctamente; `/purchasing` mostró error controlado porque la tabla `ReplenishmentProposal` no existe aún.
+- Evidencia visual guardada en `visual-purchasing-2026-08-17.png`, `visual-purchasing-orders-2026-08-17.png` y `visual-new-purchase-order-2026-08-17.png`.
 
 ## Gaps que siguen abiertos
 
@@ -48,6 +52,6 @@
 2. Ejecutar pruebas PostgreSQL con esquema aislado y evidencia de rollback, concurrencia y persistencia de propuestas; requiere autorización para crear datos de prueba.
 3. Completar el flujo de aprobación de propuestas y conversión a orden de compra; el dashboard ya muestra la worklist activa.
 4. Revisar transaccionalidad de los formularios de catálogo y proveedores existentes que todavía usan el alias legacy de auditoría fuera de una transacción local.
-5. Ejecutar E2E autenticado V1–V8 con credenciales Manager/System Admin y validar AWS desplegado; no se realizó en esta rama.
-6. Realizar captura visual actual por rol en navegador elegido por el usuario; no se declara aceptación UX desde pruebas de contrato.
+5. Ejecutar E2E autenticado V1–V8 con credenciales Manager/System Admin contra un despliegue que incluya la migración; no se realizó en esta rama.
+6. Completar la captura visual por rol y resolver el bloqueo de `/purchasing`; la revisión actual es parcial y no constituye aceptación UX final.
 7. Reconciliar en Jira KAN-86/KAN-87 con la rama/PR que corresponda y no cerrar KAN-125, KAN-127, KAN-128, KAN-133 ni los tickets finalizados cuya evidencia actual aún no exista.

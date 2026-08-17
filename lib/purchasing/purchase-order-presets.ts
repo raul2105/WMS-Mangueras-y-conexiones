@@ -46,6 +46,21 @@ export function getMexicoCityDayBounds(date = new Date()) {
   return { start, end };
 }
 
+/**
+ * Purchase-order expected dates come from HTML `type="date"` inputs and are
+ * stored as UTC-midnight values (for example 2026-08-15T00:00:00Z). They
+ * represent a business calendar date, not an instant in Mexico City.
+ *
+ * These bounds map the current Mexico City calendar date to the matching
+ * UTC-midnight storage interval so "today"/"overdue" do not shift one day.
+ */
+export function getMexicoCityPurchaseDateBounds(date = new Date()) {
+  const { year, month, day } = getMexicoCityDateParts(date);
+  const start = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+  const end = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
+  return { start, end };
+}
+
 export function isPurchaseOrderPresetFilter(value: unknown): value is PurchaseOrderPresetFilter {
   return typeof value === "string" && PURCHASE_ORDER_PRESET_FILTERS.includes(value as PurchaseOrderPresetFilter);
 }
@@ -94,7 +109,7 @@ export function buildPurchaseOrderPresetWhere(
     case "recibidas":
       return { status: "RECIBIDA" };
     case "vencidas": {
-      const { start } = getMexicoCityDayBounds();
+      const { start } = getMexicoCityPurchaseDateBounds();
       return {
         status: { in: [...OPEN_STATUSES] },
         expectedDate: { lt: start },
@@ -105,7 +120,7 @@ export function buildPurchaseOrderPresetWhere(
     case "recepcion_parcial":
       return { status: "PARCIAL" };
     case "por_recibir_hoy": {
-      const { start, end } = getMexicoCityDayBounds();
+      const { start, end } = getMexicoCityPurchaseDateBounds();
       return {
         status: { in: [...OPEN_STATUSES] },
         expectedDate: { gte: start, lt: end },
@@ -124,7 +139,7 @@ export function matchesPurchaseOrderPreset(
 
   const status = order.status;
   const expectedDate = order.expectedDate ? new Date(order.expectedDate) : null;
-  const { start, end } = getMexicoCityDayBounds();
+  const { start, end } = getMexicoCityPurchaseDateBounds();
 
   switch (filter) {
     case "borrador":

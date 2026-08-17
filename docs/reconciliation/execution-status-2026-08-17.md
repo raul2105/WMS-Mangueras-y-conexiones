@@ -30,6 +30,7 @@
 - Se agregó generación persistente de propuestas considerando inventario disponible, entradas confirmadas/en tránsito, consumo, lead time, MOQ y unidad de compra.
 - Se agregó endpoint protegido por `purchasing.manage` para generar propuestas.
 - Cada propuesta accionable o bloqueada queda auditada.
+- El dashboard de compras muestra propuestas activas con producto, almacén, disponible, cantidad sugerida y motivo.
 
 ## Validación ejecutada
 
@@ -38,13 +39,14 @@
 - `npm run typecheck`: verde.
 - `npm run test:unit`: 46 archivos, 144 pruebas, verde.
 - `git diff --check`: verde.
-- La compilación local no reportó errores durante la ejecución del gate.
+- `npm run build`: verde.
+- `npm run build:opennext`: terminó con código 0; Windows reportó una advertencia no bloqueante al instalar dependencias de image optimization.
 
 ## Gaps que siguen abiertos
 
 1. Aplicar y verificar la migración `20260817100000_add_replenishment_governance` en un PostgreSQL controlado; no se aplicó a AWS.
 2. Ejecutar pruebas PostgreSQL con esquema aislado y evidencia de rollback, concurrencia y persistencia de propuestas; requiere autorización para crear datos de prueba.
-3. Completar la integración visual del worklist de reabasto y su flujo de aprobación a orden de compra.
+3. Completar el flujo de aprobación de propuestas y conversión a orden de compra; el dashboard ya muestra la worklist activa.
 4. Revisar transaccionalidad de los formularios de catálogo y proveedores existentes que todavía usan el alias legacy de auditoría fuera de una transacción local.
 5. Ejecutar E2E autenticado V1–V8 con credenciales Manager/System Admin y validar AWS desplegado; no se realizó en esta rama.
 6. Realizar captura visual actual por rol en navegador elegido por el usuario; no se declara aceptación UX desde pruebas de contrato.

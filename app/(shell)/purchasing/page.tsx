@@ -79,6 +79,7 @@ export default async function PurchasingPage() {
     candidateOrders,
     overdueCount,
     dueTodayCount,
+    replenishmentProposals,
   ] = await Promise.all([
     prisma.supplier.count({ where: { isActive: true } }),
     prisma.purchaseOrder.groupBy({ by: ["status"], _count: { _all: true } }),
@@ -96,6 +97,23 @@ export default async function PurchasingPage() {
     }),
     prisma.purchaseOrder.count({ where: buildPurchaseOrderPresetWhere("vencidas") }),
     prisma.purchaseOrder.count({ where: dueTodayWhere }),
+    canManagePurchasing
+      ? prisma.replenishmentProposal.findMany({
+          where: { status: { in: ["PROPOSED", "BLOCKED"] } },
+          orderBy: [{ status: "asc" }, { generatedAt: "desc" }],
+          take: 8,
+          select: {
+            id: true,
+            status: true,
+            recommendedQuantity: true,
+            availableStock: true,
+            reason: true,
+            generatedAt: true,
+            product: { select: { sku: true, name: true } },
+            warehouse: { select: { code: true, name: true } },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   const countsByStatus = Object.fromEntries(statusCounts.map((s) => [s.status, s._count._all]));
@@ -212,6 +230,48 @@ export default async function PurchasingPage() {
           ) : null}
         </div>
       </SectionCard>
+
+      {!isOperatorView ? (
+        <SectionCard
+          title="Propuestas de reabasto"
+          description="Señales min–max con inventario disponible, consumo reciente y entradas comprometidas. Requieren decisión antes de crear una OC."
+        >
+          {replenishmentProposals.length === 0 ? (
+            <EmptyState compact title="Sin propuestas activas" description="No hay productos debajo de mínimo o con una política inválida registrada." />
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {replenishmentProposals.map((proposal) => (
+                <article key={proposal.id} className="surface rounded-[var(--radius-lg)] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs text-[var(--text-muted)]">{proposal.product.sku}</p>
+                      <p className="mt-1 line-clamp-2 text-sm font-semibold text-[var(--text-primary)]">{proposal.product.name}</p>
+                    </div>
+                    <Badge variant={proposal.status === "BLOCKED" ? "danger" : "warning"} size="sm">
+                      {proposal.status === "BLOCKED" ? "Bloqueada" : "Propuesta"}
+                    </Badge>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Almacén</dt>
+                      <dd className="font-semibold text-[var(--text-primary)]">{proposal.warehouse.code}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Sugerido</dt>
+                      <dd className="font-semibold text-[var(--status-info)]">{proposal.recommendedQuantity}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Disponible</dt>
+                      <dd className="font-semibold text-[var(--text-primary)]">{proposal.availableStock}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{proposal.reason}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title={isOperatorView ? "Cola de recepción" : "Cola priorizada de compras"}

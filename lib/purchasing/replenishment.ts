@@ -258,3 +258,138 @@ export async function generateReplenishmentProposals(
     return generated;
   });
 }
+
+export type ApprovedReplenishmentProposal = {
+  proposalId: string;
+  purchaseOrderId: string;
+  purchaseOrderFolio: string;
+  status: "CONVERTED";
+};
+
+/**
+ * Approves one actionable proposal and converts it to a draft purchase order.
+ * The proposal and OC are linked in one transaction so a retry cannot create
+ * a second order from the same decision.
+ */
+export async function approveReplenishmentProposal(
+  prisma: PrismaClient,
+  input: { proposalId: string; actorUserId: string | null; now?: Date },
+): Promise<ApprovedReplenishmentProposal> {
+  const now = input.now ?? new Date();
+
+  return prisma.$transaction(async (tx) => {
+    const proposal = await tx.replenishmentProposal.findUnique({
+      where: { id: input.proposalId },
+      select: {
+        id: true,
+        status: true,
+        productId: true,
+        warehouseId: true,
+        recommendedQuantity: true,
+        purchaseUnitFactor: true,
+        purchaseMoq: true,
+        reason: true,
+        purchaseOrderId: true,
+        policy: { select: { leadTimeDays: true } },
+        product: {
+          select: {
+            sku: true,
+            name: true,
+            unitLabel: true,
+            purchaseUnitLabel: true,
+            primarySupplier: { select: { id: true, name: true, isActive: true, paymentTerms: true } },
+            supplierProducts: {
+              where: { supplier: { isActive: true } },
+              orderBy: [{ unitPrice: "asc" }, { supplierId: "asc" }],
+              take: 1,
+              select: { supplierId: true, unitPrice: true, supplier: { select: { id: true, name: true, paymentTerms: true } } },
+            },
+          },
+        },
+        warehouse: { select: { id: true, address: true, isActive: true } },
+      },
+    });
+
+    if (!proposal) throw new Error("Propuesta de reabasto no encontrada");
+    if (proposal.status === "CONVERTED" && proposal.purchaseOrderId) {
+      const existing = await tx.purchaseOrder.findUnique({ where: { id: proposal.purchaseOrderId }, select: { id: true, folio: true } });
+      if (existing) return { proposalId: proposal.id, purchaseOrderId: existing.id, purchaseOrderFolio: existing.folio, status: "CONVERTED" };
+    }
+    if (proposal.status !== "PROPOSED") throw new Error("Solo se pueden aprobar propuestas accionables");
+    if (proposal.recommendedQuantity <= 0) throw new Error("La propuesta no tiene una cantidad aprobable");
+    if (!proposal.warehouse.isActive) throw new Error("El almacén de la propuesta está inactivo");
+
+    const supplier = proposal.product.primarySupplier?.isActive
+      ? proposal.product.primarySupplier
+      : proposal.product.supplierProducts[0]?.supplier ?? null;
+    if (!supplier) throw new Error(`El producto ${proposal.product.sku} no tiene proveedor activo configurado`);
+
+    // Claim the proposal before creating the OC. This closes the concurrent
+    // double-approval window while keeping the claim in the same transaction.
+    const claim = await tx.replenishmentProposal.updateMany({
+      where: { id: proposal.id, status: "PROPOSED", purchaseOrderId: null },
+      data: { status: "APPROVING", approvedAt: now, approvedByUserId: input.actorUserId },
+    });
+    if (claim.count !== 1) {
+      throw new Error("La propuesta ya está siendo aprobada por otra sesión");
+    }
+
+    const currentYear = now.getFullYear();
+    const orderCount = await tx.purchaseOrder.count();
+    const folio = `OC-${currentYear}-${String(orderCount + 1).padStart(4, "0")}`;
+    const expectedDate = new Date(now.getTime() + proposal.policy.leadTimeDays * 24 * 60 * 60 * 1000);
+    const supplierPrice = proposal.product.supplierProducts.find((item) => item.supplierId === supplier.id)?.unitPrice
+      ?? proposal.product.supplierProducts[0]?.unitPrice
+      ?? null;
+    const frozenPaymentTerms = supplier.paymentTerms ?? null;
+
+    const order = await tx.purchaseOrder.create({
+      data: {
+        folio,
+        supplierId: supplier.id,
+        deliveryWarehouseId: proposal.warehouse.id,
+        expectedDate,
+        notes: `Generada desde propuesta de reabasto ${proposal.id}. ${proposal.reason}`,
+        deliveryAddressSnapshot: proposal.warehouse.address ?? null,
+        paymentTermsSnapshot: frozenPaymentTerms,
+        lines: {
+          create: {
+            productId: proposal.productId,
+            qtyOrdered: proposal.recommendedQuantity,
+            unitPrice: supplierPrice,
+            purchaseUnitLabel: proposal.product.purchaseUnitLabel ?? proposal.product.unitLabel,
+            purchaseUnitFactor: proposal.purchaseUnitFactor,
+          },
+        },
+      },
+      select: { id: true, folio: true },
+    });
+
+    await tx.replenishmentProposal.update({
+      where: { id: proposal.id },
+      data: { status: "CONVERTED", approvedAt: now, approvedByUserId: input.actorUserId, purchaseOrderId: order.id },
+    });
+
+    await createAuditLogRequiredWithDb({
+      entityType: "REPLENISHMENT_PROPOSAL",
+      entityId: proposal.id,
+      action: "APPROVE_AND_CONVERT",
+      actor: input.actorUserId ?? "system",
+      actorUserId: input.actorUserId,
+      source: "purchasing/replenishment/approval",
+      before: { status: proposal.status, purchaseOrderId: proposal.purchaseOrderId },
+      after: { status: "CONVERTED", purchaseOrderId: order.id, purchaseOrderFolio: order.folio, supplierId: supplier.id },
+    }, tx);
+    await createAuditLogRequiredWithDb({
+      entityType: "PURCHASE_ORDER",
+      entityId: order.id,
+      action: "CREATE_FROM_REPLENISHMENT_PROPOSAL",
+      actor: input.actorUserId ?? "system",
+      actorUserId: input.actorUserId,
+      source: "purchasing/replenishment/approval",
+      after: { folio: order.folio, proposalId: proposal.id, supplierId: supplier.id, productId: proposal.productId, quantity: proposal.recommendedQuantity },
+    }, tx);
+
+    return { proposalId: proposal.id, purchaseOrderId: order.id, purchaseOrderFolio: order.folio, status: "CONVERTED" };
+  });
+}

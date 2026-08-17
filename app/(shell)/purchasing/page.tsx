@@ -16,6 +16,7 @@ import {
   comparePurchaseOrderOperationalPriority,
   getPurchaseOrderOperationalState,
 } from "@/lib/purchasing/purchase-order-operational";
+import { ReplenishmentProposalApproval } from "@/components/purchasing/ReplenishmentProposalApproval";
 
 export const revalidate = 30;
 
@@ -266,6 +267,7 @@ export default async function PurchasingPage() {
                     </div>
                   </dl>
                   <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{proposal.reason}</p>
+                  {proposal.status === "PROPOSED" ? <ReplenishmentProposalApproval proposalId={proposal.id} /> : null}
                 </article>
               ))}
             </div>

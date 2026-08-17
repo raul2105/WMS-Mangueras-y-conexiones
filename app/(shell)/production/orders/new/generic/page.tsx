@@ -2,7 +2,7 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { firstErrorMessage, parseDueDate, parsePriority, productionOrderCreateSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { getCustomerById, resolveCustomerSnapshot, searchCustomers } from "@/lib/customers/customer-service";
 import { pageGuard } from "@/components/rbac/PageGuard";
 
@@ -71,31 +71,33 @@ async function createOrder(formData: FormData) {
     redirect(`/production/orders/new/generic?error=${encodeURIComponent(`El codigo ${code} ya existe`)}`);
   }
 
-  await prisma.productionOrder.create({
-    data: {
-      code,
-      status: parsed.data.status,
-      warehouseId,
-      customerName,
-      priority: validPriority,
-      dueDate,
-      notes,
-    },
-  });
+  await prisma.$transaction(async (tx) => {
+    await tx.productionOrder.create({
+      data: {
+        code,
+        status: parsed.data.status,
+        warehouseId,
+        customerName,
+        priority: validPriority,
+        dueDate,
+        notes,
+      },
+    });
 
-  await createAuditLogSafe({
-    entityType: "PRODUCTION_ORDER",
-    entityId: code,
-    action: "CREATE_ORDER",
-    after: {
-      code,
-      status,
-      warehouseId,
-      priority: validPriority,
-      dueDate: dueDate ? dueDate.toISOString() : null,
-    },
-    source: "production/orders/new/generic",
-    actor: "system",
+    await createAuditLogSafeWithDb({
+      entityType: "PRODUCTION_ORDER",
+      entityId: code,
+      action: "CREATE_ORDER",
+      after: {
+        code,
+        status,
+        warehouseId,
+        priority: validPriority,
+        dueDate: dueDate ? dueDate.toISOString() : null,
+      },
+      source: "production/orders/new/generic",
+      actor: "system",
+    }, tx);
   });
 
   redirect("/production/orders");

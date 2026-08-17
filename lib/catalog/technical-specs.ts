@@ -1,4 +1,5 @@
 import { normalizeTechnicalText, syncProductTechnicalAttributes } from "@/lib/product-attributes";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
 import type { PrismaClient } from "@prisma/client";
 
 export type TechnicalFamily = "HOSE" | "FITTING" | "ASSEMBLY" | "ACCESSORY";
@@ -537,6 +538,19 @@ export async function promoteProductTechnicalSource(
       data: { status: "APPROVED", reviewedAt, reviewedByUserId: args.reviewerUserId },
     });
     await tx.productTechnicalSpecCandidate.deleteMany({ where: { sourceId: source.id } });
+    await createAuditLogRequiredWithDb({
+      entityType: "PRODUCT_TECHNICAL_SOURCE",
+      entityId: source.id,
+      action: "APPROVE",
+      actorUserId: args.reviewerUserId,
+      source: "catalog/technical-sources/approve",
+      after: {
+        sourceId: source.id,
+        productCount: affectedProductIds.length,
+        specCount: candidates.length,
+        status: "APPROVED",
+      },
+    }, tx);
     return {
       sourceId: source.id,
       productCount: affectedProductIds.length,

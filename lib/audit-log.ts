@@ -38,19 +38,28 @@ export async function createAuditLog(payload: AuditPayload, db: AuditDb = prisma
   });
 }
 
+/**
+ * Critical mutations must be atomic with their audit record.  Callers should
+ * invoke this inside the same Prisma transaction as the state change.
+ */
+export async function createAuditLogRequired(payload: AuditPayload, db: AuditDb = prisma) {
+  return createAuditLog(payload, db);
+}
+
+export async function createAuditLogRequiredWithDb(payload: AuditPayload, db: AuditDb) {
+  return createAuditLog(payload, db);
+}
+
+/**
+ * Legacy name retained for existing callers.  It is intentionally no longer
+ * best-effort: swallowing an audit failure makes a warehouse mutation
+ * impossible to reconcile and violates the operational audit contract.
+ */
 export async function createAuditLogSafe(payload: AuditPayload) {
-  try {
-    await createAuditLog(payload);
-  } catch {
-    // Never block warehouse operation due to audit failures.
-  }
+  return createAuditLogRequired(payload);
 }
 
 export async function createAuditLogSafeWithDb(payload: AuditPayload, db: AuditDb) {
-  try {
-    await createAuditLog(payload, db);
-  } catch {
-    // Never block warehouse operation due to audit failures.
-  }
+  return createAuditLogRequiredWithDb(payload, db);
 }
 

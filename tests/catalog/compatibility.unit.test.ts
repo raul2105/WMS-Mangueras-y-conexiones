@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateCompatibilityRules } from "@/lib/catalog/compatibility";
+import { evaluateCompatibilityRules, getAssemblyCompatibilityDecision } from "@/lib/catalog/compatibility";
 import { validateAssemblyCompatibility } from "@/lib/assembly/availability-service";
 
 describe("technical compatibility contract", () => {
@@ -63,5 +63,26 @@ describe("technical compatibility contract", () => {
 
     expect(result.status).toBe("review");
     expect(result.matchedRules).toHaveLength(1);
+  });
+
+  it("only loads active rules backed by an approved technical source", async () => {
+    let capturedWhere: unknown;
+    const db = {
+      productCompatibilityRule: {
+        findMany: async (args: { where: unknown }) => {
+          capturedWhere = args.where;
+          return [];
+        },
+      },
+    };
+
+    await getAssemblyCompatibilityDecision(db, ["entry", "hose"]);
+
+    expect(capturedWhere).toEqual({
+      active: true,
+      productId: { in: ["entry", "hose"] },
+      compatibleProductId: { in: ["entry", "hose"] },
+      source: { status: "APPROVED" },
+    });
   });
 });

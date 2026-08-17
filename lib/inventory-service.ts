@@ -123,11 +123,7 @@ export class InventoryService {
   }
 
   private async writeAuditSafe(tx: TxClient, data: AuditData): Promise<void> {
-    try {
-      await tx.auditLog.create({ data });
-    } catch {
-      // Keep warehouse operation alive even if audit table is not available yet.
-    }
+    await tx.auditLog.create({ data });
   }
 
   private withTransaction<T>(tx: TxClient | undefined, fn: (txClient: TxClient) => Promise<T>): Promise<T> {

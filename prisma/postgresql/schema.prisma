@@ -135,6 +135,8 @@ model Product {
   technicalSpecs ProductTechnicalSpec[]
   technicalSpecCandidates ProductTechnicalSpecCandidate[]
   assets ProductAsset[]
+  replenishmentPolicies ReplenishmentPolicy[]
+  replenishmentProposals ReplenishmentProposal[]
   compatibilityRulesFrom ProductCompatibilityRule[] @relation("ProductCompatibilityRuleFrom")
   compatibilityRulesTo ProductCompatibilityRule[] @relation("ProductCompatibilityRuleTo")
   productionOrderItems ProductionOrderItem[]
@@ -348,6 +350,8 @@ model Warehouse {
   salesInternalOrders SalesInternalOrder[]
   assemblyWorkOrders AssemblyWorkOrder[]
   purchaseOrders PurchaseOrder[]
+  replenishmentPolicies ReplenishmentPolicy[]
+  replenishmentProposals ReplenishmentProposal[]
   traceRecords TraceRecord[]
   
   createdAt   DateTime   @default(now())
@@ -531,6 +535,53 @@ model InventoryMovement {
   @@index([documentType, documentId])
   @@index([traceId])
   @@index([operatorUserId])
+}
+
+model ReplenishmentPolicy {
+  id               String   @id @default(uuid())
+  productId        String
+  warehouseId      String
+  minimumStock     Float
+  maximumStock     Float
+  leadTimeDays     Int      @default(0)
+  reviewWindowDays Int      @default(30)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  proposals ReplenishmentProposal[]
+
+  @@unique([productId, warehouseId])
+  @@index([warehouseId, active])
+}
+
+model ReplenishmentProposal {
+  id                       String   @id @default(uuid())
+  policyId                 String
+  productId                String
+  warehouseId              String
+  status                   String   @default("PROPOSED")
+  availableStock           Float
+  incomingQuantity         Float    @default(0)
+  consumedQuantity         Float
+  windowDays               Int
+  averageDailyConsumption  Float
+  recommendedQuantity      Float
+  purchaseUnitFactor       Float    @default(1)
+  purchaseMoq              Float?
+  reason                   String
+  generatedAt              DateTime @default(now())
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  policy   ReplenishmentPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  product  Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@index([warehouseId, status, generatedAt])
+  @@index([productId, generatedAt])
 }
 
 enum LabelType {
@@ -1027,6 +1078,9 @@ model AssemblyConfiguration {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
+  compatibilityStatus String @default("ALLOWED")
+  compatibilityReviewApproved Boolean @default(false)
+  compatibilityReviewRules String?
 
   productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
   entryFittingProduct Product @relation("AssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)

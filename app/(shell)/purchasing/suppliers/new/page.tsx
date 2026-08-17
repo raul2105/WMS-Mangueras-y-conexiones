@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { supplierCreateSchema, firstErrorMessage } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
@@ -34,27 +34,31 @@ async function createSupplier(formData: FormData) {
     redirect(`/purchasing/suppliers/new?error=${encodeURIComponent(`Ya existe un proveedor con código ${parsed.data.code}`)}`);
   }
 
-  const supplier = await prisma.supplier.create({
-    data: {
-      code: parsed.data.code,
-      name: parsed.data.name,
-      legalName: parsed.data.legalName ?? parsed.data.name,
-      businessName: parsed.data.businessName ?? parsed.data.name,
-      taxId: parsed.data.taxId ?? null,
-      email: parsed.data.email || null,
-      phone: parsed.data.phone ?? null,
-      address: parsed.data.address ?? null,
-      paymentTerms: parsed.data.paymentTerms ?? null,
-    },
-    select: { id: true },
-  });
+  await prisma.$transaction(async (tx) => {
+    const createdSupplier = await tx.supplier.create({
+      data: {
+        code: parsed.data.code,
+        name: parsed.data.name,
+        legalName: parsed.data.legalName ?? parsed.data.name,
+        businessName: parsed.data.businessName ?? parsed.data.name,
+        taxId: parsed.data.taxId ?? null,
+        email: parsed.data.email || null,
+        phone: parsed.data.phone ?? null,
+        address: parsed.data.address ?? null,
+        paymentTerms: parsed.data.paymentTerms ?? null,
+      },
+      select: { id: true },
+    });
 
-  await createAuditLogSafe({
-    entityType: "SUPPLIER",
-    entityId: supplier.id,
-    action: "CREATE",
-    after: JSON.stringify({ code: parsed.data.code, name: parsed.data.name }),
-    source: "purchasing/suppliers/new",
+    await createAuditLogSafeWithDb({
+      entityType: "SUPPLIER",
+      entityId: createdSupplier.id,
+      action: "CREATE",
+      after: JSON.stringify({ code: parsed.data.code, name: parsed.data.name }),
+      source: "purchasing/suppliers/new",
+    }, tx);
+
+    return createdSupplier;
   });
 
   redirect("/purchasing/suppliers");

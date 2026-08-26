@@ -21,6 +21,7 @@
     "smoke:mobile-auth": "node scripts/smoke/validate-mobile-auth.cjs",
     "env:postgres:check": "node scripts/db/assert-postgres-env.cjs",
     "env:postgres:tcp": "node scripts/db/assert-postgres-env.cjs --check-connection",
+    "db:test-schemas:list": "node scripts/db/list-stale-test-schemas.cjs",
     "sync:daily:report": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\ops\\daily-sync-report.ps1 -JiraProject KAN",
     "sync:jira:views": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\ops\\sync-jira-views.ps1 -JiraProject KAN",
     "test:rbac": "node scripts/db/run-vitest-postgres.cjs run tests/rbac",

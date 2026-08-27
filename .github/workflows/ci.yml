@@ -128,7 +128,7 @@ jobs:
           retention-days: 30
 
   security:
-    name: Security Audit (optional)
+    name: Security Audit (critical gate)
     runs-on: ubuntu-latest
 
     steps:
@@ -141,8 +141,11 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Audit dependencies
-        run: npm audit --audit-level=moderate
+      - name: Block critical production vulnerabilities
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Report remaining dependency debt
+        run: npm audit --audit-level=high
         continue-on-error: true
 
   staging-mobile-pwa-smoke:

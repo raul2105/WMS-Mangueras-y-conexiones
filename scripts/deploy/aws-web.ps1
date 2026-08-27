@@ -72,6 +72,8 @@ $env:WMS_ENV = $Environment
 $env:WMS_COMMIT_SHA = $commitSha
 $env:WMS_RELEASE_ID = $releaseId
 $env:AWS_SDK_LOAD_CONFIG = "1"
+$env:AWS_RETRY_MODE = "adaptive"
+$env:AWS_MAX_ATTEMPTS = "8"
 
 function Write-Phase {
     param(
@@ -79,6 +81,38 @@ function Write-Phase {
         [string]$Label
     )
     Write-Host "`n[$Index] $Label" -ForegroundColor Yellow
+}
+
+function Invoke-AwsCliWithRetry {
+    param(
+        [string[]]$Arguments,
+        [int]$MaxAttempts = 4
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $raw = & aws @Arguments 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+
+        $output = ($raw | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        if ($exitCode -eq 0) {
+            return [pscustomobject]@{ ExitCode = 0; Output = $output }
+        }
+
+        $retryable = $output -match "(?i)(429|Rate exceeded|TooManyRequests|Throttl|CreateOAuth2Token|temporarily unavailable)"
+        if (-not $retryable -or $attempt -eq $MaxAttempts) {
+            return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
+        }
+
+        $delaySeconds = [Math]::Min(8, [Math]::Pow(2, $attempt - 1))
+        Write-Warning "AWS CLI throttled; retrying in $delaySeconds second(s) ($attempt/$MaxAttempts)."
+        Start-Sleep -Seconds $delaySeconds
+    }
 }
 
 function Load-WebConfig {
@@ -103,19 +137,37 @@ function Load-WebConfig {
 function Test-StackExists {
     param([string]$CurrentStackName)
 
-    aws cloudformation describe-stacks --stack-name $CurrentStackName --query "Stacks[0].StackName" --output text *> $null
-    return $LASTEXITCODE -eq 0
+    $result = Invoke-AwsCliWithRetry -Arguments @(
+        "cloudformation", "describe-stacks",
+        "--stack-name", $CurrentStackName,
+        "--query", "Stacks[0].StackName",
+        "--output", "text",
+        "--no-cli-pager"
+    )
+    if ($result.ExitCode -eq 0) {
+        return $true
+    }
+    if ($result.Output -match "(?i)(ValidationError.*does not exist|Stack with id .* does not exist)") {
+        return $false
+    }
+    throw "No se pudo determinar si existe el stack ${CurrentStackName}: $($result.Output)"
 }
 
 function Get-StackOutputsMap {
     param([string]$CurrentStackName)
 
-    $raw = aws cloudformation describe-stacks --stack-name $CurrentStackName --query "Stacks[0].Outputs" --output json 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo leer outputs de stack ${CurrentStackName}: $raw"
+    $result = Invoke-AwsCliWithRetry -Arguments @(
+        "cloudformation", "describe-stacks",
+        "--stack-name", $CurrentStackName,
+        "--query", "Stacks[0].Outputs",
+        "--output", "json",
+        "--no-cli-pager"
+    )
+    if ($result.ExitCode -ne 0) {
+        throw "No se pudo leer outputs de stack ${CurrentStackName}: $($result.Output)"
     }
 
-    $outputs = $raw | ConvertFrom-Json
+    $outputs = $result.Output | ConvertFrom-Json
     $map = @{}
     foreach ($entry in $outputs) {
         $map[$entry.OutputKey] = $entry.OutputValue
@@ -185,12 +237,16 @@ function Assert-ProdConfigSafe {
 function Set-AwsSdkCredentialsFromProfile {
     param([string]$CurrentProfile)
 
-    $raw = aws configure export-credentials --profile $CurrentProfile --format process 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo exportar credenciales del profile '$CurrentProfile': $raw"
+    $result = Invoke-AwsCliWithRetry -Arguments @(
+        "configure", "export-credentials",
+        "--profile", $CurrentProfile,
+        "--format", "process"
+    )
+    if ($result.ExitCode -ne 0) {
+        throw "No se pudo exportar credenciales del profile '$CurrentProfile': $($result.Output)"
     }
 
-    $credentials = $raw | ConvertFrom-Json
+    $credentials = $result.Output | ConvertFrom-Json
     if (-not $credentials.AccessKeyId -or -not $credentials.SecretAccessKey -or -not $credentials.SessionToken) {
         throw "Credenciales exportadas incompletas para profile '$CurrentProfile'."
     }
@@ -653,7 +709,15 @@ try {
     Write-Phase "1" "Validating AWS access and environment config..."
     Assert-ProdConfigSafe -Config $config
     try {
-        $identity = aws sts get-caller-identity --output json 2>&1 | ConvertFrom-Json
+        $identityResult = Invoke-AwsCliWithRetry -Arguments @(
+            "sts", "get-caller-identity",
+            "--output", "json",
+            "--no-cli-pager"
+        )
+        if ($identityResult.ExitCode -ne 0) {
+            throw $identityResult.Output
+        }
+        $identity = $identityResult.Output | ConvertFrom-Json
         Write-Host "  Account: $($identity.Account) | ARN: $($identity.Arn)"
         $env:CDK_DEFAULT_ACCOUNT = [string]$identity.Account
         $env:CDK_DEFAULT_REGION = [string]$config.region
@@ -716,6 +780,9 @@ try {
     Write-Phase "4" "Deploying via CDK..."
     Invoke-CdkDeploy -WorkingDirectory $cdkDir -CurrentEnvironment $Environment
 
+    # CDK asset publication can outlive short-lived CLI credentials. Refresh them
+    # before post-deploy reconciliation and fail closed if renewal is unavailable.
+    Set-AwsSdkCredentialsFromProfile -CurrentProfile $Profile
     $outputsAfterDeploy = Get-StackOutputsMap -CurrentStackName $resolvedStackName
     if ($webRuntimeEnabled) {
         Assert-RequiredOutputs -OutputsMap $outputsAfterDeploy -Keys @("CloudFrontUrl", "DbSecretArn", "RdsEndpoint", "RdsPort", "NextAuthSecretArn")

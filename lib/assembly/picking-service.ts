@@ -2,6 +2,7 @@ import type { PrismaClient, Prisma } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
+import { assertAssemblyOperationalCompatibility } from "@/lib/assembly/compatibility-guard";
 
 type Tx = Prisma.TransactionClient;
 
@@ -183,6 +184,8 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
       );
     }
 
+    const compatibilityRevalidation = await assertAssemblyOperationalCompatibility(tx, order.id, "RELEASE_PICK_LIST");
+
     if (pickList.status === "DRAFT") {
       await tx.pickList.update({
         where: { id: pickList.id },
@@ -212,6 +215,7 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
         pickListId: pickList.id,
         pickListStatus: pickList.status === "DRAFT" ? "RELEASED" : pickList.status,
         orderStatus: order.status === "ABIERTA" ? "EN_PROCESO" : order.status,
+        compatibilityRevalidation,
       },
     }, tx);
   }, { timeout: 20000 });
@@ -267,6 +271,12 @@ export async function confirmAssemblyPickTask(
     if (!["RELEASED", "IN_PROGRESS", "PARTIAL"].includes(task.pickList.status)) {
       throw new InventoryServiceError("PICKLIST_NOT_RELEASED", "Cannot confirm pick tasks before release");
     }
+
+    const compatibilityRevalidation = await assertAssemblyOperationalCompatibility(
+      tx,
+      task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
+      "CONFIRM_PICK",
+    );
 
     const pending = task.reservedQty - task.pickedQty;
     if (args.pickedQty > pending) {
@@ -387,6 +397,7 @@ export async function confirmAssemblyPickTask(
       entityId: task.id,
       action: "CONFIRM_PICK",
       actor: args.operatorName ?? "system",
+      actorUserId: args.operatorUserId ?? null,
       source: "assembly/picking-service",
       before: {
         taskStatus: task.status,
@@ -403,6 +414,7 @@ export async function confirmAssemblyPickTask(
         labelJobId,
         orderTraceId,
         pickListStatus: nextPickListStatus,
+        compatibilityRevalidation,
       },
     }, tx);
 

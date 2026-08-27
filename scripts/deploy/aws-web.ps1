@@ -230,7 +230,8 @@ function Restore-DefaultPrismaClient {
 }
 
 function Repair-OpenNextWindowsDependencies {
-    if (-not $IsWindows) {
+    $runningOnWindows = $env:OS -eq "Windows_NT"
+    if (-not $runningOnWindows) {
         return
     }
 
@@ -413,6 +414,15 @@ function Invoke-CdkDeploy {
         [string]$WorkingDirectory,
         [string]$CurrentEnvironment
     )
+
+    $cdkExecutable = Join-Path $WorkingDirectory "node_modules\.bin\cdk.cmd"
+    if (-not (Test-Path $cdkExecutable)) {
+        Write-Host "  Installing locked CDK dependencies..."
+        Invoke-Checked `
+            -Command "npm ci" `
+            -WorkingDirectory $WorkingDirectory `
+            -FailureMessage "npm ci for CDK dependencies failed"
+    }
 
     Push-Location $WorkingDirectory
     try {
@@ -664,13 +674,14 @@ try {
     if ($webRuntimeEnabled) {
         if (-not $SkipBuild) {
             Invoke-Checked -Command "npx @opennextjs/aws build" -FailureMessage "OpenNext build failed"
-            Repair-OpenNextWindowsDependencies
         } else {
             Write-Host "  Skipping build (using existing .open-next/)"
             if (-not (Test-Path $openNextDir)) {
                 throw ".open-next/ not found. Run without -SkipBuild."
             }
         }
+
+        Repair-OpenNextWindowsDependencies
 
         Remove-WindowsPrismaArtifacts -TargetDir $prismaClientDir
     } else {

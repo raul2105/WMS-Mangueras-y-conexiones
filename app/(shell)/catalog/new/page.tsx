@@ -3,7 +3,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { newCatalogInventorySchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
 import { buildTechnicalSpecRows, supersedePendingTechnicalSourcesForProduct, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalAttributesJson, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
@@ -22,6 +24,7 @@ export const dynamic = "force-dynamic";
 async function createProduct(formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("catalog.edit");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const sku = String(formData.get("sku") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
@@ -104,116 +107,6 @@ async function createProduct(formData: FormData) {
     }
   }
 
-  let category: { id: string } | null = null;
-  if (categoryRaw) {
-    const existing = await prisma.category.findFirst({ where: { name: categoryRaw }, select: { id: true } });
-    if (existing) {
-      category = existing;
-    } else {
-      try {
-        category = await prisma.category.create({ data: { name: categoryRaw }, select: { id: true } });
-      } catch {
-        // If a concurrent request created it, fetch it.
-        category = await prisma.category.findFirst({ where: { name: categoryRaw }, select: { id: true } });
-      }
-    }
-  }
-
-  // Resolve brand snapshot from SupplierBrand
-  let brandRaw: string | null = null;
-  let primarySupplierId: string | null = null;
-  let supplierBrandId: string | null = null;
-  if (supplierBrandIdRaw) {
-    const sb = await prisma.supplierBrand.findUnique({
-      where: { id: supplierBrandIdRaw },
-      select: { id: true, name: true, supplierId: true },
-    });
-    if (sb && (!primarySupplierIdRaw || sb.supplierId === primarySupplierIdRaw)) {
-      brandRaw = sb.name;
-      supplierBrandId = sb.id;
-      primarySupplierId = sb.supplierId;
-    }
-  } else if (primarySupplierIdRaw) {
-    primarySupplierId = primarySupplierIdRaw;
-  }
-
-  const product = await prisma.product.upsert({
-    where: { sku },
-    create: {
-      sku,
-      referenceCode: referenceCodeRaw || null,
-      imageUrl: hasTechnicalSource ? null : imageUrl,
-      name,
-      type: normalizedType,
-      unitLabel: unitLabelRaw || "unidad",
-      purchaseUnitLabel: purchaseUnitLabelRaw || unitLabelRaw || "unidad",
-      purchaseUnitFactor,
-      description: descriptionRaw || null,
-      brand: brandRaw,
-      subcategory: subcategoryRaw || null,
-      base_cost: Number.isFinite(base_cost) ? base_cost : null,
-      price: Number.isFinite(price) ? price : null,
-      purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
-      attributes: hasTechnicalSource ? null : attributes,
-      categoryId: category?.id ?? null,
-      primarySupplierId,
-      supplierBrandId,
-    },
-    update: {
-      name,
-      type: normalizedType,
-      unitLabel: unitLabelRaw || "unidad",
-      purchaseUnitLabel: purchaseUnitLabelRaw || unitLabelRaw || "unidad",
-      purchaseUnitFactor,
-      description: descriptionRaw || null,
-      brand: brandRaw,
-      referenceCode: referenceCodeRaw || null,
-      imageUrl: hasTechnicalSource ? undefined : imageUrl,
-      subcategory: subcategoryRaw || null,
-      base_cost: Number.isFinite(base_cost) ? base_cost : null,
-      price: Number.isFinite(price) ? price : null,
-      purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
-      attributes: hasTechnicalSource ? undefined : attributes,
-      categoryId: category?.id ?? null,
-      primarySupplierId,
-      supplierBrandId,
-    },
-    select: { id: true },
-  });
-
-  if (!hasTechnicalSource) {
-    await supersedePendingTechnicalSourcesForProduct(prisma, product.id);
-    await syncProductTechnicalAttributes(prisma, product.id, attributes);
-  }
-  const technicalSource = technicalSourceSupplier && technicalSourceDocument
-    ? await prisma.productTechnicalSource.create({
-        data: {
-          supplierName: technicalSourceSupplier,
-          documentRef: technicalSourceDocument,
-          documentVersion: technicalSourceVersion || null,
-          sourceUrl: technicalSourceUrl || null,
-          status: "PENDING_REVIEW",
-        },
-        select: { id: true },
-      })
-    : null;
-  if (technicalSource) {
-    await syncProductTechnicalSpecCandidates(prisma, product.id, normalizedType, attributes, technicalSource.id);
-  } else {
-    await syncProductTechnicalSpecs(prisma, product.id, normalizedType, attributes, null);
-  }
-  if (imageUrl && technicalSource) {
-    await prisma.productAsset.create({
-      data: {
-        productId: product.id,
-        url: imageUrl,
-        brandSnapshot: brandRaw,
-        sourceId: technicalSource.id,
-        validationStatus: "PENDING",
-      },
-    });
-  }
-
   // KAN-10: only create initial inventory when quantity > 0 and location is valid.
   const location = inventoryParsed.data.locationCode
     ? await prisma.location.findUnique({ where: { code: locationRaw }, select: { id: true } })
@@ -223,37 +116,73 @@ async function createProduct(formData: FormData) {
     redirect(`/catalog/new?error=${encodeURIComponent("Ubicacion valida obligatoria para cantidad inicial mayor a 0")}`);
   }
 
-  if (location && quantity > 0) {
-    await prisma.inventory.deleteMany({ where: { productId: product.id } });
-    await prisma.inventory.create({
-      data: {
-        productId: product.id,
-        locationId: location.id,
-        quantity,
-        reserved: 0,
-        available: quantity,
+  const result = await prisma.$transaction(async (tx) => {
+    const category = categoryRaw
+      ? await tx.category.upsert({ where: { name: categoryRaw }, create: { name: categoryRaw }, update: {}, select: { id: true } })
+      : null;
+    const supplierBrand = supplierBrandIdRaw
+      ? await tx.supplierBrand.findUnique({ where: { id: supplierBrandIdRaw }, select: { id: true, name: true, supplierId: true } })
+      : null;
+    const supplierBrandValid = supplierBrand && (!primarySupplierIdRaw || supplierBrand.supplierId === primarySupplierIdRaw);
+    const brandRaw = supplierBrandValid ? supplierBrand.name : null;
+    const supplierBrandId = supplierBrandValid ? supplierBrand.id : null;
+    const primarySupplierId = supplierBrandValid ? supplierBrand.supplierId : primarySupplierIdRaw || null;
+    const before = await tx.product.findUnique({ where: { sku } });
+    const product = await tx.product.upsert({
+      where: { sku },
+      create: {
+        sku, referenceCode: referenceCodeRaw || null, imageUrl: hasTechnicalSource ? null : imageUrl,
+        name, type: normalizedType, unitLabel: unitLabelRaw || "unidad",
+        purchaseUnitLabel: purchaseUnitLabelRaw || unitLabelRaw || "unidad", purchaseUnitFactor,
+        description: descriptionRaw || null, brand: brandRaw, subcategory: subcategoryRaw || null,
+        base_cost: Number.isFinite(base_cost) ? base_cost : null, price: Number.isFinite(price) ? price : null,
+        purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
+        attributes: hasTechnicalSource ? null : attributes, categoryId: category?.id ?? null,
+        primarySupplierId, supplierBrandId,
+      },
+      update: {
+        name, type: normalizedType, unitLabel: unitLabelRaw || "unidad",
+        purchaseUnitLabel: purchaseUnitLabelRaw || unitLabelRaw || "unidad", purchaseUnitFactor,
+        description: descriptionRaw || null, brand: brandRaw, referenceCode: referenceCodeRaw || null,
+        imageUrl: hasTechnicalSource ? undefined : imageUrl, subcategory: subcategoryRaw || null,
+        base_cost: Number.isFinite(base_cost) ? base_cost : null, price: Number.isFinite(price) ? price : null,
+        purchaseMoq: Number.isFinite(purchaseMoq) ? purchaseMoq : null,
+        attributes: hasTechnicalSource ? undefined : attributes, categoryId: category?.id ?? null,
+        primarySupplierId, supplierBrandId,
       },
     });
-  }
-
-  await createAuditLogSafe({
-    entityType: "PRODUCT",
-    entityId: product.id,
-    action: "UPSERT_PRODUCT",
-    after: {
-      sku,
-      quantity,
-      locationCode: locationRaw || null,
-    },
-    source: "catalog/new",
+    if (!hasTechnicalSource) {
+      await supersedePendingTechnicalSourcesForProduct(tx, product.id);
+      await syncProductTechnicalAttributes(tx, product.id, attributes);
+    }
+    const technicalSource = hasTechnicalSource
+      ? await tx.productTechnicalSource.create({
+          data: { supplierName: technicalSourceSupplier, documentRef: technicalSourceDocument, documentVersion: technicalSourceVersion || null, sourceUrl: technicalSourceUrl || null, status: "PENDING_REVIEW" },
+          select: { id: true },
+        })
+      : null;
+    if (technicalSource) await syncProductTechnicalSpecCandidates(tx, product.id, normalizedType, attributes, technicalSource.id);
+    else await syncProductTechnicalSpecs(tx, product.id, normalizedType, attributes, null);
+    if (imageUrl && technicalSource) {
+      await tx.productAsset.create({ data: { productId: product.id, url: imageUrl, brandSnapshot: brandRaw, sourceId: technicalSource.id, validationStatus: "PENDING" } });
+    }
+    if (location && quantity > 0) {
+      await tx.inventory.deleteMany({ where: { productId: product.id } });
+      await tx.inventory.create({ data: { productId: product.id, locationId: location.id, quantity, reserved: 0, available: quantity } });
+    }
+    await createAuditLogRequiredWithDb({
+      entityType: "PRODUCT", entityId: product.id, action: before ? "UPSERT_PRODUCT" : "CREATE_PRODUCT",
+      before, after: product, source: "catalog/new", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
+    return { productId: product.id, brandRaw };
   });
 
   const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
   await emitSyncEventSafe({
     entityType: "PRODUCT",
-    entityId: product.id,
+    entityId: result.productId,
     action: "CREATE",
-    payload: { productId: product.id, sku, name, type: normalizedType, brand: brandRaw, price },
+    payload: { productId: result.productId, sku, name, type: normalizedType, brand: result.brandRaw, price },
   });
 
   redirect("/catalog");

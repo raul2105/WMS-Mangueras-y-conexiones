@@ -113,8 +113,8 @@ jobs:
           test -n "$WMS_E2E_WAREHOUSE_OPERATOR_EMAIL" || (echo "Missing WMS_E2E_WAREHOUSE_OPERATOR_EMAIL" && exit 1)
           test -n "$WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD" || (echo "Missing WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD" && exit 1)
 
-      - name: Run AWS read-only KAN-128 evidence gate
-        run: npx playwright test tests/e2e/kan128-aws-readonly-evidence.spec.ts --config=playwright.aws-readonly.config.ts --project=chromium
+      - name: Run AWS read-only operational and role visual evidence
+        run: npx playwright test --config=playwright.aws-readonly.config.ts --project=chromium
 
       - name: Publish AWS browser evidence
         if: always()

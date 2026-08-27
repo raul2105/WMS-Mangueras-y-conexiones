@@ -32,26 +32,6 @@ export default function AppShell({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
 
   useEffect(() => {
-    setMobileNavOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
-      if (stored === "1" && !sidebarCollapsed) {
-        setSidebarCollapsed(true);
-      }
-      if (stored === "0" && sidebarCollapsed) {
-        setSidebarCollapsed(false);
-      }
-    } catch {
-      // Ignore storage failures.
-    }
-    // Only re-sync once after mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     try {
       window.localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
       document.cookie = `${SIDEBAR_COOKIE_KEY}=${sidebarCollapsed ? "1" : "0"}; Path=/; Max-Age=31536000; SameSite=Lax`;

@@ -6,6 +6,7 @@ import { AlertCircle, ClipboardList, Flag, ShoppingCart, Truck, Users } from 'lu
 import Link from 'next/link';
 import { FulfillmentOperationalMetrics } from '@/components/dashboard/fulfillment-operational-metrics';
 import type { FulfillmentOperationalMetrics as FulfillmentOperationalMetricsData } from '@/lib/dashboard/fulfillment-dashboard';
+import { Badge } from '@/components/ui/badge';
 
 interface ManagerHomeContentProps {
   overdueOrders: number;
@@ -38,15 +39,15 @@ export function ManagerHomeContent({
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-500">{stat.label}</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
+                    <p className="text-sm text-[var(--text-muted)]">{stat.label}</p>
+                    <p className="mt-1 text-2xl font-bold text-[var(--text-primary)]">{stat.value}</p>
                   </div>
                   <div className={`p-3 bg-gray-100 rounded-lg ${stat.color}`}>
                     <stat.icon size={24} />
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                  <Badge variant="success">Datos en vivo</Badge>
                 </div>
               </CardContent>
             </Card>

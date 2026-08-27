@@ -515,8 +515,14 @@ function Update-LambdaEnvironment {
             $json,
             (New-Object System.Text.UTF8Encoding($false))
         )
-        aws lambda update-function-configuration --function-name $CurrentLambdaFunctionName --environment "file://$envFile" --query "LastUpdateStatus" --output text
-        aws lambda wait function-updated-v2 --function-name $CurrentLambdaFunctionName
+        aws lambda update-function-configuration --function-name $CurrentLambdaFunctionName --environment "file://$envFile" --query "LastUpdateStatus" --output text --no-cli-pager
+        if ($LASTEXITCODE -ne 0) {
+            throw "No se pudieron actualizar las variables de entorno de Lambda"
+        }
+        aws lambda wait function-updated-v2 --function-name $CurrentLambdaFunctionName --no-cli-pager
+        if ($LASTEXITCODE -ne 0) {
+            throw "Lambda no alcanzó el estado actualizado"
+        }
         Write-Host "  Lambda env vars updated"
     } else {
         Write-Host "  Lambda env vars already correct"

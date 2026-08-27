@@ -359,6 +359,9 @@ class WmsWebStack extends Stack {
       environment: {
         NODE_ENV: "production",
         APP_VERSION: packageJson.version || "unknown",
+        WMS_ENVIRONMENT: config.environment,
+        WMS_COMMIT_SHA: process.env.WMS_COMMIT_SHA || "unknown",
+        WMS_RELEASE_ID: process.env.WMS_RELEASE_ID || "unknown",
         AUTH_TRUST_HOST: "true",
         DATABASE_URL: dbUrl,
         AUTH_SECRET: nextAuthSecret.secretValue.unsafeUnwrap(),

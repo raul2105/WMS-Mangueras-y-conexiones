@@ -48,6 +48,13 @@ $awsPrismaSchemaPath = Join-Path $projectRoot "prisma\postgresql\schema.prisma"
 $configDir = Join-Path $projectRoot "infra\cdk\config"
 $packageJsonPath = Join-Path $projectRoot "package.json"
 $packageVersion = if (Test-Path $packageJsonPath) { (Get-Content $packageJsonPath -Raw | ConvertFrom-Json).version } else { "unknown" }
+$commitSha = (git -C $projectRoot rev-parse HEAD 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $commitSha) {
+    $commitSha = "unknown"
+}
+$commitSha = $commitSha.Trim()
+$releaseTimestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$releaseId = "$Environment-$($commitSha.Substring(0, [Math]::Min(12, $commitSha.Length)))-$releaseTimestamp"
 
 $toolPaths = @(
     "C:\Program Files\nodejs",
@@ -62,6 +69,8 @@ foreach ($toolPath in $toolPaths) {
 $env:AWS_PROFILE = $Profile
 $env:AWS_PAGER = ""
 $env:WMS_ENV = $Environment
+$env:WMS_COMMIT_SHA = $commitSha
+$env:WMS_RELEASE_ID = $releaseId
 $env:AWS_SDK_LOAD_CONFIG = "1"
 
 function Write-Phase {
@@ -459,6 +468,18 @@ function Update-LambdaEnvironment {
     }
     if (-not $config.Variables.APP_VERSION -or $config.Variables.APP_VERSION -ne $packageVersion) {
         $config.Variables | Add-Member -NotePropertyName "APP_VERSION" -NotePropertyValue $packageVersion -Force
+        $changed = $true
+    }
+    if (-not $config.Variables.WMS_ENVIRONMENT -or $config.Variables.WMS_ENVIRONMENT -ne $Environment) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_ENVIRONMENT" -NotePropertyValue $Environment -Force
+        $changed = $true
+    }
+    if (-not $config.Variables.WMS_COMMIT_SHA -or $config.Variables.WMS_COMMIT_SHA -ne $commitSha) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_COMMIT_SHA" -NotePropertyValue $commitSha -Force
+        $changed = $true
+    }
+    if (-not $config.Variables.WMS_RELEASE_ID -or $config.Variables.WMS_RELEASE_ID -ne $releaseId) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_RELEASE_ID" -NotePropertyValue $releaseId -Force
         $changed = $true
     }
     if (-not $config.Variables.AUTH_SECRET) {

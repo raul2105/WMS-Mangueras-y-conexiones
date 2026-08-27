@@ -54,6 +54,11 @@ async function createConfiguredAssembly(formData: FormData) {
     assemblyQuantityRaw: String(formData.get("assemblyQuantity") ?? "").trim(),
     sourceDocumentRef: String(formData.get("sourceDocumentRef") ?? "").trim() || undefined,
     notes: String(formData.get("notes") ?? "").trim() || undefined,
+    workingPressureBarRaw: String(formData.get("workingPressureBar") ?? "").trim(),
+    operatingTemperatureCRaw: String(formData.get("operatingTemperatureC") ?? "").trim(),
+    medium: String(formData.get("medium") ?? "").trim() || undefined,
+    application: String(formData.get("application") ?? "").trim() || undefined,
+    assemblyMethod: String(formData.get("assemblyMethod") ?? "").trim() || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/requests/${orderId}/assembly/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
@@ -70,6 +75,11 @@ async function createConfiguredAssembly(formData: FormData) {
       assemblyQuantity: parsed.data.assemblyQuantityRaw,
       sourceDocumentRef: parsed.data.sourceDocumentRef ?? null,
       notes: parsed.data.notes ?? null,
+      workingPressureBar: parsed.data.workingPressureBarRaw,
+      operatingTemperatureC: parsed.data.operatingTemperatureCRaw,
+      medium: parsed.data.medium ?? null,
+      application: parsed.data.application ?? null,
+      assemblyMethod: parsed.data.assemblyMethod ?? null,
       compatibilityReviewApproved: false,
     });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Ensamble configurado agregado al pedido")}`);
@@ -122,6 +132,11 @@ export default async function NewRequestAssemblyLinePage({
     assemblyQuantity: String(sp.assemblyQuantity ?? ""),
     sourceDocumentRef: String(sp.sourceDocumentRef ?? order.code),
     notes: String(sp.notes ?? ""),
+    workingPressureBar: String(sp.workingPressureBar ?? ""),
+    operatingTemperatureC: String(sp.operatingTemperatureC ?? ""),
+    medium: String(sp.medium ?? ""),
+    application: String(sp.application ?? ""),
+    assemblyMethod: String(sp.assemblyMethod ?? ""),
   };
 
   const [entryFittingSelection, hoseSelection, exitFittingSelection] = await Promise.all([
@@ -163,7 +178,13 @@ export default async function NewRequestAssemblyLinePage({
         values.entryFittingProductId,
         values.hoseProductId,
         values.exitFittingProductId,
-      ]);
+      ], {
+        workingPressureBar: parseDecimal(values.workingPressureBar),
+        operatingTemperatureC: parseDecimal(values.operatingTemperatureC),
+        medium: values.medium || null,
+        application: values.application || null,
+        assemblyMethod: values.assemblyMethod || null,
+      });
     } catch {
       compatibilityDecision = null;
     }
@@ -268,6 +289,11 @@ export default async function NewRequestAssemblyLinePage({
           <input type="hidden" name="assemblyQuantity" value={values.assemblyQuantity} />
           <input type="hidden" name="sourceDocumentRef" value={values.sourceDocumentRef} />
           <input type="hidden" name="notes" value={values.notes} />
+          <input type="hidden" name="workingPressureBar" value={values.workingPressureBar} />
+          <input type="hidden" name="operatingTemperatureC" value={values.operatingTemperatureC} />
+          <input type="hidden" name="medium" value={values.medium} />
+          <input type="hidden" name="application" value={values.application} />
+          <input type="hidden" name="assemblyMethod" value={values.assemblyMethod} />
           <p className="text-sm text-slate-400">
             La confirmación crea la línea configurada, genera la orden exacta ligada y aparta inventario para el ensamble.
           </p>

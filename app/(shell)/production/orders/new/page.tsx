@@ -111,6 +111,11 @@ async function configureAssemblyOrder(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim();
   const compatibilityReviewApproved = String(formData.get("compatibilityReviewApproved") ?? "") === "on";
   const compatibilityReviewReason = String(formData.get("compatibilityReviewReason") ?? "").trim();
+  const workingPressureBarRaw = String(formData.get("workingPressureBar") ?? "").trim();
+  const operatingTemperatureCRaw = String(formData.get("operatingTemperatureC") ?? "").trim();
+  const medium = String(formData.get("medium") ?? "").trim();
+  const application = String(formData.get("application") ?? "").trim();
+  const assemblyMethod = String(formData.get("assemblyMethod") ?? "").trim();
 
   if (!orderId) {
     redirect("/production/orders/new?error=Orden%20de%20ensamble%20invalida");
@@ -125,6 +130,11 @@ async function configureAssemblyOrder(formData: FormData) {
     assemblyQuantityRaw,
     sourceDocumentRef: sourceDocumentRef || undefined,
     notes: notes || undefined,
+    workingPressureBarRaw,
+    operatingTemperatureCRaw,
+    medium: medium || undefined,
+    application: application || undefined,
+    assemblyMethod: assemblyMethod || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/orders/new?orderId=${encodeURIComponent(orderId)}&error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
@@ -139,6 +149,11 @@ async function configureAssemblyOrder(formData: FormData) {
     assemblyQuantity: parsed.data.assemblyQuantityRaw,
     sourceDocumentRef: sourceDocumentRef || null,
     notes: notes || null,
+    workingPressureBar: parsed.data.workingPressureBarRaw,
+    operatingTemperatureC: parsed.data.operatingTemperatureCRaw,
+    medium: parsed.data.medium ?? null,
+    application: parsed.data.application ?? null,
+    assemblyMethod: parsed.data.assemblyMethod ?? null,
     compatibilityReviewApproved,
     compatibilityReviewReason: compatibilityReviewApproved ? compatibilityReviewReason : null,
     compatibilityReviewedByUserId: compatibilityReviewApproved ? session.user.id : null,
@@ -223,6 +238,11 @@ export default async function NewAssemblyOrderPage({
     assemblyQuantity: String(sp.assemblyQuantity ?? ""),
     sourceDocumentRef: String(sp.sourceDocumentRef ?? ""),
     notes: String(sp.notes ?? ""),
+    workingPressureBar: String(sp.workingPressureBar ?? ""),
+    operatingTemperatureC: String(sp.operatingTemperatureC ?? ""),
+    medium: String(sp.medium ?? ""),
+    application: String(sp.application ?? ""),
+    assemblyMethod: String(sp.assemblyMethod ?? ""),
   };
 
   const [entryFittingSelection, hoseSelection, exitFittingSelection] = await Promise.all([
@@ -276,7 +296,13 @@ export default async function NewAssemblyOrderPage({
         values.entryFittingProductId,
         values.hoseProductId,
         values.exitFittingProductId,
-      ]);
+      ], {
+        workingPressureBar: parseDecimal(values.workingPressureBar),
+        operatingTemperatureC: parseDecimal(values.operatingTemperatureC),
+        medium: values.medium || null,
+        application: values.application || null,
+        assemblyMethod: values.assemblyMethod || null,
+      });
     } catch {
       compatibilityDecision = null;
     }
@@ -493,6 +519,11 @@ export default async function NewAssemblyOrderPage({
             <input type="hidden" name="assemblyQuantity" value={values.assemblyQuantity} />
             <input type="hidden" name="sourceDocumentRef" value={values.sourceDocumentRef} />
             <input type="hidden" name="notes" value={values.notes} />
+            <input type="hidden" name="workingPressureBar" value={values.workingPressureBar} />
+            <input type="hidden" name="operatingTemperatureC" value={values.operatingTemperatureC} />
+            <input type="hidden" name="medium" value={values.medium} />
+            <input type="hidden" name="application" value={values.application} />
+            <input type="hidden" name="assemblyMethod" value={values.assemblyMethod} />
             <p className="text-slate-400 text-sm">
               La confirmacion crea la configuracion tecnica, aparta inventario y genera la lista de surtido exacta.
             </p>

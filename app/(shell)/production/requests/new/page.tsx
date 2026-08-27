@@ -214,6 +214,11 @@ async function createSalesRequest(formData: FormData) {
         assemblyQuantityRaw: String(formData.get("assemblyQuantity") ?? "").trim(),
         sourceDocumentRef: String(formData.get("sourceDocumentRef") ?? "").trim() || undefined,
         notes: String(formData.get("assemblyNotes") ?? "").trim() || undefined,
+        workingPressureBarRaw: String(formData.get("workingPressureBar") ?? "").trim(),
+        operatingTemperatureCRaw: String(formData.get("operatingTemperatureC") ?? "").trim(),
+        medium: String(formData.get("medium") ?? "").trim() || undefined,
+        application: String(formData.get("application") ?? "").trim() || undefined,
+        assemblyMethod: String(formData.get("assemblyMethod") ?? "").trim() || undefined,
       })
     : null;
 
@@ -287,6 +292,11 @@ async function createSalesRequest(formData: FormData) {
             assemblyQuantity: assemblyInput.data.assemblyQuantityRaw,
             sourceDocumentRef: assemblyInput.data.sourceDocumentRef ?? null,
             notes: assemblyInput.data.notes ?? null,
+            workingPressureBar: assemblyInput.data.workingPressureBarRaw,
+            operatingTemperatureC: assemblyInput.data.operatingTemperatureCRaw,
+            medium: assemblyInput.data.medium ?? null,
+            application: assemblyInput.data.application ?? null,
+            assemblyMethod: assemblyInput.data.assemblyMethod ?? null,
           },
         })
       : await createSalesRequestDraftHeader(prisma, requestArgs);

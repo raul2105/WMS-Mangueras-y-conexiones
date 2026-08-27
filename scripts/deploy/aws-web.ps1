@@ -237,7 +237,8 @@ function Repair-OpenNextWindowsDependencies {
 
     $imageOptimizationDir = Join-Path $openNextDir "image-optimization-function"
     $sharpPackageJson = Join-Path $imageOptimizationDir "node_modules\sharp\package.json"
-    if (Test-Path $sharpPackageJson) {
+    $sharpLinuxArm64Binary = Join-Path $imageOptimizationDir "node_modules\sharp\build\Release\sharp-linux-arm64v8.node"
+    if ((Test-Path $sharpPackageJson) -and (Test-Path $sharpLinuxArm64Binary)) {
         return
     }
 
@@ -246,8 +247,8 @@ function Repair-OpenNextWindowsDependencies {
         -Command "node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir `"$imageOptimizationDir`" --packages sharp@0.32.6 --os linux --arch arm64 --target 18 --libc glibc" `
         -FailureMessage "No se pudieron instalar dependencias del bundle OpenNext"
 
-    if (-not (Test-Path $sharpPackageJson)) {
-        throw "La reparación de dependencias OpenNext no creó node_modules/sharp en $imageOptimizationDir"
+    if (-not (Test-Path $sharpPackageJson) -or -not (Test-Path $sharpLinuxArm64Binary)) {
+        throw "La reparación de dependencias OpenNext no creó sharp para Linux ARM64 en $imageOptimizationDir"
     }
 }
 

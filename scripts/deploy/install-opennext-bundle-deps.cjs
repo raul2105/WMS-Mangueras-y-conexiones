@@ -79,10 +79,7 @@ if (args["--os"]) {
   npmArgs.push(`--os=${args["--os"]}`);
 }
 if (args["--arch"]) {
-  npmArgs.push(`--arch=${args["--arch"]}`);
-}
-if (args["--target"]) {
-  npmArgs.push(`--target=${args["--target"]}`);
+  npmArgs.push(`--cpu=${args["--arch"]}`);
 }
 if (args["--libc"]) {
   npmArgs.push(`--libc=${args["--libc"]}`);
@@ -92,15 +89,34 @@ npmArgs.push(...packages);
 
 try {
   fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tempInstallDir, "package.json"),
+    `${JSON.stringify({ name: "open-next-bundle-deps", private: true }, null, 2)}\n`,
+    "utf8",
+  );
 
-  const result = spawnSync("npm", npmArgs, {
+  let npmExecutable = "npm";
+  if (process.platform === "win32") {
+    const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+    if (!fs.existsSync(npmCli)) {
+      throw new Error(`npm CLI not found at ${npmCli}`);
+    }
+    npmExecutable = process.execPath;
+    npmArgs.unshift(npmCli);
+  }
+
+  const result = spawnSync(npmExecutable, npmArgs, {
     cwd: tempInstallDir,
     env: {
       ...process.env,
+      npm_config_platform: args["--os"] || process.platform,
+      npm_config_arch: args["--arch"] || process.arch,
+      npm_config_libc: args["--libc"] || "",
+      npm_config_target: args["--target"] || process.versions.node,
       SHARP_IGNORE_GLOBAL_LIBVIPS: "1",
     },
     stdio: "inherit",
-    shell: true,
+    shell: false,
   });
 
   if (result.error) {
@@ -110,7 +126,14 @@ try {
     process.exit(result.status ?? 1);
   }
 
-  fs.cpSync(path.join(tempInstallDir, "node_modules"), path.join(outputDir, "node_modules"), {
+  const installedModulesDir = path.join(tempInstallDir, "node_modules");
+  if (!fs.existsSync(installedModulesDir)) {
+    throw new Error(`npm completed without creating ${installedModulesDir}`);
+  }
+
+  const outputModulesDir = path.join(outputDir, "node_modules");
+  fs.rmSync(outputModulesDir, { recursive: true, force: true });
+  fs.cpSync(installedModulesDir, outputModulesDir, {
     recursive: true,
     force: true,
     dereference: true,

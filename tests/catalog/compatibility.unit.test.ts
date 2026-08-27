@@ -72,6 +72,23 @@ describe("technical compatibility contract", () => {
     expect(result.reviewOverrideAllowed).toBe(false);
   });
 
+  it("uses the captured operating context when configuring an assembly", async () => {
+    const db = {
+      productCompatibilityRule: {
+        findMany: async () => [{ ...approvedRule, maxWorkingPressureBar: 120 }],
+      },
+    };
+    await expect(validateAssemblyCompatibility(db, {
+      warehouseId: "warehouse-1",
+      entryFittingProductId: "entry",
+      hoseProductId: "hose",
+      exitFittingProductId: "entry",
+      hoseLength: 1,
+      assemblyQuantity: 1,
+      workingPressureBar: 100,
+    })).resolves.toMatchObject({ status: "APPROVED" });
+  });
+
   it("permits an explicit override only for a current review rule", async () => {
     const db = {
       productCompatibilityRule: {

@@ -23,6 +23,12 @@ function validateAssemblyInput(input: AssemblyConfigInput) {
   if (!Number.isFinite(input.assemblyQuantity) || input.assemblyQuantity <= 0) {
     throw new InventoryServiceError("INVALID_QTY", "Assembly quantity must be greater than zero");
   }
+  if (input.workingPressureBar != null && (!Number.isFinite(input.workingPressureBar) || input.workingPressureBar < 0)) {
+    throw new InventoryServiceError("INVALID_OPERATING_CONTEXT", "Working pressure must be zero or greater");
+  }
+  if (input.operatingTemperatureC != null && !Number.isFinite(input.operatingTemperatureC)) {
+    throw new InventoryServiceError("INVALID_OPERATING_CONTEXT", "Operating temperature must be a finite number");
+  }
 }
 
 export function buildAssemblyRequirements(input: AssemblyConfigInput): AssemblyRequirement[] {
@@ -161,7 +167,13 @@ export async function validateAssemblyCompatibility(
     input.entryFittingProductId,
     input.hoseProductId,
     input.exitFittingProductId,
-  ]);
+  ], {
+    workingPressureBar: input.workingPressureBar,
+    operatingTemperatureC: input.operatingTemperatureC,
+    medium: input.medium,
+    application: input.application,
+    assemblyMethod: input.assemblyMethod,
+  });
 
   if (decision.status === "BLOCKED") {
     throw new InventoryServiceError("INCOMPATIBLE_COMPONENTS", decision.explanation);

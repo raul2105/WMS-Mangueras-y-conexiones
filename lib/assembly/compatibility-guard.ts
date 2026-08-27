@@ -68,6 +68,11 @@ export async function assertAssemblyOperationalCompatibility(
           compatibilityReviewReason: true,
           compatibilityReviewedByUserId: true,
           compatibilityReviewRules: true,
+          workingPressureBar: true,
+          operatingTemperatureC: true,
+          medium: true,
+          application: true,
+          assemblyMethod: true,
         },
       },
       assemblyWorkOrder: {
@@ -110,7 +115,13 @@ export async function assertAssemblyOperationalCompatibility(
     );
   }
 
-  const decision = await getAssemblyCompatibilityDecision(db, productIds);
+  const decision = await getAssemblyCompatibilityDecision(db, productIds, {
+    workingPressureBar: order.assemblyConfiguration.workingPressureBar,
+    operatingTemperatureC: order.assemblyConfiguration.operatingTemperatureC,
+    medium: order.assemblyConfiguration.medium,
+    application: order.assemblyConfiguration.application,
+    assemblyMethod: order.assemblyConfiguration.assemblyMethod,
+  });
   if (decision.status === "BLOCKED") {
     throw new InventoryServiceError("INCOMPATIBLE_COMPONENTS", decision.explanation);
   }

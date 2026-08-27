@@ -35,6 +35,11 @@ function configuredOrder(overrides: Record<string, unknown> = {}) {
       compatibilityReviewReason: null,
       compatibilityReviewedByUserId: null,
       compatibilityReviewRules: null,
+      workingPressureBar: null,
+      operatingTemperatureC: null,
+      medium: null,
+      application: null,
+      assemblyMethod: null,
       ...overrides,
     },
     assemblyWorkOrder: {
@@ -83,6 +88,13 @@ describe("assembly operational compatibility guard", () => {
   it("blocks a configured order when a current rule explicitly forbids the combination", async () => {
     const blockedRule = { ...approvedRule, decision: "BLOCKED", severity: "BLOCK", description: "Combinación insegura" };
     await expect(assertAssemblyOperationalCompatibility(mockDb(configuredOrder(), [blockedRule]), "order-1", "RELEASE_PICK_LIST"))
+      .rejects.toMatchObject({ code: "INCOMPATIBLE_COMPONENTS" });
+  });
+
+  it("revalidates governed operating limits from the persisted assembly context", async () => {
+    const pressureRule = { ...approvedRule, maxWorkingPressureBar: 210 };
+    const order = configuredOrder({ workingPressureBar: 250 });
+    await expect(assertAssemblyOperationalCompatibility(mockDb(order, [pressureRule]), "order-1", "CLOSE_ASSEMBLY"))
       .rejects.toMatchObject({ code: "INCOMPATIBLE_COMPONENTS" });
   });
 

@@ -37,6 +37,11 @@ type AssemblyLineInput = {
   assemblyQuantity: number;
   sourceDocumentRef?: string | null;
   notes?: string | null;
+  workingPressureBar?: number | null;
+  operatingTemperatureC?: number | null;
+  medium?: string | null;
+  application?: string | null;
+  assemblyMethod?: string | null;
   compatibilityReviewApproved?: boolean;
 };
 
@@ -67,6 +72,11 @@ export type CreateSalesRequestLineInput =
       assemblyQuantity: number;
       sourceDocumentRef?: string | null;
       notes?: string | null;
+      workingPressureBar?: number | null;
+      operatingTemperatureC?: number | null;
+      medium?: string | null;
+      application?: string | null;
+      assemblyMethod?: string | null;
     };
 
 type ProductAllocation = {
@@ -977,6 +987,11 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
         totalHoseRequired: input.hoseLength * input.assemblyQuantity,
         sourceDocumentRef: input.sourceDocumentRef ?? null,
         notes: input.notes ?? null,
+        workingPressureBar: input.workingPressureBar ?? null,
+        operatingTemperatureC: input.operatingTemperatureC ?? null,
+        medium: input.medium?.trim() || null,
+        application: input.application?.trim() || null,
+        assemblyMethod: input.assemblyMethod?.trim() || null,
       },
     });
 
@@ -997,6 +1012,11 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
       assemblyQuantity: input.assemblyQuantity,
       sourceDocumentRef: input.sourceDocumentRef ?? null,
       notes: input.notes ?? null,
+      workingPressureBar: input.workingPressureBar ?? null,
+      operatingTemperatureC: input.operatingTemperatureC ?? null,
+      medium: input.medium,
+      application: input.application,
+      assemblyMethod: input.assemblyMethod,
       compatibilityReviewApproved: input.compatibilityReviewApproved,
     });
 

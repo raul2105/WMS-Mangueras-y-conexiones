@@ -810,11 +810,20 @@ try {
         Write-Host "  Expected DB secret resolved: $($outputsAfterDeploy['DbSecretArn'])"
 
         try {
-            $response = Invoke-WebRequest -Uri "$cloudFrontUrl/api/health" -UseBasicParsing
+            $response = Invoke-WebRequest -Uri "$cloudFrontUrl/api/health" -UseBasicParsing -TimeoutSec 30
             $health = $response.Content | ConvertFrom-Json
-            Write-Host "  Health: ok=$($health.ok) | db=$($health.db)"
+            if (-not $health.ok -or $health.db -ne "up") {
+                throw "Health degradado: ok=$($health.ok), db=$($health.db)"
+            }
+            if ($health.environment -ne $Environment) {
+                throw "Entorno desplegado '$($health.environment)' no coincide con '$Environment'."
+            }
+            if ($health.commitSha -ne $commitSha) {
+                throw "SHA desplegado '$($health.commitSha)' no coincide con '$commitSha'."
+            }
+            Write-Host "  Health: ok=$($health.ok) | db=$($health.db) | sha=$($health.commitSha)"
         } catch {
-            Write-Warning "Health check failed for $cloudFrontUrl/api/health. Cold start or runtime issue may need review."
+            throw "Health check falló para $cloudFrontUrl/api/health: $($_.Exception.Message)"
         }
 
         Invoke-AuthSmokeCheck -BaseUrl $cloudFrontUrl -Email $SmokeAuthEmail -Password $SmokeAuthPassword

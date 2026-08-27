@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SectionCard } from "@/components/ui/section-card";
 import { buttonStyles } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
 import { searchProducts } from "@/lib/product-search";
 import {
@@ -52,7 +53,12 @@ export default async function ProductionEquivalencesPage({
   const groups = await Promise.all(
     matches.map(async (product) => ({
       product,
-      equivalents: await getEquivalentProducts(product.id, { warehouseId: warehouseId || undefined, limit: 6, inStockOnly: false }),
+      equivalents: await getEquivalentProducts(product.id, {
+        warehouseId: warehouseId || undefined,
+        limit: 6,
+        inStockOnly: false,
+        includeReviewRequired: true,
+      }),
     })),
   );
 
@@ -223,21 +229,27 @@ export default async function ProductionEquivalencesPage({
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {equivalents.map((equivalent) => (
-                    <div key={equivalent.equivalenceId} className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm">
+                    <div key={equivalent.equivalenceId} className="op-surface-muted rounded-xl border border-[var(--border-default)] p-4 text-sm">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-white">{equivalent.name}</p>
-                          <p className="font-mono text-xs text-cyan-200">{equivalent.sku}</p>
+                          <p className="font-semibold text-[var(--text-primary)]">{equivalent.name}</p>
+                          <p className="font-mono text-xs text-[var(--text-muted)]">{equivalent.sku}</p>
                         </div>
-                        <span className="text-xs text-emerald-200">{equivalent.totalAvailable} disp.</span>
+                        <Badge variant={equivalent.technicalStatus === "APPROVED" ? "success" : equivalent.technicalStatus === "BLOCKED" ? "danger" : "warning"}>
+                          {equivalent.technicalStatus === "APPROVED" ? "Aprobado" : equivalent.technicalStatus === "BLOCKED" ? "Bloqueado" : "Revisión técnica"}
+                        </Badge>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-200">
-                        {equivalent.brand ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.brand}</span> : null}
-                        {equivalent.categoryName ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.categoryName}</span> : null}
-                        {equivalent.basisNorm ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.basisNorm}</span> : null}
-                        {typeof equivalent.basisDash === "number" ? <span className="rounded bg-black/20 px-2 py-1">Dash {equivalent.basisDash}</span> : null}
+                      <p className="mt-3 text-xs text-[var(--text-secondary)]">{equivalent.technicalExplanation}</p>
+                      {equivalent.technicalSources.length > 0 ? (
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">Fuente: {equivalent.technicalSources.join(", ")}</p>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[var(--text-secondary)]">
+                        {equivalent.brand ? <Badge variant="neutral">{equivalent.brand}</Badge> : null}
+                        {equivalent.categoryName ? <Badge variant="neutral">{equivalent.categoryName}</Badge> : null}
+                        {equivalent.basisNorm ? <Badge variant="neutral">{equivalent.basisNorm}</Badge> : null}
+                        {typeof equivalent.basisDash === "number" ? <Badge variant="neutral">Dash {equivalent.basisDash}</Badge> : null}
                       </div>
-                      <div className="mt-3 space-y-1 text-xs text-cyan-100/90">
+                      <div className="mt-3 space-y-1 text-xs text-[var(--text-secondary)]">
                         {equivalent.locations.length === 0 ? (
                           <p>Equivalencia registrada sin stock disponible.</p>
                         ) : equivalent.locations.slice(0, 3).map((location) => (
@@ -250,9 +262,11 @@ export default async function ProductionEquivalencesPage({
                         <Link href={buildCommercialSearchHref("/production/availability", equivalent.sku, { productId: equivalent.productId, sku: equivalent.sku, source: "equivalences", equivalentProductId: product.id })} className={buttonStyles({ variant: "secondary", size: "sm" })}>
                           Ver disponibilidad
                         </Link>
-                        <Link href={buildCommercialRequestHref({ productId: equivalent.productId, sku: equivalent.sku, q: query || sku || product.sku, source: "equivalences", equivalentProductId: product.id })} className={buttonStyles({ size: "sm" })} aria-label={`Crear pedido con ${equivalent.name} (${equivalent.sku})`}>
-                          Crear pedido
-                        </Link>
+                        {equivalent.technicalStatus === "APPROVED" ? (
+                          <Link href={buildCommercialRequestHref({ productId: equivalent.productId, sku: equivalent.sku, q: query || sku || product.sku, source: "equivalences", equivalentProductId: product.id })} className={buttonStyles({ size: "sm" })} aria-label={`Crear pedido con ${equivalent.name} (${equivalent.sku})`}>
+                            Crear pedido
+                          </Link>
+                        ) : null}
                       </div>
                     </div>
                   ))}

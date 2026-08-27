@@ -6,7 +6,6 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, transferStockSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
 import { buttonStyles } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,15 +100,6 @@ async function transferStock(formData: FormData) {
       source: "inventory/transfer",
     });
 
-    await createAuditLogSafe({
-      entityType: "INVENTORY_MOVEMENT",
-      entityId: `${product.id}:${fromLocation.id}->${toLocation.id}`,
-      action: "TRANSFER_FORM_SUBMIT",
-      after: { quantity: parsed.data.quantityRaw, fromLocationCode, toLocationCode, reference },
-      source: "inventory/transfer",
-      actor: actor.actorName,
-      actorUserId: actor.actorUserId,
-    });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {

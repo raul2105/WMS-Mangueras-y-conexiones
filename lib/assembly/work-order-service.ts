@@ -180,6 +180,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
       notes: input.notes ?? null,
       compatibilityStatus: compatibilityDecision.status.toUpperCase(),
       compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+      compatibilityReviewReason: input.compatibilityReviewReason ?? null,
+      compatibilityReviewedByUserId: input.compatibilityReviewedByUserId ?? null,
       compatibilityReviewRules: compatibilityDecision.matchedRules.length > 0
         ? JSON.stringify(compatibilityDecision.matchedRules)
         : null,
@@ -292,6 +294,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
         requirements,
         allocations: preview.allocations,
         compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+        compatibilityReviewReason: input.compatibilityReviewReason ?? null,
+        compatibilityReviewedByUserId: input.compatibilityReviewedByUserId ?? null,
         compatibilityReviewRules: compatibilityDecision.matchedRules,
         pickListCode: pickCode,
       }),
@@ -384,6 +388,9 @@ export async function configureAssemblyOrderExact(
 
     const compatibilityDecision = await validateAssemblyCompatibility(tx, input, {
       allowReview: Boolean(input.compatibilityReviewApproved),
+      reviewReason: input.compatibilityReviewReason,
+      reviewerRoles: input.compatibilityReviewerRoles,
+      reviewedByUserId: input.compatibilityReviewedByUserId,
     });
     const preview = await previewAssemblyAvailability(tx, input);
     if (!preview.exact) {

@@ -15,8 +15,11 @@ export type AssemblyConfigInput = {
   assemblyQuantity: number;
   sourceDocumentRef?: string | null;
   notes?: string | null;
-  /** Required when an active WARN compatibility rule was reviewed by the operator. */
+  /** Explicit technical review; accepted only for a governed rule that permits an override. */
   compatibilityReviewApproved?: boolean;
+  compatibilityReviewReason?: string | null;
+  compatibilityReviewedByUserId?: string | null;
+  compatibilityReviewerRoles?: string[];
 };
 
 export type AssemblyRequirement = {

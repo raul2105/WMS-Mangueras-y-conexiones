@@ -44,7 +44,6 @@ async function createConfiguredAssembly(formData: FormData) {
   await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
-  const compatibilityReviewApproved = String(formData.get("compatibilityReviewApproved") ?? "") === "on";
   const parsed = salesInternalOrderAssemblyLineCreateSchema.safeParse({
     orderId,
     warehouseId: String(formData.get("warehouseId") ?? "").trim(),
@@ -71,7 +70,7 @@ async function createConfiguredAssembly(formData: FormData) {
       assemblyQuantity: parsed.data.assemblyQuantityRaw,
       sourceDocumentRef: parsed.data.sourceDocumentRef ?? null,
       notes: parsed.data.notes ?? null,
-      compatibilityReviewApproved,
+      compatibilityReviewApproved: false,
     });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Ensamble configurado agregado al pedido")}`);
   } catch (error) {
@@ -169,6 +168,7 @@ export default async function NewRequestAssemblyLinePage({
       compatibilityDecision = null;
     }
   }
+  const compatibilityCanContinue = compatibilityDecision?.status === "APPROVED";
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -271,19 +271,20 @@ export default async function NewRequestAssemblyLinePage({
           <p className="text-sm text-slate-400">
             La confirmación crea la línea configurada, genera la orden exacta ligada y aparta inventario para el ensamble.
           </p>
-          {compatibilityDecision?.status === "review" ? (
-            <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              <input type="checkbox" name="compatibilityReviewApproved" required className="mt-1" />
-              <span>
-                Revisé las advertencias de compatibilidad y autorizo agregar esta combinación.
-                <span className="mt-1 block text-xs text-amber-200/80">
-                  {compatibilityDecision.matchedRules.map((rule) => rule.description).filter(Boolean).join("; ")}
-                </span>
-              </span>
-            </label>
+          {compatibilityDecision?.status === "REQUIRES_REVIEW" ? (
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-text)]">
+              <p className="font-semibold">Revisión técnica requerida</p>
+              <p className="mt-1">{compatibilityDecision.explanation}</p>
+              <p className="mt-2 text-xs">Ventas no puede autorizar excepciones técnicas. Solicita revisión de manager o administración.</p>
+            </div>
+          ) : compatibilityDecision?.status === "BLOCKED" ? (
+            <div className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">
+              <p className="font-semibold">Combinación bloqueada</p>
+              <p className="mt-1">{compatibilityDecision.explanation}</p>
+            </div>
           ) : null}
           <div className="flex justify-end">
-            <button type="submit" className={buttonStyles({ className: !preview?.exact ? "opacity-50" : "" })} disabled={!preview?.exact}>
+            <button type="submit" className={buttonStyles({ className: !preview?.exact || !compatibilityCanContinue ? "opacity-50" : "" })} disabled={!preview?.exact || !compatibilityCanContinue}>
               Agregar al pedido
             </button>
           </div>

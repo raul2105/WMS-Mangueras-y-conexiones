@@ -150,7 +150,12 @@ export async function previewAssemblyAvailability(db: Db, input: AssemblyConfigI
 export async function validateAssemblyCompatibility(
   db: Parameters<typeof getAssemblyCompatibilityDecision>[0],
   input: AssemblyConfigInput,
-  options?: { allowReview?: boolean },
+  options?: {
+    allowReview?: boolean;
+    reviewReason?: string | null;
+    reviewerRoles?: string[];
+    reviewedByUserId?: string | null;
+  },
 ) {
   const decision = await getAssemblyCompatibilityDecision(db, [
     input.entryFittingProductId,
@@ -158,16 +163,26 @@ export async function validateAssemblyCompatibility(
     input.exitFittingProductId,
   ]);
 
-  if (decision.status === "blocked") {
-    const reason = decision.matchedRules[0]?.description || "La combinación de componentes tiene una regla técnica de bloqueo";
-    throw new InventoryServiceError("INCOMPATIBLE_COMPONENTS", reason);
+  if (decision.status === "BLOCKED") {
+    throw new InventoryServiceError("INCOMPATIBLE_COMPONENTS", decision.explanation);
   }
 
-  if (decision.status === "review") {
-    if (options?.allowReview) return decision;
-    const reason = decision.matchedRules.map((rule) => rule.description).filter(Boolean).join("; ")
-      || "La combinación de componentes requiere revisión técnica";
-    throw new InventoryServiceError("COMPATIBILITY_REVIEW_REQUIRED", reason);
+  if (decision.status === "REQUIRES_REVIEW") {
+    if (options?.allowReview && decision.reviewOverrideAllowed) {
+      const canOverride = options.reviewerRoles?.some((role) => role === "MANAGER" || role === "SYSTEM_ADMIN") ?? false;
+      const reason = options.reviewReason?.trim() ?? "";
+      if (!canOverride) {
+        throw new InventoryServiceError("COMPATIBILITY_OVERRIDE_FORBIDDEN", "Sólo manager o administración pueden autorizar una revisión técnica");
+      }
+      if (!options.reviewedByUserId) {
+        throw new InventoryServiceError("COMPATIBILITY_REVIEWER_REQUIRED", "La autorización técnica requiere un usuario autenticado");
+      }
+      if (reason.length < 10) {
+        throw new InventoryServiceError("COMPATIBILITY_REVIEW_REASON_REQUIRED", "Captura un motivo técnico de al menos 10 caracteres");
+      }
+      return decision;
+    }
+    throw new InventoryServiceError("COMPATIBILITY_REVIEW_REQUIRED", decision.explanation);
   }
 
   return decision;

@@ -19,6 +19,7 @@ const fixture = {
   locationIds: [] as string[],
   salesOrderId: "",
   productionOrderId: "",
+  technicalSourceId: "",
 };
 
 async function cleanupFixture() {
@@ -32,6 +33,7 @@ async function cleanupFixture() {
   const productionOrderIds = productionOrders.map((order) => order.id);
 
   if (productionOrderIds.length > 0) {
+    await prisma.auditLog.deleteMany({ where: { entityId: { in: productionOrderIds } } });
     await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: productionOrderIds } } });
     await prisma.productionOrder.deleteMany({ where: { id: { in: productionOrderIds } } });
   }
@@ -56,6 +58,9 @@ async function cleanupFixture() {
     await prisma.inventory.deleteMany({ where: { productId: { in: fixture.productIds } } });
     await prisma.productTechnicalAttribute.deleteMany({ where: { productId: { in: fixture.productIds } } });
     await prisma.product.deleteMany({ where: { id: { in: fixture.productIds } } });
+  }
+  if (fixture.technicalSourceId) {
+    await prisma.productTechnicalSource.deleteMany({ where: { id: fixture.technicalSourceId } });
   }
   if (fixture.locationIds.length > 0) {
     await prisma.location.deleteMany({ where: { id: { in: fixture.locationIds } } });
@@ -112,6 +117,54 @@ test.beforeAll(async () => {
   ]);
   fixture.productIds.push(entry.id, exit.id, hose.id, direct.id);
 
+  const technicalSource = await prisma.productTechnicalSource.create({
+    data: {
+      supplierName: `Proveedor técnico ${tag}`,
+      documentRef: `FICHA-${tag}`,
+      documentVersion: "1",
+      status: "APPROVED",
+      reviewedAt: new Date(),
+    },
+  });
+  fixture.technicalSourceId = technicalSource.id;
+
+  await prisma.productCompatibilityRule.createMany({
+    data: [
+      {
+        productId: entry.id,
+        compatibleProductId: hose.id,
+        ruleType: "ASSEMBLY",
+        description: "Entrada y manguera aprobadas para el E2E controlado",
+        severity: "INFO",
+        decision: "APPROVED",
+        governanceStatus: "APPROVED",
+        sourceId: technicalSource.id,
+        maxWorkingPressureBar: 250,
+        minTemperatureC: -20,
+        maxTemperatureC: 90,
+        medium: "Aceite hidráulico",
+        application: "Línea de retorno",
+        assemblyMethod: "Prensado según ficha técnica",
+      },
+      {
+        productId: hose.id,
+        compatibleProductId: exit.id,
+        ruleType: "ASSEMBLY",
+        description: "Manguera y salida aprobadas para el E2E controlado",
+        severity: "INFO",
+        decision: "APPROVED",
+        governanceStatus: "APPROVED",
+        sourceId: technicalSource.id,
+        maxWorkingPressureBar: 250,
+        minTemperatureC: -20,
+        maxTemperatureC: 90,
+        medium: "Aceite hidráulico",
+        application: "Línea de retorno",
+        assemblyMethod: "Prensado según ficha técnica",
+      },
+    ],
+  });
+
   await prisma.inventory.createMany({
     data: [
       { productId: entry.id, locationId: location.id, quantity: 10, reserved: 0, available: 10 },
@@ -149,6 +202,11 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
 
   await page.getByLabel("Longitud por ensamble").fill("2");
   await page.getByLabel("Cantidad de ensambles").fill("3");
+  await page.getByLabel("Presión de trabajo (bar)").fill("180");
+  await page.getByLabel("Temperatura de operación (°C)").fill("60");
+  await page.getByLabel("Medio o fluido").fill("Aceite hidráulico");
+  await page.getByLabel("Aplicación").fill("Línea de retorno");
+  await page.getByLabel("Método de ensamble").fill("Prensado según ficha técnica");
   await page.getByRole("button", { name: "Agregar ensamble al pedido" }).click();
 
   await page.getByRole("button", { name: "Producto directo" }).click();
@@ -165,6 +223,11 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   await page.getByRole("button", { name: new RegExp(fixture.hoseSku) }).click();
   await page.getByLabel("Longitud por ensamble").fill("1");
   await page.getByLabel("Cantidad de ensambles").fill("2");
+  await page.getByLabel("Presión de trabajo (bar)").fill("160");
+  await page.getByLabel("Temperatura de operación (°C)").fill("50");
+  await page.getByLabel("Medio o fluido").fill("Aceite hidráulico");
+  await page.getByLabel("Aplicación").fill("Línea de retorno");
+  await page.getByLabel("Método de ensamble").fill("Prensado según ficha técnica");
   await page.getByRole("button", { name: "Agregar ensamble al pedido" }).click();
 
   await expect(page.getByTestId("sales-order-lines")).toContainText("3 líneas listas");
@@ -187,13 +250,27 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   expect(directLines).toHaveLength(1);
   expect(configuredLines.every((line) => line.productId === null)).toBe(true);
   expect(configuredLines.map((line) => line.assemblyConfiguration?.assemblyQuantity).sort()).toEqual([2, 3]);
+  expect(configuredLines.map((line) => line.assemblyConfiguration?.workingPressureBar).sort()).toEqual([160, 180]);
+  expect(configuredLines.map((line) => line.assemblyConfiguration?.operatingTemperatureC).sort()).toEqual([50, 60]);
+  expect(configuredLines.every((line) => line.assemblyConfiguration?.medium === "Aceite hidráulico")).toBe(true);
+  expect(configuredLines.every((line) => line.assemblyConfiguration?.application === "Línea de retorno")).toBe(true);
+  expect(configuredLines.every((line) => line.assemblyConfiguration?.assemblyMethod === "Prensado según ficha técnica")).toBe(true);
 
   const productionOrder = await prisma.productionOrder.findFirstOrThrow({
     where: { sourceDocumentId: order.id },
-    include: { assemblyWorkOrder: { include: { pickLists: true } } },
+    include: { assemblyConfiguration: true, assemblyWorkOrder: { include: { pickLists: true } } },
   });
   fixture.productionOrderId = productionOrder.id;
   expect(await prisma.productionOrder.count({ where: { sourceDocumentId: order.id } })).toBe(2);
+  const productionConfigurations = await prisma.assemblyConfiguration.findMany({
+    where: { productionOrder: { sourceDocumentId: order.id } },
+  });
+  expect(productionConfigurations.map((configuration) => configuration.workingPressureBar).sort()).toEqual([160, 180]);
+  expect(productionConfigurations.map((configuration) => configuration.operatingTemperatureC).sort()).toEqual([50, 60]);
+  expect(productionConfigurations.every((configuration) => configuration.medium === "Aceite hidráulico")).toBe(true);
+  expect(productionConfigurations.every((configuration) => configuration.application === "Línea de retorno")).toBe(true);
+  expect(productionConfigurations.every((configuration) => configuration.assemblyMethod === "Prensado según ficha técnica")).toBe(true);
+  expect(productionConfigurations.every((configuration) => configuration.compatibilityStatus === "APPROVED")).toBe(true);
   expect(productionOrder.status).toBe("ABIERTA");
   expect(productionOrder.assemblyWorkOrder?.reservationStatus).toBe("RESERVED");
   expect(productionOrder.assemblyWorkOrder?.pickLists[0]?.status).toBe("DRAFT");

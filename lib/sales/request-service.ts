@@ -1100,6 +1100,11 @@ export async function createSalesRequestWithLines(
           assemblyQuantity: line.assemblyQuantity,
           sourceDocumentRef: line.sourceDocumentRef ?? null,
           notes: line.notes ?? null,
+          workingPressureBar: line.workingPressureBar ?? null,
+          operatingTemperatureC: line.operatingTemperatureC ?? null,
+          medium: line.medium ?? null,
+          application: line.application ?? null,
+          assemblyMethod: line.assemblyMethod ?? null,
         });
       }
     }

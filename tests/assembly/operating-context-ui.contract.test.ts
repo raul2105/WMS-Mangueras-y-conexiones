@@ -43,5 +43,13 @@ describe("assembly operating context UI contract", () => {
       expect(salesService).toContain(field);
       expect(workOrderService).toContain(field);
     }
+
+    const multiLineBoundary = salesService.slice(
+      salesService.indexOf("export async function createSalesRequestWithLines"),
+      salesService.indexOf("export async function deleteSalesRequestLine"),
+    );
+    for (const field of contextFields) {
+      expect(multiLineBoundary).toContain(`${field}: line.${field}`);
+    }
   });
 });

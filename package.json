@@ -36,6 +36,7 @@
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
     "e2e:report": "playwright show-report",
+    "e2e:aws:write": "playwright test --config=playwright.aws-write.config.ts --project=chromium",
     "e2e:install": "playwright install",
     "postinstall": "node scripts/db/generate-default-prisma-client.cjs",
     "prisma:validate": "node scripts/db/validate-prisma-schemas.cjs",

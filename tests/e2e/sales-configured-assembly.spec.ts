@@ -284,8 +284,23 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   await expect(page.getByTestId("assembly-technical-safety")).toContainText("Aceite hidráulico");
   await expect(page.getByTestId("assembly-technical-safety")).toContainText("Línea de retorno");
   await expect(page.getByTestId("assembly-technical-safety")).toContainText("Prensado según ficha técnica");
+  await expect(page.getByRole("button", { name: "Liberar materiales" })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("sales-technical-approved-1440.png"), fullPage: true });
+
+  await prisma.salesInternalOrder.update({
+    where: { id: order.id },
+    data: { status: "CONFIRMADA", confirmedAt: new Date() },
+  });
+  await page.goto("/logout");
+  await loginAs(
+    page,
+    "WAREHOUSE_OPERATOR",
+    `/production/orders/${productionOrder.id}`,
+    `/production/orders/${productionOrder.id}`,
+  );
+  await expect(page.getByTestId("assembly-technical-status")).toHaveText("APROBADO");
   await expect(page.getByRole("button", { name: "Liberar materiales" })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("assembly-technical-approved-1440.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("warehouse-technical-approved-1440.png"), fullPage: true });
 
   const ruleToBlock = await prisma.productCompatibilityRule.findFirstOrThrow({
     where: {

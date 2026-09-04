@@ -35,4 +35,21 @@ describe("mixed order work surface", () => {
     expect(assembly).toContain("Ver datos de operación");
     expect(assembly).toContain("Confirmar materiales y cerrar si aplica");
   });
+
+  it("keeps the technical decision, operating context, next action, and accessible recovery visible", () => {
+    const assembly = read("app/(shell)/production/orders/[id]/page.tsx");
+
+    expect(assembly).toContain('data-testid="assembly-technical-safety"');
+    expect(assembly).toContain('data-testid="assembly-technical-status"');
+    expect(assembly).toContain("Seguridad técnica");
+    expect(assembly).toContain("Presión");
+    expect(assembly).toContain("Temperatura");
+    expect(assembly).toContain("Medio");
+    expect(assembly).toContain("Aplicación");
+    expect(assembly).toContain("Método");
+    expect(assembly).toContain("Siguiente acción:");
+    expect(assembly).toContain('role="alert"');
+    expect(assembly).toContain("No se aplicaron movimientos");
+    expect(assembly).toContain("!technicalGateError && Boolean(activePickList)");
+  });
 });

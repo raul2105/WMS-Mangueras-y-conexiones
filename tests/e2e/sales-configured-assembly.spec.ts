@@ -180,7 +180,7 @@ test.afterAll(async () => {
   await prisma.$disconnect();
 });
 
-test("Ventas mezcla productos directos y varios ensambles en un solo pedido", async ({ page }) => {
+test("Ventas mezcla productos directos y varios ensambles en un solo pedido", async ({ page }, testInfo) => {
   await loginAs(page, "SALES_EXECUTIVE");
   await page.goto("/production/requests/new");
 
@@ -274,4 +274,41 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   expect(productionOrder.status).toBe("ABIERTA");
   expect(productionOrder.assemblyWorkOrder?.reservationStatus).toBe("RESERVED");
   expect(productionOrder.assemblyWorkOrder?.pickLists[0]?.status).toBe("DRAFT");
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/production/orders/${productionOrder.id}`);
+  await expect(page.getByTestId("assembly-technical-safety")).toBeVisible();
+  await expect(page.getByTestId("assembly-technical-status")).toHaveText("APROBADO");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("180 bar");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("60 °C");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("Aceite hidráulico");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("Línea de retorno");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("Prensado según ficha técnica");
+  await expect(page.getByRole("button", { name: "Liberar materiales" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("assembly-technical-approved-1440.png"), fullPage: true });
+
+  const ruleToBlock = await prisma.productCompatibilityRule.findFirstOrThrow({
+    where: {
+      sourceId: fixture.technicalSourceId,
+      productId: productionOrder.assemblyConfiguration!.entryFittingProductId,
+      compatibleProductId: productionOrder.assemblyConfiguration!.hoseProductId,
+    },
+  });
+  await prisma.productCompatibilityRule.update({
+    where: { id: ruleToBlock.id },
+    data: {
+      decision: "BLOCKED",
+      severity: "BLOCK",
+      description: "Combinación detenida por prueba técnica controlada",
+    },
+  });
+  await page.reload();
+  await expect(page.getByTestId("assembly-technical-status")).toHaveText("BLOQUEADO");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("Detén la operación");
+  await expect(page.getByRole("button", { name: "Liberar materiales" })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("assembly-technical-blocked-1440.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("assembly-technical-safety")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("assembly-technical-blocked-390.png"), fullPage: true });
 });

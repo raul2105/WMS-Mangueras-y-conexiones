@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { InventoryServiceError } from "@/lib/inventory-service";
+import { assertAssemblyOperationalCompatibility } from "@/lib/assembly/compatibility-guard";
 import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
 import { confirmAssemblyPickTasksBatch, releaseAssemblyPickList } from "@/lib/assembly/picking-service";
 import { addGenericOrderItem, removeGenericOrderItem, transitionGenericOrderStatus, updateGenericOrderItemQty } from "@/lib/production/generic-order-service";
@@ -328,11 +329,22 @@ export default async function ProductionOrderDetailPage({
       },
       assemblyConfiguration: {
         select: {
+          entryFittingProductId: true,
+          hoseProductId: true,
+          exitFittingProductId: true,
           hoseLength: true,
           assemblyQuantity: true,
           totalHoseRequired: true,
           sourceDocumentRef: true,
           notes: true,
+          workingPressureBar: true,
+          operatingTemperatureC: true,
+          medium: true,
+          application: true,
+          assemblyMethod: true,
+          compatibilityStatus: true,
+          compatibilityReviewApproved: true,
+          compatibilityReviewReason: true,
           entryFittingProduct: { select: { sku: true, name: true } },
           hoseProduct: { select: { sku: true, name: true } },
           exitFittingProduct: { select: { sku: true, name: true } },
@@ -692,9 +704,40 @@ export default async function ProductionOrderDetailPage({
       : null;
   const hasValidSalesSource = order.sourceDocumentType === "SalesInternalOrder" && Boolean(order.sourceDocumentId);
   const isSourceConfirmed = sourceSalesOrder?.status === "CONFIRMADA";
+  let technicalGate: {
+    status: "APPROVED" | "REQUIRES_REVIEW" | "LEGACY_NOT_APPLICABLE";
+    reasonCode: string;
+    explanation: string;
+    overrideReused: boolean;
+  } | null = null;
+  let technicalGateError: { code: string; message: string } | null = null;
+  try {
+    technicalGate = await assertAssemblyOperationalCompatibility(prisma, order.id, "RELEASE_PICK_LIST");
+  } catch (error) {
+    technicalGateError = error instanceof InventoryServiceError
+      ? { code: error.code, message: error.message }
+      : { code: "TECHNICAL_VALIDATION_ERROR", message: "No fue posible comprobar la seguridad técnica del ensamble." };
+  }
+  const technicalNextAction = technicalGateError?.code === "INCOMPATIBLE_COMPONENTS"
+    ? "Detén la operación y solicita al responsable técnico una combinación compatible."
+    : technicalGateError
+      ? "Solicita revisión técnica antes de liberar, sustituir o consumir materiales."
+      : technicalGate?.status === "REQUIRES_REVIEW"
+        ? "La revisión documentada sigue vigente; cualquier cambio de regla o componente requerirá una nueva aprobación."
+        : "La configuración puede continuar; el sistema volverá a validarla al surtir y al cerrar.";
+  const technicalStatus = technicalGateError
+    ? technicalGateError.code === "INCOMPATIBLE_COMPONENTS" ? "BLOQUEADO" : "REQUIERE REVISIÓN"
+    : technicalGate?.status === "REQUIRES_REVIEW" ? "REVISIÓN APROBADA" : "APROBADO";
+  const technicalStatusTone = technicalGateError
+    ? technicalGateError.code === "INCOMPATIBLE_COMPONENTS"
+      ? "border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[var(--danger-soft)] text-[var(--danger)]"
+      : "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[var(--warning-soft)] text-[var(--warning)]"
+    : "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[var(--success-soft)] text-[var(--success)]";
   const releaseBlockedReason =
     order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"
       ? "El surtido ya fue liberado o procesado"
+      : technicalGateError
+        ? technicalGateError.message
       : !hasValidSalesSource
           ? "La orden no tiene pedido de origen vinculado"
           : !sourceSalesOrder
@@ -714,15 +757,18 @@ export default async function ProductionOrderDetailPage({
     order.assemblyWorkOrder.consumptionStatus === "NOT_CONSUMED";
   const canClose =
     !isFinalOrderStatus &&
+    !technicalGateError &&
     order.assemblyWorkOrder.pickStatus === "COMPLETED" &&
     order.assemblyWorkOrder.wipStatus !== "NOT_IN_WIP" &&
     order.assemblyWorkOrder.consumptionStatus !== "CONSUMED";
   const actionableTasks = activePickList?.tasks.filter((task) => task.status !== "COMPLETED" && task.status !== "CANCELLED") ?? [];
-  const canConfirmTasks = Boolean(activePickList) && activePickList.status !== "DRAFT" && actionableTasks.length > 0;
+  const canConfirmTasks = !technicalGateError && Boolean(activePickList) && activePickList.status !== "DRAFT" && actionableTasks.length > 0;
   const canUnifiedProcess = canConfirmTasks || canClose;
   const unifiedProcessBlockedReason = canUnifiedProcess
     ? null
-    : activePickList?.status === "DRAFT"
+    : technicalGateError
+      ? technicalNextAction
+      : activePickList?.status === "DRAFT"
       ? "No se puede surtir: primero debes liberar el surtido"
       : "No hay tareas pendientes para confirmar ni condiciones para cierre";
   const closeOperatorDefault = lastAssemblyOperator?.operatorName ?? "";
@@ -748,7 +794,13 @@ export default async function ProductionOrderDetailPage({
         </Link>
       </div>
 
-      {sp.error && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">{sp.error}</div>}
+      {sp.error && (
+        <div role="alert" className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--danger) 35%,var(--border-default))] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          <p className="font-semibold">Acción detenida</p>
+          <p className="mt-1">{sp.error}</p>
+          <p className="mt-2 text-xs">No se aplicaron movimientos. Revisa Seguridad técnica y corrige o solicita aprobación antes de reintentar.</p>
+        </div>
+      )}
       {sp.ok && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">{sp.ok}</div>}
 
       <div className="panel space-y-4 p-5">
@@ -789,6 +841,30 @@ export default async function ProductionOrderDetailPage({
         <p className="text-sm text-slate-400">Longitud {order.assemblyConfiguration.hoseLength}, cantidad {order.assemblyConfiguration.assemblyQuantity}, manguera total {order.assemblyConfiguration.totalHoseRequired}</p>
         <p className="text-sm text-slate-400">Documento fuente: {order.assemblyConfiguration.sourceDocumentRef ?? "--"}</p>
         <p className="text-sm text-slate-400">Notas tecnicas: {order.assemblyConfiguration.notes ?? "--"}</p>
+      </div>
+
+      <div className="panel space-y-4 p-5" data-testid="assembly-technical-safety">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Seguridad técnica</h2>
+            <p className="mt-1 text-sm text-slate-400">Validación vigente de componentes y condiciones reales de operación.</p>
+          </div>
+          <span data-testid="assembly-technical-status" className={`rounded-full border px-3 py-1 text-xs font-semibold ${technicalStatusTone}`}>
+            {technicalStatus}
+          </span>
+        </div>
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+          <div><dt className="text-slate-400">Presión</dt><dd className="font-medium">{order.assemblyConfiguration.workingPressureBar ?? "—"} bar</dd></div>
+          <div><dt className="text-slate-400">Temperatura</dt><dd className="font-medium">{order.assemblyConfiguration.operatingTemperatureC ?? "—"} °C</dd></div>
+          <div><dt className="text-slate-400">Medio</dt><dd className="font-medium">{order.assemblyConfiguration.medium ?? "—"}</dd></div>
+          <div><dt className="text-slate-400">Aplicación</dt><dd className="font-medium">{order.assemblyConfiguration.application ?? "—"}</dd></div>
+          <div><dt className="text-slate-400">Método</dt><dd className="font-medium">{order.assemblyConfiguration.assemblyMethod ?? "—"}</dd></div>
+        </dl>
+        <div className={`rounded-lg border px-4 py-3 text-sm ${technicalStatusTone}`}>
+          <p className="font-semibold">{technicalGateError?.message ?? technicalGate?.explanation}</p>
+          <p className="mt-1 text-xs">Siguiente acción: {technicalNextAction}</p>
+          {technicalGate?.overrideReused ? <p className="mt-1 text-xs">Motivo registrado: {order.assemblyConfiguration.compatibilityReviewReason}</p> : null}
+        </div>
       </div>
 
       <div className="panel space-y-4 p-5" data-testid="assembly-work-steps">

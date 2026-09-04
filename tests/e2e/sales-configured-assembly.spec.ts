@@ -1,9 +1,51 @@
 import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { loginAs } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 const tag = `TSA${Date.now().toString().slice(-8)}`;
+const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"];
+
+async function attachAccessibilityEvidence(page: import("@playwright/test").Page, testInfo: import("@playwright/test").TestInfo, state: string) {
+  const workspace = page.getByTestId("assembly-order-workspace");
+  const axe = await new AxeBuilder({ page }).include('[data-testid="assembly-order-workspace"]').withTags(WCAG_TAGS).analyze();
+  await testInfo.attach(`axe-${state}.json`, {
+    body: Buffer.from(JSON.stringify({ violations: axe.violations, passes: axe.passes.map((item) => item.id) }, null, 2)),
+    contentType: "application/json",
+  });
+  expect(axe.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious")).toEqual([]);
+  expect(axe.violations.filter((violation) => violation.id === "color-contrast")).toEqual([]);
+
+  const ariaSnapshot = await workspace.ariaSnapshot();
+  await testInfo.attach(`screen-reader-tree-${state}.yml`, {
+    body: Buffer.from(ariaSnapshot),
+    contentType: "text/yaml",
+  });
+  expect(ariaSnapshot).toContain("Seguridad técnica");
+  expect(ariaSnapshot).toContain("Siguiente acción");
+}
+
+async function reachActionWithKeyboard(page: import("@playwright/test").Page, actionName: string) {
+  const visited: string[] = [];
+  for (let step = 0; step < 40; step += 1) {
+    await page.keyboard.press("Tab");
+    const active = await page.evaluate(() => {
+      const element = document.activeElement as HTMLElement | null;
+      return {
+        name: element?.getAttribute("aria-label") ?? element?.innerText?.trim() ?? "",
+        outline: element ? getComputedStyle(element).outlineStyle : "none",
+        shadow: element ? getComputedStyle(element).boxShadow : "none",
+      };
+    });
+    visited.push(active.name);
+    if (active.name.includes(actionName)) {
+      expect(active.outline !== "none" || active.shadow !== "none").toBe(true);
+      return visited;
+    }
+  }
+  throw new Error(`La acción ${actionName} no fue alcanzable por teclado. Secuencia: ${visited.join(" -> ")}`);
+}
 
 const fixture = {
   warehouseCode: `${tag}-WH`,
@@ -285,6 +327,12 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   await expect(page.getByTestId("assembly-technical-safety")).toContainText("Línea de retorno");
   await expect(page.getByTestId("assembly-technical-safety")).toContainText("Prensado según ficha técnica");
   await expect(page.getByRole("button", { name: "Liberar materiales" })).toHaveCount(0);
+  await expect(page.getByText("ENTRY_FITTING", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("HOSE", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("EXIT_FITTING", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Confirmar materiales recogidos" })).toHaveCount(0);
+  await expect(page.getByTestId("assembly-work-steps")).toContainText("Confirma el pedido de origen antes de enviarlo a almacén");
+  await attachAccessibilityEvidence(page, testInfo, "sales-approved");
   await page.screenshot({ path: testInfo.outputPath("sales-technical-approved-1440.png"), fullPage: true });
 
   await prisma.salesInternalOrder.update({
@@ -300,6 +348,12 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   );
   await expect(page.getByTestId("assembly-technical-status")).toHaveText("APROBADO");
   await expect(page.getByRole("button", { name: "Liberar materiales" })).toBeVisible();
+  const keyboardSequence = await reachActionWithKeyboard(page, "Liberar materiales");
+  await testInfo.attach("warehouse-keyboard-sequence.json", {
+    body: Buffer.from(JSON.stringify(keyboardSequence, null, 2)),
+    contentType: "application/json",
+  });
+  await attachAccessibilityEvidence(page, testInfo, "warehouse-approved");
   await page.screenshot({ path: testInfo.outputPath("warehouse-technical-approved-1440.png"), fullPage: true });
 
   const ruleToBlock = await prisma.productCompatibilityRule.findFirstOrThrow({
@@ -312,6 +366,34 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   await prisma.productCompatibilityRule.update({
     where: { id: ruleToBlock.id },
     data: {
+      decision: "REQUIRES_REVIEW",
+      severity: "WARN",
+      description: "La combinación requiere revisión técnica controlada",
+    },
+  });
+  await page.reload();
+  await expect(page.getByTestId("assembly-technical-status")).toHaveText("REQUIERE REVISIÓN");
+  await expect(page.getByTestId("assembly-technical-safety")).toContainText("Solicita revisión técnica");
+  await expect(page.getByTestId("assembly-work-steps")).toContainText("Solicita revisión técnica antes de liberar, sustituir o consumir materiales");
+  await expect(page.getByTestId("assembly-work-steps")).not.toContainText("Libera materiales para empezar");
+  await expect(page.getByRole("button", { name: "Liberar materiales" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Confirmar materiales recogidos" })).toHaveCount(0);
+  await attachAccessibilityEvidence(page, testInfo, "warehouse-review");
+  await page.screenshot({ path: testInfo.outputPath("assembly-technical-review-1440.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 640, height: 900 });
+  await expect(page.getByTestId("assembly-technical-safety")).toBeVisible();
+  const reflow = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(reflow.scrollWidth).toBeLessThanOrEqual(reflow.clientWidth);
+  await page.screenshot({ path: testInfo.outputPath("assembly-technical-review-200-percent.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await prisma.productCompatibilityRule.update({
+    where: { id: ruleToBlock.id },
+    data: {
       decision: "BLOCKED",
       severity: "BLOCK",
       description: "Combinación detenida por prueba técnica controlada",
@@ -320,10 +402,17 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   await page.reload();
   await expect(page.getByTestId("assembly-technical-status")).toHaveText("BLOQUEADO");
   await expect(page.getByTestId("assembly-technical-safety")).toContainText("Detén la operación");
+  await expect(page.getByTestId("assembly-work-steps")).toContainText("Detén la operación y solicita al responsable técnico una combinación compatible");
+  await expect(page.getByTestId("assembly-work-steps")).not.toContainText("Libera materiales para empezar");
   await expect(page.getByRole("button", { name: "Liberar materiales" })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("assembly-technical-blocked-1440.png"), fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("assembly-technical-safety")).toBeVisible();
+  const mobileReflow = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(mobileReflow.scrollWidth).toBeLessThanOrEqual(mobileReflow.clientWidth);
   await page.screenshot({ path: testInfo.outputPath("assembly-technical-blocked-390.png"), fullPage: true });
 });

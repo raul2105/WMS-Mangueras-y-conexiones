@@ -34,6 +34,15 @@ describe("mixed order work surface", () => {
     expect(assembly).toContain("Paso 1: libera. Paso 2: recoge y confirma. Paso 3:");
     expect(assembly).toContain("Ver datos de operación");
     expect(assembly).toContain("Confirmar materiales y cerrar si aplica");
+    expect(assembly).toContain("Siguiente acción");
+    expect(assembly).toContain('activePickList.status !== "DRAFT"');
+    expect(assembly).toContain('sessionCtx.permissions.includes("production.execute")');
+    expect(assembly).toContain(": technicalGateError");
+    expect(assembly).toContain("Confirma el pedido de origen antes de enviarlo a almacén");
+    expect(assembly).toContain("Almacén debe liberar los materiales para iniciar el surtido");
+    expect(assembly).toContain("assemblyComponentRoleLabel(line.componentRole)");
+    expect(assembly).toContain("Requerido");
+    expect(assembly).toContain("En ensamble");
   });
 
   it("keeps the technical decision, operating context, next action, and accessible recovery visible", () => {

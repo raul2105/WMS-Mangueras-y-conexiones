@@ -11,6 +11,7 @@ import { productionOrderItemSchema } from "@/lib/schemas/wms";
 import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 import { buttonStyles } from "@/components/ui/button";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
+import { assemblyComponentRoleLabel, assemblyWorkflowStatusLabel } from "@/lib/assembly/presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -401,6 +402,7 @@ export default async function ProductionOrderDetailPage({
   if (!order) redirect("/production");
 
   const canViewSalesOrigin = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("sales.view");
+  const canExecuteAssembly = isSystemAdmin(sessionCtx.roles) || sessionCtx.permissions.includes("production.execute");
 
   const orderTrace = await prisma.traceRecord.findFirst({
     where: {
@@ -730,22 +732,24 @@ export default async function ProductionOrderDetailPage({
     : technicalGate?.status === "REQUIRES_REVIEW" ? "REVISIÓN APROBADA" : "APROBADO";
   const technicalStatusTone = technicalGateError
     ? technicalGateError.code === "INCOMPATIBLE_COMPONENTS"
-      ? "border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[var(--danger-soft)] text-[var(--danger)]"
-      : "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[var(--warning-soft)] text-[var(--warning)]"
-    : "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[var(--success-soft)] text-[var(--success)]";
+      ? "border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]"
+      : "border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]"
+    : "border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-text)]";
   const releaseBlockedReason =
     order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED"
       ? "El surtido ya fue liberado o procesado"
       : technicalGateError
         ? technicalGateError.message
-      : !hasValidSalesSource
+        : !hasValidSalesSource
           ? "La orden no tiene pedido de origen vinculado"
           : !sourceSalesOrder
             ? "No se encontró el pedido de origen vinculado"
             : !isSourceConfirmed
-              ? "El pedido de origen debe estar CONFIRMADA para liberar surtido"
-              : null;
-  const canReleaseAssemblyPick = !releaseBlockedReason;
+              ? "Confirma el pedido de origen antes de enviarlo a almacén"
+              : !canExecuteAssembly
+                ? "El pedido está listo para que almacén libere los materiales"
+                : null;
+  const canReleaseAssemblyPick = canExecuteAssembly && !releaseBlockedReason;
   const isFinalOrderStatus = order.status === "COMPLETADA" || order.status === "CANCELADA";
   const hasWip = order.assemblyWorkOrder.lines.some((line) => line.wipQty > 0);
   const hasConsumed = order.assemblyWorkOrder.lines.some((line) => line.consumedQty > 0);
@@ -774,10 +778,10 @@ export default async function ProductionOrderDetailPage({
   const closeOperatorDefault = lastAssemblyOperator?.operatorName ?? "";
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="mx-auto max-w-6xl space-y-4 md:space-y-6" data-testid="assembly-order-workspace">
+      <div className="flex items-start justify-between gap-3 md:items-center md:gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Orden {order.code}</h1>
+          <h1 className="text-2xl font-bold md:text-3xl">Orden {order.code}</h1>
           <p className="text-slate-400 mt-1">{order.warehouse.name} ({order.warehouse.code})</p>
         </div>
         <Link
@@ -803,7 +807,7 @@ export default async function ProductionOrderDetailPage({
       )}
       {sp.ok && <div className="rounded-[var(--radius-lg)] border border-[color-mix(in oklab,var(--success) 35%,var(--border-default))] bg-[var(--success-soft)] px-4 py-3 text-sm text-[var(--success)]">{sp.ok}</div>}
 
-      <div className="panel space-y-4 p-5">
+      <div className="panel space-y-3 p-4 md:space-y-4 md:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold">Ensamble para pedido</h2>
@@ -835,7 +839,7 @@ export default async function ProductionOrderDetailPage({
         </div>
       </div>
 
-      <div className="panel space-y-3 p-5">
+      <div className="panel space-y-2 p-4 md:space-y-3 md:p-5">
         <h2 className="text-xl font-semibold">Configuración</h2>
         <p>{order.assemblyConfiguration.entryFittingProduct.sku} + {order.assemblyConfiguration.hoseProduct.sku} + {order.assemblyConfiguration.exitFittingProduct.sku}</p>
         <p className="text-sm text-slate-400">Longitud {order.assemblyConfiguration.hoseLength}, cantidad {order.assemblyConfiguration.assemblyQuantity}, manguera total {order.assemblyConfiguration.totalHoseRequired}</p>
@@ -843,65 +847,73 @@ export default async function ProductionOrderDetailPage({
         <p className="text-sm text-slate-400">Notas tecnicas: {order.assemblyConfiguration.notes ?? "--"}</p>
       </div>
 
-      <div className="panel space-y-4 p-5" data-testid="assembly-technical-safety">
+      <div className="panel space-y-3 p-4 md:space-y-4 md:p-5" data-testid="assembly-technical-safety" aria-labelledby="assembly-technical-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold">Seguridad técnica</h2>
+            <h2 id="assembly-technical-title" className="text-xl font-semibold">Seguridad técnica</h2>
             <p className="mt-1 text-sm text-slate-400">Validación vigente de componentes y condiciones reales de operación.</p>
           </div>
-          <span data-testid="assembly-technical-status" className={`rounded-full border px-3 py-1 text-xs font-semibold ${technicalStatusTone}`}>
+          <span data-testid="assembly-technical-status" role="status" aria-live="polite" className={`rounded-full border px-3 py-1 text-xs font-semibold ${technicalStatusTone}`}>
             {technicalStatus}
           </span>
         </div>
-        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+        <dl className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-5">
           <div><dt className="text-slate-400">Presión</dt><dd className="font-medium">{order.assemblyConfiguration.workingPressureBar ?? "—"} bar</dd></div>
           <div><dt className="text-slate-400">Temperatura</dt><dd className="font-medium">{order.assemblyConfiguration.operatingTemperatureC ?? "—"} °C</dd></div>
           <div><dt className="text-slate-400">Medio</dt><dd className="font-medium">{order.assemblyConfiguration.medium ?? "—"}</dd></div>
           <div><dt className="text-slate-400">Aplicación</dt><dd className="font-medium">{order.assemblyConfiguration.application ?? "—"}</dd></div>
-          <div><dt className="text-slate-400">Método</dt><dd className="font-medium">{order.assemblyConfiguration.assemblyMethod ?? "—"}</dd></div>
+          <div className="col-span-2 lg:col-span-1"><dt className="text-slate-400">Método</dt><dd className="font-medium">{order.assemblyConfiguration.assemblyMethod ?? "—"}</dd></div>
         </dl>
-        <div className={`rounded-lg border px-4 py-3 text-sm ${technicalStatusTone}`}>
+        <div role={technicalGateError ? "alert" : "status"} className={`rounded-lg border px-4 py-3 text-sm ${technicalStatusTone}`}>
           <p className="font-semibold">{technicalGateError?.message ?? technicalGate?.explanation}</p>
           <p className="mt-1 text-xs">Siguiente acción: {technicalNextAction}</p>
           {technicalGate?.overrideReused ? <p className="mt-1 text-xs">Motivo registrado: {order.assemblyConfiguration.compatibilityReviewReason}</p> : null}
         </div>
       </div>
 
-      <div className="panel space-y-4 p-5" data-testid="assembly-work-steps">
-        <div className="op-next-action">
-          <p className="op-label">Trabajo del ensamble</p>
-          <p className="mt-1 font-semibold text-[var(--text-primary)]">
-            {isFinalOrderStatus
-              ? "Ensamble terminado. Regresa al pedido para continuar."
-              : activePickList?.status === "DRAFT"
-                ? "1. Libera materiales para empezar el surtido."
-                : canConfirmTasks
-                  ? "2. Confirma los materiales recogidos."
-                  : canClose
-                    ? "3. Cierra el ensamble y registra el consumo."
-                    : "Revisa el bloqueo antes de continuar."}
-          </p>
-          {releaseBlockedReason ? <p className="mt-1 text-xs text-[var(--warning)]">{releaseBlockedReason}.</p> : null}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="panel space-y-3 p-4 md:space-y-4 md:p-5" data-testid="assembly-work-steps" aria-labelledby="assembly-work-title">
+        <div className="op-next-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-xl font-semibold">Materiales y surtido</h2>
-            <p className="mt-1 text-sm text-slate-400">Paso 1: libera. Paso 2: recoge y confirma. Paso 3: el sistema cierra el ensamble si todo quedó completo.</p>
+            <p className="op-label">Siguiente acción</p>
+            <p className="mt-1 font-semibold text-[var(--text-primary)]">
+              {isFinalOrderStatus
+                ? "Ensamble terminado. Regresa al pedido para continuar."
+                : technicalGateError
+                  ? technicalNextAction
+                  : activePickList?.status === "DRAFT"
+                    ? canExecuteAssembly
+                      ? "1. Libera materiales para empezar el surtido."
+                      : isSourceConfirmed
+                        ? "Almacén debe liberar los materiales para iniciar el surtido."
+                        : "Confirma el pedido de origen antes de enviarlo a almacén."
+                  : canConfirmTasks
+                    ? "2. Confirma los materiales recogidos."
+                    : canClose
+                      ? "3. Cierra el ensamble y registra el consumo."
+                      : "Revisa el bloqueo antes de continuar."}
+            </p>
+            {releaseBlockedReason ? <p className="mt-1 text-xs text-[var(--warning)]">{releaseBlockedReason}.</p> : null}
           </div>
           {canReleaseAssemblyPick ? (
-            <form action={releaseAssemblyPick}>
+            <form action={releaseAssemblyPick} className="shrink-0">
               <input type="hidden" name="orderId" value={order.id} />
-              <button type="submit" className={buttonStyles()}>
+              <button type="submit" className={buttonStyles({ className: "w-full sm:w-auto" })}>
                 Liberar materiales
               </button>
             </form>
           ) : null}
         </div>
+        <div>
+          <div>
+            <h2 id="assembly-work-title" className="text-xl font-semibold">Materiales y surtido</h2>
+            <p className="mt-1 text-sm text-slate-400">Paso 1: libera. Paso 2: recoge y confirma. Paso 3: el sistema cierra el ensamble si todo quedó completo.</p>
+          </div>
+        </div>
         <details className="text-sm text-slate-400">
           <summary className="cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]">Ver datos de operación</summary>
           <div className="mt-3 space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3">
-            <p>Reserva {order.assemblyWorkOrder.reservationStatus} · Picking {order.assemblyWorkOrder.pickStatus} · WIP {order.assemblyWorkOrder.wipStatus} · Consumo {order.assemblyWorkOrder.consumptionStatus}</p>
-            <p>Zona WIP: {order.assemblyWorkOrder.wipLocation.code} - {order.assemblyWorkOrder.wipLocation.name}</p>
+            <p>Reserva: {assemblyWorkflowStatusLabel(order.assemblyWorkOrder.reservationStatus)} · Surtido: {assemblyWorkflowStatusLabel(order.assemblyWorkOrder.pickStatus)} · Área de ensamble: {assemblyWorkflowStatusLabel(order.assemblyWorkOrder.wipStatus)} · Consumo: {assemblyWorkflowStatusLabel(order.assemblyWorkOrder.consumptionStatus)}</p>
+            <p>Ubicación de ensamble: {order.assemblyWorkOrder.wipLocation.code} - {order.assemblyWorkOrder.wipLocation.name}</p>
             <p>
               Trace de ensamble: {orderTrace ? (
                 <Link href={`/trace/${encodeURIComponent(orderTrace.traceId)}`} className="font-mono text-cyan-300 hover:underline">
@@ -913,15 +925,15 @@ export default async function ProductionOrderDetailPage({
         </details>
       </div>
 
-      <TableWrap dense striped className="glass-card p-0">
+      <TableWrap dense striped label="Materiales requeridos para el ensamble" className="glass-card hidden p-0 md:block">
         <Table className="min-w-[880px] table-fixed">
           <thead>
             <tr>
-              <Th className="w-[12rem]">Rol</Th>
+              <Th className="w-[12rem]">Componente</Th>
               <Th className="w-[48%]">Producto</Th>
-              <Th className="w-[5.5rem] text-right">Req</Th>
+              <Th className="w-[5.5rem] text-right">Requerido</Th>
               <Th className="w-[6.5rem] text-right">Reservado</Th>
-              <Th className="w-[5rem] text-right">WIP</Th>
+              <Th className="w-[5rem] text-right">En ensamble</Th>
               <Th className="w-[7rem] text-right">Consumido</Th>
               <Th className="w-[6rem] text-right">Faltante</Th>
             </tr>
@@ -929,7 +941,7 @@ export default async function ProductionOrderDetailPage({
           <tbody>
             {order.assemblyWorkOrder.lines.map((line) => (
               <TableRow key={line.id}>
-                <Td className="align-top font-medium text-[var(--text-primary)]">{line.componentRole}</Td>
+                <Td className="align-top font-medium text-[var(--text-primary)]">{assemblyComponentRoleLabel(line.componentRole)}</Td>
                 <Td className="align-top">
                   <div className="min-w-0 space-y-1">
                     <p className="break-words font-mono text-xs text-[var(--text-muted)]">{line.product.sku}</p>
@@ -947,8 +959,33 @@ export default async function ProductionOrderDetailPage({
         </Table>
       </TableWrap>
 
-      {activePickList && (
-        <div className="panel space-y-3 p-5">
+      <section className="panel space-y-2 p-4 md:hidden" aria-labelledby="assembly-mobile-materials-title">
+        <h2 id="assembly-mobile-materials-title" className="text-lg font-semibold">Materiales requeridos</h2>
+        {order.assemblyWorkOrder.lines.map((line) => (
+          <article key={line.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-[var(--text-primary)]">{assemblyComponentRoleLabel(line.componentRole)}</h3>
+                <p className="break-all font-mono text-xs text-[var(--text-muted)]">{line.product.sku}</p>
+                <p className="text-sm text-[var(--text-secondary)]">{line.product.name}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-xs text-[var(--text-muted)]">Requerido</p>
+                <p className="text-lg font-semibold text-[var(--text-primary)]">{line.requiredQty}</p>
+              </div>
+            </div>
+            <dl className="mt-2 grid grid-cols-4 gap-2 border-t border-[var(--border-default)] pt-2 text-center text-xs">
+              <div><dt className="text-[var(--text-muted)]">Reservado</dt><dd className="font-semibold">{line.reservedQty}</dd></div>
+              <div><dt className="text-[var(--text-muted)]">En ensamble</dt><dd className="font-semibold">{line.wipQty}</dd></div>
+              <div><dt className="text-[var(--text-muted)]">Consumido</dt><dd className="font-semibold">{line.consumedQty}</dd></div>
+              <div><dt className="text-[var(--text-muted)]">Faltante</dt><dd className="font-semibold">{line.shortQty}</dd></div>
+            </dl>
+          </article>
+        ))}
+      </section>
+
+      {activePickList && activePickList.status !== "DRAFT" && (
+        <div className="panel space-y-3 p-4 md:p-5">
           <h2 className="text-xl font-semibold">Confirmar materiales recogidos</h2>
           <p className="text-sm text-slate-400">Paso 2 de 3: registra lo que llevaste al área de ensamble.</p>
           <form action={confirmAssemblyBatch} className="space-y-3">
@@ -965,7 +1002,7 @@ export default async function ProductionOrderDetailPage({
                   </div>
                   <div>
                     <p className="text-xs text-slate-400">Componente</p>
-                    <p>{task.assemblyWorkOrderLine.componentRole} ({task.assemblyWorkOrderLine.product.sku})</p>
+                    <p>{assemblyComponentRoleLabel(task.assemblyWorkOrderLine.componentRole)} ({task.assemblyWorkOrderLine.product.sku})</p>
                   </div>
                   <label className="space-y-1">
                     <span className="text-xs text-slate-400">Cantidad recogida</span>
@@ -990,7 +1027,7 @@ export default async function ProductionOrderDetailPage({
                     />
                   </label>
                   <div className="text-xs text-slate-400">
-                    Estado: <span className="text-slate-200">{task.status}</span>
+                    Estado: <span className="text-slate-200">{assemblyWorkflowStatusLabel(task.status)}</span>
                     <br />
                     Pendiente: <span className="text-slate-200">{pendingQty}</span>
                     <br />

@@ -31,8 +31,14 @@ export type TechnicalValidationResult = {
  * product.  Without this boundary an older source could later be approved and
  * overwrite values that were deliberately published without a source.
  */
-export async function supersedePendingTechnicalSourcesForProduct(prisma: PrismaClient, productId: string) {
-  return prisma.productTechnicalSource.updateMany({
+type TechnicalSourceSupersedeDb = {
+  productTechnicalSource: {
+    updateMany: (args: Parameters<PrismaClient["productTechnicalSource"]["updateMany"]>[0]) => PromiseLike<unknown>;
+  };
+};
+
+export async function supersedePendingTechnicalSourcesForProduct(db: TechnicalSourceSupersedeDb, productId: string) {
+  return db.productTechnicalSource.updateMany({
     where: {
       status: "PENDING_REVIEW",
       OR: [

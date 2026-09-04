@@ -87,12 +87,14 @@ export default function CustomerSearchField({
   useEffect(() => {
     if (!shouldSearch) {
       abortRef.current?.abort();
-      setIsLoading(false);
-      if (!cursor) {
-        setResults([]);
-        setNextCursor(null);
-      }
-      return;
+      const resetId = setTimeout(() => {
+        setIsLoading(false);
+        if (!cursor) {
+          setResults([]);
+          setNextCursor(null);
+        }
+      }, 0);
+      return () => clearTimeout(resetId);
     }
 
     const timeoutId = setTimeout(() => {

@@ -36,6 +36,7 @@
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
     "e2e:report": "playwright show-report",
+    "e2e:aws:write": "playwright test --config=playwright.aws-write.config.ts --project=chromium",
     "e2e:install": "playwright install",
     "postinstall": "node scripts/db/generate-default-prisma-client.cjs",
     "prisma:validate": "node scripts/db/validate-prisma-schemas.cjs",
@@ -70,7 +71,7 @@
     "infra:diff": "npm --prefix infra/cdk run diff"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.1",
+    "@auth/prisma-adapter": "2.11.3",
     "@aws-sdk/client-apigatewaymanagementapi": "^3.1029.0",
     "@aws-sdk/client-dynamodb": "^3.1029.0",
     "@aws-sdk/client-ses": "^3.1077.0",
@@ -82,8 +83,8 @@
     "bcryptjs": "^3.0.3",
     "csv-parse": "^5.6.0",
     "lucide-react": "^1.21.0",
-    "next": "16.1.6",
-    "next-auth": "^5.0.0-beta.31",
+    "next": "16.3.3",
+    "next-auth": "5.0.0-beta.32",
     "nodemailer": "^7.0.13",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
@@ -92,7 +93,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",
-    "@opennextjs/aws": "^3.10.0",
+    "@opennextjs/aws": "3.10.4",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -100,10 +101,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9.39.4",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.3.3",
     "prisma": "6.19.2",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "3.2.7"
   }
 }

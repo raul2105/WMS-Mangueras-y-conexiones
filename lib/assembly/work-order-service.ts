@@ -4,6 +4,7 @@ import { reconcileProductionReservations } from "@/lib/reservation-policy";
 import { buildAssemblyRequirements, previewAssemblyAvailability, validateAssemblyCompatibility } from "@/lib/assembly/availability-service";
 import type { AssemblyConfigInput, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
+import { assertAssemblyOperationalCompatibility } from "@/lib/assembly/compatibility-guard";
 
 type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
@@ -178,8 +179,15 @@ async function createAssemblyOperationalRecordsInTx(args: {
       totalHoseRequired: input.hoseLength * input.assemblyQuantity,
       sourceDocumentRef: input.sourceDocumentRef ?? null,
       notes: input.notes ?? null,
+      workingPressureBar: input.workingPressureBar ?? null,
+      operatingTemperatureC: input.operatingTemperatureC ?? null,
+      medium: input.medium?.trim() || null,
+      application: input.application?.trim() || null,
+      assemblyMethod: input.assemblyMethod?.trim() || null,
       compatibilityStatus: compatibilityDecision.status.toUpperCase(),
       compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+      compatibilityReviewReason: input.compatibilityReviewReason ?? null,
+      compatibilityReviewedByUserId: input.compatibilityReviewedByUserId ?? null,
       compatibilityReviewRules: compatibilityDecision.matchedRules.length > 0
         ? JSON.stringify(compatibilityDecision.matchedRules)
         : null,
@@ -292,6 +300,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
         requirements,
         allocations: preview.allocations,
         compatibilityReviewApproved: Boolean(input.compatibilityReviewApproved),
+        compatibilityReviewReason: input.compatibilityReviewReason ?? null,
+        compatibilityReviewedByUserId: input.compatibilityReviewedByUserId ?? null,
         compatibilityReviewRules: compatibilityDecision.matchedRules,
         pickListCode: pickCode,
       }),
@@ -384,6 +394,9 @@ export async function configureAssemblyOrderExact(
 
     const compatibilityDecision = await validateAssemblyCompatibility(tx, input, {
       allowReview: Boolean(input.compatibilityReviewApproved),
+      reviewReason: input.compatibilityReviewReason,
+      reviewerRoles: input.compatibilityReviewerRoles,
+      reviewedByUserId: input.compatibilityReviewedByUserId,
     });
     const preview = await previewAssemblyAvailability(tx, input);
     if (!preview.exact) {
@@ -594,6 +607,8 @@ export async function closeAssemblyWorkOrderConsume(
       throw new InventoryServiceError("WIP_INSUFFICIENT", "WIP quantity is insufficient to close the assembly order");
     }
 
+    const compatibilityRevalidation = await assertAssemblyOperationalCompatibility(tx, order.id, "CLOSE_ASSEMBLY");
+
     for (const line of order.assemblyWorkOrder.lines) {
       const pendingToConsume = line.requiredQty - line.consumedQty;
       if (pendingToConsume <= 0) continue;
@@ -659,6 +674,24 @@ export async function closeAssemblyWorkOrderConsume(
       where: { id: order.id },
       data: { status: "COMPLETADA" },
     });
+
+    await createAuditLogSafeWithDb({
+      entityType: "ASSEMBLY_ORDER",
+      entityId: order.id,
+      action: "CLOSE_AND_CONSUME",
+      actor: operatorName ?? "system",
+      actorUserId: operatorUserId ?? null,
+      source: "assembly/work-order-service",
+      before: {
+        orderStatus: order.status,
+        consumptionStatus: order.assemblyWorkOrder.consumptionStatus,
+      },
+      after: {
+        orderStatus: "COMPLETADA",
+        consumptionStatus: "CONSUMED",
+        compatibilityRevalidation,
+      },
+    }, tx);
 
     if (operatorUserId && order.sourceDocumentType === "SalesInternalOrder" && order.sourceDocumentId) {
       const activityAt = new Date();

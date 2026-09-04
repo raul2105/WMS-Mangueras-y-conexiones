@@ -25,6 +25,8 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Table, TableRow, TableWrap, Td, Th } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +45,7 @@ function formatDateLabel(value: Date | string | null | undefined) {
 
 async function createAssemblyDraft(formData: FormData) {
   "use server";
+  await requirePermission("production.execute");
 
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const customerName = String(formData.get("customerName") ?? "").trim();
@@ -94,6 +97,8 @@ async function createAssemblyDraft(formData: FormData) {
 
 async function configureAssemblyOrder(formData: FormData) {
   "use server";
+  const session = await requirePermission("production.execute");
+  const sessionContext = await getSessionContext();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
@@ -105,6 +110,12 @@ async function configureAssemblyOrder(formData: FormData) {
   const sourceDocumentRef = String(formData.get("sourceDocumentRef") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
   const compatibilityReviewApproved = String(formData.get("compatibilityReviewApproved") ?? "") === "on";
+  const compatibilityReviewReason = String(formData.get("compatibilityReviewReason") ?? "").trim();
+  const workingPressureBarRaw = String(formData.get("workingPressureBar") ?? "").trim();
+  const operatingTemperatureCRaw = String(formData.get("operatingTemperatureC") ?? "").trim();
+  const medium = String(formData.get("medium") ?? "").trim();
+  const application = String(formData.get("application") ?? "").trim();
+  const assemblyMethod = String(formData.get("assemblyMethod") ?? "").trim();
 
   if (!orderId) {
     redirect("/production/orders/new?error=Orden%20de%20ensamble%20invalida");
@@ -119,6 +130,11 @@ async function configureAssemblyOrder(formData: FormData) {
     assemblyQuantityRaw,
     sourceDocumentRef: sourceDocumentRef || undefined,
     notes: notes || undefined,
+    workingPressureBarRaw,
+    operatingTemperatureCRaw,
+    medium: medium || undefined,
+    application: application || undefined,
+    assemblyMethod: assemblyMethod || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/orders/new?orderId=${encodeURIComponent(orderId)}&error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
@@ -133,7 +149,15 @@ async function configureAssemblyOrder(formData: FormData) {
     assemblyQuantity: parsed.data.assemblyQuantityRaw,
     sourceDocumentRef: sourceDocumentRef || null,
     notes: notes || null,
+    workingPressureBar: parsed.data.workingPressureBarRaw,
+    operatingTemperatureC: parsed.data.operatingTemperatureCRaw,
+    medium: parsed.data.medium ?? null,
+    application: parsed.data.application ?? null,
+    assemblyMethod: parsed.data.assemblyMethod ?? null,
     compatibilityReviewApproved,
+    compatibilityReviewReason: compatibilityReviewApproved ? compatibilityReviewReason : null,
+    compatibilityReviewedByUserId: compatibilityReviewApproved ? session.user.id : null,
+    compatibilityReviewerRoles: sessionContext.roles,
   };
 
   let result: Awaited<ReturnType<typeof configureAssemblyOrderExact>>;
@@ -155,6 +179,9 @@ export default async function NewAssemblyOrderPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
+  const sessionContext = await getSessionContext();
+  await requirePermission("production.execute");
+  const canAuthorizeTechnicalReview = sessionContext.roles.some((role) => role === "MANAGER" || role === "SYSTEM_ADMIN");
   const orderId = String(sp.orderId ?? "").trim() || null;
 
   const [warehouses, customers, order] = await Promise.all([
@@ -211,6 +238,11 @@ export default async function NewAssemblyOrderPage({
     assemblyQuantity: String(sp.assemblyQuantity ?? ""),
     sourceDocumentRef: String(sp.sourceDocumentRef ?? ""),
     notes: String(sp.notes ?? ""),
+    workingPressureBar: String(sp.workingPressureBar ?? ""),
+    operatingTemperatureC: String(sp.operatingTemperatureC ?? ""),
+    medium: String(sp.medium ?? ""),
+    application: String(sp.application ?? ""),
+    assemblyMethod: String(sp.assemblyMethod ?? ""),
   };
 
   const [entryFittingSelection, hoseSelection, exitFittingSelection] = await Promise.all([
@@ -264,11 +296,21 @@ export default async function NewAssemblyOrderPage({
         values.entryFittingProductId,
         values.hoseProductId,
         values.exitFittingProductId,
-      ]);
+      ], {
+        workingPressureBar: parseDecimal(values.workingPressureBar),
+        operatingTemperatureC: parseDecimal(values.operatingTemperatureC),
+        medium: values.medium || null,
+        application: values.application || null,
+        assemblyMethod: values.assemblyMethod || null,
+      });
     } catch {
       compatibilityDecision = null;
     }
   }
+  const compatibilityCanContinue = compatibilityDecision?.status === "APPROVED"
+    || (compatibilityDecision?.status === "REQUIRES_REVIEW"
+      && compatibilityDecision.reviewOverrideAllowed
+      && canAuthorizeTechnicalReview);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -477,22 +519,41 @@ export default async function NewAssemblyOrderPage({
             <input type="hidden" name="assemblyQuantity" value={values.assemblyQuantity} />
             <input type="hidden" name="sourceDocumentRef" value={values.sourceDocumentRef} />
             <input type="hidden" name="notes" value={values.notes} />
+            <input type="hidden" name="workingPressureBar" value={values.workingPressureBar} />
+            <input type="hidden" name="operatingTemperatureC" value={values.operatingTemperatureC} />
+            <input type="hidden" name="medium" value={values.medium} />
+            <input type="hidden" name="application" value={values.application} />
+            <input type="hidden" name="assemblyMethod" value={values.assemblyMethod} />
             <p className="text-slate-400 text-sm">
               La confirmacion crea la configuracion tecnica, aparta inventario y genera la lista de surtido exacta.
             </p>
-            {compatibilityDecision?.status === "review" ? (
-              <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                <input type="checkbox" name="compatibilityReviewApproved" required className="mt-1" />
-                <span>
-                  Revisé las advertencias de compatibilidad y autorizo continuar con esta combinación.
-                  <span className="mt-1 block text-xs text-amber-200/80">
-                    {compatibilityDecision.matchedRules.map((rule) => rule.description).filter(Boolean).join("; ")}
-                  </span>
-                </span>
-              </label>
+            {compatibilityDecision?.status === "REQUIRES_REVIEW" ? (
+              <div className="space-y-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-text)]">
+                <p className="font-semibold">Revisión técnica requerida</p>
+                <p>{compatibilityDecision.explanation}</p>
+                {compatibilityDecision.reviewOverrideAllowed && canAuthorizeTechnicalReview ? (
+                  <>
+                    <label className="flex items-start gap-3">
+                      <input type="checkbox" name="compatibilityReviewApproved" required className="mt-1" />
+                      <span>Autorizo continuar como manager/administración y acepto registrar la decisión en auditoría.</span>
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="font-medium">Motivo técnico de la autorización</span>
+                      <Textarea name="compatibilityReviewReason" required minLength={10} placeholder="Describe la evidencia revisada y el motivo de la excepción" />
+                    </label>
+                  </>
+                ) : (
+                  <p className="text-xs">La combinación no puede continuar hasta que exista una regla técnica aprobada o una revisión autorizable.</p>
+                )}
+              </div>
+            ) : compatibilityDecision?.status === "BLOCKED" ? (
+              <div className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">
+                <p className="font-semibold">Combinación bloqueada</p>
+                <p className="mt-1">{compatibilityDecision.explanation}</p>
+              </div>
             ) : null}
             <div className="flex justify-end">
-              <button type="submit" className={buttonStyles({ className: !preview?.exact ? "opacity-50" : "" })} disabled={!preview?.exact}>
+              <button type="submit" className={buttonStyles({ className: !preview?.exact || !compatibilityCanContinue ? "opacity-50" : "" })} disabled={!preview?.exact || !compatibilityCanContinue}>
                 Crear orden exacta
               </button>
             </div>

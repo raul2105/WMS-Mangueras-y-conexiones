@@ -271,8 +271,19 @@ model ProductCompatibilityRule {
   ruleType String
   description String
   severity String @default("BLOCK")
+  decision String @default("REQUIRES_REVIEW")
+  governanceStatus String @default("DRAFT")
+  ruleRevision Int @default(1)
   active Boolean @default(true)
   sourceId String?
+  validFrom DateTime?
+  validTo DateTime?
+  maxWorkingPressureBar Decimal? @db.Decimal(12, 3)
+  minTemperatureC Decimal? @db.Decimal(8, 2)
+  maxTemperatureC Decimal? @db.Decimal(8, 2)
+  medium String?
+  application String?
+  assemblyMethod String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -283,6 +294,8 @@ model ProductCompatibilityRule {
   @@unique([productId, compatibleProductId, ruleType])
   @@index([productId, active])
   @@index([compatibleProductId, active])
+  @@index([decision, governanceStatus, active])
+  @@index([validFrom, validTo])
 }
 
 model ProductEquivalence {
@@ -938,6 +951,11 @@ model SalesInternalOrderAssemblyConfig {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
+  workingPressureBar Float?
+  operatingTemperatureC Float?
+  medium String?
+  application String?
+  assemblyMethod String?
 
   orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
   entryFittingProduct Product @relation("SalesAssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
@@ -1083,8 +1101,15 @@ model AssemblyConfiguration {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
-  compatibilityStatus String @default("ALLOWED")
+  workingPressureBar Float?
+  operatingTemperatureC Float?
+  medium String?
+  application String?
+  assemblyMethod String?
+  compatibilityStatus String @default("REQUIRES_REVIEW")
   compatibilityReviewApproved Boolean @default(false)
+  compatibilityReviewReason String?
+  compatibilityReviewedByUserId String?
   compatibilityReviewRules String?
 
   productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)

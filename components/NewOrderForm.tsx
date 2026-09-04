@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import CustomerSearchField from "@/components/CustomerSearchField";
 import ProductSearchField from "@/components/ProductSearchField";
+import AssemblyOperatingContextFields, { type AssemblyOperatingContextValues } from "@/components/AssemblyOperatingContextFields";
 import { SectionCard } from "@/components/ui/section-card";
 import { buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -13,7 +14,7 @@ import type { CommercialAvailabilityPromise, CommercialPromiseStatus } from "@/l
 
 type PendingOrderLine =
   | { id: string; kind: "PRODUCT"; productId: string; requestedQty: number; notes?: string; label: string }
-  | { id: string; kind: "ASSEMBLY"; entryFittingProductId: string; hoseProductId: string; exitFittingProductId: string; hoseLength: number; assemblyQuantity: number; notes?: string; label: string };
+  | { id: string; kind: "ASSEMBLY"; entryFittingProductId: string; hoseProductId: string; exitFittingProductId: string; hoseLength: number; assemblyQuantity: number; workingPressureBar?: number | null; operatingTemperatureC?: number | null; medium?: string; application?: string; assemblyMethod?: string; notes?: string; label: string };
 
 interface NewOrderFormProps {
   initialCustomerId?: string;
@@ -95,6 +96,9 @@ export function NewOrderForm({
   const [hoseLength, setHoseLength] = useState("");
   const [assemblyQuantity, setAssemblyQuantity] = useState("1");
   const [assemblyNotes, setAssemblyNotes] = useState("");
+  const [operatingContext, setOperatingContext] = useState<AssemblyOperatingContextValues>({
+    workingPressureBar: "", operatingTemperatureC: "", medium: "", application: "", assemblyMethod: "",
+  });
   const [notes, setNotes] = useState("");
   const [serverError] = useState<string | undefined>(error);
   const [activeStep, setActiveStep] = useState<"customer" | "product" | "delivery">("customer");
@@ -125,7 +129,11 @@ export function NewOrderForm({
   })();
 
   // A search query is context only; warehouse execution requires a resolved line.
-  const assemblyReady = Boolean(warehouseId && entryFittingProductId && hoseProductId && exitFittingProductId && parsePositiveDecimal(hoseLength) && parsePositiveDecimal(assemblyQuantity));
+  const workingPressureBar = parseOptionalDecimal(operatingContext.workingPressureBar);
+  const operatingTemperatureC = parseOptionalDecimal(operatingContext.operatingTemperatureC);
+  const operatingContextValid = workingPressureBar.valid && operatingTemperatureC.valid
+    && (workingPressureBar.value === null || workingPressureBar.value >= 0);
+  const assemblyReady = Boolean(warehouseId && entryFittingProductId && hoseProductId && exitFittingProductId && parsePositiveDecimal(hoseLength) && parsePositiveDecimal(assemblyQuantity) && operatingContextValid);
   const hasProductContext = orderLines.length > 0;
   const readinessState: "not_ready" | "missing_required" | "ready" =
     missingFields.length === 0 && hasProductContext
@@ -220,6 +228,11 @@ export function NewOrderForm({
       exitFittingProductId,
       hoseLength: length,
       assemblyQuantity: assemblyQty,
+      workingPressureBar: workingPressureBar.value,
+      operatingTemperatureC: operatingTemperatureC.value,
+      medium: operatingContext.medium || undefined,
+      application: operatingContext.application || undefined,
+      assemblyMethod: operatingContext.assemblyMethod || undefined,
       notes: assemblyNotes || undefined,
       label: `Ensamble ${assemblyQty} × ${length}`,
     }]);
@@ -229,6 +242,7 @@ export function NewOrderForm({
     setHoseLength("");
     setAssemblyQuantity("1");
     setAssemblyNotes("");
+    setOperatingContext({ workingPressureBar: "", operatingTemperatureC: "", medium: "", application: "", assemblyMethod: "" });
     setAssemblyDraftKey((value) => value + 1);
   };
 
@@ -251,6 +265,7 @@ export function NewOrderForm({
         <input type="hidden" name="hoseLength" value={hoseLength} />
         <input type="hidden" name="assemblyQuantity" value={assemblyQuantity} />
         <input type="hidden" name="assemblyNotes" value={assemblyNotes} />
+        {Object.entries(operatingContext).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
       </> : null}
       <SectionCard title="Nuevo pedido">
         <div className="space-y-5">
@@ -519,6 +534,7 @@ export function NewOrderForm({
                     </div>
                     <label className="space-y-1"><span className="op-label">Longitud por ensamble</span><input name="hoseLength" type="number" min="0.0001" step="0.0001" required value={hoseLength} onChange={(e) => setHoseLength(e.target.value)} className="op-field w-full px-4 py-3" placeholder="Ej. 2.5" /></label>
                     <label className="space-y-1"><span className="op-label">Cantidad de ensambles</span><input name="assemblyQuantity" type="number" min="1" step="1" required value={assemblyQuantity} onChange={(e) => setAssemblyQuantity(e.target.value)} className="op-field w-full px-4 py-3" /></label>
+                    <AssemblyOperatingContextFields values={operatingContext} onValueChange={(field, value) => setOperatingContext((current) => ({ ...current, [field]: value }))} />
                     <label className="space-y-1 md:col-span-2"><span className="op-label">Nota técnica (opcional)</span><input name="assemblyNotes" value={assemblyNotes} onChange={(e) => setAssemblyNotes(e.target.value)} className="op-field w-full px-4 py-3" placeholder="Presión, fluido, medida o aplicación" /></label>
                   </div>
                   <p className="text-sm text-[var(--text-secondary)]">El sistema reservará las piezas y generará el surtido de ensamble cuando confirmes el pedido.</p>
@@ -661,4 +677,13 @@ function parsePositiveDecimal(value: string) {
   const parsed = Number(value.replace(",", "."));
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return parsed;
+}
+
+function parseOptionalDecimal(value: string) {
+  const normalized = value.trim().replace(",", ".");
+  if (!normalized) return { valid: true, value: null };
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed)
+    ? { valid: true, value: parsed }
+    : { valid: false, value: null };
 }

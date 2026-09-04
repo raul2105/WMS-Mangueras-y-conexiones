@@ -44,7 +44,6 @@ async function createConfiguredAssembly(formData: FormData) {
   await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
-  const compatibilityReviewApproved = String(formData.get("compatibilityReviewApproved") ?? "") === "on";
   const parsed = salesInternalOrderAssemblyLineCreateSchema.safeParse({
     orderId,
     warehouseId: String(formData.get("warehouseId") ?? "").trim(),
@@ -55,6 +54,11 @@ async function createConfiguredAssembly(formData: FormData) {
     assemblyQuantityRaw: String(formData.get("assemblyQuantity") ?? "").trim(),
     sourceDocumentRef: String(formData.get("sourceDocumentRef") ?? "").trim() || undefined,
     notes: String(formData.get("notes") ?? "").trim() || undefined,
+    workingPressureBarRaw: String(formData.get("workingPressureBar") ?? "").trim(),
+    operatingTemperatureCRaw: String(formData.get("operatingTemperatureC") ?? "").trim(),
+    medium: String(formData.get("medium") ?? "").trim() || undefined,
+    application: String(formData.get("application") ?? "").trim() || undefined,
+    assemblyMethod: String(formData.get("assemblyMethod") ?? "").trim() || undefined,
   });
   if (!parsed.success) {
     redirect(`/production/requests/${orderId}/assembly/new?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
@@ -71,7 +75,12 @@ async function createConfiguredAssembly(formData: FormData) {
       assemblyQuantity: parsed.data.assemblyQuantityRaw,
       sourceDocumentRef: parsed.data.sourceDocumentRef ?? null,
       notes: parsed.data.notes ?? null,
-      compatibilityReviewApproved,
+      workingPressureBar: parsed.data.workingPressureBarRaw,
+      operatingTemperatureC: parsed.data.operatingTemperatureCRaw,
+      medium: parsed.data.medium ?? null,
+      application: parsed.data.application ?? null,
+      assemblyMethod: parsed.data.assemblyMethod ?? null,
+      compatibilityReviewApproved: false,
     });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Ensamble configurado agregado al pedido")}`);
   } catch (error) {
@@ -123,6 +132,11 @@ export default async function NewRequestAssemblyLinePage({
     assemblyQuantity: String(sp.assemblyQuantity ?? ""),
     sourceDocumentRef: String(sp.sourceDocumentRef ?? order.code),
     notes: String(sp.notes ?? ""),
+    workingPressureBar: String(sp.workingPressureBar ?? ""),
+    operatingTemperatureC: String(sp.operatingTemperatureC ?? ""),
+    medium: String(sp.medium ?? ""),
+    application: String(sp.application ?? ""),
+    assemblyMethod: String(sp.assemblyMethod ?? ""),
   };
 
   const [entryFittingSelection, hoseSelection, exitFittingSelection] = await Promise.all([
@@ -164,11 +178,18 @@ export default async function NewRequestAssemblyLinePage({
         values.entryFittingProductId,
         values.hoseProductId,
         values.exitFittingProductId,
-      ]);
+      ], {
+        workingPressureBar: parseDecimal(values.workingPressureBar),
+        operatingTemperatureC: parseDecimal(values.operatingTemperatureC),
+        medium: values.medium || null,
+        application: values.application || null,
+        assemblyMethod: values.assemblyMethod || null,
+      });
     } catch {
       compatibilityDecision = null;
     }
   }
+  const compatibilityCanContinue = compatibilityDecision?.status === "APPROVED";
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -268,22 +289,28 @@ export default async function NewRequestAssemblyLinePage({
           <input type="hidden" name="assemblyQuantity" value={values.assemblyQuantity} />
           <input type="hidden" name="sourceDocumentRef" value={values.sourceDocumentRef} />
           <input type="hidden" name="notes" value={values.notes} />
+          <input type="hidden" name="workingPressureBar" value={values.workingPressureBar} />
+          <input type="hidden" name="operatingTemperatureC" value={values.operatingTemperatureC} />
+          <input type="hidden" name="medium" value={values.medium} />
+          <input type="hidden" name="application" value={values.application} />
+          <input type="hidden" name="assemblyMethod" value={values.assemblyMethod} />
           <p className="text-sm text-slate-400">
             La confirmación crea la línea configurada, genera la orden exacta ligada y aparta inventario para el ensamble.
           </p>
-          {compatibilityDecision?.status === "review" ? (
-            <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              <input type="checkbox" name="compatibilityReviewApproved" required className="mt-1" />
-              <span>
-                Revisé las advertencias de compatibilidad y autorizo agregar esta combinación.
-                <span className="mt-1 block text-xs text-amber-200/80">
-                  {compatibilityDecision.matchedRules.map((rule) => rule.description).filter(Boolean).join("; ")}
-                </span>
-              </span>
-            </label>
+          {compatibilityDecision?.status === "REQUIRES_REVIEW" ? (
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-4 py-3 text-sm text-[var(--status-warning-text)]">
+              <p className="font-semibold">Revisión técnica requerida</p>
+              <p className="mt-1">{compatibilityDecision.explanation}</p>
+              <p className="mt-2 text-xs">Ventas no puede autorizar excepciones técnicas. Solicita revisión de manager o administración.</p>
+            </div>
+          ) : compatibilityDecision?.status === "BLOCKED" ? (
+            <div className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]">
+              <p className="font-semibold">Combinación bloqueada</p>
+              <p className="mt-1">{compatibilityDecision.explanation}</p>
+            </div>
           ) : null}
           <div className="flex justify-end">
-            <button type="submit" className={buttonStyles({ className: !preview?.exact ? "opacity-50" : "" })} disabled={!preview?.exact}>
+            <button type="submit" className={buttonStyles({ className: !preview?.exact || !compatibilityCanContinue ? "opacity-50" : "" })} disabled={!preview?.exact || !compatibilityCanContinue}>
               Agregar al pedido
             </button>
           </div>

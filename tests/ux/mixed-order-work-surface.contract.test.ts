@@ -34,5 +34,31 @@ describe("mixed order work surface", () => {
     expect(assembly).toContain("Paso 1: libera. Paso 2: recoge y confirma. Paso 3:");
     expect(assembly).toContain("Ver datos de operación");
     expect(assembly).toContain("Confirmar materiales y cerrar si aplica");
+    expect(assembly).toContain("Siguiente acción");
+    expect(assembly).toContain('activePickList.status !== "DRAFT"');
+    expect(assembly).toContain('sessionCtx.permissions.includes("production.execute")');
+    expect(assembly).toContain(": technicalGateError");
+    expect(assembly).toContain("Confirma el pedido de origen antes de enviarlo a almacén");
+    expect(assembly).toContain("Almacén debe liberar los materiales para iniciar el surtido");
+    expect(assembly).toContain("assemblyComponentRoleLabel(line.componentRole)");
+    expect(assembly).toContain("Requerido");
+    expect(assembly).toContain("En ensamble");
+  });
+
+  it("keeps the technical decision, operating context, next action, and accessible recovery visible", () => {
+    const assembly = read("app/(shell)/production/orders/[id]/page.tsx");
+
+    expect(assembly).toContain('data-testid="assembly-technical-safety"');
+    expect(assembly).toContain('data-testid="assembly-technical-status"');
+    expect(assembly).toContain("Seguridad técnica");
+    expect(assembly).toContain("Presión");
+    expect(assembly).toContain("Temperatura");
+    expect(assembly).toContain("Medio");
+    expect(assembly).toContain("Aplicación");
+    expect(assembly).toContain("Método");
+    expect(assembly).toContain("Siguiente acción:");
+    expect(assembly).toContain('role="alert"');
+    expect(assembly).toContain("No se aplicaron movimientos");
+    expect(assembly).toContain("!technicalGateError && Boolean(activePickList)");
   });
 });

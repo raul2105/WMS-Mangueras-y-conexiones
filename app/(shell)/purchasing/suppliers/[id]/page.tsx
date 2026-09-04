@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
+import { pageGuard } from "@/components/rbac/PageGuard";
 import { firstErrorMessage, supplierBrandSchema, supplierUpdateSchema } from "@/lib/schemas/wms";
 import { z } from "zod";
 
 async function linkProduct(supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const productId = String(formData.get("productId") ?? "").trim();
   const supplierSku = String(formData.get("supplierSku") ?? "").trim() || null;
@@ -26,17 +31,17 @@ async function linkProduct(supplierId: string, formData: FormData) {
   const unitPrice = unitPriceRaw ? Number(unitPriceRaw.replace(",", ".")) : null;
   const leadTimeDays = leadTimeDaysRaw ? parseInt(leadTimeDaysRaw) : null;
 
-  await prisma.supplierProduct.upsert({
-    where: { supplierId_productId: { supplierId, productId } },
-    create: { supplierId, productId, supplierSku, unitPrice, leadTimeDays },
-    update: { supplierSku, unitPrice, leadTimeDays },
-  });
-
-  await createAuditLogSafe({
-    entityType: "SUPPLIER_PRODUCT",
-    entityId: `${supplierId}:${productId}`,
-    action: "LINK",
-    source: "purchasing/suppliers",
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.supplierProduct.findUnique({ where: { supplierId_productId: { supplierId, productId } } });
+    const after = await tx.supplierProduct.upsert({
+      where: { supplierId_productId: { supplierId, productId } },
+      create: { supplierId, productId, supplierSku, unitPrice, leadTimeDays },
+      update: { supplierSku, unitPrice, leadTimeDays },
+    });
+    await createAuditLogRequiredWithDb({
+      entityType: "SUPPLIER_PRODUCT", entityId: after.id, action: before ? "UPDATE_LINK" : "LINK",
+      before, after, source: "purchasing/suppliers", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
   });
 
   redirect(`/purchasing/suppliers/${supplierId}?ok=1`);
@@ -44,17 +49,18 @@ async function linkProduct(supplierId: string, formData: FormData) {
 
 async function unlinkProduct(supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const supplierProductId = String(formData.get("supplierProductId") ?? "").trim();
   if (!supplierProductId) redirect(`/purchasing/suppliers/${supplierId}`);
 
-  await prisma.supplierProduct.delete({ where: { id: supplierProductId } });
-
-  await createAuditLogSafe({
-    entityType: "SUPPLIER_PRODUCT",
-    entityId: supplierProductId,
-    action: "UNLINK",
-    source: "purchasing/suppliers",
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.supplierProduct.delete({ where: { id: supplierProductId } });
+    await createAuditLogRequiredWithDb({
+      entityType: "SUPPLIER_PRODUCT", entityId: supplierProductId, action: "UNLINK",
+      before, source: "purchasing/suppliers", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
   });
 
   redirect(`/purchasing/suppliers/${supplierId}`);
@@ -62,14 +68,25 @@ async function unlinkProduct(supplierId: string, formData: FormData) {
 
 async function toggleActive(supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const isActive = formData.get("isActive") === "true";
-  await prisma.supplier.update({ where: { id: supplierId }, data: { isActive: !isActive } });
+  await prisma.$transaction(async (tx) => {
+    const after = await tx.supplier.update({ where: { id: supplierId }, data: { isActive: !isActive } });
+    await createAuditLogRequiredWithDb({
+      entityType: "SUPPLIER", entityId: supplierId, action: "TOGGLE_ACTIVE",
+      before: { isActive }, after: { isActive: after.isActive }, source: "purchasing/suppliers",
+      actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
+  });
   redirect(`/purchasing/suppliers/${supplierId}`);
 }
 
 async function updatePaymentTerms(supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const paymentTerms = String(formData.get("paymentTerms") ?? "").trim() || undefined;
   const parsed = supplierUpdateSchema.safeParse({ paymentTerms });
@@ -77,17 +94,13 @@ async function updatePaymentTerms(supplierId: string, formData: FormData) {
     redirect(`/purchasing/suppliers/${supplierId}?error=${encodeURIComponent(firstErrorMessage(parsed.error))}`);
   }
 
-  await prisma.supplier.update({
-    where: { id: supplierId },
-    data: { paymentTerms: parsed.data.paymentTerms ?? null },
-  });
-
-  await createAuditLogSafe({
-    entityType: "SUPPLIER",
-    entityId: supplierId,
-    action: "UPDATE",
-    after: JSON.stringify({ paymentTerms: parsed.data.paymentTerms ?? null }),
-    source: "purchasing/suppliers",
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.supplier.findUnique({ where: { id: supplierId }, select: { paymentTerms: true } });
+    const after = await tx.supplier.update({ where: { id: supplierId }, data: { paymentTerms: parsed.data.paymentTerms ?? null }, select: { paymentTerms: true } });
+    await createAuditLogRequiredWithDb({
+      entityType: "SUPPLIER", entityId: supplierId, action: "UPDATE_PAYMENT_TERMS", before, after,
+      source: "purchasing/suppliers", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
   });
 
   redirect(`/purchasing/suppliers/${supplierId}?ok=terms`);
@@ -95,6 +108,8 @@ async function updatePaymentTerms(supplierId: string, formData: FormData) {
 
 async function addBrand(supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const name = String(formData.get("brandName") ?? "").trim();
   const parsed = supplierBrandSchema.safeParse({ name });
@@ -103,44 +118,50 @@ async function addBrand(supplierId: string, formData: FormData) {
   }
 
   try {
-    await prisma.supplierBrand.create({ data: { supplierId, name: parsed.data.name } });
+    await prisma.$transaction(async (tx) => {
+      const after = await tx.supplierBrand.create({ data: { supplierId, name: parsed.data.name } });
+      await createAuditLogRequiredWithDb({
+        entityType: "SUPPLIER_BRAND", entityId: after.id, action: "CREATE", after,
+        source: "purchasing/suppliers", actor: actor.actorName, actorUserId: actor.actorUserId,
+      }, tx);
+    });
   } catch {
     redirect(`/purchasing/suppliers/${supplierId}?error=${encodeURIComponent("Ya existe una marca con ese nombre para este proveedor")}`);
   }
-
-  await createAuditLogSafe({
-    entityType: "SUPPLIER_BRAND",
-    entityId: supplierId,
-    action: "CREATE",
-    after: JSON.stringify({ supplierId, name: parsed.data.name }),
-    source: "purchasing/suppliers",
-  });
 
   redirect(`/purchasing/suppliers/${supplierId}?ok=brand`);
 }
 
 async function toggleBrand(brandId: string, supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
   void formData;
-  const brand = await prisma.supplierBrand.findUnique({ where: { id: brandId }, select: { isActive: true } });
-  if (!brand) redirect(`/purchasing/suppliers/${supplierId}`);
-  await prisma.supplierBrand.update({ where: { id: brandId }, data: { isActive: !brand.isActive } });
+  await prisma.$transaction(async (tx) => {
+    const brand = await tx.supplierBrand.findUnique({ where: { id: brandId }, select: { isActive: true } });
+    if (!brand) return;
+    const after = await tx.supplierBrand.update({ where: { id: brandId }, data: { isActive: !brand.isActive }, select: { isActive: true } });
+    await createAuditLogRequiredWithDb({
+      entityType: "SUPPLIER_BRAND", entityId: brandId, action: "TOGGLE_ACTIVE", before: brand, after,
+      source: "purchasing/suppliers", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
+  });
   redirect(`/purchasing/suppliers/${supplierId}`);
 }
 
 async function deleteBrand(brandId: string, supplierId: string, formData: FormData) {
   "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
   void formData;
   const usedBy = await prisma.product.count({ where: { supplierBrandId: brandId } });
-  if (usedBy > 0) {
-    redirect(`/purchasing/suppliers/${supplierId}?error=${encodeURIComponent(`Esta marca está asignada a ${usedBy} artículo(s) y no puede eliminarse`)}`);
-  }
-  await prisma.supplierBrand.delete({ where: { id: brandId } });
-  await createAuditLogSafe({
-    entityType: "SUPPLIER_BRAND",
-    entityId: brandId,
-    action: "DELETE",
-    source: "purchasing/suppliers",
+  if (usedBy > 0) redirect(`/purchasing/suppliers/${supplierId}?error=${encodeURIComponent(`Esta marca está asignada a ${usedBy} artículo(s) y no puede eliminarse`)}`);
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.supplierBrand.delete({ where: { id: brandId } });
+    await createAuditLogRequiredWithDb({
+      entityType: "SUPPLIER_BRAND", entityId: brandId, action: "DELETE", before,
+      source: "purchasing/suppliers", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
   });
   redirect(`/purchasing/suppliers/${supplierId}`);
 }
@@ -154,6 +175,7 @@ export default async function SupplierDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ ok?: string; error?: string }>;
 }) {
+  await pageGuard("purchasing.manage");
   const { id } = await params;
   const sp = await searchParams;
 

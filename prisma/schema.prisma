@@ -666,6 +666,11 @@ model SalesInternalOrderAssemblyConfig {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
+  workingPressureBar Float?
+  operatingTemperatureC Float?
+  medium String?
+  application String?
+  assemblyMethod String?
 
   orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
   entryFittingProduct Product @relation("SalesAssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
@@ -801,6 +806,11 @@ model AssemblyConfiguration {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
+  workingPressureBar Float?
+  operatingTemperatureC Float?
+  medium String?
+  application String?
+  assemblyMethod String?
 
   productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
   entryFittingProduct Product @relation("AssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)

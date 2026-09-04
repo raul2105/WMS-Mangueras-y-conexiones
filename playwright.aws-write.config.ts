@@ -10,7 +10,7 @@ const baseURL = process.env.WMS_LIVE_BASE_URL ?? "https://d2b1ltxtvypxr4.cloudfr
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: ["sales-configured-assembly.spec.ts"],
+  testMatch: ["sales-configured-assembly.spec.ts", "aws-v1-v5-v7-v8-browser.spec.ts"],
   timeout: 240000,
   expect: { timeout: 20000 },
   forbidOnly: true,

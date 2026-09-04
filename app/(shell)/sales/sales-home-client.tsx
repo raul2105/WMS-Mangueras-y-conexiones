@@ -18,6 +18,11 @@ import {
   CheckCircle,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS,
+  SALES_ORDER_FLOW_STAGE_LABELS,
+  type SalesOrderFlowStage,
+} from "@/lib/sales/internal-orders";
 
 interface SalesHomeClientProps {
   stats: {
@@ -33,46 +38,10 @@ interface SalesHomeClientProps {
     id: string;
     code: string;
     customerName: string;
-    status: string;
+    status: SalesOrderFlowStage;
     dueDate: string;
     nextAction: string;
   }>;
-}
-
-function getStageBadgeVariant(variant: string) {
-  switch (variant) {
-    case "accent":
-      return "accent";
-    case "warning":
-      return "warning";
-    case "success":
-      return "success";
-    case "danger":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
-
-function getStatusBadgeVariant(status: string) {
-  switch (status) {
-    case "entregado":
-      return "success";
-    case "cancelado":
-      return "danger";
-    case "captura":
-      return "warning";
-    case "por_asignar":
-      return "warning";
-    case "en_surtido":
-      return "info";
-    case "preparar_entrega":
-      return "warning";
-    case "listo_entrega":
-      return "success";
-    default:
-      return "neutral";
-  }
 }
 
 export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
@@ -216,7 +185,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <p className="font-medium leading-snug text-gray-900">{stage.label}</p>
-                        <Badge variant={getStageBadgeVariant(stage.variant)} className="text-xs">
+                        <Badge variant={stage.variant} className="text-xs">
                           {stage.count}
                         </Badge>
                       </div>
@@ -263,11 +232,8 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
-                        <Badge variant={getStatusBadgeVariant(order.status)}>
-                          {order.status}
-                        </Badge>
-                        <Badge variant={getStageBadgeVariant(order.status)}>
-                          {order.status.replace("_", " ")}
+                        <Badge variant={SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS[order.status]}>
+                          {SALES_ORDER_FLOW_STAGE_LABELS[order.status]}
                         </Badge>
                       </div>
                     </div>

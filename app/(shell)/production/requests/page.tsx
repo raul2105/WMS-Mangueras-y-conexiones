@@ -882,7 +882,7 @@ export default async function ProductionRequestsPage({
       <section className="space-y-3">
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
           <div
-            className="flex flex-wrap gap-2 pb-1"
+            className="flex flex-wrap gap-2"
             data-testid="requests-quick-filters"
           >
             {quickFilters.map((filter) => (

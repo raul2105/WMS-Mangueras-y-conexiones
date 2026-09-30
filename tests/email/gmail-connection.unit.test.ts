@@ -66,7 +66,11 @@ describe("Gmail connection security", () => {
     expect(envelope).not.toContain("refresh-secret");
     expect(decryptGmailRefreshToken("manager-1", envelope, key)).toBe("refresh-secret");
     expect(() => decryptGmailRefreshToken("manager-2", envelope, key)).toThrow(/no se pudo descifrar/i);
-    expect(() => decryptGmailRefreshToken("manager-1", `${envelope.slice(0, -1)}x`, key)).toThrow();
+    const parts = envelope.split(".");
+    const tamperedCiphertext = Buffer.from(parts[3], "base64url");
+    tamperedCiphertext[0] ^= 1;
+    parts[3] = tamperedCiphertext.toString("base64url");
+    expect(() => decryptGmailRefreshToken("manager-1", parts.join("."), key)).toThrow();
   });
 
   it("does not persist an OAuth grant unless Google verifies the identity and requested scopes", async () => {

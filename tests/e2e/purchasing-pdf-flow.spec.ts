@@ -39,15 +39,19 @@ async function writeManifest(after: Record<string, unknown>) {
 }
 
 async function cleanupFixtures() {
-  const orderIds = [orderWithDocumentId, orderWithoutDocumentId].filter(Boolean);
+  const ownedOrders = await prisma.purchaseOrder.findMany({
+    where: { folio: { in: [`${tag}-DOC`, `${tag}-NODOC`] } },
+    select: { id: true },
+  });
+  const orderIds = ownedOrders.map((order) => order.id);
   if (orderIds.length > 0) {
     await prisma.auditLog.deleteMany({ where: { entityId: { in: orderIds } } });
     await prisma.purchaseOrderDocument.deleteMany({ where: { purchaseOrderId: { in: orderIds } } });
     await prisma.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: { in: orderIds } } });
     await prisma.purchaseOrder.deleteMany({ where: { id: { in: orderIds } } });
   }
-  if (supplierId) await prisma.supplier.deleteMany({ where: { id: supplierId } });
-  if (productId) await prisma.product.deleteMany({ where: { id: productId } });
+  await prisma.supplier.deleteMany({ where: { code: `${tag}-SUP` } });
+  await prisma.product.deleteMany({ where: { sku: `${tag}-SKU` } });
 }
 
 test.describe("PDF Flow - Purchase Order Document", () => {
@@ -95,6 +99,7 @@ test.describe("PDF Flow - Purchase Order Document", () => {
       select: { id: true },
     });
 
+    orderWithDocumentId = orderWithDocument.id;
     await updatePurchaseOrderStatusWithDocument({
       purchaseOrderId: orderWithDocument.id,
       newStatus: "CONFIRMADA",
@@ -120,7 +125,6 @@ test.describe("PDF Flow - Purchase Order Document", () => {
       select: { id: true },
     });
 
-    orderWithDocumentId = orderWithDocument.id;
     orderWithoutDocumentId = orderWithoutDocument.id;
   });
 
@@ -160,7 +164,7 @@ test.describe("PDF Flow - Purchase Order Document", () => {
   test("documento page debe mostrar fallback si no hay documento", async ({ page }) => {
     await loginAs(page, "MANAGER");
     await page.goto(`/purchasing/orders/${orderWithoutDocumentId}/document`);
-    await expect(page.locator(".glass-card")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("heading", { name: "Documento oficial de OC" })).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/No existe un documento oficial persistido para esta OC/i)).toBeVisible();
   });
 

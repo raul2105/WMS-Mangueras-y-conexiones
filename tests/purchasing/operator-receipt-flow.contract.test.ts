@@ -18,14 +18,18 @@ describe("operator safe receipt flow", () => {
 
   it("only accepts controlled receipt locations and persists line discrepancies", () => {
     const page = read("app/(shell)/purchasing/orders/[id]/receive/page.tsx");
+    const receivingService = read("lib/purchasing/purchase-order-receiving.ts");
     const schema = read("prisma/postgresql/schema.prisma");
 
     expect(page).toContain('receivingLocation.code.startsWith("RECV")');
     expect(page).toContain('code: { startsWith: "RECV" }');
-    expect(page).toContain("qtyDamaged: item.qtyDamaged");
-    expect(page).toContain("discrepancyReason: item.discrepancyReason");
+    expect(page).toContain("qtyDamaged,");
     expect(page).toContain("lineParsed.data.discrepancyReason ?? null");
     expect(page).toContain("const accounted = qty + qtyDamaged + qtyMissing + qtyRejected");
+    expect(page).toContain("lines: linesToReceive");
+    expect(page).toContain("commitPurchaseOrderReceipt({");
+    expect(receivingService).toContain("qtyDamaged: item.qtyDamaged");
+    expect(receivingService).toContain("discrepancyReason: item.discrepancyReason");
     expect(schema).toMatch(/qtyDamaged\s+Float\s+@default\(0\)/);
     expect(schema).toMatch(/discrepancyReason\s+String\?/);
   });

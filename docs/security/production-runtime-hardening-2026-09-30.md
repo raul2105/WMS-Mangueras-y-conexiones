@@ -20,6 +20,12 @@ La consulta oficial AWS Price List del 30/09/2026, SKU `9HPEGXQTDDGH53C9`, Postg
 
 No se crean NAT Gateways, una segunda base productiva ni planes de cómputo adicionales. La factura observada de toda la cuenta incluye otros proyectos y no se atribuye íntegramente al WMS. Evidencia de tarifa en `output/rds-production-price-list-20260930.json`; el costo final depende de uso y créditos efectivos.
 
+## Parche de seguridad del candidato
+
+El CI de `335f6bf` bloqueó Next.js 16.3.3 por GHSA-vcvr-r3jv-pc5j. El advisory oficial identifica el rango afectado anterior a 16.3.6; se actualizan Next y su configuración ESLint a 16.3.8, una revisión posterior del mismo minor, manteniendo Prisma 6.19.2 y OpenNext 3.10.4. No se encontraron usos de `next/og`/`ImageResponse` en `app` o `lib`; aun así se respeta el gate de seguridad y se reconstruye el candidato. [Advisory oficial de Vercel](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j).
+
+La consulta npm posterior al parche devolvió cero avisos productivos en `output/npm-production-audit-patched-20260930.json`. El build anterior de 335f6bf queda como evidencia estática rechazada para promoción. Los dos contratos que fallaron en ese CI se alinearon con el helper real de recepción y con el escenario ampliado de continuidad; cinco comprobaciones aprobaron en la corrida AWS `contractsretry10930_5bf2`, con limpieza de sus dos esquemas. Esas comprobaciones no sustituyen los recorridos del nuevo runtime.
+
 ## Recuperación y acceso
 
 Mantener los cinco usuarios con sus IDs, correos, perfiles y relaciones según la decisión del propietario. La protección de sus claves y revocación de JWT anteriores se valida por separado; nunca copiar secretos a Jira, PR ni logs. El procedimiento está en `operational-account-cutover.md`.
@@ -27,3 +33,9 @@ Mantener los cinco usuarios con sus IDs, correos, perfiles y relaciones según l
 Un snapshot disponible no demuestra por sí solo recuperación. El snapshot final debe probarse mediante una restauración temporal controlada, comparando migraciones, relaciones y fingerprints; registrar y eliminar únicamente la instancia temporal. La evidencia de una restauración anterior con menos migraciones no sustituye esa comprobación final.
 
 La ejecución está preparada en `scripts/ops/aws-production-recovery-proof.ps1 -ExpectedCommitSha <SHA validado>`, desde la raíz del repositorio. Exige runtime productivo del SHA exacto, RDS protegido, snapshot cifrado, ingress restringido y nombre/tags propios para autorizar la limpieza de la instancia temporal. El helper `scripts/ops/aws-recovery-fingerprints.cjs` compara todas las tablas, incluyendo usuarios y migraciones, sin exportar registros ni credenciales. La instancia temporal supone consumo AWS durante la restauración; se elimina al terminar y se conserva el snapshot operativo. Una restauración de un checkpoint anterior a la rotación exige renovar credenciales antes de volver a exponer el sistema.
+
+## Integridad canónica previa a promoción
+
+La migración `20260930210000_add_technical_selection_snapshot` se aplicó en el esquema canónico AWS `wms/public`: 25 a 26 migraciones, 114 FKs validadas y fingerprints de datos preservados. Evidencia: `output/technical-snapshot-migration-20260930/apply-evidence.json`. El cambio es una columna nullable compatible con el runtime anterior; esta prueba no acredita la nueva interfaz desplegada.
+
+La lectura de cuentas encontró cinco identidades del seed y 25 fixtures históricas activas de junio. Se preparó `scripts/security/retire-historical-test-users.cjs` para desactivar exclusivamente esas fixtures, manteniendo IDs, correos, roles y relaciones. Exige el manifiesto exacto, coincidencia de los 25 hashes con el marcador estático de prueba, cuenta/host/esquema canónicos y autorización explícita; aborta íntegramente ante cualquier discrepancia. La transacción serializable conserva fingerprints de las demás tablas y añade auditorías del Admin real. Está preparado; todavía no ejecutado. Los cinco accesos operativos se mantienen.

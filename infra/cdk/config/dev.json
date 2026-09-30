@@ -4,6 +4,7 @@
   "namePrefix": "wms-web-dev",
   "stackName": "WmsWebDevStack",
   "enableWebRuntime": true,
+  "gmailOAuth": { "enabled": false, "secretName": null },
   "appBaseUrl": "https://d2b1ltxtvypxr4.cloudfront.net",
   "enableServerWarmer": false,
   "networkMode": "ipv6-private",

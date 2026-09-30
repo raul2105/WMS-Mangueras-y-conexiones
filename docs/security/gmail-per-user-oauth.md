@@ -14,6 +14,12 @@ El refresh token se cifra con AES-256-GCM y AAD que incluye usuario y versión. 
 
 El servicio vincula la renovación al correo seleccionado para la OC. Si el Manager reconecta otra cuenta antes de renovar, se rechaza el intento antes de contactar Google. La comprobación final de estado, correo y sobre cifrado impide devolver un token si la conexión cambia durante la renovación. La desconexión deshabilita primero los envíos locales y elimina sólo el grant que se revoca, preservando una reconexión concurrente.
 
+## Persistencia de configuración AWS
+
+`infra/cdk/config/<entorno>.json` declara `gmailOAuth.enabled` y `secretName`. DEV comienza con `enabled: false, secretName: null`, sin crear recursos ni cargos Gmail. Para provisionar, establecer exclusivamente el nombre propio `<namePrefix>-gmail` y mantener `enabled: false`; CloudFormation genera una clave hex de 64 caracteres y conserva el secreto con RETAIN. Guardar `clientId` y `clientSecret` mediante Secrets Manager sin sobrescribir `tokenEncryptionKey`. Después de completar Google, activar `enabled: true` y desplegar una release nueva: las cuatro variables se resuelven desde referencias seguras, nunca desde credenciales versionadas.
+
+Deshabilitar sólo `enabled` conserva la clave y los grants cifrados; no eliminar `secretName` para apagar envíos. Cambiar el template de generación o rotar la clave requiere migración/re-cifrado coordinado. La actualización del secreto sola no refresca el entorno de Lambda: desplegar una release nueva provoca la actualización del recurso y resolución de AWSCURRENT, según [CloudFormation y Secrets Manager](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html). El secreto dedicado tendrá el cargo normal del servicio cuando se provisione; no se crea en la configuración actual.
+
 ## Preparación de Google Cloud
 
 Configurar la pantalla de consentimiento OAuth, agregar únicamente los usuarios de prueba durante la validación y registrar el redirect URI exacto. Antes de habilitar Managers externos en producción, revisar en Google Cloud el estado de publicación, verificación de marca y requisitos de verificación aplicables al scope de Gmail. `gmail.send` permite enviar correo y debe tratarse como un permiso sensible; la revisión vigente de Google prevalece sobre esta nota.

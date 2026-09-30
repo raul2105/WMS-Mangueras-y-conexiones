@@ -16,6 +16,8 @@ Jira KAN-85/KAN-125/KAN-137 actualizado con evidencia y pendientes; KAN-137 pas�
 
 La configuración Google está preparada en Chrome del perfil rigentec.com, proyecto wms-gmail-rigentec-20260929, con facturación Pagina Web Rigentec expresamente autorizada. Está pendiente aceptar la política Google, crear el cliente OAuth y el consentimiento individual. El envío real de Gmail y su disponibilidad para todos los Managers aún no están validados.
 
+Se prepara el despliegue final con las correcciones móviles de ed328ef. La infraestructura posterior incorpora configuración Gmail persistente mediante un secreto con RETAIN y referencias seguras; la configuración actual mantiene enabled=false y secretName=null, por lo que no provisiona el secreto ni habilita envíos. Los tres modos de template (desactivado, provisionado y habilitado) se comprobaron estáticamente; esto no demuestra autorización Google ni envío. El artefacto OpenNext se construyó en ed328ef y cualquier revisión posterior de este candidato cambia únicamente infraestructura/documentación, con igualdad del código de aplicación y hashes de assets registrada antes del despliegue. La evidencia final del SHA efectivo, CI y repetición AWS se adjunta a PR 108 y a output/aws-final-*; no se presume aprobada por este manifiesto previo.
+
 La alerta presupuestal AWS de USD 5 no tiene filtros y cuenta toda la cuenta: reportó USD 13.941 y pronóstico USD 14.665 al consultar. No demuestra gasto exclusivo del WMS. Se preserva el objetivo del usuario, sin NAT ni infraestructura mensual nueva para las pruebas; la instancia de recuperación temporal ya se eliminó. La ventana RDS se extendió para pruebas/despliegue y se debe detener DEV al terminar, fuera del horario operativo.
 
 ## Alcance y autorización

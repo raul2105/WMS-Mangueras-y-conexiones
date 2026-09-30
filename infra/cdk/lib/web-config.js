@@ -39,6 +39,19 @@ function loadWebConfig(app) {
     }
   }
 
+  if (config.gmailOAuth !== undefined) {
+    const gmail = config.gmailOAuth;
+    if (!gmail || typeof gmail !== "object" || typeof gmail.enabled !== "boolean") {
+      throw new Error("gmailOAuth must define an explicit boolean enabled flag");
+    }
+    if (gmail.secretName != null && gmail.secretName !== `${config.namePrefix}-gmail`) {
+      throw new Error("gmailOAuth.secretName must use the environment-owned Gmail secret name");
+    }
+    if (gmail.enabled && (!gmail.secretName || !config.appBaseUrl)) {
+      throw new Error("Enabling Gmail requires its managed secret and canonical appBaseUrl");
+    }
+  }
+
   for (const key of REQUIRED_KEYS) {
     if (config[key] === undefined) {
       throw new Error(`Missing required config key "${key}" in ${configPath}`);

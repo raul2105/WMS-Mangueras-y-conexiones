@@ -379,6 +379,41 @@ class WmsWebStack extends Stack {
         }
       : {};
 
+    // Provisioning and enabling are separate: disabling Gmail must preserve
+    // the key that decrypts existing user grants. Never clear secretName to
+    // disable sending; change only the enabled flag.
+    const gmailSecret = config.gmailOAuth?.secretName
+      ? new secretsmanager.Secret(this, "GmailOAuthSecret", {
+          secretName: config.gmailOAuth.secretName,
+          description: "Per-Manager Gmail OAuth client and user-token encryption key",
+          removalPolicy: RemovalPolicy.RETAIN,
+          generateSecretString: {
+            secretStringTemplate: JSON.stringify({ clientId: "", clientSecret: "" }),
+            generateStringKey: "tokenEncryptionKey",
+            passwordLength: 64,
+            excludeUppercase: true,
+            excludePunctuation: true,
+            excludeCharacters: "ghijklmnopqrstuvwxyz",
+            includeSpace: false,
+            requireEachIncludedType: false,
+          },
+        })
+      : undefined;
+    const gmailEnvironment = config.gmailOAuth?.enabled && gmailSecret
+      ? {
+          GOOGLE_GMAIL_CLIENT_ID: gmailSecret.secretValueFromJson("clientId").unsafeUnwrap(),
+          GOOGLE_GMAIL_CLIENT_SECRET: gmailSecret.secretValueFromJson("clientSecret").unsafeUnwrap(),
+          GMAIL_TOKEN_ENCRYPTION_KEY: gmailSecret.secretValueFromJson("tokenEncryptionKey").unsafeUnwrap(),
+          GOOGLE_GMAIL_REDIRECT_URI: `${config.appBaseUrl.replace(/\/$/, "")}/api/email/gmail/callback`,
+        }
+      : {};
+    if (gmailSecret) {
+      new CfnOutput(this, "GmailOAuthSecretArn", {
+        value: gmailSecret.secretArn,
+        description: "Managed Gmail client/key secret; values must never be exported",
+      });
+    }
+
     // ─── Server Lambda ────────────────────────────────────────────────
     const serverFn = new lambda.Function(this, "ServerFunction", {
       functionName: `${prefix}-server`,
@@ -411,6 +446,7 @@ class WmsWebStack extends Stack {
         OPEN_NEXT_ORIGIN: "default",
         WMS_DISABLE_SYNC_EVENTS_IN_WEB: "true",
         PERF_DEBUG_LOGS: config.environment === "dev" ? "true" : "false",
+        ...gmailEnvironment,
         ...(ipv6PrivateNetwork
           ? { WMS_IPV6_EGRESS: "1", NODE_OPTIONS: "--dns-result-order=ipv6first" }
           : {}),

@@ -1,8 +1,12 @@
 # Validación del entregable WMS — 29 de septiembre de 2026
 
-Estado: en ejecución. No constituye aceptación operativa ni cierre de Jira.
+Estado: validación técnica de DEV aprobada en 5120296; aceptación operativa pendiente. No constituye cierre de Jira.
 
 ## Estado vigente al 30 de septiembre
+
+Última ronda completa en runtime 5120296: ocho escenarios mutables, 23 casos de roles/RBAC/Gmail desactivado/accesibilidad y ocho casos móviles aprobados (39 en total), con Tab/Escape/restauración de foco. Nueve tablas conservaron sus huellas; cero productos/almacenes QA, 54 inventarios consistentes y 114 FK válidas. Health y release exactos comprobados; CI de código 36689156363 verde. La evidencia manual de release se registra en PR 108. Los párrafos posteriores conservan resultados de rondas anteriores.
+
+Nuevo bloqueo productivo KAN-138: la comprobación AWS de sólo lectura confirmó cinco cuentas activas con claves públicas del seed. Se añade una guarda contra seed sobre DEV/public y producción, más opt-in para bases/esquemas remotos desechables. No se cambiaron usuarios previos ni secretos CI. Antes de entregar a personas reales se debe completar la transición descrita en docs/security/operational-account-cutover.md. No declarar seguridad de acceso por el resultado de npm audit.
 
 Los apartados siguientes conservan la secuencia histórica y los manifiestos; sus resultados pendientes originales no representan el estado vigente. Migraciones 24 y 25 aplicadas sobre DEV público, diff 0, huellas existentes preservadas y 114 FK validadas. RDS ya no admite PostgreSQL desde todo internet; Lambda usa subredes aisladas con salida IPv6 y cuatro servicios Google respondieron HTTPS. No hay NAT Gateway nuevo. La retención efectiva ya se verificó en siete días y el almacenamiento declarado se reconcilió con gp3 existente.
 

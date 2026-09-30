@@ -10,6 +10,7 @@ import {
   ChevronRightIcon,
   DashboardIcon,
   InventoryIcon,
+  MailIcon,
   ProductionIcon,
   PurchasingIcon,
   SalesIcon,
@@ -27,6 +28,7 @@ const iconMap: Record<NavIcon, ComponentType<SVGProps<SVGSVGElement>>> = {
   purchasing: PurchasingIcon,
   production: ProductionIcon,
   audit: AuditIcon,
+  mail: MailIcon,
 };
 
 type Props = {
@@ -48,7 +50,7 @@ export default function SidebarNav({
      <nav className="space-y-1 px-2 py-3" aria-label="Navegacion principal" data-testid={mode === "desktop" ? "desktop-main-nav" : "mobile-main-nav"}>
       {modules.map((item) => {
         const Icon = iconMap[item.icon];
-        const active = isNavItemActive(pathname, item);
+        const active = isNavItemActive(pathname, item, modules);
         const compact = mode === "desktop" && collapsed;
 
         return (

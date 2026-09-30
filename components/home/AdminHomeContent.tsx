@@ -41,7 +41,7 @@ export function AdminHomeContent({
   const stats = [
     { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
     { label: 'Eventos de Auditoría', value: String(auditTotalCount), icon: AlertTriangle, color: 'text-orange-600', href: '/audit', live: true },
-    { label: 'Rastros Recientes', value: String(tracesRecentCount), icon: Database, color: 'text-purple-600', href: '/trace', live: true },
+    { label: 'Rastros registrados', value: String(tracesRecentCount), icon: Database, color: 'text-purple-600', href: '/trace', live: true },
   ];
 
   return (

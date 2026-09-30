@@ -357,6 +357,12 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     permission: "purchasing.receive",
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
   },
+  {
+    route: "/purchasing/email",
+    description: "Configuración personal de Gmail para envío de órdenes de compra",
+    permission: "purchasing.manage",
+    roles: ["MANAGER"],
+  },
 
   // ── Auditoría & Trazabilidad ───────────────────────────────────────────
   {

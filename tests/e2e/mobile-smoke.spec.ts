@@ -116,3 +116,34 @@ for (const { path, role, heading } of MOBILE_ROUTES) {
     });
   }
 }
+
+test.describe("Mobile navigation dialog keyboard behavior", () => {
+  test("keeps Tab inside the dialog and restores focus after Escape", async ({ page }, testInfo) => {
+    test.skip(!testInfo.project.name.startsWith("mobile"), "Este recorrido solo valida proyectos móviles.");
+    await loginAs(page, "SYSTEM_ADMIN", "/");
+
+    const opener = page.getByRole("button", { name: "Abrir navegacion" });
+    await opener.click();
+    const dialog = page.getByRole("dialog", { name: "WMS ERP" });
+    await expect(dialog).toBeVisible();
+
+    const panel = dialog.locator("aside");
+    const focusable = panel.locator(
+      'a[href]:visible, button:not([disabled]):visible, input:not([disabled]):visible, select:not([disabled]):visible, textarea:not([disabled]):visible, [tabindex]:not([tabindex="-1"]):visible',
+    );
+    const first = focusable.first();
+    const last = focusable.last();
+    await expect(first).toBeVisible();
+    await expect(last).toBeVisible();
+
+    await first.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(last).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(first).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+  });
+});

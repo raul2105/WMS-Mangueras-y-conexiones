@@ -40,7 +40,10 @@ import {
   summarizePickListStatus,
   summarizeProductionStatus,
 } from "@/lib/sales/internal-orders";
-import { getSalesConsoleTimelineItems } from "@/lib/sales/console";
+import {
+  getSalesConsoleTimelineItems,
+  resolveSalesConsolePrimaryActionState,
+} from "@/lib/sales/console";
 import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
 import {
   firstErrorMessage,
@@ -772,12 +775,16 @@ export default async function ProductionRequestDetailPage({
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
   });
-  const canConfirmDelivery = deliveredEligibility.canMarkDelivered && (
+  const activeException = order.operationalExceptions.find(
+    (exception: any) => exception.status === "OPEN",
+  ) ?? null;
+  const canConfirmDelivery = !activeException && deliveredEligibility.canMarkDelivered && (
     (order.assignedToUserId === sessionCtx.user?.id && sessionCtx.roles.includes("SALES_EXECUTIVE"))
     || sessionCtx.roles.includes("MANAGER")
     || sessionCtx.roles.includes("SYSTEM_ADMIN")
   );
   const canPrepareForDelivery =
+    !activeException &&
     (sessionCtx.roles.includes("WAREHOUSE_OPERATOR") || sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN")) &&
     orderStatus === "CONFIRMADA" &&
     hasWarehouseFulfillmentOwnership(order) &&
@@ -798,8 +805,19 @@ export default async function ProductionRequestDetailPage({
     hasAssemblyLines: configuredLines.length > 0,
     hasCompletedConfiguredAssembly,
     assemblyHref,
+    activeException,
     takeEligibility,
     deliveredEligibility,
+  });
+  const primaryActionState = resolveSalesConsolePrimaryActionState({
+    flowNarrative,
+    canExecuteSalesActions: canRenderWriteActions,
+    canExecuteProductionActions: canOperateDirectPick,
+    canResolveExceptions: canManageAssignments,
+    deliveryBlockedReason: canConfirmDelivery ? null : "La entrega corresponde al ejecutivo responsable o a supervisión.",
+    preparationBlockedReason: !hasWarehouseFulfillmentOwnership(order)
+      ? "Falta asignar o tomar el trabajo físico antes de preparar el pedido."
+      : deliveryLocations.length === 0 ? "No hay un área de entrega activa configurada para este almacén." : null,
   });
   const timeline = getSalesConsoleTimelineItems({
     createdAt: order.createdAt,
@@ -856,59 +874,51 @@ export default async function ProductionRequestDetailPage({
       ) : null}
 
       <section className="glass-card space-y-4 text-sm text-[var(--text-secondary)]" data-testid="request-work-summary">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-2">
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado del pedido</h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[var(--text-muted)]">Etapa actual:</span>
-                <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
-              </div>
-              <p>Compromiso: {formatDate(order.dueDate)} · Responsable comercial: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
-              <p>Responsable físico: {order.warehouseAssigneeUser?.name ?? order.warehouseClaimedByUser?.name ?? order.warehouseAssigneeUser?.email ?? order.warehouseClaimedByUser?.email ?? "Sin asignar"}</p>
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado del pedido</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[var(--text-muted)]">Etapa actual:</span>
+              <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
+              {activeException ? <Badge variant="danger">Excepción abierta</Badge> : null}
             </div>
-            <div className="flex flex-wrap gap-3">
-              <Link href="/production/requests" className={buttonStyles({ variant: "secondary" })}>
-                ← Pedidos
-              </Link>
-            </div>
-          </div>
-
-          <div className="op-next-action">
-            <p className="op-label">{flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "Pedido finalizado" : "Siguiente paso"}</p>
-            <p className="mt-1 font-semibold text-[var(--text-primary)]">
-              {flowNarrative.nextRecommendedAction.blockedReason ? (
-                flowNarrative.nextRecommendedAction.label
-              ) : (
-                <Link href={flowNarrative.nextRecommendedAction.href} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
-                  {flowNarrative.nextRecommendedAction.label}
-                </Link>
-              )}
-            </p>
-            {flowNarrative.nextRecommendedAction.blockedReason ? (
-              <p className="mt-1 text-xs text-[var(--status-warning-text)]">
-                {flowNarrative.nextRecommendedAction.blockedReason}
+            <p>Compromiso: {formatDate(order.dueDate)} · Responsable comercial: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
+            <p>Responsable físico: {order.warehouseAssigneeUser?.name ?? order.warehouseClaimedByUser?.name ?? order.warehouseAssigneeUser?.email ?? order.warehouseClaimedByUser?.email ?? "Sin asignar"}</p>
+            {activeException ? (
+              <p className="text-[var(--status-danger-text)]">
+                Bloqueo: {activeException.type === "SHORTAGE" ? "Faltante operativo" : "Solicitud de cancelación"} · Dueño de decisión: Manager / Administrador
               </p>
             ) : null}
           </div>
 
+          <div className="op-next-action">
+            <p className="op-label">{flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "Pedido finalizado" : "Siguiente paso"}</p>
+            <p className="mt-1 font-semibold text-[var(--text-primary)]">{primaryActionState.label}</p>
+            <p className={`mt-1 text-xs ${primaryActionState.state === "blocked" ? "text-[var(--status-warning-text)]" : "text-[var(--text-muted)]"}`}>
+              {primaryActionState.blockedReason ?? primaryActionState.reason}
+            </p>
+          </div>
+
           <div className="flex flex-wrap gap-3">
+            {primaryActionState.state === "allowed" && ["OPERATE_PICK", "COMPLETE_ASSEMBLY", "RESOLVE_EXCEPTION"].includes(primaryActionState.code) ? (
+              <Link href={primaryActionState.href} className={buttonStyles()}>
+                {primaryActionState.label}
+              </Link>
+            ) : null}
             {canRenderWriteActions ? (
               <>
-                {order.status === "BORRADOR" ? (
+                {primaryActionState.state === "allowed" && primaryActionState.code === "CONFIRM_ORDER" ? (
                   <form action={confirmRequest}>
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button type="submit" className="btn-primary" disabled={order.lines.length === 0}>
-                      Confirmar pedido
-                    </button>
+                    <button type="submit" className="btn-primary">{primaryActionState.label}</button>
                   </form>
                 ) : null}
-                {takeEligibility.canTakeOrder ? (
+                {primaryActionState.state === "allowed" && primaryActionState.code === "TAKE_ORDER" ? (
                   <form action={takeRequest}>
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button type="submit" className="btn-secondary">{takeEligibility.takeActionLabel ?? "Tomar pedido"}</button>
+                    <button type="submit" className="btn-primary">{primaryActionState.label}</button>
                   </form>
                 ) : null}
-                {canConfirmDelivery ? (
+                {primaryActionState.state === "allowed" && primaryActionState.code === "MARK_DELIVERED" && canConfirmDelivery ? (
                   <form action={markDelivered} className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] p-4">
                     <input type="hidden" name="orderId" value={order.id} />
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -942,11 +952,9 @@ export default async function ProductionRequestDetailPage({
             </a>
           ) : null}
               </>
-            ) : (
-              <p className="text-sm text-[var(--text-muted)]">Este rol puede revisar el pedido, pero no ejecutar acciones de escritura.</p>
-            )}
+            ) : null}
           </div>
-          {canPrepareForDelivery ? (
+          {primaryActionState.state === "allowed" && primaryActionState.code === "PREPARE_DELIVERY" && canPrepareForDelivery ? (
             <form action={markPreparedForDelivery} className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] p-4" data-testid="prepare-for-delivery-form">
               <input type="hidden" name="orderId" value={order.id} />
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -1001,7 +1009,7 @@ export default async function ProductionRequestDetailPage({
             </div>
           ) : null}
           {order.operationalExceptions.length > 0 ? (
-            <div className="space-y-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4" data-testid="operational-exceptions">
+            <div id="excepciones" className="scroll-mt-24 space-y-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4" data-testid="operational-exceptions">
               <h3 className="font-semibold text-[var(--status-warning-text)]">Excepciones operativas</h3>
               {order.operationalExceptions.map((exception: any) => (
                 <div key={exception.id} className="rounded-md border border-[var(--status-warning-border)] bg-[var(--bg-surface)] p-3 text-sm">

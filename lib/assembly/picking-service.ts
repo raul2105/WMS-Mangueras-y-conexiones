@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { PrismaClient, Prisma, PickTaskStatus } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
@@ -6,7 +6,7 @@ import { assertAssemblyOperationalCompatibility } from "@/lib/assembly/compatibi
 
 type Tx = Prisma.TransactionClient;
 
-async function recomputePickStates(tx: Tx, assemblyWorkOrderId: string) {
+async function recomputePickStates(tx: Tx, assemblyWorkOrderId: string, updatedAtFloor: Date) {
   const [tasks, lines] = await Promise.all([
     tx.pickTask.findMany({
       where: { pickList: { assemblyWorkOrderId } },
@@ -43,8 +43,52 @@ async function recomputePickStates(tx: Tx, assemblyWorkOrderId: string) {
       hasShortage: anyShort,
       reservationStatus: "RESERVED",
       releasedAt: anyPicked ? new Date() : undefined,
+      updatedAt: new Date(Math.max(Date.now(), updatedAtFloor.getTime())),
     },
   });
+}
+
+export async function claimAssemblyPickTaskInTx(args: {
+  tx: Tx;
+  task: { id: string; status: PickTaskStatus; pickedQty: number; shortQty: number };
+  next: { status: "PARTIAL" | "COMPLETED"; pickedQty: number; shortQty: number; shortReason: string | null };
+}) {
+  const { tx, task, next } = args;
+  const claimed = await tx.pickTask.updateMany({
+    where: {
+      id: task.id,
+      status: task.status,
+      pickedQty: task.pickedQty,
+      shortQty: task.shortQty,
+    },
+    data: next,
+  });
+  if (claimed.count !== 1) {
+    throw new InventoryServiceError(
+      "CONCURRENT_PICK_CONFIRMATION",
+      "La tarea fue modificada por otra operación; actualice la pantalla y reintente",
+    );
+  }
+}
+
+export async function claimAssemblyWorkOrderConfirmationInTx(args: {
+  tx: Tx;
+  assemblyWorkOrderId: string;
+  updatedAt: Date;
+}) {
+  const { tx, assemblyWorkOrderId, updatedAt } = args;
+  const nextUpdatedAt = new Date(Math.max(Date.now(), updatedAt.getTime() + 1));
+  const claimed = await tx.assemblyWorkOrder.updateMany({
+    where: { id: assemblyWorkOrderId, updatedAt },
+    data: { updatedAt: nextUpdatedAt },
+  });
+  if (claimed.count !== 1) {
+    throw new InventoryServiceError(
+      "CONCURRENT_PICK_CONFIRMATION",
+      "La orden de ensamble cambió durante otra confirmación; actualice la pantalla y reintente",
+    );
+  }
+  return nextUpdatedAt;
 }
 
 async function moveReservedToWipInTx(args: {
@@ -72,30 +116,52 @@ async function moveReservedToWipInTx(args: {
 
   const target = await tx.inventory.findUnique({
     where: { productId_locationId: { productId, locationId: toWipLocationId } },
-    select: { id: true, quantity: true, reserved: true },
+    select: { id: true, quantity: true, reserved: true, available: true },
   });
 
   const nextSourceQty = source.quantity - qty;
   const nextSourceReserved = source.reserved - qty;
   const nextSourceAvailable = nextSourceQty - nextSourceReserved;
 
-  await tx.inventory.update({
-    where: { id: source.id },
+  const sourceUpdate = await tx.inventory.updateMany({
+    where: {
+      id: source.id,
+      quantity: source.quantity,
+      reserved: source.reserved,
+      available: source.available,
+    },
     data: {
       quantity: nextSourceQty,
       reserved: nextSourceReserved,
       available: nextSourceAvailable,
     },
   });
+  if (sourceUpdate.count !== 1) {
+    throw new InventoryServiceError(
+      "CONCURRENT_MODIFICATION",
+      "El inventario de origen cambió durante el surtido; actualice la pantalla y reintente",
+    );
+  }
 
   const nextTargetQty = (target?.quantity ?? 0) + qty;
   const targetReserved = target?.reserved ?? 0;
   const nextTargetAvailable = nextTargetQty - targetReserved;
   if (target) {
-    await tx.inventory.update({
-      where: { id: target.id },
+    const targetUpdate = await tx.inventory.updateMany({
+      where: {
+        id: target.id,
+        quantity: target.quantity,
+        reserved: target.reserved,
+        available: target.available,
+      },
       data: { quantity: nextTargetQty, available: nextTargetAvailable },
     });
+    if (targetUpdate.count !== 1) {
+      throw new InventoryServiceError(
+        "CONCURRENT_MODIFICATION",
+        "El inventario WIP cambió durante el surtido; actualice la pantalla y reintente",
+      );
+    }
   } else {
     await tx.inventory.create({
       data: {
@@ -254,6 +320,8 @@ export async function confirmAssemblyPickTask(
             assemblyWorkOrderId: true,
             assemblyWorkOrder: {
               select: {
+                id: true,
+                updatedAt: true,
                 productionOrder: { select: { id: true, code: true, sourceDocumentType: true, sourceDocumentId: true } },
               },
             },
@@ -272,6 +340,12 @@ export async function confirmAssemblyPickTask(
       throw new InventoryServiceError("PICKLIST_NOT_RELEASED", "Cannot confirm pick tasks before release");
     }
 
+    const workOrderUpdatedAtFloor = await claimAssemblyWorkOrderConfirmationInTx({
+      tx,
+      assemblyWorkOrderId: task.assemblyWorkOrderLine.assemblyWorkOrder.id,
+      updatedAt: task.assemblyWorkOrderLine.assemblyWorkOrder.updatedAt,
+    });
+
     const compatibilityRevalidation = await assertAssemblyOperationalCompatibility(
       tx,
       task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder.id,
@@ -282,6 +356,21 @@ export async function confirmAssemblyPickTask(
     if (args.pickedQty > pending) {
       throw new InventoryServiceError("INVALID_QTY", "Picked quantity exceeds pending reserved quantity");
     }
+
+    const additionalShort = pending - args.pickedQty;
+    const nextTaskPicked = task.pickedQty + args.pickedQty;
+    const nextTaskShort = task.shortQty + additionalShort;
+    const nextTaskStatus = additionalShort > 0 ? "PARTIAL" : "COMPLETED";
+    await claimAssemblyPickTaskInTx({
+      tx,
+      task,
+      next: {
+        pickedQty: nextTaskPicked,
+        shortQty: nextTaskShort,
+        status: nextTaskStatus,
+        shortReason: additionalShort > 0 ? (args.shortReason?.trim() || "FALTANTE_EN_PICK") : null,
+      },
+    });
 
     let movementId: string | null = null;
     if (args.pickedQty > 0) {
@@ -300,20 +389,6 @@ export async function confirmAssemblyPickTask(
       });
     }
 
-    const additionalShort = pending - args.pickedQty;
-    const nextTaskPicked = task.pickedQty + args.pickedQty;
-    const nextTaskShort = task.shortQty + additionalShort;
-    const nextTaskStatus = additionalShort > 0 ? "PARTIAL" : "COMPLETED";
-    await tx.pickTask.update({
-      where: { id: task.id },
-      data: {
-        pickedQty: nextTaskPicked,
-        shortQty: nextTaskShort,
-        status: nextTaskStatus,
-        shortReason: additionalShort > 0 ? (args.shortReason?.trim() || "FALTANTE_EN_PICK") : null,
-      },
-    });
-
     const nextLinePicked = task.assemblyWorkOrderLine.pickedQty + args.pickedQty;
     const nextLineWip = task.assemblyWorkOrderLine.wipQty + args.pickedQty;
     const nextLineShort = task.assemblyWorkOrderLine.shortQty + additionalShort;
@@ -322,8 +397,13 @@ export async function confirmAssemblyPickTask(
       : nextLinePicked > 0
         ? "PARTIAL"
         : "NOT_RELEASED";
-    await tx.assemblyWorkOrderLine.update({
-      where: { id: task.assemblyWorkOrderLine.id },
+    const lineUpdate = await tx.assemblyWorkOrderLine.updateMany({
+      where: {
+        id: task.assemblyWorkOrderLine.id,
+        pickedQty: task.assemblyWorkOrderLine.pickedQty,
+        wipQty: task.assemblyWorkOrderLine.wipQty,
+        shortQty: task.assemblyWorkOrderLine.shortQty,
+      },
       data: {
         pickedQty: nextLinePicked,
         wipQty: nextLineWip,
@@ -332,6 +412,12 @@ export async function confirmAssemblyPickTask(
         wipStatus: nextLineWip >= task.assemblyWorkOrderLine.requiredQty ? "IN_WIP" : "PARTIAL",
       },
     });
+    if (lineUpdate.count !== 1) {
+      throw new InventoryServiceError(
+        "CONCURRENT_PICK_CONFIRMATION",
+        "La línea de ensamble cambió durante otra confirmación; actualice la pantalla y reintente",
+      );
+    }
 
     const pickListTasks = await tx.pickTask.findMany({
       where: { pickListId: task.pickListId },
@@ -349,7 +435,7 @@ export async function confirmAssemblyPickTask(
       },
     });
 
-    await recomputePickStates(tx, task.pickList.assemblyWorkOrderId);
+    await recomputePickStates(tx, task.pickList.assemblyWorkOrderId, workOrderUpdatedAtFloor);
 
     const sourceDocument = task.assemblyWorkOrderLine.assemblyWorkOrder.productionOrder;
     if (args.operatorUserId && sourceDocument.sourceDocumentType === "SalesInternalOrder" && sourceDocument.sourceDocumentId) {

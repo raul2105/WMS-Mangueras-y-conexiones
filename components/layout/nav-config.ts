@@ -12,7 +12,8 @@ export type NavIcon =
   | "sales"
   | "purchasing"
   | "production"
-  | "audit";
+  | "audit"
+  | "mail";
 
 export type NavMatchMode = "exact" | "prefix";
 
@@ -148,6 +149,17 @@ function buildNavItems(primaryRole: RoleCode): NavItem[] {
     };
   }
 
+  if (primaryRole === "MANAGER") {
+    items.push({
+      href: "/purchasing/email",
+      label: "Correo para OC",
+      icon: "mail",
+      description: "Conecta tu cuenta Gmail para enviar órdenes de compra.",
+      match: "exact",
+      requiredPermission: "purchasing.manage",
+    });
+  }
+
   if (primaryRole === "SALES_EXECUTIVE") {
     return items.filter((item) => item.href !== "/inventory");
   }
@@ -207,18 +219,27 @@ export function getVisibleNavItems(
   ];
 }
 
-export function isNavItemActive(pathname: string, item: NavItem) {
+export function isNavItemActive(
+  pathname: string,
+  item: NavItem,
+  items: NavItem[] = NAV_ITEMS,
+) {
   if (item.match === "exact") return pathname === item.href;
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+  const matches = pathname === item.href || pathname.startsWith(`${item.href}/`);
+  const hasMoreSpecificMatch = items.some((candidate) => {
+    if (candidate.href === item.href || !candidate.href.startsWith(`${item.href}/`)) return false;
+    return candidate.match === "exact"
+      ? pathname === candidate.href
+      : pathname === candidate.href || pathname.startsWith(`${candidate.href}/`);
+  });
+  return matches && !hasMoreSpecificMatch;
 }
 
 export function getActiveNavItem(
   pathname: string,
   items: NavItem[] = NAV_ITEMS,
 ) {
-  return (
-    items.find((item) => isNavItemActive(pathname, item)) ??
-    items[0] ??
-    NAV_ITEMS[0]
-  );
+  return items
+    .filter((item) => isNavItemActive(pathname, item, items))
+    .sort((left, right) => right.href.length - left.href.length)[0] ?? items[0] ?? NAV_ITEMS[0];
 }

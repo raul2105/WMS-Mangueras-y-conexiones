@@ -48,6 +48,7 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
   { prefix: "/sales", permission: "sales.view" },
 
   { prefix: "/purchasing/orders/new", permission: "purchasing.manage" },
+  { prefix: "/purchasing/email", permission: "purchasing.manage" },
   { prefix: "/purchasing/orders/", permission: "purchasing.manage" },
   { prefix: "/purchasing/suppliers/new", permission: "purchasing.manage" },
   { prefix: "/purchasing/suppliers/", permission: "purchasing.view" },
@@ -59,6 +60,9 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
 
   { prefix: "/api/export/kardex", permission: "kardex.view" },
   { prefix: "/api/export/audit", permission: "audit.view" },
+  { prefix: "/api/email/gmail/connect", permission: "purchasing.manage" },
+  { prefix: "/api/email/gmail/callback", permission: "purchasing.manage" },
+  { prefix: "/api/email/gmail/disconnect", permission: "purchasing.manage" },
   { prefix: "/api/purchasing/orders/", permission: "purchasing.manage" },
   { prefix: "/api/products/lookup", permission: "catalog.view" },
   { prefix: "/api/products/search", permission: "catalog.view" },

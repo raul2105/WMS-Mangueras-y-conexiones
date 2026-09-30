@@ -81,11 +81,11 @@
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "bcryptjs": "^3.0.3",
-    "csv-parse": "^5.6.0",
+    "csv-parse": "7.0.3",
     "lucide-react": "^1.21.0",
     "next": "16.3.3",
     "next-auth": "5.0.0-beta.32",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "10.0.13",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -105,6 +105,19 @@
     "prisma": "6.19.2",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "3.2.7"
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "@auth/core": {
+      "nodemailer": "$nodemailer"
+    },
+    "next-auth": {
+      "nodemailer": "$nodemailer"
+    },
+    "@prisma/config": {
+      "effect": "3.22.2",
+      "deepmerge-ts": "8.0.2"
+    },
+    "defu": "6.1.7"
   }
 }

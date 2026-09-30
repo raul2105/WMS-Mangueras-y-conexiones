@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     "infra/cdk/cdk.out/**",
     "playwright-report/**",
     "test-results/**",
+    "output/**",
     "next-env.d.ts",
 
     // Utility scripts (CommonJS)

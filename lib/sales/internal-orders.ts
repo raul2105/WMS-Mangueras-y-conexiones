@@ -273,25 +273,35 @@ export function getSalesOrderFlowStage(
 }
 export type SalesOrderRecommendedAction = {
   label:
+    | "Confirmar pedido"
+    | "Agregar productos"
     | "Tomar pedido"
     | "Continuar pedido"
     | "Operar surtido"
-  | "Completar ensamble"
-  | "Preparar pedido"
-  | "En espera de almacén"
-  | "Marcar entrega"
+    | "Completar ensamble"
+    | "Preparar pedido"
+    | "En espera de almacén"
+    | "En espera de supervisor"
+    | "Resolver excepción"
+    | "Marcar entrega"
     | "Ver historial"
     | "Revisar bloqueo";
   href: string;
   blockedReason?: string;
 };
 export type SalesOrderPrimaryCtaCode =
+  | "CONFIRM_ORDER"
   | "TAKE_ORDER"
   | "OPERATE_PICK"
   | "COMPLETE_ASSEMBLY"
   | "PREPARE_DELIVERY"
   | "MARK_DELIVERED"
+  | "RESOLVE_EXCEPTION"
   | "REVIEW_BLOCK";
+export type SalesOrderActiveException = {
+  type: string;
+  reason?: string | null;
+};
 export type SalesOrderPrimaryCtaResolutionInput = {
   orderId: string;
   roles: string[];
@@ -306,6 +316,7 @@ export type SalesOrderPrimaryCtaResolutionInput = {
    * in the parent order so they can choose the correct line deliberately.
    */
   assemblyHref?: string | null;
+  activeException?: SalesOrderActiveException | null;
   takeEligibility?: ReturnType<typeof getTakeOrderEligibility>;
   deliveredEligibility?: ReturnType<typeof getMarkDeliveredEligibility>;
 };
@@ -346,6 +357,61 @@ export function resolveSalesOrderPrimaryCta(
       reason: "Pedido terminal sin acción operativa pendiente.",
     };
   }
+  if (input.flowStage === "captura") {
+    if ((isSales || isManager || isAdmin) && (input.hasProductLines || input.hasAssemblyLines)) {
+      return {
+        code: "CONFIRM_ORDER",
+        action: { label: "Confirmar pedido", href: orderHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "El pedido tiene líneas y está listo para confirmar.",
+      };
+    }
+    return {
+      code: "REVIEW_BLOCK",
+      action: { label: "Agregar productos", href: orderHref },
+      actorRole,
+      isPrimary: true,
+      isAllowed: false,
+      reason: "Agrega al menos un producto o ensamble antes de confirmar.",
+    };
+  }
+  if (input.activeException) {
+    const exceptionLabel = input.activeException.type === "SHORTAGE"
+      ? "Faltante operativo"
+      : input.activeException.type === "CANCELLATION_REQUEST"
+        ? "Solicitud de cancelación"
+        : "Excepción operativa";
+    const exceptionReason = input.activeException.reason?.trim() || "Requiere una decisión operativa";
+    const exceptionHref = `${orderHref}#excepciones`;
+
+    if (isManager || isAdmin) {
+      return {
+        code: "RESOLVE_EXCEPTION",
+        action: { label: "Resolver excepción", href: exceptionHref },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: `${exceptionLabel}: ${exceptionReason}`,
+      };
+    }
+
+    const blockedReason = `${exceptionLabel}: ${exceptionReason}. Manager o Administrador debe registrar la decisión.`;
+    return {
+      code: "REVIEW_BLOCK",
+      action: {
+        label: "En espera de supervisor",
+        href: exceptionHref,
+        blockedReason,
+      },
+      actorRole,
+      isPrimary: true,
+      isAllowed: false,
+      reason: "Existe una excepción abierta que impide continuar el flujo.",
+      blockedReason,
+    };
+  }
   if (input.flowStage === "por_asignar") {
     if (isSales && input.takeEligibility?.canTakeOrder) {
       return {
@@ -377,6 +443,19 @@ export function resolveSalesOrderPrimaryCta(
     };
   }
   if (input.flowStage === "en_surtido") {
+    if (isSales && input.takeEligibility?.canTakeOrder) {
+      return {
+        code: "TAKE_ORDER",
+        action: {
+          label: input.takeEligibility.takeActionLabel ?? "Tomar pedido",
+          href: orderHref,
+        },
+        actorRole,
+        isPrimary: true,
+        isAllowed: true,
+        reason: "El ejecutivo asignado debe confirmar la toma antes de continuar el seguimiento.",
+      };
+    }
     const needsAssembly = Boolean(
       input.hasAssemblyLines && !input.hasCompletedConfiguredAssembly,
     );
@@ -418,15 +497,15 @@ export function resolveSalesOrderPrimaryCta(
     return {
       code: "REVIEW_BLOCK",
       action: {
-        label: "Revisar bloqueo",
+        label: "En espera de almacén",
         href: orderHref,
-        blockedReason: "No hay acción operativa habilitada para el rol actual",
+        blockedReason: "Almacén o Producción continúa el surtido; Ventas conserva el seguimiento.",
       },
       actorRole,
       isPrimary: true,
       isAllowed: false,
-      reason: "Etapa en surtido sin acción permitida por RBAC para este rol.",
-      blockedReason: "No hay acción operativa habilitada para el rol actual",
+      reason: "La ejecución física está activa y corresponde al equipo operativo.",
+      blockedReason: "Almacén o Producción continúa el surtido; Ventas conserva el seguimiento.",
     };
   }
   if (input.flowStage === "preparar_entrega") {
@@ -524,6 +603,7 @@ type SalesOrderFlowNarrativeInput = {
   hasAssemblyLines?: boolean;
   hasCompletedConfiguredAssembly?: boolean;
   assemblyHref?: string | null;
+  activeException?: SalesOrderActiveException | null;
   takeEligibility?: ReturnType<typeof getTakeOrderEligibility>;
   deliveredEligibility?: ReturnType<typeof getMarkDeliveredEligibility>;
 };
@@ -563,6 +643,7 @@ export function getSalesOrderFlowNarrative(
     hasCompletedConfiguredAssembly: input.hasCompletedConfiguredAssembly,
     latestPickStatus: input.latestPickStatus,
     assemblyHref: input.assemblyHref,
+    activeException: input.activeException,
     takeEligibility: input.takeEligibility,
     deliveredEligibility: input.deliveredEligibility,
   });

@@ -78,7 +78,7 @@ async function ensureWarehouseWipLocation(tx: Tx, warehouseId: string) {
   });
 }
 
-async function reserveInventoryInTx(args: {
+export async function reserveInventoryInTx(args: {
   tx: Tx;
   productId: string;
   locationId: string;
@@ -98,10 +98,21 @@ async function reserveInventoryInTx(args: {
   }
   const nextReserved = row.reserved + qty;
   const nextAvailable = row.quantity - nextReserved;
-  await tx.inventory.update({
-    where: { id: row.id },
+  const updated = await tx.inventory.updateMany({
+    where: {
+      id: row.id,
+      quantity: row.quantity,
+      reserved: row.reserved,
+      available: row.available,
+    },
     data: { reserved: nextReserved, available: nextAvailable },
   });
+  if (updated.count !== 1) {
+    throw new InventoryServiceError(
+      "CONCURRENT_MODIFICATION",
+      "Conflicto concurrente al reservar componentes de ensamble; reintente la operación",
+    );
+  }
   await tx.inventoryMovement.create({
     data: {
       productId,

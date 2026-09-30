@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface ManagerHomeContentProps {
   overdueOrders: number;
-  activeBlockers: number;
+  assemblyBlockedCount: number;
   purchaseDrafts: number;
   purchaseAttention: number;
   operationalMetrics: FulfillmentOperationalMetricsData;
@@ -18,14 +18,14 @@ interface ManagerHomeContentProps {
 
 export function ManagerHomeContent({ 
   overdueOrders, 
-  activeBlockers,
+  assemblyBlockedCount,
   purchaseDrafts,
   purchaseAttention,
   operationalMetrics,
 }: ManagerHomeContentProps) {
   const stats = [
     { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-red-600', href: '/production/requests?queue=overdue', live: true },
-    { label: 'Bloqueos Activos', value: String(activeBlockers), icon: Flag, color: 'text-purple-600', href: '/production/requests?queue=assembly_blocked', live: true },
+    { label: 'Ensambles bloqueados', value: String(assemblyBlockedCount), icon: Flag, color: 'text-purple-600', href: '/production/requests?queue=assembly_blocked', live: true },
     { label: 'OC por confirmar', value: String(purchaseDrafts), icon: ShoppingCart, color: 'text-amber-600', href: '/purchasing/orders?preset=borrador', live: true },
     { label: 'Recepciones a resolver', value: String(purchaseAttention), icon: Truck, color: 'text-orange-600', href: '/purchasing/orders?preset=parciales', live: true },
   ];

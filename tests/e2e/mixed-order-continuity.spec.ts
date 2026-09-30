@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { loginAs } from "./lib/auth.helpers";
+import { loginAs, USERS } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
-const tag = `QA-MIX-${Date.now().toString().slice(-8)}`;
+const tag = `QA-MIX-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
 
 const fixture = {
   warehouseId: "",
@@ -13,6 +14,7 @@ const fixture = {
   orderId: "",
   productionOrderId: "",
   salesUserId: "",
+  technicalSourceId: "",
   shippingLocationId: "",
   warehouseCode: `${tag}-WH`,
   customerName: `Cliente continuidad ${tag}`,
@@ -48,6 +50,13 @@ async function cleanupFixture() {
     : [];
   const orderIds = scopedOrders.map((order) => order.id);
   const productionIds = scopedProductionOrders.map((order) => order.id);
+  const traceIds = fixture.warehouseId
+    ? (await prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })).map(({ id }) => id)
+    : [];
+  if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { traceRecordId: { in: traceIds } } });
+  if (traceIds.length) await prisma.traceRecord.deleteMany({ where: { id: { in: traceIds } } });
+  const auditEntityIds = [...orderIds, ...productionIds, ...fixture.productIds, ...fixture.locationIds, fixture.warehouseId].filter(Boolean);
+  if (auditEntityIds.length) await prisma.auditLog.deleteMany({ where: { entityId: { in: auditEntityIds } } });
 
   if (orderIds.length || productionIds.length || fixture.productIds.length || fixture.locationIds.length) {
     await prisma.inventoryMovement.deleteMany({
@@ -61,10 +70,8 @@ async function cleanupFixture() {
       },
     });
   }
-  if (orderIds.length) {
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: orderIds } } });
-  }
   if (productionIds.length) {
+    await prisma.auditLog.deleteMany({ where: { entityId: { in: productionIds } } });
     await prisma.productionOrder.deleteMany({ where: { id: { in: productionIds } } });
   }
   if (orderIds.length) {
@@ -72,9 +79,11 @@ async function cleanupFixture() {
   }
   if (fixture.productIds.length) {
     await prisma.inventory.deleteMany({ where: { productId: { in: fixture.productIds } } });
+    await prisma.productCompatibilityRule.deleteMany({ where: { OR: [{ productId: { in: fixture.productIds } }, { compatibleProductId: { in: fixture.productIds } }] } });
     await prisma.productTechnicalAttribute.deleteMany({ where: { productId: { in: fixture.productIds } } });
     await prisma.product.deleteMany({ where: { id: { in: fixture.productIds } } });
   }
+  if (fixture.technicalSourceId) await prisma.productTechnicalSource.delete({ where: { id: fixture.technicalSourceId } });
   if (fixture.locationIds.length) {
     await prisma.location.deleteMany({ where: { id: { in: fixture.locationIds } } });
   }
@@ -89,7 +98,7 @@ async function cleanupFixture() {
 test.describe.serial("mixed sales order continuity", () => {
   test.beforeAll(async () => {
     const salesUser = await prisma.user.findUniqueOrThrow({
-      where: { email: "sales@scmayher.com" },
+      where: { email: USERS.SALES_EXECUTIVE.email },
       select: { id: true },
     });
     fixture.salesUserId = salesUser.id;
@@ -120,6 +129,23 @@ test.describe.serial("mixed sales order continuity", () => {
       prisma.product.create({ data: { sku: fixture.directSku, name: `Producto directo ${tag}`, type: "ACCESSORY" } }),
     ]);
     fixture.productIds.push(entry.id, exit.id, hose.id, direct.id);
+
+    const technicalSource = await prisma.productTechnicalSource.create({
+      data: {
+        supplierName: `Proveedor QA ${tag}`,
+        documentRef: `FICHA-${tag}`,
+        documentVersion: "1",
+        status: "APPROVED",
+        reviewedAt: new Date(),
+      },
+    });
+    fixture.technicalSourceId = technicalSource.id;
+    await prisma.productCompatibilityRule.createMany({
+      data: [
+        { productId: entry.id, compatibleProductId: hose.id, ruleType: "ASSEMBLY", description: `Regla aprobada QA ${tag}`, severity: "INFO", decision: "APPROVED", governanceStatus: "APPROVED", sourceId: technicalSource.id, maxWorkingPressureBar: 250, minTemperatureC: -20, maxTemperatureC: 90, medium: "Aceite hidráulico", application: "Línea de retorno", assemblyMethod: "Prensado según ficha técnica" },
+        { productId: hose.id, compatibleProductId: exit.id, ruleType: "ASSEMBLY", description: `Regla aprobada QA ${tag}`, severity: "INFO", decision: "APPROVED", governanceStatus: "APPROVED", sourceId: technicalSource.id, maxWorkingPressureBar: 250, minTemperatureC: -20, maxTemperatureC: 90, medium: "Aceite hidráulico", application: "Línea de retorno", assemblyMethod: "Prensado según ficha técnica" },
+      ],
+    });
 
     await prisma.inventory.createMany({
       data: [
@@ -175,12 +201,34 @@ test.describe.serial("mixed sales order continuity", () => {
     expect((await pickDownload).suggestedFilename()).toMatch(/^surtido-.*\.pdf$/);
     await page.getByRole("button", { name: "Liberar surtido directo" }).click();
     await page.getByRole("button", { name: "Tomar tareas" }).click();
+    const operatorId = (await prisma.user.findUniqueOrThrow({ where: { email: USERS.WAREHOUSE_OPERATOR.email }, select: { id: true } })).id;
+    const claimedTask = await prisma.salesInternalOrderPickTask.findFirstOrThrow({ where: { orderLine: { orderId: directOrder.id } } });
+    expect(claimedTask.claimedByUserId).toBe(operatorId);
     await page.locator('input[name^="scanRef__"]').first().fill(fixture.directSku);
     await page.getByRole("button", { name: "Confirmar surtido" }).click();
     await expect(page.getByTestId("fulfillment-next-action")).toContainText("Surtido directo terminado");
     await page.goto(`/production/requests/${directOrder.id}`);
     await expect(page.getByTestId("prepare-for-delivery-form")).toBeVisible();
-    await page.getByTestId("prepare-for-delivery-form").locator('select[name="preparedLocationId"]').selectOption(fixture.shippingLocationId);
+
+    await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
+    await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
+    await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/requests/${directOrder.id}`);
+    const preparationForm = page.getByTestId("prepare-for-delivery-form");
+    const preparedLocation = preparationForm.locator('select[name="preparedLocationId"]');
+    await preparedLocation.evaluate((select, invalidId) => {
+      const option = document.createElement("option");
+      option.value = invalidId;
+      option.textContent = "QA STORAGE tampered";
+      select.append(option);
+    }, fixture.locationIds[0]);
+    await preparedLocation.selectOption(fixture.locationIds[0]);
+    await Promise.all([
+      page.waitForURL((url) => url.pathname.endsWith(`/production/requests/${directOrder.id}`) && url.searchParams.has("error")),
+      page.getByRole("button", { name: "Preparar para entrega" }).click(),
+    ]);
+    await expect(page).toHaveURL(/error=/);
+    await expect(prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: directOrder.id }, select: { preparedForDeliveryAt: true } })).resolves.toMatchObject({ preparedForDeliveryAt: null });
+    await preparedLocation.selectOption(fixture.shippingLocationId);
     await page.getByLabel("Nota (opcional)").fill("Fixture directo preparado para entrega");
     await Promise.all([
       page.waitForURL(/\?ok=/),
@@ -224,6 +272,11 @@ test.describe.serial("mixed sales order continuity", () => {
     await page.getByRole("button", { name: new RegExp(fixture.exitSku) }).click();
     await page.getByTestId("new-order-hose-input").fill(fixture.hoseSku);
     await page.getByRole("button", { name: new RegExp(fixture.hoseSku) }).click();
+    await page.getByLabel("Presión de trabajo (bar)").fill("180");
+    await page.getByLabel("Temperatura de operación (°C)").fill("60");
+    await page.getByLabel("Medio o fluido").fill("Aceite hidráulico");
+    await page.getByLabel("Aplicación").fill("Línea de retorno");
+    await page.getByLabel("Método de ensamble").fill("Prensado según ficha técnica");
     await page.getByLabel("Longitud por ensamble").fill("2");
     await page.getByLabel("Cantidad de ensambles").fill("1");
     await page.getByRole("button", { name: "Agregar ensamble al pedido" }).click();
@@ -296,6 +349,11 @@ test.describe.serial("mixed sales order continuity", () => {
     await page.getByRole("button", { name: new RegExp(fixture.exitSku) }).click();
     await page.getByTestId("new-order-hose-input").fill(fixture.hoseSku);
     await page.getByRole("button", { name: new RegExp(fixture.hoseSku) }).click();
+    await page.getByLabel("Presión de trabajo (bar)").fill("180");
+    await page.getByLabel("Temperatura de operación (°C)").fill("60");
+    await page.getByLabel("Medio o fluido").fill("Aceite hidráulico");
+    await page.getByLabel("Aplicación").fill("Línea de retorno");
+    await page.getByLabel("Método de ensamble").fill("Prensado según ficha técnica");
     await page.getByLabel("Longitud por ensamble").fill("2");
     await page.getByLabel("Cantidad de ensambles").fill("1");
     await page.getByRole("button", { name: "Agregar ensamble al pedido" }).click();

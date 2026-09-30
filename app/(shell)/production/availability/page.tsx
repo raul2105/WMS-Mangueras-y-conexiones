@@ -206,7 +206,7 @@ export default async function ProductionAvailabilityPage({
         meta={hasResultRows ? `${totalRows.toLocaleString("es-MX")} resultados` : undefined}
       />
 
-      <form className="surface grid gap-3 rounded-[var(--radius-lg)] p-4 md:grid-cols-[minmax(0,1.7fr)_minmax(14rem,1fr)_auto] md:items-end">
+      <form className="surface grid gap-3 rounded-[var(--radius-lg)] p-4 lg:grid-cols-2 lg:items-end xl:grid-cols-[minmax(0,1.7fr)_minmax(14rem,1fr)_auto]">
         <label className="space-y-1">
           <span className="text-sm text-[var(--text-muted)]">Producto requerido</span>
           <input
@@ -235,7 +235,7 @@ export default async function ProductionAvailabilityPage({
             ))}
           </select>
         </label>
-        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+        <div className="flex flex-wrap items-center gap-2 lg:col-span-2 lg:justify-end xl:col-span-1">
           <button type="submit" className={buttonStyles()}>
             Ver disponibilidad
           </button>
@@ -280,7 +280,7 @@ export default async function ProductionAvailabilityPage({
         />
       ) : (
         <>
-          <div className="grid gap-3 md:hidden">
+          <div className="grid gap-3 xl:hidden">
             {rows.map((row) => (
               <article key={row.id} className="surface space-y-3 rounded-[var(--radius-lg)] p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -345,7 +345,7 @@ export default async function ProductionAvailabilityPage({
             ))}
           </div>
 
-          <TableWrap className="hidden md:block" dense label="Tabla comercial de disponibilidad">
+          <TableWrap className="hidden xl:block" dense label="Tabla comercial de disponibilidad">
             <Table>
             <thead>
               <TableRow>

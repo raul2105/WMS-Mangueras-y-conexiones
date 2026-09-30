@@ -22,13 +22,13 @@ async function main() {
        n.nspname AS schema_name,
        pg_get_userbyid(n.nspowner) AS owner,
        to_timestamp((substring(n.nspname from '^t_run_([0-9]+)')::numeric) / 1000) AS created_at,
-       regexp_replace(n.nspname, '_w[0-9]+$', '') AS run_prefix,
+       regexp_replace(n.nspname, '_(w[0-9]+|f[0-9a-f]{16})$', '') AS run_prefix,
        count(c.oid)::int AS object_count,
        count(c.oid) FILTER (WHERE c.relkind IN ('r', 'p'))::int AS table_count,
        (COALESCE(sum(c.relpages), 0)::numeric * 8192)::text AS approx_bytes
      FROM pg_namespace n
      LEFT JOIN pg_class c ON c.relnamespace = n.oid
-     WHERE n.nspname ~ '^t_run_[0-9]+_[a-z0-9]+_w[0-9]+$'
+     WHERE n.nspname ~ '^t_run_[0-9]+_[a-z0-9]+_(w[0-9]+|f[0-9a-f]{16})$'
      GROUP BY n.nspname, n.nspowner
      ORDER BY created_at, n.nspname`
   );

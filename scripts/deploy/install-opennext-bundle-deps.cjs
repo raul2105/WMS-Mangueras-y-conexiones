@@ -53,13 +53,29 @@ function copyBinSymlinks(tempInstallDir, outputDir) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const outputDir = args["--output-dir"];
+const outputDirArg = args["--output-dir"];
 const packagesArg = args["--packages"];
 
-if (!outputDir || !packagesArg) {
+if (!outputDirArg || !packagesArg) {
   console.error("Usage: node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir <dir> --packages <pkg1,pkg2> [--os linux] [--arch arm64] [--target 18] [--libc glibc]");
   process.exit(1);
 }
+
+const repoRoot = fs.realpathSync(path.resolve(__dirname, "..", ".."));
+const openNextRoot = path.join(repoRoot, ".open-next");
+const outputDir = path.resolve(outputDirArg);
+function assertInside(root, target) {
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Refusing filesystem mutation outside the intended directory: ${target}`);
+  }
+}
+assertInside(openNextRoot, outputDir);
+// Resolve every existing parent before copying/removing to reject redirected paths.
+let existingParent = outputDir;
+while (!fs.existsSync(existingParent)) existingParent = path.dirname(existingParent);
+const realParent = fs.realpathSync(existingParent);
+if (realParent !== openNextRoot) assertInside(openNextRoot, realParent);
 
 const packages = packagesArg
   .split(",")
@@ -132,6 +148,8 @@ try {
   }
 
   const outputModulesDir = path.join(outputDir, "node_modules");
+  assertInside(openNextRoot, outputModulesDir);
+  if (fs.existsSync(outputModulesDir)) assertInside(openNextRoot, fs.realpathSync(outputModulesDir));
   fs.rmSync(outputModulesDir, { recursive: true, force: true });
   fs.cpSync(installedModulesDir, outputModulesDir, {
     recursive: true,
@@ -140,5 +158,7 @@ try {
   });
   copyBinSymlinks(tempInstallDir, outputDir);
 } finally {
+  assertInside(fs.realpathSync(os.tmpdir()), fs.realpathSync(tempInstallDir));
+  if (!path.basename(tempInstallDir).startsWith("open-next-install-")) throw new Error("Temporary cleanup guard failed");
   fs.rmSync(tempInstallDir, { recursive: true, force: true });
 }

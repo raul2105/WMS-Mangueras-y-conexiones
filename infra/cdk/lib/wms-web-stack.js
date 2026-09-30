@@ -1,16 +1,15 @@
 /**
  * WMS Web Stack — VPC + RDS PostgreSQL (Free Tier) + SSM Parameters + Budget
  *
- * Architecture:
- *   - VPC with 2 AZ, public subnets only (no NAT = $0)
- *   - RDS db.t4g.micro PostgreSQL 16, publicly accessible with restricted SG
+ * Architecture (default legacy mode, retained until networkMode=ipv6-private):
+ *   - Existing VPC with 2 AZ and public subnets (no NAT = $0)
+ *   - RDS db.t4g.micro PostgreSQL 16, publicly accessible with configured SG
  *   - SSM Parameter Store for DATABASE_URL and NEXTAUTH_SECRET
  *   - AWS Budget alert at configured threshold
  *
- * RDS is publicly accessible so the office PC can connect directly.
- * Security Group restricts access to:
- *   1. Office IP (officeIpCidr from config)
- *   2. Future Lambda SG (added in Phase 4)
+ * RDS remains publicly accessible so the office PC can connect directly.
+ * The ipv6-private opt-in adds isolated dual-stack Lambda subnets and IPv6-only
+ * egress; it preserves the existing VPC, public subnet group, and RDS resource.
  */
 const { Stack, RemovalPolicy, CfnOutput, Duration, Fn, Size } = require("aws-cdk-lib");
 const ec2 = require("aws-cdk-lib/aws-ec2");
@@ -47,11 +46,12 @@ class WmsWebStack extends Stack {
     const config = props.webConfig;
     const prefix = config.namePrefix;
     const enableWebRuntime = config.enableWebRuntime !== false;
-    const serverInVpc = config.serverInVpc !== false;
+    const ipv6PrivateNetwork = config.networkMode === "ipv6-private";
+    const serverInVpc = ipv6PrivateNetwork || config.serverInVpc !== false;
 
     // ─── VPC ──────────────────────────────────────────────────────────
-    // Public-only subnets (no NAT Gateway = $0).
-    // RDS is in public subnets with restricted SG (publicly accessible).
+    // The default mode preserves existing public-only topology. ipv6-private
+    // adds isolated dual-stack Lambda subnets without IPv4 NAT.
     const vpc = new ec2.Vpc(this, "Vpc", {
       vpcName: `${prefix}-vpc`,
       maxAzs: 2,
@@ -62,8 +62,38 @@ class WmsWebStack extends Stack {
           subnetType: ec2.SubnetType.PUBLIC,
           cidrMask: 24,
         },
+        ...(ipv6PrivateNetwork
+          ? [{ name: "lambda-isolated", subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 }]
+          : []),
       ],
     });
+
+    if (ipv6PrivateNetwork) {
+      // Attach IPv6 only to the new Lambda subnets. Making the existing
+      // public subnets dual-stack can replace the RDS subnet resources.
+      const ipv6Association = new ec2.CfnVPCCidrBlock(this, "LambdaIpv6Cidr", {
+        vpcId: vpc.vpcId,
+        amazonProvidedIpv6CidrBlock: true,
+      });
+      const egressOnlyInternetGateway = new ec2.CfnEgressOnlyInternetGateway(
+        this,
+        "LambdaEgressOnlyInternetGateway",
+        { vpcId: vpc.vpcId }
+      );
+      for (const [index, subnet] of vpc.isolatedSubnets.entries()) {
+        const subnetResource = subnet.node.defaultChild;
+        subnetResource.ipv6CidrBlock = Fn.select(index, Fn.cidr(
+          Fn.select(0, vpc.vpcIpv6CidrBlocks), vpc.isolatedSubnets.length, "64"
+        ));
+        subnetResource.assignIpv6AddressOnCreation = true;
+        subnetResource.addDependency(ipv6Association);
+        subnet.addRoute("Ipv6EgressOnlyRoute", {
+          destinationIpv6CidrBlock: "::/0",
+          routerId: egressOnlyInternetGateway.ref,
+          routerType: ec2.RouterType.EGRESS_ONLY_INTERNET_GATEWAY,
+        });
+      }
+    }
 
     // ─── Security Group for RDS ───────────────────────────────────────
     const dbSecurityGroup = new ec2.SecurityGroup(this, "DbSecurityGroup", {
@@ -77,14 +107,15 @@ class WmsWebStack extends Stack {
       enableWebRuntime && serverInVpc
         ? new ec2.SecurityGroup(this, "LambdaSecurityGroup", {
             vpc,
-            securityGroupName: `${prefix}-lambda-sg`,
+            securityGroupName: `${prefix}-lambda-ipv6-sg`,
             description: "Allow WMS Lambdas to reach PostgreSQL and VPC endpoints",
             allowAllOutbound: true,
+            allowAllIpv6Outbound: ipv6PrivateNetwork,
           })
         : undefined;
 
     // Allow from office IP
-    if (config.officeIpCidr && config.officeIpCidr !== "0.0.0.0/0") {
+    if (ipv6PrivateNetwork || (config.officeIpCidr && config.officeIpCidr !== "0.0.0.0/0")) {
       dbSecurityGroup.addIngressRule(
         ec2.Peer.ipv4(config.officeIpCidr),
         ec2.Port.tcp(5432),
@@ -109,7 +140,10 @@ class WmsWebStack extends Stack {
 
     vpc.addGatewayEndpoint("S3Endpoint", {
       service: ec2.GatewayVpcEndpointAwsService.S3,
-      subnets: [{ subnetType: ec2.SubnetType.PUBLIC }],
+      subnets: [
+        { subnetType: ec2.SubnetType.PUBLIC },
+        ...(ipv6PrivateNetwork ? [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }] : []),
+      ],
     });
 
     // ─── RDS PostgreSQL ───────────────────────────────────────────────
@@ -140,7 +174,7 @@ class WmsWebStack extends Stack {
       databaseName: config.dbName,
       credentials: rds.Credentials.fromSecret(dbCredentials),
       allocatedStorage: config.dbAllocatedStorageGb,
-      storageType: rds.StorageType.GP2,
+      storageType: rds.StorageType.GP3,
       multiAz: false,
       publiclyAccessible: config.rdsPubliclyAccessible !== false,
       autoMinorVersionUpgrade: true,
@@ -335,8 +369,12 @@ class WmsWebStack extends Stack {
     const webLambdaNetworkProps = serverInVpc
       ? {
           vpc,
-          vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-          allowPublicSubnet: true,
+          vpcSubnets: {
+            subnetType: ipv6PrivateNetwork
+              ? ec2.SubnetType.PRIVATE_ISOLATED
+              : ec2.SubnetType.PUBLIC,
+          },
+          ...(ipv6PrivateNetwork ? { ipv6AllowedForDualStack: true } : { allowPublicSubnet: true }),
           securityGroups: lambdaSecurityGroup ? [lambdaSecurityGroup] : undefined,
         }
       : {};
@@ -365,14 +403,17 @@ class WmsWebStack extends Stack {
         AUTH_TRUST_HOST: "true",
         DATABASE_URL: dbUrl,
         AUTH_SECRET: nextAuthSecret.secretValue.unsafeUnwrap(),
-        NEXTAUTH_URL: "https://placeholder.cloudfront.net", // Updated post-deploy (circular dep with CF)
-        NEXT_PUBLIC_APP_BASE_URL: "https://placeholder.cloudfront.net", // Updated post-deploy
+        NEXTAUTH_URL: config.appBaseUrl || "https://placeholder.cloudfront.net",
+        NEXT_PUBLIC_APP_BASE_URL: config.appBaseUrl || "https://placeholder.cloudfront.net",
         CACHE_BUCKET_NAME: assetsBucket.bucketName,
         CACHE_BUCKET_KEY_PREFIX: "_cache",
         CACHE_BUCKET_REGION: this.region,
         OPEN_NEXT_ORIGIN: "default",
         WMS_DISABLE_SYNC_EVENTS_IN_WEB: "true",
         PERF_DEBUG_LOGS: config.environment === "dev" ? "true" : "false",
+        ...(ipv6PrivateNetwork
+          ? { WMS_IPV6_EGRESS: "1", NODE_OPTIONS: "--dns-result-order=ipv6first" }
+          : {}),
       },
     });
 
@@ -403,6 +444,9 @@ class WmsWebStack extends Stack {
         BUCKET_NAME: assetsBucket.bucketName,
         BUCKET_KEY_PREFIX: "_assets",
         OPEN_NEXT_ORIGIN: "imageOptimizer",
+        ...(ipv6PrivateNetwork
+          ? { WMS_IPV6_EGRESS: "1", NODE_OPTIONS: "--dns-result-order=ipv6first" }
+          : {}),
       },
     });
 
@@ -552,7 +596,7 @@ exports.handler = async () => {
     });
 
     const warmerRuleName = `${prefix}-warmer-every-5m`;
-    new events.Rule(this, "ServerWarmerRule", {
+    if (config.enableServerWarmer !== false) new events.Rule(this, "ServerWarmerRule", {
       ruleName: `${prefix}-warmer-every-5m`,
       description: "Keep server lambda warm every 5 minutes",
       schedule: events.Schedule.rate(Duration.minutes(5)),

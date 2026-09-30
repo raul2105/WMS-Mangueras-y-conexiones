@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateFulfillmentSignals } from "@/lib/dashboard/fulfillment-dashboard";
+import { evaluateFulfillmentSignals, matchQueueFilter } from "@/lib/dashboard/fulfillment-dashboard";
 
 describe("fulfillment signals", () => {
   it("flags overdue unreleased as high risk", () => {
@@ -45,5 +45,27 @@ describe("fulfillment signals", () => {
     expect(result.riskLevel).toBe("MEDIO");
     expect(result.blockingCause).toBe("ASSEMBLY_PENDING");
     expect(result.assemblyBlocked).toBe(true);
+  });
+
+  it("matches assembly blockage independently for a mixed direct-pick and assembly order", () => {
+    const now = new Date("2026-05-10T12:00:00.000Z");
+    const result = evaluateFulfillmentSignals({
+      dueDate: new Date("2026-05-12T12:00:00.000Z"),
+      orderUpdatedAt: new Date("2026-05-10T11:00:00.000Z"),
+      assignedToUserId: "user-1",
+      hasProductLines: true,
+      hasAssemblyLines: true,
+      latestPickStatus: "COMPLETED",
+      latestPickUpdatedAt: new Date("2026-05-10T11:30:00.000Z"),
+      linkedAssemblyTotal: 1,
+      linkedAssemblyOpen: 1,
+      linkedAssemblyUpdatedAt: new Date("2026-05-10T11:45:00.000Z"),
+      now,
+      staleHours: 4,
+    });
+
+    expect(result.assemblyBlocked).toBe(true);
+    expect(matchQueueFilter(result, "assembly_blocked")).toBe(true);
+    expect(result.isOverdue).toBe(false);
   });
 });

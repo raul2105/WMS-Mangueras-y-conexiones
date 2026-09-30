@@ -24,6 +24,7 @@ describe("rbac role-route access matrix", () => {
     "/warehouse/abc",
     "/audit",
     "/purchasing/orders",
+    "/purchasing/email",
     "/purchasing/orders/new",
     "/purchasing/orders/abc",
     "/purchasing/orders/abc/receive",
@@ -61,6 +62,10 @@ describe("rbac role-route access matrix", () => {
     expect(getRequiredPermissionForPath("/production/orders/abc")).toBe("production.view");
     expect(getRequiredPermissionForPath("/sales/orders")).toBe("sales.view");
     expect(getRequiredPermissionForPath("/purchasing/orders")).toBe("purchasing.view");
+    expect(getRequiredPermissionForPath("/purchasing/email")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/api/email/gmail/connect")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/api/email/gmail/callback")).toBe("purchasing.manage");
+    expect(getRequiredPermissionForPath("/api/email/gmail/disconnect")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/purchasing/orders/new")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/purchasing/orders/abc")).toBe("purchasing.manage");
     expect(getRequiredPermissionForPath("/purchasing/orders/abc/receive")).toBe("purchasing.receive");
@@ -86,6 +91,7 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/warehouse")).toBe(true);
     expect(canAccess("MANAGER", "/warehouse/abc")).toBe(true);
     expect(canAccess("MANAGER", "/audit")).toBe(true);
+    expect(canAccess("MANAGER", "/purchasing/email")).toBe(true);
   });
 
   it("WAREHOUSE_OPERATOR can execute controlled inventory work but not adjustments, warehouse admin, or audit", () => {
@@ -95,6 +101,7 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("WAREHOUSE_OPERATOR", "/warehouse")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/warehouse/abc")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/audit")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/email")).toBe(false);
   });
 
   it("SALES_EXECUTIVE cannot access physical inventory routes or audit", () => {

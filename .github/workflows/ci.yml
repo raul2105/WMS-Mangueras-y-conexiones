@@ -6,7 +6,9 @@ on:
   pull_request:
     branches: [ main, develop ]
   schedule:
-    - cron: "0 6 * * *"
+    # 10:17 America/Mexico_City (UTC-6), Monday through Saturday.
+    # DEV starts at 08:00; avoid testing during its overnight/Sunday shutdown.
+    - cron: "17 16 * * 1-6"
   workflow_dispatch:
 
 concurrency:
@@ -76,6 +78,7 @@ jobs:
     timeout-minutes: 15
     env:
       WMS_AWS_READONLY_E2E: "1"
+      WMS_E2E_NO_CACHE: "1"
       WMS_LIVE_BASE_URL: https://d2b1ltxtvypxr4.cloudfront.net
       WMS_WEB_BASE_URL: https://d2b1ltxtvypxr4.cloudfront.net
       WMS_EXPECTED_COMMIT_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || '' }}
@@ -110,10 +113,12 @@ jobs:
       - name: Verify AWS E2E credentials are configured
         shell: bash
         run: |
-          test -n "$WMS_E2E_SALES_EXECUTIVE_EMAIL" || (echo "Missing WMS_E2E_SALES_EXECUTIVE_EMAIL" && exit 1)
-          test -n "$WMS_E2E_SALES_EXECUTIVE_PASSWORD" || (echo "Missing WMS_E2E_SALES_EXECUTIVE_PASSWORD" && exit 1)
-          test -n "$WMS_E2E_WAREHOUSE_OPERATOR_EMAIL" || (echo "Missing WMS_E2E_WAREHOUSE_OPERATOR_EMAIL" && exit 1)
-          test -n "$WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD" || (echo "Missing WMS_E2E_WAREHOUSE_OPERATOR_PASSWORD" && exit 1)
+          for role in SYSTEM_ADMIN MANAGER WAREHOUSE_OPERATOR SALES_EXECUTIVE; do
+            for field in EMAIL PASSWORD; do
+              key="WMS_E2E_${role}_${field}"
+              test -n "${!key}" || { echo "Missing $key"; exit 1; }
+            done
+          done
 
       - name: Verify deployed release metadata and database health
         run: npm run smoke:web

@@ -69,6 +69,9 @@ declare global {
 }
 
 const prisma = globalThis.prisma ?? createPrismaClient();
+// OpenNext can load this module through multiple route bundles in one Lambda
+// process. Reuse the same pool in production as well as during development.
+globalThis.prisma = prisma;
 const resolvedDatabasePath = resolveSqliteDbPath(process.env.DATABASE_URL);
 
 const prismaReady = (async () => {
@@ -97,7 +100,3 @@ void prismaReady.catch(() => undefined);
 
 export default prisma;
 export { prismaReady, resolvedDatabasePath };
-
-if (process.env.NODE_ENV !== "production") {
-  globalThis.prisma = prisma;
-}

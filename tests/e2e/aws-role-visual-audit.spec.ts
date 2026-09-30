@@ -6,6 +6,7 @@ const roles: RoleKey[] = ["SALES_EXECUTIVE", "WAREHOUSE_OPERATOR", "MANAGER", "S
 const viewports = [
   { name: "desktop-1440", width: 1440, height: 1000 },
   { name: "tablet-768", width: 768, height: 1024 },
+  { name: "narrow-desktop-1024", width: 1024, height: 900 },
   { name: "mobile-390", width: 390, height: 844 },
 ] as const;
 const themes = ["dark", "light"] as const;
@@ -76,10 +77,11 @@ test.describe("AWS DEV role visual baseline", () => {
   for (const role of roles) {
     test(`${role} home at desktop, tablet and mobile in both themes`, async ({ browser }, testInfo) => {
       await captureRoleHome(browser, role, testInfo);
-      await testInfo.attach(`${role.toLowerCase()}-pm-uat.json`, {
+      await testInfo.attach(`${role.toLowerCase()}-automated-checks.json`, {
         body: Buffer.from(JSON.stringify({
           role,
-          result: "ACCEPTED_BY_PM_PROXY",
+          result: "AUTOMATED_CHECKS_PASSED",
+          humanAcceptance: "PENDING",
           purpose: roleAcceptance[role].purpose,
           checkedViewports: viewports.map((viewport) => viewport.name),
           checkedThemes: themes,

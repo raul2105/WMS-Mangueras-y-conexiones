@@ -23,8 +23,7 @@ export default async function ManagerHomePage() {
   const overdueOrders = fulfillmentSnapshot.kpis?.overdue ?? 0;
   const alerts = fulfillmentSnapshot.alerts ?? [];
   
-  // Calculate blockers from alerts with high/critical severity
-  const activeBlockers = alerts.filter(a => a.severity === 'danger' || a.severity === 'warning').length;
+  const assemblyBlockedCount = alerts.find((alert) => alert.id === "assembly")?.count ?? 0;
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -32,7 +31,7 @@ export default async function ManagerHomePage() {
       <Suspense fallback={<ManagerHomeSkeleton />}>
         <ManagerHomeContent 
           overdueOrders={overdueOrders}
-          activeBlockers={activeBlockers}
+          assemblyBlockedCount={assemblyBlockedCount}
           purchaseDrafts={purchaseDrafts}
           purchaseAttention={purchaseAttention}
           operationalMetrics={fulfillmentSnapshot.kpis.operationalMetrics}

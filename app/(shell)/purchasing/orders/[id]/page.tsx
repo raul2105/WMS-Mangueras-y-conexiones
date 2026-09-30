@@ -15,8 +15,10 @@ import {
 import {
   buildPurchaseOrderEmailContract,
   PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS,
+  STALE_PURCHASE_ORDER_EMAIL_CLAIM_MS,
 } from "@/lib/purchasing/purchase-order-email-contract";
-import { getEmailProvider } from "@/lib/email/provider";
+import { getGmailConnectionStatus } from "@/lib/email/gmail-connection";
+import { getSessionContext } from "@/lib/auth/session-context";
 import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 const ORDER_TIMELINE = [
@@ -49,6 +51,8 @@ const EMAIL_STATUS_BADGE_VARIANTS: Record<string, "neutral" | "accent" | "succes
     SENT: "success",
     RESENT: "accent",
     FAILED: "danger",
+    SENDING: "warning",
+    SEND_UNKNOWN: "danger",
   };
 
 const mutedText = "text-[var(--text-secondary)]";
@@ -295,12 +299,11 @@ async function removeLine(orderId: string, formData: FormData) {
   redirect(`/purchasing/orders/${orderId}`);
 }
 
-async function sendPurchaseOrderEmailAction(orderId: string) {
+async function sendPurchaseOrderEmailAction(orderId: string, formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const { sendPurchaseOrderEmail } = await import("@/lib/purchasing/purchase-order-email-service");
-  const { getEmailProvider } = await import("@/lib/email/provider");
   const { getSessionContext } = await import("@/lib/auth/session-context");
   
   const sessionContext = await getSessionContext();
@@ -308,15 +311,17 @@ async function sendPurchaseOrderEmailAction(orderId: string) {
   if (!userId) {
     redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Usuario no autenticado")}`);
   }
-  
-  const provider = getEmailProvider();
-  if (!provider) {
-    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Proveedor de correo no configurado")}`);
+  if (!sessionContext.roles.includes("MANAGER")) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("El envío debe usar la cuenta Gmail del Manager responsable")}`);
   }
-  
+  const confirmUnknownResend = String(formData.get("confirmUnknownResend") ?? "") === "yes";
   const result = await sendPurchaseOrderEmail(
-    { purchaseOrderId: orderId, triggeredByUserId: userId },
-    { provider }
+    {
+      purchaseOrderId: orderId,
+      triggeredByUserId: userId,
+      triggerSource: confirmUnknownResend ? "MANUAL_RESEND_UNCERTAIN" : "MANUAL",
+      confirmUnknownResend,
+    },
   );
 
   if (!result.success) {
@@ -324,6 +329,28 @@ async function sendPurchaseOrderEmailAction(orderId: string) {
   }
 
   redirect(`/purchasing/orders/${orderId}?ok=1&emailSent=1`);
+}
+
+async function reconcileStalePurchaseOrderEmailAction(orderId: string) {
+  "use server";
+  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const { getSessionContext } = await import("@/lib/auth/session-context");
+  const sessionContext = await getSessionContext();
+  const userId = sessionContext.user?.id;
+  if (!userId || !sessionContext.roles.includes("MANAGER")) {
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent("Solo el Manager puede revisar el resultado de un envío")}`);
+  }
+  const { markStalePurchaseOrderEmailAttemptUnknown } = await import("@/lib/purchasing/purchase-order-email-service");
+  const result = await markStalePurchaseOrderEmailAttemptUnknown({ purchaseOrderId: orderId, reconciledByUserId: userId });
+  if (!result.reconciled) {
+    const message = result.status === "PO_NOT_FOUND"
+      ? "Orden de compra no encontrada"
+      : result.status === "RACE_LOST"
+        ? "El envío cambió mientras se revisaba. Actualiza la página."
+        : "El intento todavía no puede conciliarse. Actualiza la página y vuelve a revisar.";
+    redirect(`/purchasing/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+  redirect(`/purchasing/orders/${orderId}?ok=1&emailReconciled=1`);
 }
 
 export const dynamic = "force-dynamic";
@@ -358,6 +385,7 @@ export default async function PurchaseOrderDetailPage({
       emailDocumentVersionSnapshot: true,
       emailLastAttemptAt: true,
       emailLastSentAt: true,
+      emailSendClaimedAt: true,
       emailLastErrorCode: true,
       emailLastErrorMessage: true,
       supplier: { select: { id: true, code: true, name: true, businessName: true, email: true, paymentTerms: true } },
@@ -417,12 +445,19 @@ export default async function PurchaseOrderDetailPage({
       documentSnapshot = null;
     }
   }
-  const emailProvider = getEmailProvider();
+  const currentSession = await getSessionContext();
+  const managerOwnsGmail = currentSession.roles.includes("MANAGER") && Boolean(currentSession.user?.id);
+  const emailClaimStale = order.emailSendClaimedAt !== null &&
+    // eslint-disable-next-line react-hooks/purity -- server-rendered claim age uses wall-clock time.
+    Date.now() - order.emailSendClaimedAt.getTime() >= STALE_PURCHASE_ORDER_EMAIL_CLAIM_MS;
+  const gmailConnection = managerOwnsGmail && currentSession.user?.id
+    ? await getGmailConnectionStatus(currentSession.user.id)
+    : { connected: false as const };
   const emailContract = buildPurchaseOrderEmailContract({
     purchaseOrder: order,
     documentRecord,
     documentSnapshot,
-    providerConfigured: !!emailProvider,
+    providerConfigured: gmailConnection.connected && gmailConnection.status === "CONNECTED",
   });
   const allowedTransitions = TRANSITIONS[order.status] ?? [];
   const hasPending = order.lines.some((l) => l.qtyReceived < l.qtyOrdered);
@@ -703,6 +738,24 @@ export default async function PurchaseOrderDetailPage({
           </span>
         </div>
 
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-secondary)] p-3 text-sm">
+          <div>
+            <p className={`font-semibold ${primaryText}`}>Cuenta remitente</p>
+            <p className={mutedText}>
+              {gmailConnection.connected
+                ? gmailConnection.status === "CONNECTED"
+                  ? `Gmail del Manager: ${gmailConnection.email}`
+                  : `Gmail requiere reconexión: ${gmailConnection.email}`
+                : "No hay Gmail conectado para este Manager."}
+            </p>
+          </div>
+          {managerOwnsGmail && (
+            <Link href="/purchasing/email" className={buttonStyles({ variant: "secondary", size: "sm" })}>
+              {gmailConnection.connected ? "Administrar Gmail" : "Conectar Gmail"}
+            </Link>
+          )}
+        </div>
+
         <div className="grid gap-4 md:grid-cols-2 text-sm">
           <div className="space-y-1">
             <p className={`text-xs uppercase tracking-[0.18em] ${softText}`}>Destinatario</p>
@@ -733,13 +786,19 @@ export default async function PurchaseOrderDetailPage({
           <pre className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${mutedText}`}>{emailContract.body}</pre>
         </details>
 
-        {emailContract.canSend ? (
+        {emailContract.canSend && managerOwnsGmail ? (
           <form action={sendPurchaseOrderEmailAction.bind(null, id)} className="flex flex-wrap items-center gap-3">
+            {emailContract.sendState === "SEND_UNKNOWN" && (
+              <label className={`flex basis-full items-start gap-2 text-sm ${warningText}`}>
+                <input type="checkbox" name="confirmUnknownResend" value="yes" required className="mt-1" />
+                Revisé Gmail y confirmo un reenvío manual; el intento anterior pudo haberse entregado.
+              </label>
+            )}
             <button
               type="submit"
               className={buttonStyles({ variant: "primary", size: "md" })}
             >
-              Enviar OC por correo
+              {emailContract.sendState === "SEND_UNKNOWN" || emailContract.sendState === "SENT" || emailContract.sendState === "RESENT" ? "Reenviar OC por Gmail" : "Enviar OC por Gmail"}
             </button>
             <p className={`text-xs ${softText}`}>
               Se enviará a <strong>{emailContract.recipientEmail}</strong> con el PDF oficial adjunto.
@@ -747,6 +806,16 @@ export default async function PurchaseOrderDetailPage({
           </form>
         ) : (
           <>
+            {emailContract.sendState === "SENDING" && managerOwnsGmail && emailClaimStale ? (
+              <form action={reconcileStalePurchaseOrderEmailAction.bind(null, id)} className="flex flex-wrap items-center gap-3">
+                <button type="submit" className={buttonStyles({ variant: "secondary", size: "md" })}>
+                  Revisar intento sin respuesta
+                </button>
+                <p className={`text-xs ${warningText}`}>
+                  Esta revisión no envía correo; cambia el intento a resultado incierto para permitir una decisión manual.
+                </p>
+              </form>
+            ) : null}
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"

@@ -28,6 +28,25 @@ describe("operational UX state contract", () => {
     ).toMatchObject({ key: "ready_to_deliver", label: "Listo para entrega" });
   });
 
+  it("prioritizes an open exception over normal progress or delivery signals", () => {
+    expect(
+      getOperationalUxState({
+        blockingCause: "NONE",
+        activeException: { label: "Faltante operativo", reason: "Faltan dos piezas" },
+        isPartial: false,
+        assemblyBlocked: false,
+        isUnreleased: false,
+        latestPickStatus: "IN_PROGRESS",
+        canMarkDelivered: true,
+      }),
+    ).toMatchObject({
+      key: "blocked",
+      label: "Bloqueado",
+      description: "Faltante operativo: Faltan dos piezas",
+      nextAction: "Resolver excepción",
+    });
+  });
+
   it("names completed work awaiting physical delivery preparation", () => {
     expect(
       getOperationalUxState({

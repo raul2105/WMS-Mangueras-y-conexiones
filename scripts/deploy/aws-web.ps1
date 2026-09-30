@@ -293,14 +293,14 @@ function Repair-OpenNextWindowsDependencies {
 
     $imageOptimizationDir = Join-Path $openNextDir "image-optimization-function"
     $sharpPackageJson = Join-Path $imageOptimizationDir "node_modules\sharp\package.json"
-    $sharpLinuxArm64Binary = Join-Path $imageOptimizationDir "node_modules\sharp\build\Release\sharp-linux-arm64v8.node"
+    $sharpLinuxArm64Binary = Join-Path $imageOptimizationDir "node_modules\@img\sharp-linux-arm64\lib\sharp-linux-arm64-0.35.4.node"
     if ((Test-Path $sharpPackageJson) -and (Test-Path $sharpLinuxArm64Binary)) {
         return
     }
 
     Write-Warning "OpenNext no instaló dependencias Linux para image-optimization-function en Windows; aplicando reparación local."
     Invoke-Checked `
-        -Command "node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir `"$imageOptimizationDir`" --packages sharp@0.32.6 --os linux --arch arm64 --target 18 --libc glibc" `
+        -Command "node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir `"$imageOptimizationDir`" --packages sharp@0.35.4 --os linux --arch arm64 --target 22 --libc glibc" `
         -FailureMessage "No se pudieron instalar dependencias del bundle OpenNext"
 
     if (-not (Test-Path $sharpPackageJson) -or -not (Test-Path $sharpLinuxArm64Binary)) {
@@ -383,6 +383,12 @@ function Remove-WindowsPrismaArtifacts {
     $prismaRuntimeDir = Join-Path $serverBundle "node_modules\@prisma\client\runtime"
     $prismaDbFile = Join-Path $serverBundle "prisma\dev.db"
     $cleaned = 0
+    # Next's file tracing may copy the operator's local .env into the artifact.
+    # Runtime configuration must come from Lambda/Secrets Manager instead.
+    foreach ($envFile in Get-ChildItem -LiteralPath $serverBundle -Filter ".env*" -File) {
+        Remove-Item -LiteralPath $envFile.FullName -Force
+        $cleaned++
+    }
     foreach ($file in @($windowsEngines) + @($tmpFiles)) {
         if ($file -and (Test-Path -LiteralPath $file.FullName)) {
             Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue

@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
 import { InventoryService } from "@/lib/inventory-service";
@@ -8,12 +9,12 @@ import {
   createSalesRequestDraftHeader,
   releaseSalesRequestPickList,
 } from "@/lib/sales/request-service";
-import { loginAs } from "./lib/auth.helpers";
+import { loginAs, USERS } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 const enabled = process.env.WMS_AWS_WRITE_E2E === "1";
-const secondaryPassword = process.env.WMS_E2E_SECONDARY_OPERATOR_PASSWORD ?? "Operator123*";
-const tag = `QA-GATES-${Date.now().toString().slice(-8)}`;
+const secondaryPassword = randomUUID();
+const tag = `QA-GATES-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
 
 const fixture = {
   warehouseId: "",
@@ -65,10 +66,24 @@ async function createConfirmedDirectOrder(quantity = 2): Promise<GateOrder> {
 }
 
 async function cleanupFixture() {
-  if (fixture.orderIds.length) {
-    await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: fixture.orderIds } } });
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: fixture.orderIds } } });
-    await prisma.salesInternalOrder.deleteMany({ where: { id: { in: fixture.orderIds } } });
+  const scopedOrders = fixture.warehouseId
+    ? await prisma.salesInternalOrder.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })
+    : [];
+  const orderIds = [...new Set([...fixture.orderIds, ...scopedOrders.map(({ id }) => id)])];
+  const traceIds = fixture.warehouseId
+    ? (await prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })).map(({ id }) => id)
+    : [];
+  if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { traceRecordId: { in: traceIds } } });
+  if (traceIds.length) await prisma.traceRecord.deleteMany({ where: { id: { in: traceIds } } });
+  if (orderIds.length) {
+    await prisma.auditLog.deleteMany({ where: { entityId: { in: orderIds } } });
+    await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: orderIds } } });
+    await prisma.salesInternalOrder.deleteMany({ where: { id: { in: orderIds } } });
+  }
+  if (fixture.warehouseId) {
+    const locationIds = [fixture.storageLocationId, fixture.stagingLocationId, fixture.shippingLocationId].filter(Boolean);
+    await prisma.auditLog.deleteMany({ where: { entityId: fixture.warehouseId } });
+    await prisma.inventoryMovement.deleteMany({ where: { OR: [...(locationIds.length ? [{ locationId: { in: locationIds } }] : []), ...(fixture.productId ? [{ productId: fixture.productId }] : [])] } });
   }
   if (fixture.productId) {
     await prisma.inventory.deleteMany({ where: { productId: fixture.productId } });
@@ -115,7 +130,7 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
     const role = await prisma.role.findUniqueOrThrow({ where: { code: "WAREHOUSE_OPERATOR" }, select: { id: true } });
     const secondary = await prisma.user.create({
       data: {
-        email: `${tag.toLowerCase()}-operator@scmayher.com`,
+        email: `${tag.toLowerCase()}-operator@qa.invalid`,
         name: `Operador secundario ${tag}`,
         passwordHash: await bcrypt.hash(secondaryPassword, 10),
         isActive: true,
@@ -202,30 +217,31 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
     await page.getByRole("button", { name: "Exigir asignación" }).click();
     const assignmentForm = page.locator("form").filter({ hasText: "Asignación requerida" });
     await expect(assignmentForm).toBeVisible();
-    await assignmentForm.locator('select[name="assigneeUserId"]').selectOption((await prisma.user.findUniqueOrThrow({ where: { email: "operator@scmayher.com" }, select: { id: true } })).id);
+    const primaryOperatorId = (await prisma.user.findUniqueOrThrow({ where: { email: USERS.WAREHOUSE_OPERATOR.email }, select: { id: true } })).id;
+    await assignmentForm.locator('select[name="assigneeUserId"]').selectOption(primaryOperatorId);
     await assignmentForm.getByRole("button", { name: "Asignar tareas" }).click();
 
     const secondaryContext = await browser.newContext();
     const secondaryPage = await secondaryContext.newPage();
     try {
-      await loginWithCredentials(secondaryPage, `${tag.toLowerCase()}-operator@scmayher.com`, secondaryPassword, `/production/fulfillment/${order.id}`);
+      await loginWithCredentials(secondaryPage, `${tag.toLowerCase()}-operator@qa.invalid`, secondaryPassword, `/production/fulfillment/${order.id}`);
       await expect(secondaryPage.getByText("Asignada a operador")).toBeVisible();
       await expect(secondaryPage.getByRole("button", { name: "Tomar tareas" })).toHaveCount(0);
     } finally {
       await secondaryContext.close();
     }
 
-    await loginWithCredentials(page, "operator@scmayher.com", "Operator123*", `/production/fulfillment/${order.id}`);
+    await loginAs(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${order.id}`, `/production/fulfillment/${order.id}`);
     await page.getByRole("button", { name: "Tomar tareas" }).click();
     await expect(page.getByText("Tomada por ti")).toBeVisible();
     const task = await prisma.salesInternalOrderPickTask.findFirstOrThrow({ where: { orderLine: { orderId: order.id } } });
-    expect(task.assignedToUserId).toBe((await prisma.user.findUniqueOrThrow({ where: { email: "operator@scmayher.com" }, select: { id: true } })).id);
+    expect(task.assignedToUserId).toBe(primaryOperatorId);
     expect(task.claimedByUserId).toBe(task.assignedToUserId);
   });
 
   test("V7 browser registra faltante, bloquea preparación y permite decisión auditada", async ({ page }) => {
     const order = await createConfirmedDirectOrder();
-    await loginWithCredentials(page, "operator@scmayher.com", "Operator123*", `/production/fulfillment/${order.id}`);
+    await loginAs(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${order.id}`, `/production/fulfillment/${order.id}`);
     await page.getByRole("button", { name: "Tomar tareas" }).click();
     await expect(page.getByText("Tomada por ti")).toBeVisible();
     await page.locator('input[name^="scanRef__"]').first().fill(fixture.productSku);
@@ -241,7 +257,7 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
     await expect(page.getByTestId("operational-exceptions")).toContainText("FALTANTE_BROWSER_GATE");
     await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
 
-    await loginWithCredentials(page, "manager@scmayher.com", "Manager123*", `/production/requests/${order.id}`);
+    await loginAs(page, "MANAGER", `/production/requests/${order.id}`, `/production/requests/${order.id}`);
     const exceptions = page.getByTestId("operational-exceptions");
     await expect(exceptions).toContainText("OPEN");
     await exceptions.locator('select[name="resolution"]').selectOption("WAIT_REPLENISHMENT");
@@ -259,8 +275,8 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
     const secondaryPage = await secondaryContext.newPage();
     try {
       await Promise.all([
-        loginWithCredentials(primaryPage, "operator@scmayher.com", "Operator123*", `/production/fulfillment/${order.id}`),
-        loginWithCredentials(secondaryPage, `${tag.toLowerCase()}-operator@scmayher.com`, secondaryPassword, `/production/fulfillment/${order.id}`),
+        loginAs(primaryPage, "WAREHOUSE_OPERATOR", `/production/fulfillment/${order.id}`, `/production/fulfillment/${order.id}`),
+        loginWithCredentials(secondaryPage, `${tag.toLowerCase()}-operator@qa.invalid`, secondaryPassword, `/production/fulfillment/${order.id}`),
       ]);
       await Promise.all([
         Promise.all([primaryPage.waitForURL(/\/production\/fulfillment\/[^?]+\?(?:ok|error)=/), primaryPage.getByRole("button", { name: "Tomar tareas" }).click()]),

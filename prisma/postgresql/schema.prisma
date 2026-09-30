@@ -40,6 +40,7 @@ model User {
   traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
   auditLogs          AuditLog[]          @relation("AuditActorUser")
   purchaseOrderEmailAttempts PurchaseOrderEmailAttempt[] @relation("PurchaseOrderEmailTriggeredByUser")
+  gmailConnection UserGmailConnection?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -342,6 +343,7 @@ model Customer {
 
   salesInternalOrders SalesInternalOrder[]
 
+  createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([isActive])
@@ -1285,6 +1287,13 @@ enum PurchaseOrderEmailSendState {
   SENT
   RESENT
   FAILED
+  SENDING
+  SEND_UNKNOWN
+}
+
+enum UserGmailConnectionStatus {
+  CONNECTED
+  REAUTH_REQUIRED
 }
 
 model Supplier {
@@ -1349,6 +1358,8 @@ model PurchaseOrder {
   deliveryWarehouseId String?
   status       PurchaseOrderStatus @default(BORRADOR)
   emailSendState PurchaseOrderEmailSendState @default(NOT_SENT)
+  emailSendClaimToken String?
+  emailSendClaimedAt DateTime?
   emailRecipientSnapshot String?
   emailSubjectSnapshot String?
   emailBodySnapshot String?
@@ -1430,6 +1441,9 @@ model PurchaseOrderEmailAttempt {
   errorMessage    String?
   triggeredByUserId String?
   triggerSource   String
+  senderEmail     String?
+  provider        String?
+  providerMessageId String?
   createdAt       DateTime @default(now())
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -1441,6 +1455,25 @@ model PurchaseOrderEmailAttempt {
   @@index([sendState])
   @@index([triggeredByUserId])
   @@index([purchaseOrderDocumentId])
+}
+
+model UserGmailConnection {
+  id                      String                      @id @default(uuid())
+  userId                  String                      @unique
+  googleSub               String                      @unique
+  email                   String
+  encryptedRefreshToken   String                      @db.Text
+  scopes                  String
+  status                  UserGmailConnectionStatus   @default(CONNECTED)
+  connectedAt             DateTime                    @default(now())
+  lastValidatedAt         DateTime?
+  reauthRequiredAt        DateTime?
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
 }
 
 model PurchaseReceipt {

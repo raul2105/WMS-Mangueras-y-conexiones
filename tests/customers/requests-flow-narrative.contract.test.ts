@@ -16,7 +16,8 @@ describe("KAN-52 flow narrative contract", () => {
     expect(detailContent).toContain("getSalesOrderFlowNarrative");
     expect(detailContent).toContain("getSalesConsoleTimelineItems");
     expect(listContent).toContain("Seguimiento del pedido");
-    expect(detailContent).toContain("flowNarrative.nextRecommendedAction.label");
+    expect(detailContent).toContain("resolveSalesConsolePrimaryActionState");
+    expect(detailContent).toContain("primaryActionState.label");
     expect(consoleContent).toContain("Surtido / fulfillment");
     expect(consoleContent).toContain("Cancelación");
   });
@@ -44,6 +45,8 @@ describe("KAN-52 flow narrative contract", () => {
     expect(detailContent).toContain("getMarkDeliveredEligibility");
     expect(detailContent).toContain("pulledAt: order.pulledAt");
     expect(detailContent).toContain("latestPickUpdatedAt");
-    expect(detailContent).toContain("flowNarrative.nextRecommendedAction.label");
+    expect(detailContent).toContain("primaryActionState.code === \"MARK_DELIVERED\"");
+    expect(detailContent.match(/← Pedidos/g)).toHaveLength(1);
+    expect(detailContent).toContain('id="excepciones"');
   });
 });

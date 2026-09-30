@@ -870,7 +870,11 @@ exports.handler = async () => {
       });
       new cloudwatch.Alarm(this, "ProductionHttpErrorsAlarm", {
         alarmDescription: "WMS CloudFront 5xx errors; verify canonical /api/health and database availability",
-        metric: distribution.metric5xxErrorRate({ period: Duration.minutes(5), statistic: "Average" }),
+        metric: distribution.metric5xxErrorRate({
+          period: Duration.minutes(5),
+          statistic: "Average",
+          dimensionsMap: { DistributionId: distribution.distributionId, Region: "Global" },
+        }),
         threshold: 5,
         evaluationPeriods: 2,
         datapointsToAlarm: 2,

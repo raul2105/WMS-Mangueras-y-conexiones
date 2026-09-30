@@ -31,6 +31,7 @@ export default defineConfig({
     "rbac-browser.spec.ts",
     "mobile-smoke.spec.ts",
     "aws-role-visual-audit.spec.ts",
+    "aws-gmail-settings.spec.ts",
     "kan128-aws-readonly-evidence.spec.ts",
     ...(writeEnabled ? [
       "mixed-order-continuity.spec.ts",

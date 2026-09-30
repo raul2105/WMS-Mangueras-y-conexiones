@@ -4,13 +4,15 @@ Estado: en ejecución. No constituye aceptación operativa ni cierre de Jira.
 
 ## Estado vigente al 30 de septiembre
 
-Los apartados siguientes conservan la secuencia y los manifiestos de ejecución. El estado más reciente es: migraciones 24 y 25 aplicadas sobre DEV público, diff 0, huellas existentes preservadas y 114 FK validadas; RDS ya no admite PostgreSQL desde todo internet, Lambda usa subredes aisladas con salida IPv6 y cuatro servicios Google respondieron HTTPS. No hay NAT Gateway nuevo. La retención efectiva aún es un día y se debe reconciliar con los siete declarados.
+Los apartados siguientes conservan la secuencia histórica y los manifiestos; sus resultados pendientes originales no representan el estado vigente. Migraciones 24 y 25 aplicadas sobre DEV público, diff 0, huellas existentes preservadas y 114 FK validadas. RDS ya no admite PostgreSQL desde todo internet; Lambda usa subredes aisladas con salida IPv6 y cuatro servicios Google respondieron HTTPS. No hay NAT Gateway nuevo. La retención efectiva ya se verificó en siete días y el almacenamiento declarado se reconcilió con gp3 existente.
 
-El candidato incorpora Gmail independiente por Manager (permiso de envío, sin lectura del buzón ni login Google al WMS), conexiones cifradas por usuario, estados inciertos y conciliación manual auditada. Las tres pruebas de concurrencia real de correo y 13 casos de servicio pasaron en RDS; las 15 pruebas de inventario anteriormente omitidas también pasaron. La auditoría actual de dependencias indica cero avisos tras actualizar versiones y parches. La regresión de esas actualizaciones, la restauración real de snapshot y el despliegue del runtime candidato siguen en curso.
+El candidato incorpora Gmail independiente por Manager (permiso de envío, sin lectura del buzón ni login Google al WMS), conexiones cifradas por usuario, estados inciertos y conciliación manual auditada. La regresión AWS posterior a dependencias pasó 152 casos en 27 archivos, sin omitidos, y eliminó sus 27 esquemas propios. El ajuste posterior que vincula el token al remitente elegido pasó 25 casos en tres archivos AWS y eliminó sus tres esquemas. La auditoría actual de dependencias indica cero avisos. La restauración real del snapshot pasó y su instancia temporal quedó eliminada. Runtime 0904728 desplegado y DB up; el ajuste posterior de Gmail requiere nuevo candidato versionado y despliegue.
+
+Aceptación mutable del runtime 0904728: los cuatro gates V1/V5/V7/V8 pasaron en la ronda final; los pedidos directos, de ensamble, mixtos y ensamble configurado pasaron en la ronda anterior. Las rondas fallidas quedan conservadas: navegación Manager desactualizada en el arnés y reutilización de layout al cambiar de actor, corregidas antes de repetir. Limpieza final comprobó huellas de nueve tablas preservadas, cero productos/almacenes QA, 54 inventarios consistentes y 114 FK válidas. Gmail sin configuración real pasó tres pruebas fail-closed de UI/API; no demuestra entrega de correo. El CI manual 36681468354 falló por la expectativa anterior de siete enlaces Manager; requiere repetición con el arnés corregido y SHA desplegado exacto.
 
 La configuración Google está preparada en Chrome del perfil rigentec.com, proyecto wms-gmail-rigentec-20260929, con facturación Pagina Web Rigentec expresamente autorizada. Está pendiente aceptar la política Google, crear el cliente OAuth y el consentimiento individual. El envío real de Gmail y su disponibilidad para todos los Managers aún no están validados.
 
-La alerta presupuestal AWS de USD 5 no tiene filtros y cuenta toda la cuenta: reportó USD 13.941 y pronóstico USD 14.665 al consultar. No demuestra gasto exclusivo del WMS. Se preserva el objetivo del usuario, sin NAT ni infraestructura mensual nueva para las pruebas; la instancia de recuperación es temporal y debe eliminarse.
+La alerta presupuestal AWS de USD 5 no tiene filtros y cuenta toda la cuenta: reportó USD 13.941 y pronóstico USD 14.665 al consultar. No demuestra gasto exclusivo del WMS. Se preserva el objetivo del usuario, sin NAT ni infraestructura mensual nueva para las pruebas; la instancia de recuperación temporal ya se eliminó. La ventana RDS se extendió para pruebas/despliegue y se debe detener DEV al terminar, fuera del horario operativo.
 
 ## Alcance y autorización
 
@@ -18,7 +20,7 @@ El objetivo mantiene la operación completa del proyecto y todos sus perfiles: a
 
 El usuario autorizó el 29 de septiembre todas las pruebas directamente contra AWS y pidió detener la ejecución si era necesario renovar login. El login ya fue completado y STS confirmó cuenta **904891391424**, identidad **arn:aws:iam::904891391424:user/Raul_ITsupport**. El presupuesto objetivo sigue siendo **USD 5 mensuales**; el usuario permite excederlo con justificación explícita.
 
-## Fuentes actuales
+## Fuentes al inicio de la revisión (históricas)
 
 - Checkout: `codex/wms-5w2h-implementation`, HEAD `ddf3bd1dd47dcc620ab530b1948c4dee9146f800`, con cambios pendientes. Los cambios no versionados no están identificados por ese SHA.
 - PR candidato: [108](https://github.com/raul2105/WMS-Mangueras-y-conexiones/pull/108), draft al iniciar la revisión.
@@ -28,7 +30,7 @@ El usuario autorizó el 29 de septiembre todas las pruebas directamente contra A
 - Snapshot previo: `wms-dev-pre-delivery-20260929`, estado **available**, progreso 100 %. No se ha probado una restauración.
 - Jira: inventario consultado de 119 issues (71 terminados, 48 abiertos), con 17 épicas. El estado de Jira no demuestra por sí mismo ejecución AWS ni aceptación humana.
 
-## Evidencia obtenida
+## Evidencia inicial (histórica)
 
 | Comprobación | Resultado | Límite |
 |---|---|---|
@@ -66,7 +68,7 @@ El usuario autorizó el 29 de septiembre todas las pruebas directamente contra A
 - Registro de ejecución: `output/aws-postgres-full-2026-09-29.log`. Resultado pendiente.
   Resultado posterior: exit 0, 92 archivos aprobados y uno omitido; 483 casos aprobados, 14 omitidos por la condición histórica SQLite de inventario. Se eliminaron los 93 esquemas propios y se verificó su ausencia. El resultado corresponde al código cargado por esa ejecución; los cambios posteriores Gmail requieren validación separada.
 
-## Pendientes que impiden declarar el 100 %
+## Pendientes identificados al inicio (ver resolución posterior)
 
 - RDS acepta TCP/5432 desde `0.0.0.0/0` y Lambda está fuera de VPC. Restringir sólo la IP de oficina rompería Lambda; hace falta un cambio coherente de red y prueba posterior, con costo justificado.
 - Aplicar la migración candidata sobre DEV público con respaldo, comprobar diff e integridad, desplegar un candidato versionado y probar la versión exacta.
@@ -136,3 +138,25 @@ Restauración real AWS aprobada: copia cifrada disponible, huellas de siete tabl
 Regresión posterior a dependencias aprobada: awspatch20260930_067df3, 27 archivos y 152 casos aprobados, cero omitidos. Incluyó Gmail/MIME, compras, inventario/CSV, revocación de sesión, ensamble/concurrencia y exportaciones. Los 27 esquemas propios fueron eliminados y se verificó ausencia. Lint y TypeScript aprobados. Build Next de candidato aprobado; OpenNext Windows requiere reparación declarada de Sharp Linux ARM64 0.35.4. El artefacto verificado previo midió 73 MB al retirar engines ajenos, sourcemaps de Prisma y .env del operador. La privacidad Gmail se permite públicamente por ruta exacta; el build final debe contener ese cambio.
 
 Entrega candidata preparada para DEV: publicar el código revisado de esta rama, incluyendo las correcciones operativas preexistentes ya cubiertas por la regresión AWS, sin mezclar archivos personales/no relacionados que estaban sin seguimiento. Antes de ejecutar CloudFormation se revisarán replacements (RDS/VPC/subredes deben conservarse), cambios de permisos y código/release exactos. Gmail quedará sin credenciales operativas hasta completar la configuración y consentimiento Google; la UI debe explicarlo y no permitir enviar con otro proveedor global.
+
+Plan CloudFormation wms-delivery-candidate-20260930 aprobado para ejecución: 16 modificaciones, sin altas/eliminaciones, RDS/Lambdas/CloudFront sin replacement. Las referencias dinámicas de Function URLs/permisos y recursos de despliegue muestran Conditional por dependencias; no se amplían permisos IAM ni se altera la exposición pública de URLs respecto a la base. VPC/subredes/SG no cambian. RDS storage declarado se reconcilia con gp3 ya existente; retención declarada siete días, efectiva pendiente de verificar. Fuente exacta 09047288444fa8fdcdda6ee13d7bcfc9c6625dd0; release dev-09047288444f-20260930T065045Z. CI de código 36680417719 aprobada, release AWS no aplica a esa ejecución. Artefactos sin .env del operador y con binarios Linux verificados.
+
+## Manifiesto de aceptación con escritura en navegador AWS
+
+Run aws-browser-candidate-20260930, runtime CloudFront canónico de DEV y DB wms.public del RDS canónico, cuenta 904891391424/perfil Raul_ITsupport. Se ejecutará sólo tras health DB up y SHA 09047288444fa8fdcdda6ee13d7bcfc9c6625dd0. Identidades: perfiles existentes SYSTEM_ADMIN/MANAGER/WAREHOUSE_OPERATOR/SALES_EXECUTIVE y un operador QA secundario con contraseña aleatoria, sin alterar credenciales o roles existentes.
+
+Suites: aws-v1-v5-v7-v8-browser, mixed-order-continuity y sales-configured-assembly, Chromium, worker único, sin retries. Crean únicamente fixtures nuevas con códigos QA-GATES-<UUID>, QA-MIX-<UUID> y TSA<timestamp>, almacenes/ubicaciones propias, clientes propios, cuatro SKU de ensamble/directo por suite (existencias 10/10/20/10), atributos/fuente técnica aprobada y relaciones propias. Gates directos usan SKU propio, órdenes de dos unidades y movimientos/reservas de seis/cinco según el caso. Se comprueban reserva actual, ownership entre dos operadores, faltante y decisión Manager auditada, claims concurrentes, surtido/ensamble, staging/shipping, entrega y PDFs.
+
+No envían correo ni crean CFDI real. Efectos esperados: pedidos, tareas, reservas, movimientos, órdenes de producción/ensamble, rastreo, documentos/auditorías QA en almacenes propios. afterAll elimina únicamente IDs/códigos que cada suite creó; se comprobará ausencia de sus fixtures y consistencia pública después. Antes de ejecutar se guardará baseline de prefijos para no confundir restos anteriores con el run actual. Una limpieza incompleta se conserva como pendiente y se revisa por identidad exacta; no se borra catálogo previo. Evidencia bajo output/aws-browser-candidate-20260930, con reporte/trazas/capturas y log; no equivale a UAT humana ni prueba de Gmail autorizado.
+
+Runtime candidato 0904728 desplegado: UPDATE_COMPLETE y health confirma SHA/release/DB up. Retención efectiva reconciliada a siete días mediante modify-db-instance, sin pasar por cero; privacidad pública respondió 200. Primera aceptación mutable: dos casos aprobados, dos fallidos y cuatro no ejecutados por serialidad. Los dos fallos proceden del helper de pruebas: esperaba siete enlaces Manager, pero el nuevo Correo para OC añade el octavo; además el helper no limpiaba sesión al cambiar de actor en un flujo. Se actualiza el arnés para esperar la navegación vigente y establecer siempre la identidad solicitada, sin cambiar permisos de aplicación. Limpieza aprobada: huellas de nueve tablas existentes idénticas, ningún producto/almacén QA remanente, 54 inventarios consistentes y 114 FK validadas. Evidencia original preservada en output/aws-browser-candidate-20260930/first-attempt.
+
+Repetición de las mismas ocho pruebas mutable Chromium autorizadas, mismo manifiesto, con nuevos prefijos/IDs propios; log output/aws-browser-candidate-retry-20260930.log. No modifica usuarios existentes ni envía correo. La limpieza se comprobará de nuevo frente al baseline propio.
+
+Validación Gmail sin consentimiento real: tres pruebas de navegador contra CloudFront canónico, Manager existente y otros tres perfiles, sin fixtures DB/Google/correo. Comprueban privacidad pública, protección anónima, pantalla del Manager, configuración faltante explícita, CSRF/origen inválido rechazado y perfiles ajenos sin capacidad de conectar Gmail. Sólo solicitudes HTTP de lectura/POST que terminan antes de Google por configuración no disponible/permiso inválido. Capturas/trazas propias output/aws-gmail-settings-20260930; no se guarda ningún token ni se envía correo. Estas pruebas se deberán adaptar después de habilitar OAuth real; su alcance actual es fail-closed.
+
+Segunda ronda mutable: seis aprobadas, V7 falló al cambiar de operador a Manager (cabecera anterior), V8 no ejecutada. La limpieza preservó nueve huellas, eliminó fixtures propios y confirmó 54 inventarios consistentes/114 FK. Se corrige sólo el arnés: desmontar página anterior antes de borrar cookies y recargar el documento tras login antes de comprobar identidad. Tercera ronda ejecutará los cuatro gates V1/V5/V7/V8 con el mismo manifiesto AWS, nuevas fixtures propias y limpieza comprobada. Evidencia previa conservada en second-attempt; log output/aws-browser-gates-final-20260930.log.
+
+Run awssender20260930_061c: mismo RDS AWS DEV, esquemas exclusivos t_awssender20260930_061c_f<hash16>, tests Gmail de conexión, servicio de correo y concurrencia real de OC. Verifica que una reconexión entre seleccionar remitente y renovar token no envíe con identidad distinta; Google/PDF/proveedor simulados, transacciones reales en esquemas propios, sin correo ni public. Runner elimina/verifica esquemas propios. Log output/aws-sender-binding-20260930.log.
+
+La revisión fresca de accesibilidad encontró contraste transitorio insuficiente en los inputs de login: texto del tema claro se aplicaba inmediatamente mientras el fondo animaba desde el tema oscuro (2.83:1). Se retira sólo la transición de background-color de campos; borde/foco conservan transición. Se validará nuevamente en el runtime AWS del nuevo candidato; no se excluye ni relaja axe.

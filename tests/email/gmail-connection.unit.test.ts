@@ -146,13 +146,23 @@ describe("Gmail connection security", () => {
   it("does not return an access token after the connection changes or is disconnected", async () => {
     configureOAuth();
     const encryptedRefreshToken = encryptGmailRefreshToken("manager-1", "refresh-secret");
-    prismaMock.userGmailConnection.findUnique.mockResolvedValue({ encryptedRefreshToken, status: "CONNECTED" });
+    prismaMock.userGmailConnection.findUnique.mockResolvedValue({ encryptedRefreshToken, status: "CONNECTED", email: "manager@example.test" });
     prismaMock.userGmailConnection.updateMany.mockResolvedValue({ count: 0 });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ access_token: "access-secret" }), { status: 200 })));
     await expect(getGmailAccessTokenForUser("manager-1")).rejects.toThrow(/actualizar el estado/i);
     expect(prismaMock.userGmailConnection.updateMany.mock.calls[0][0].where).toEqual({
-      userId: "manager-1", status: "CONNECTED", encryptedRefreshToken,
+      userId: "manager-1", status: "CONNECTED", email: "manager@example.test", encryptedRefreshToken,
     });
+  });
+
+  it("rejects a relinked account before renewing a token for a previously selected sender", async () => {
+    configureOAuth();
+    prismaMock.userGmailConnection.findUnique.mockResolvedValue({ status: "CONNECTED", email: "new@example.test" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getGmailAccessTokenForUser("manager-1", "old@example.test")).rejects.toThrow(/cuenta Gmail cambió/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(prismaMock.userGmailConnection.updateMany).not.toHaveBeenCalled();
   });
 
   it("revokes and deletes only the disconnected grant, preserving a concurrent new connection", async () => {

@@ -217,7 +217,7 @@ describe("purchase order email service", () => {
     expect(emailService?.senderEmail).toBe("manager@example.test");
     expect(emailService?.provider.providerId).toBe("gmail");
     expect(getGmailConnectionStatus).toHaveBeenCalledWith("manager-7");
-    expect(getGmailAccessTokenForUser).toHaveBeenCalledWith("manager-7");
+    expect(getGmailAccessTokenForUser).toHaveBeenCalledWith("manager-7", "manager@example.test");
   });
 
   it("requires an explicit manual confirmation before retrying an uncertain send", async () => {

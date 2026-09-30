@@ -51,7 +51,7 @@ export const EXPECTED_HOME: Record<RoleKey, string> = {
 
 const EXPECTED_USER_META = {
   SYSTEM_ADMIN: { name: "Admin Principal", navItems: 8 },
-  MANAGER: { name: "Manager WMS", navItems: 7 },
+  MANAGER: { name: "Manager WMS", navItems: 8 },
   WAREHOUSE_OPERATOR: { name: "Operador Almacen", navItems: 5 },
   SALES_EXECUTIVE: { name: "Ejecutivo Ventas", navItems: 4 },
 } as const;
@@ -76,6 +76,12 @@ export async function loginAs(
   expectedUrl = EXPECTED_HOME[role],
 ) {
   const user = USERS[role];
+  // A workflow may switch actors on the same page. Always establish the
+  // requested identity instead of reusing the previous actor's session.
+  // Unmount the previous actor before clearing cookies: an in-flight session
+  // request must not restore that actor's cookie during the next sign-in.
+  await page.goto("about:blank");
+  await page.context().clearCookies();
   // Warm auth endpoints before the first browser login on a fresh dev server.
   // This avoids flaky first-request failures while webpack compiles auth routes.
   await page.request.get("/api/auth/session");
@@ -91,6 +97,10 @@ export async function loginAs(
   }
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page).toHaveURL(buildUrlExpectation(expectedUrl));
+
+  // Credentials sign-in can retain an existing App Router layout. Load the
+  // destination document afresh before asserting the authenticated actor.
+  await page.reload();
 
   const expectedUser = EXPECTED_USER[role];
   await expect(page.getByRole("banner")).toContainText(expectedUser.name);

@@ -249,7 +249,7 @@ export async function disconnectGmailConnection(userId: string): Promise<void> {
   }
 }
 
-export async function getGmailAccessTokenForUser(userId: string): Promise<string> {
+export async function getGmailAccessTokenForUser(userId: string, expectedEmail?: string): Promise<string> {
   let connection: Awaited<ReturnType<typeof prisma.userGmailConnection.findUnique>>;
   try {
     connection = await prisma.userGmailConnection.findUnique({ where: { userId } });
@@ -258,6 +258,9 @@ export async function getGmailAccessTokenForUser(userId: string): Promise<string
   }
   if (!connection) throw new Error("Este usuario no tiene una cuenta Gmail conectada.");
   if (connection.status !== "CONNECTED") throw new GmailReauthorizationRequiredError();
+  if (expectedEmail && connection.email !== expectedEmail) {
+    throw new Error("La cuenta Gmail cambió antes del envío; vuelve a intentar con la cuenta actual.");
+  }
   const config = requireGmailOAuthConfig();
   const refreshToken = decryptGmailRefreshToken(userId, connection.encryptedRefreshToken);
   let tokens: TokenResponse;
@@ -286,7 +289,7 @@ export async function getGmailAccessTokenForUser(userId: string): Promise<string
   }
   try {
     const validated = await prisma.userGmailConnection.updateMany({
-      where: { userId, status: "CONNECTED", encryptedRefreshToken: connection.encryptedRefreshToken },
+      where: { userId, status: "CONNECTED", email: connection.email, encryptedRefreshToken: connection.encryptedRefreshToken },
       data: { lastValidatedAt: new Date() },
     });
     if (validated.count !== 1) throw new Error("La conexión Gmail cambió durante la renovación; vuelve a intentar.");

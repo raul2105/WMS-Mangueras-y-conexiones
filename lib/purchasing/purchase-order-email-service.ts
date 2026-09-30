@@ -262,7 +262,7 @@ export async function sendPurchaseOrderEmail(
   if (!provider && managerGmail) {
     try {
       provider = createGmailEmailProvider({
-        accessToken: await getGmailAccessTokenForUser(triggeredByUserId),
+        accessToken: await getGmailAccessTokenForUser(triggeredByUserId, managerGmail.email),
         fromEmail: managerGmail.email,
       });
     } catch (error) {
@@ -413,7 +413,7 @@ export async function getEmailService(userId: string): Promise<{ provider: Email
   }
   try {
     const provider = createGmailEmailProvider({
-      accessToken: await getGmailAccessTokenForUser(userId),
+      accessToken: await getGmailAccessTokenForUser(userId, connection.email),
       fromEmail: connection.email,
     });
     return { provider, senderEmail: connection.email };

@@ -39,9 +39,9 @@ export function AdminHomeContent({
   operationalMetrics,
 }: AdminHomeContentProps) {
   const stats = [
-    { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
-    { label: 'Eventos de Auditoría', value: String(auditTotalCount), icon: AlertTriangle, color: 'text-orange-600', href: '/audit', live: true },
-    { label: 'Rastros registrados', value: String(tracesRecentCount), icon: Database, color: 'text-purple-600', href: '/trace', live: true },
+    { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-[var(--text-accent)]', iconBackground: 'bg-[var(--accent-soft)]', href: '/users', live: true },
+    { label: 'Eventos de Auditoría', value: String(auditTotalCount), icon: AlertTriangle, color: 'text-[var(--status-warning-text)]', iconBackground: 'bg-[var(--status-warning-bg)]', href: '/audit', live: true },
+    { label: 'Rastros registrados', value: String(tracesRecentCount), icon: Database, color: 'text-[var(--text-accent)]', iconBackground: 'bg-[var(--accent-soft)]', href: '/trace', live: true },
   ];
 
   return (
@@ -57,7 +57,7 @@ export function AdminHomeContent({
                     <p className="text-sm text-[var(--text-muted)]">{stat.label}</p>
                     <p className="mt-1 text-2xl font-bold text-[var(--text-primary)]">{stat.value}</p>
                   </div>
-                  <div className={`p-3 bg-gray-100 rounded-lg ${stat.color}`}>
+                  <div className={`rounded-lg p-3 ${stat.iconBackground} ${stat.color}`}>
                     <stat.icon size={24} />
                   </div>
                 </div>

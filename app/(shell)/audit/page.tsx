@@ -21,6 +21,29 @@ function parseAuditPayload(value: string | null) {
   }
 }
 
+function formatAuditSnapshot(value: string | null) {
+  if (!value) return null;
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function AuditSnapshot({ label, value }: { label: string; value: string | null }) {
+  const snapshot = formatAuditSnapshot(value);
+  return (
+    <section className="min-w-0 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] p-3">
+      <h4 className="mb-2 text-xs font-semibold text-[var(--text-primary)]">{label}</h4>
+      {snapshot ? (
+        <pre className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded bg-[var(--surface-raised)] p-2 text-xs text-[var(--text-secondary)]">{snapshot}</pre>
+      ) : (
+        <p className="text-xs text-[var(--text-muted)]">Sin datos</p>
+      )}
+    </section>
+  );
+}
+
 function formatActor(row: {
   actor: string | null;
   actorUser?: { name: string | null; email: string | null } | null;
@@ -146,8 +169,22 @@ function describeAuditEvent(row: {
     }
 
     if (row.action === "MARK_DELIVERED_TO_CUSTOMER") {
-      const deliveredAt = typeof after?.deliveredAt === "string" ? ` el ${after.deliveredAt}` : "";
+      const deliveredAt = typeof after?.deliveredToCustomerAt === "string" ? ` el ${after.deliveredToCustomerAt}` : "";
       return `${actor} marcó pedido${codePrefix} como ENTREGADO AL CLIENTE${deliveredAt}.`;
+    }
+
+    if (row.action === "REQUEST_CUSTOMER_RETURN") {
+      const reason = typeof after?.reason === "string" ? ` Motivo: ${after.reason}.` : "";
+      return `${actor} solicitó una devolución de cliente${codePrefix}.${reason}`;
+    }
+
+    if (row.action === "COMPLETE_SALES_ORDER_RETURN") {
+      const kind = typeof after?.kind === "string" ? ` (${after.kind})` : "";
+      return `${actor} recibió y cerró la devolución${kind} de pedido${codePrefix}.`;
+    }
+
+    if (row.action === "CONFIRM_CANCELLATION_AFTER_PHYSICAL_REVERSAL") {
+      return `${actor} confirmó la cancelación${codePrefix} después de completar la reversión física.`;
     }
 
     if (row.action === "CANCEL_REQUEST") {
@@ -210,7 +247,14 @@ export default async function AuditPage({
   const where = {
     ...(entityType ? { entityType: { contains: entityType } } : {}),
     ...(action ? { action: { contains: action } } : {}),
-    ...(actor ? { actor: { contains: actor } } : {}),
+    ...(actor
+      ? {
+          OR: [
+            { actor: { contains: actor } },
+            { actorUser: { is: { OR: [{ name: { contains: actor } }, { email: { contains: actor } }] } } },
+          ],
+        }
+      : {}),
     ...(source ? { source: { contains: source } } : {}),
     ...(entityId ? { entityId: { contains: entityId } } : {}),
     ...(fromDate || toDate
@@ -328,8 +372,7 @@ export default async function AuditPage({
                 <Th>Accion</Th>
                 <Th>Actor</Th>
                 <Th>Origen</Th>
-                <Th className="text-center">Before</Th>
-                <Th className="text-center">After</Th>
+                <Th>Cambios</Th>
               </tr>
             </thead>
             <tbody>
@@ -341,11 +384,24 @@ export default async function AuditPage({
                   <Td>{auditActionLabel(row.action)}</Td>
                   <Td>{formatActor(row)}</Td>
                   <Td>{row.source ?? "--"}</Td>
-                  <Td className="text-center">{row.before ? "Disponible" : "--"}</Td>
-                  <Td className="text-center">{row.after ? "Disponible" : "--"}</Td>
+                  <Td className="min-w-[13rem]">
+                    {row.before || row.after ? (
+                      <details className="w-full max-w-[36rem]">
+                        <summary className="cursor-pointer rounded px-1 py-1 font-medium text-[var(--status-info)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--status-info)]">
+                          Ver cambios
+                        </summary>
+                        <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
+                          <AuditSnapshot label="Antes" value={row.before} />
+                          <AuditSnapshot label="Después" value={row.after} />
+                        </div>
+                      </details>
+                    ) : (
+                      <span className="text-xs text-[var(--text-muted)]">Sin datos</span>
+                    )}
+                  </Td>
                 </TableRow>
               ))}
-              {rows.length === 0 ? <TableEmptyRow colSpan={8}>No hay eventos para los filtros seleccionados.</TableEmptyRow> : null}
+              {rows.length === 0 ? <TableEmptyRow colSpan={7}>No hay eventos para los filtros seleccionados.</TableEmptyRow> : null}
             </tbody>
           </Table>
         </TableWrap>

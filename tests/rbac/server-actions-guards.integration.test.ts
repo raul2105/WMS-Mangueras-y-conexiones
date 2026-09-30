@@ -134,8 +134,10 @@ describe("rbac guards in critical server actions/pages", () => {
   it("assembly release action no longer blocks warehouse operator by hardcoded role check", () => {
     const productionOrderDetail = readWorkspaceFile("app/(shell)/production/orders/[id]/page.tsx");
 
-    expect(productionOrderDetail).toContain("releaseAssemblyPickList(prisma, orderId)");
+    expect(productionOrderDetail).toContain("releaseAssemblyPickList(prisma, orderId, auditActor)");
     expect(productionOrderDetail).toContain('requirePermission("production.execute")');
+    expect(productionOrderDetail).toContain("session.user.id");
+    expect(productionOrderDetail).toContain("actorUserId: session.user.id");
     expect(productionOrderDetail).not.toContain("Operador de almacén no puede liberar surtido de ensamble");
   });
 

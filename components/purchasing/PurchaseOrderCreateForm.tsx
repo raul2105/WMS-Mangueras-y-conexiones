@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
+import { getMexicoCityDateInputValue } from "@/components/purchasing/purchase-order-date";
 
 type Option = {
   id: string;
@@ -121,7 +122,7 @@ export function PurchaseOrderCreateForm({
 
           <label className="space-y-1.5">
             <span className="text-sm font-medium text-[var(--text-primary)]">Fecha esperada de entrega</span>
-            <input name="expectedDate" type="date" min={new Date().toISOString().slice(0, 10)} className="field h-10 w-full" />
+            <input name="expectedDate" type="date" min={getMexicoCityDateInputValue()} className="field h-10 w-full" />
           </label>
 
           <label className="space-y-1.5">
@@ -204,7 +205,7 @@ export function PurchaseOrderCreateForm({
                   </label>
                   <p className="text-sm text-[var(--text-secondary)] sm:text-right">
                     <span className="block text-xs text-[var(--text-muted)]">Subtotal estimado</span>
-                    {line.unitPrice === null ? "Precio pendiente" : line.unitPrice.toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
+                    {line.unitPrice === null ? "Precio pendiente" : (line.unitPrice * line.qtyOrdered).toLocaleString("es-MX", { style: "currency", currency: "MXN" })}
                   </p>
                   <button
                     type="button"

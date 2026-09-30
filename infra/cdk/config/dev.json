@@ -1,5 +1,7 @@
 {
   "environment": "dev",
+  "productionMode": true,
+  "accountId": "904891391424",
   "region": "us-east-1",
   "namePrefix": "wms-web-dev",
   "stackName": "WmsWebDevStack",

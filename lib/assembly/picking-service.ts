@@ -3,6 +3,7 @@ import { InventoryServiceError } from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { assertAssemblyOperationalCompatibility } from "@/lib/assembly/compatibility-guard";
+import type { AssemblyMutationActor } from "@/lib/assembly/work-order-service";
 
 type Tx = Prisma.TransactionClient;
 
@@ -193,7 +194,29 @@ async function moveReservedToWipInTx(args: {
   return movement.id;
 }
 
-export async function releaseAssemblyPickList(prisma: PrismaClient, productionOrderId: string) {
+export async function claimAssemblyPickListReleaseInTx(
+  tx: Tx,
+  assemblyWorkOrderId: string,
+  releasedAt = new Date(),
+) {
+  const claimed = await tx.assemblyWorkOrder.updateMany({
+    where: { id: assemblyWorkOrderId, pickStatus: "NOT_RELEASED", canceledAt: null },
+    data: { pickStatus: "RELEASED", releasedAt, updatedAt: releasedAt },
+  });
+  if (claimed.count !== 1) {
+    throw new InventoryServiceError(
+      "CONCURRENT_ORDER_TRANSITION",
+      "La orden de ensamble cambió durante otra operación; actualice la pantalla y reintente",
+    );
+  }
+  return releasedAt;
+}
+
+export async function releaseAssemblyPickList(
+  prisma: PrismaClient,
+  productionOrderId: string,
+  actor?: AssemblyMutationActor,
+) {
   return prisma.$transaction(async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: productionOrderId },
@@ -206,8 +229,9 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
         assemblyWorkOrder: {
           select: {
             id: true,
+            pickStatus: true,
+            canceledAt: true,
             pickLists: {
-              where: { status: { in: ["DRAFT", "RELEASED", "IN_PROGRESS", "PARTIAL"] } },
               orderBy: { createdAt: "desc" },
               take: 1,
               select: { id: true, status: true },
@@ -222,6 +246,24 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
     const pickList = order.assemblyWorkOrder.pickLists[0];
     if (!pickList) {
       throw new InventoryServiceError("PICKLIST_NOT_FOUND", "Pick list not found for assembly order");
+    }
+
+    if (order.status === "CANCELADA" || order.assemblyWorkOrder.canceledAt ||
+        order.assemblyWorkOrder.pickStatus === "CANCELED" || pickList.status === "CANCELLED") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Cannot release a cancelled assembly order");
+    }
+    if (order.status !== "ABIERTA" && order.status !== "EN_PROCESO") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Assembly order is not in an operational state");
+    }
+    if (pickList.status !== "DRAFT") {
+      if (order.assemblyWorkOrder.pickStatus === "NOT_RELEASED") {
+        throw new InventoryServiceError("INVALID_ORDER_STATE", "Pick list and assembly order release states do not match");
+      }
+      // Repeated release requests are safe no-ops and must never reset picking progress.
+      return;
+    }
+    if (order.assemblyWorkOrder.pickStatus !== "NOT_RELEASED") {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "Assembly order is not in a releasable state");
     }
 
     if (order.sourceDocumentType !== "SalesInternalOrder" || !order.sourceDocumentId) {
@@ -252,35 +294,46 @@ export async function releaseAssemblyPickList(prisma: PrismaClient, productionOr
 
     const compatibilityRevalidation = await assertAssemblyOperationalCompatibility(tx, order.id, "RELEASE_PICK_LIST");
 
-    if (pickList.status === "DRAFT") {
-      await tx.pickList.update({
-        where: { id: pickList.id },
-        data: { status: "RELEASED", releasedAt: new Date() },
-      });
+    const releasedAt = await claimAssemblyPickListReleaseInTx(tx, order.assemblyWorkOrder.id);
+    const pickListClaim = await tx.pickList.updateMany({
+      where: { id: pickList.id, status: "DRAFT" },
+      data: { status: "RELEASED", releasedAt, updatedAt: releasedAt },
+    });
+    if (pickListClaim.count !== 1) {
+      throw new InventoryServiceError(
+        "CONCURRENT_ORDER_TRANSITION",
+        "La lista de surtido cambió durante otra operación; actualice la pantalla y reintente",
+      );
     }
 
-    await tx.assemblyWorkOrder.update({
-      where: { id: order.assemblyWorkOrder.id },
-      data: { pickStatus: "RELEASED" },
-    });
-
     if (order.status === "ABIERTA") {
-      await tx.productionOrder.update({
-        where: { id: order.id },
-        data: { status: "EN_PROCESO" },
+      const orderClaim = await tx.productionOrder.updateMany({
+        where: { id: order.id, status: "ABIERTA" },
+        data: { status: "EN_PROCESO", updatedAt: releasedAt },
       });
+      if (orderClaim.count !== 1) {
+        throw new InventoryServiceError("CONCURRENT_ORDER_TRANSITION", "La orden de producción cambió durante la liberación; actualice la pantalla y reintente");
+      }
     }
 
     await createAuditLogSafeWithDb({
       entityType: "ASSEMBLY_ORDER",
       entityId: order.id,
       action: "RELEASE_PICK_LIST",
-      actor: "system",
+      actor: actor?.actor ?? "system",
+      actorUserId: actor?.actorUserId ?? null,
       source: "assembly/picking-service",
+      before: {
+        orderStatus: order.status,
+        pickStatus: order.assemblyWorkOrder.pickStatus,
+        pickListStatus: pickList.status,
+      },
       after: {
         pickListId: pickList.id,
-        pickListStatus: pickList.status === "DRAFT" ? "RELEASED" : pickList.status,
+        pickListStatus: "RELEASED",
+        pickStatus: "RELEASED",
         orderStatus: order.status === "ABIERTA" ? "EN_PROCESO" : order.status,
+        releasedAt: releasedAt.toISOString(),
         compatibilityRevalidation,
       },
     }, tx);

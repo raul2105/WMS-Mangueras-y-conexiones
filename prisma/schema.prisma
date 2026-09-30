@@ -555,6 +555,7 @@ model SalesInternalOrderLine {
   productId String?
   requestedQty Float
   notes String?
+  technicalSelectionSnapshot String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

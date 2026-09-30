@@ -1,10 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
+import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { loginAs, USERS } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 const tag = `QA-MIX-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
+const secondaryPassword = randomUUID();
 
 const fixture = {
   warehouseId: "",
@@ -14,6 +16,8 @@ const fixture = {
   orderId: "",
   productionOrderId: "",
   salesUserId: "",
+  warehouseOperatorId: "",
+  secondaryOperatorId: "",
   technicalSourceId: "",
   shippingLocationId: "",
   warehouseCode: `${tag}-WH`,
@@ -35,38 +39,81 @@ async function loginFresh(page: Page, role: "MANAGER" | "SALES_EXECUTIVE" | "WAR
   await loginAs(page, role, callbackUrl, callbackUrl);
 }
 
+async function loginWithCredentials(page: Page, email: string, password: string, callbackUrl: string) {
+  await page.context().clearCookies();
+  await page.goto(`/logout?e2eNonce=${Date.now()}`);
+  await page.context().clearCookies();
+  await page.goto(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}&e2eNonce=${Date.now()}`);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Contrasena").fill(password);
+  await page.getByRole("button", { name: "Iniciar sesion" }).click();
+  await expect(page).toHaveURL(new RegExp(callbackUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+}
+
 async function cleanupFixture() {
   const scopedOrders = fixture.warehouseId
     ? await prisma.salesInternalOrder.findMany({
         where: { warehouseId: fixture.warehouseId },
-        select: { id: true },
+        select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } },
       })
     : [];
   const scopedProductionOrders = fixture.warehouseId
     ? await prisma.productionOrder.findMany({
         where: { warehouseId: fixture.warehouseId },
-        select: { id: true },
+        select: {
+          id: true,
+          items: { select: { id: true } },
+          assemblyConfiguration: { select: { id: true } },
+          assemblyWorkOrder: {
+            select: {
+              id: true,
+              lines: { select: { id: true, pickTasks: { select: { id: true } } } },
+              pickLists: { select: { id: true, tasks: { select: { id: true } } } },
+            },
+          },
+        },
       })
     : [];
   const orderIds = scopedOrders.map((order) => order.id);
   const productionIds = scopedProductionOrders.map((order) => order.id);
+  const childEntityIds = [
+    ...scopedOrders.flatMap((order) => [order.id, ...order.lines.map((line) => line.id), ...order.pickLists.flatMap((list) => [list.id, ...list.tasks.map((task) => task.id)])]),
+    ...scopedProductionOrders.flatMap((order) => [
+      order.id,
+      ...order.items.map((item) => item.id),
+      ...(order.assemblyConfiguration ? [order.assemblyConfiguration.id] : []),
+      ...(order.assemblyWorkOrder ? [
+        order.assemblyWorkOrder.id,
+        ...order.assemblyWorkOrder.lines.flatMap((line) => [line.id, ...line.pickTasks.map((task) => task.id)]),
+        ...order.assemblyWorkOrder.pickLists.flatMap((list) => [list.id, ...list.tasks.map((task) => task.id)]),
+      ] : []),
+    ]),
+  ];
+  const inventoryEntityIds = fixture.productIds.flatMap((productId) => [
+    ...fixture.locationIds.map((locationId) => `${productId}:${locationId}`),
+    ...fixture.locationIds.flatMap((fromLocationId) => fixture.locationIds
+      .filter((toLocationId) => toLocationId !== fromLocationId)
+      .map((toLocationId) => `${productId}:${fromLocationId}->${toLocationId}`)),
+  ]);
+  const movementScope = [
+    ...(orderIds.length ? [{ documentId: { in: orderIds } }] : []),
+    ...(productionIds.length ? [{ documentId: { in: productionIds } }] : []),
+    ...(fixture.productIds.length ? [{ productId: { in: fixture.productIds } }] : []),
+    ...(fixture.locationIds.length ? [{ locationId: { in: fixture.locationIds } }] : []),
+  ];
   const traceIds = fixture.warehouseId
     ? (await prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })).map(({ id }) => id)
     : [];
   if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { traceRecordId: { in: traceIds } } });
   if (traceIds.length) await prisma.traceRecord.deleteMany({ where: { id: { in: traceIds } } });
-  const auditEntityIds = [...orderIds, ...productionIds, ...fixture.productIds, ...fixture.locationIds, fixture.warehouseId].filter(Boolean);
+  const auditEntityIds = [...childEntityIds, ...inventoryEntityIds, ...fixture.productIds, ...fixture.locationIds, fixture.warehouseId].filter(Boolean);
   if (auditEntityIds.length) await prisma.auditLog.deleteMany({ where: { entityId: { in: auditEntityIds } } });
+  if (inventoryEntityIds.length) await prisma.syncEvent.deleteMany({ where: { entityType: "INVENTORY", entityId: { in: inventoryEntityIds } } });
 
   if (orderIds.length || productionIds.length || fixture.productIds.length || fixture.locationIds.length) {
     await prisma.inventoryMovement.deleteMany({
       where: {
-        OR: [
-          orderIds.length ? { documentId: { in: orderIds } } : undefined,
-          productionIds.length ? { documentId: { in: productionIds } } : undefined,
-          fixture.productIds.length ? { productId: { in: fixture.productIds } } : undefined,
-          fixture.locationIds.length ? { locationId: { in: fixture.locationIds } } : undefined,
-        ].filter(Boolean) as never[],
+        OR: movementScope,
       },
     });
   }
@@ -93,6 +140,26 @@ async function cleanupFixture() {
   if (fixture.warehouseId) {
     await prisma.warehouse.deleteMany({ where: { id: fixture.warehouseId } });
   }
+  if (fixture.secondaryOperatorId) {
+    await prisma.user.delete({ where: { id: fixture.secondaryOperatorId } });
+  }
+
+  const residualCounts = await Promise.all([
+    fixture.warehouseId ? prisma.warehouse.count({ where: { id: fixture.warehouseId } }) : 0,
+    fixture.customerId ? prisma.customer.count({ where: { id: fixture.customerId } }) : 0,
+    fixture.productIds.length ? prisma.product.count({ where: { id: { in: fixture.productIds } } }) : 0,
+    fixture.locationIds.length ? prisma.location.count({ where: { id: { in: fixture.locationIds } } }) : 0,
+    orderIds.length ? prisma.salesInternalOrder.count({ where: { id: { in: orderIds } } }) : 0,
+    productionIds.length ? prisma.productionOrder.count({ where: { id: { in: productionIds } } }) : 0,
+    fixture.secondaryOperatorId ? prisma.user.count({ where: { id: fixture.secondaryOperatorId } }) : 0,
+    auditEntityIds.length ? prisma.auditLog.count({ where: { entityId: { in: auditEntityIds } } }) : 0,
+    inventoryEntityIds.length ? prisma.syncEvent.count({ where: { entityType: "INVENTORY", entityId: { in: inventoryEntityIds } } }) : 0,
+    traceIds.length ? prisma.traceRecord.count({ where: { id: { in: traceIds } } }) : 0,
+    traceIds.length ? prisma.labelPrintJob.count({ where: { traceRecordId: { in: traceIds } } }) : 0,
+    movementScope.length ? prisma.inventoryMovement.count({ where: { OR: movementScope } }) : 0,
+    fixture.productIds.length ? prisma.inventory.count({ where: { productId: { in: fixture.productIds } } }) : 0,
+  ]);
+  expect(residualCounts).toEqual(Array(residualCounts.length).fill(0));
 }
 
 test.describe.serial("mixed sales order continuity", () => {
@@ -102,6 +169,23 @@ test.describe.serial("mixed sales order continuity", () => {
       select: { id: true },
     });
     fixture.salesUserId = salesUser.id;
+    fixture.warehouseOperatorId = (await prisma.user.findUniqueOrThrow({
+      where: { email: USERS.WAREHOUSE_OPERATOR.email },
+      select: { id: true },
+    })).id;
+
+    const operatorRole = await prisma.role.findUniqueOrThrow({ where: { code: "WAREHOUSE_OPERATOR" }, select: { id: true } });
+    const secondaryOperator = await prisma.user.create({
+      data: {
+        email: `${tag.toLowerCase()}-operator@qa.invalid`,
+        name: `Operador secundario ${tag}`,
+        passwordHash: await bcrypt.hash(secondaryPassword, 10),
+        isActive: true,
+        userRoles: { create: [{ roleId: operatorRole.id }] },
+      },
+      select: { id: true },
+    });
+    fixture.secondaryOperatorId = secondaryOperator.id;
 
     const warehouse = await prisma.warehouse.create({
       data: { code: fixture.warehouseCode, name: `Almacén ${tag}`, isActive: true },
@@ -162,7 +246,7 @@ test.describe.serial("mixed sales order continuity", () => {
     await prisma.$disconnect();
   });
 
-  test("completes a direct-product order and downloads its operational documents", async ({ page }) => {
+  test("V2/V6/V8 direct order reserves, fulfills under assignment, and prepares/delivers idempotently", async ({ browser, page }) => {
     await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new", "/production/requests/new");
     await page.getByLabel("Selecciona o crea el cliente").fill(fixture.customerName);
     await page.getByRole("button", { name: new RegExp(fixture.customerName) }).click();
@@ -186,6 +270,11 @@ test.describe.serial("mixed sales order continuity", () => {
     });
     expect(directOrder.lines).toHaveLength(1);
     expect(directOrder.lines[0]?.lineKind).toBe("PRODUCT");
+    const directInventory = await prisma.inventory.findFirstOrThrow({ where: { productId: fixture.productIds[3], locationId: fixture.locationIds[0] } });
+    expect(directInventory.reserved).toBe(directOrder.lines[0]?.requestedQty);
+    const draftPickList = await prisma.salesInternalOrderPickList.findFirstOrThrow({ where: { orderId: directOrder.id }, include: { tasks: true } });
+    expect(draftPickList.status).toBe("DRAFT");
+    expect(draftPickList.tasks).toHaveLength(1);
 
     await loginFresh(page, "MANAGER", `/production/requests/${directOrder.id}`);
     await page.getByRole("button", { name: "Confirmar pedido" }).click();
@@ -200,18 +289,39 @@ test.describe.serial("mixed sales order continuity", () => {
     await page.getByRole("link", { name: "Descargar lista de surtido" }).click();
     expect((await pickDownload).suggestedFilename()).toMatch(/^surtido-.*\.pdf$/);
     await page.getByRole("button", { name: "Liberar surtido directo" }).click();
+    await loginFresh(page, "MANAGER", `/production/fulfillment/${directOrder.id}`);
+    const requireAssignment = page.locator("form").filter({ hasText: "¿Requiere asignación manual?" });
+    await requireAssignment.locator('input[name="reason"]').fill("V2/V6 ownership fixture");
+    await requireAssignment.getByRole("button", { name: "Exigir asignación" }).click();
+    const assignmentForm = page.locator("form").filter({ hasText: "Asignación requerida" });
+    await assignmentForm.locator('select[name="assigneeUserId"]').selectOption(fixture.warehouseOperatorId);
+    await assignmentForm.getByRole("button", { name: "Asignar tareas" }).click();
+
+    await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${directOrder.id}`);
     await page.getByRole("button", { name: "Tomar tareas" }).click();
-    const operatorId = (await prisma.user.findUniqueOrThrow({ where: { email: USERS.WAREHOUSE_OPERATOR.email }, select: { id: true } })).id;
+    const operatorId = fixture.warehouseOperatorId;
     const claimedTask = await prisma.salesInternalOrderPickTask.findFirstOrThrow({ where: { orderLine: { orderId: directOrder.id } } });
     expect(claimedTask.claimedByUserId).toBe(operatorId);
+    expect(claimedTask.assignedToUserId).toBe(operatorId);
+    expect(claimedTask.assignmentMode).toBe("MANAGER_REQUIRED");
+    const pickList = await prisma.salesInternalOrderPickList.findFirstOrThrow({
+      where: { orderId: directOrder.id },
+      include: { targetLocation: { select: { code: true, usageType: true } } },
+    });
+    expect(pickList.targetLocation.usageType).toBe("STAGING");
     await page.locator('input[name^="scanRef__"]').first().fill(fixture.directSku);
     await page.getByRole("button", { name: "Confirmar surtido" }).click();
     await expect(page.getByTestId("fulfillment-next-action")).toContainText("Surtido directo terminado");
+    await expect(prisma.salesInternalOrderPickList.findFirstOrThrow({ where: { orderId: directOrder.id }, select: { status: true } })).resolves.toMatchObject({ status: "COMPLETED" });
     await page.goto(`/production/requests/${directOrder.id}`);
     await expect(page.getByTestId("prepare-for-delivery-form")).toBeVisible();
 
     await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
     await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
+    await loginWithCredentials(page, `${tag.toLowerCase()}-operator@qa.invalid`, secondaryPassword, `/production/requests/${directOrder.id}`);
+    await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
+    await expect(prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: directOrder.id }, select: { preparedForDeliveryAt: true } })).resolves.toMatchObject({ preparedForDeliveryAt: null });
+    await expect(prisma.auditLog.count({ where: { entityId: directOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).resolves.toBe(0);
     await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/requests/${directOrder.id}`);
     const preparationForm = page.getByTestId("prepare-for-delivery-form");
     const preparedLocation = preparationForm.locator('select[name="preparedLocationId"]');
@@ -228,18 +338,47 @@ test.describe.serial("mixed sales order continuity", () => {
     ]);
     await expect(page).toHaveURL(/error=/);
     await expect(prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: directOrder.id }, select: { preparedForDeliveryAt: true } })).resolves.toMatchObject({ preparedForDeliveryAt: null });
+    await expect(prisma.auditLog.count({ where: { entityId: directOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).resolves.toBe(0);
     await preparedLocation.selectOption(fixture.shippingLocationId);
     await page.getByLabel("Nota (opcional)").fill("Fixture directo preparado para entrega");
-    await Promise.all([
-      page.waitForURL(/\?ok=/),
-      page.getByRole("button", { name: "Preparar para entrega" }).click(),
-    ]);
+
+    const duplicatePrepContext = await browser.newContext();
+    const duplicatePrepPage = await duplicatePrepContext.newPage();
+    try {
+      await loginAs(duplicatePrepPage, "WAREHOUSE_OPERATOR", `/production/requests/${directOrder.id}`, `/production/requests/${directOrder.id}`);
+      const duplicatePrepLocation = duplicatePrepPage.locator('[data-testid="prepare-for-delivery-form"] select[name="preparedLocationId"]');
+      await duplicatePrepLocation.selectOption(fixture.shippingLocationId);
+      await duplicatePrepPage.getByLabel("Nota (opcional)").fill("Fixture directo preparado para entrega");
+      await Promise.all([
+        page.waitForURL(/\?ok=/),
+        duplicatePrepPage.waitForURL(/\?ok=/),
+        page.getByRole("button", { name: "Preparar para entrega" }).click(),
+        duplicatePrepPage.getByRole("button", { name: "Preparar para entrega" }).click(),
+      ]);
+    } finally {
+      await duplicatePrepContext.close();
+    }
     await expect(page.getByTestId("prepared-for-delivery-summary")).toContainText("Preparado para entrega");
 
     await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
     await page.getByLabel("Recibió *").fill("Cliente QA directo");
     await page.getByLabel("Método de entrega *").fill("Entrega directa");
-    await page.getByRole("button", { name: "Confirmar entrega al cliente" }).click();
+    const movementsBeforeDelivery = await prisma.inventoryMovement.count({ where: { documentId: directOrder.id } });
+    const duplicateDeliveryContext = await browser.newContext();
+    const duplicateDeliveryPage = await duplicateDeliveryContext.newPage();
+    try {
+      await loginAs(duplicateDeliveryPage, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`, `/production/requests/${directOrder.id}`);
+      await duplicateDeliveryPage.getByLabel("Recibió *").fill("Cliente QA directo");
+      await duplicateDeliveryPage.getByLabel("Método de entrega *").fill("Entrega directa");
+      await Promise.all([
+        page.waitForURL(/\?ok=/),
+        duplicateDeliveryPage.waitForURL(/\?ok=/),
+        page.getByRole("button", { name: "Confirmar entrega al cliente" }).click(),
+        duplicateDeliveryPage.getByRole("button", { name: "Confirmar entrega al cliente" }).click(),
+      ]);
+    } finally {
+      await duplicateDeliveryContext.close();
+    }
     const deliveryDownload = page.waitForEvent("download");
     await page.getByRole("link", { name: "Descargar comprobante de entrega" }).click();
     expect((await deliveryDownload).suggestedFilename()).toMatch(/^entrega-.*\.pdf$/);
@@ -251,12 +390,26 @@ test.describe.serial("mixed sales order continuity", () => {
 
     const finalOrder = await prisma.salesInternalOrder.findUniqueOrThrow({
       where: { id: directOrder.id },
-      select: { preparedForDeliveryAt: true, preparedForDeliveryNotes: true, preparedForDeliveryLocation: { select: { code: true } }, deliveredToCustomerAt: true },
+      select: { preparedForDeliveryAt: true, preparedForDeliveryNotes: true, preparedForDeliveryByUserId: true, preparedForDeliveryLocation: { select: { code: true } }, deliveredToCustomerAt: true, deliveredByUserId: true },
     });
+    const [preparedAudit, deliveredAudit] = await Promise.all([
+      prisma.auditLog.findFirst({ where: { entityId: directOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" }, orderBy: { createdAt: "desc" } }),
+      prisma.auditLog.findFirst({ where: { entityId: directOrder.id, action: "MARK_DELIVERED_TO_CUSTOMER" }, orderBy: { createdAt: "desc" } }),
+    ]);
     expect(finalOrder.preparedForDeliveryAt).toBeTruthy();
     expect(finalOrder.preparedForDeliveryLocation?.code).toBe(`${tag}-SHIP`);
     expect(finalOrder.preparedForDeliveryNotes).toBe("Fixture directo preparado para entrega");
     expect(finalOrder.deliveredToCustomerAt).toBeTruthy();
+    expect(finalOrder.preparedForDeliveryByUserId).toBe(operatorId);
+    expect(preparedAudit?.actorUserId).toBe(operatorId);
+    expect(deliveredAudit?.actorUserId).toBe(finalOrder.deliveredByUserId);
+    expect(deliveredAudit?.actorUserId).toBe(fixture.salesUserId);
+    expect(await prisma.auditLog.count({ where: { entityId: directOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: directOrder.id, action: "MARK_DELIVERED_TO_CUSTOMER" } })).toBe(1);
+    expect(await prisma.inventoryMovement.count({ where: { documentId: directOrder.id } })).toBeGreaterThan(0);
+    expect(await prisma.inventoryMovement.count({ where: { documentId: directOrder.id } })).toBe(movementsBeforeDelivery + 1);
+    expect(await prisma.inventoryMovement.count({ where: { documentType: "SALES_INTERNAL_ORDER_DELIVERY", documentId: directOrder.id, type: "OUT" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: directOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(1);
   });
 
   test("completes an assembly-only order without requiring a direct pick", async ({ page }) => {
@@ -309,15 +462,23 @@ test.describe.serial("mixed sales order continuity", () => {
     await continueAssembly.click();
     const production = await prisma.productionOrder.findFirstOrThrow({
       where: { sourceDocumentId: assemblyOrder.id },
-      select: { id: true },
+      include: { assemblyWorkOrder: { include: { pickLists: true } } },
     });
+    expect(await prisma.productionOrder.count({ where: { sourceDocumentId: assemblyOrder.id } })).toBe(1);
+    expect(production.status).toBe("ABIERTA");
+    expect(production.assemblyWorkOrder?.reservationStatus).toBe("RESERVED");
+    expect(production.assemblyWorkOrder?.pickLists[0]?.status).toBe("DRAFT");
     await expect(page).toHaveURL(new RegExp(`/production/orders/${production.id}`));
+    await page.goto(`/production/requests/${assemblyOrder.id}`);
+    await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
+    await page.goto(`/production/orders/${production.id}`);
     await page.getByRole("button", { name: "Liberar materiales" }).click();
     await page.getByLabel("Operador").fill(`Operador ${tag}`);
     await page.getByTestId("confirm-assembly-materials").click({ noWaitAfter: true });
     await expect(page.getByText(/orden cerrada\/consumida/i)).toBeVisible({ timeout: 60_000 });
     await page.getByRole("link", { name: "Volver al pedido" }).click();
     await expect(page.getByTestId("prepare-for-delivery-form")).toBeVisible();
+    expect(await prisma.auditLog.count({ where: { entityId: assemblyOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(0);
     await page.getByTestId("prepare-for-delivery-form").locator('select[name="preparedLocationId"]').selectOption(fixture.shippingLocationId);
     await page.getByRole("button", { name: "Preparar para entrega" }).click();
     await expect(page.getByTestId("prepared-for-delivery-summary")).toContainText("Preparado para entrega");
@@ -329,10 +490,14 @@ test.describe.serial("mixed sales order continuity", () => {
     await expect(page.getByRole("link", { name: "Descargar comprobante de entrega" })).toBeVisible();
     const finalOrder = await prisma.salesInternalOrder.findUniqueOrThrow({
       where: { id: assemblyOrder.id },
-      select: { preparedForDeliveryAt: true, deliveredToCustomerAt: true },
+      select: { preparedForDeliveryAt: true, preparedForDeliveryByUserId: true, preparedForDeliveryLocation: { select: { usageType: true } }, deliveredToCustomerAt: true },
     });
     expect(finalOrder.preparedForDeliveryAt).toBeTruthy();
+    expect(finalOrder.preparedForDeliveryByUserId).toBe((await prisma.user.findUniqueOrThrow({ where: { email: USERS.WAREHOUSE_OPERATOR.email }, select: { id: true } })).id);
+    expect(finalOrder.preparedForDeliveryLocation?.usageType).toBe("SHIPPING");
     expect(finalOrder.deliveredToCustomerAt).toBeTruthy();
+    expect(await prisma.auditLog.count({ where: { entityId: assemblyOrder.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: assemblyOrder.id, action: "COMPLETE_WAREHOUSE_ASSEMBLY" } })).toBe(1);
   });
 
   test("maintains one continuous route from a mixed order to delivery", async ({ page }) => {
@@ -394,7 +559,19 @@ test.describe.serial("mixed sales order continuity", () => {
     const continueAssembly = page.getByRole("link", { name: /Continuar ensamble/ });
     await expect(page.getByTestId("fulfillment-next-action")).toContainText("Continuar ensamble");
     await expect(continueAssembly).toHaveAttribute("href", /\/production\/orders\//);
-    await continueAssembly.click();
+    await page.goto(`/production/requests/${order.id}`);
+    await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
+    const pendingProduction = await prisma.productionOrder.findFirstOrThrow({
+      where: { sourceDocumentId: order.id },
+      select: { status: true },
+    });
+    expect(pendingProduction.status).toBe("ABIERTA");
+    expect(await prisma.salesInternalOrderPickList.count({ where: { orderId: order.id, status: "COMPLETED" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: order.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { entityId: order.id, action: "MARK_DELIVERED_TO_CUSTOMER" } })).toBe(0);
+    await page.goto(`/production/fulfillment/${order.id}`);
+    await expect(page.getByRole("link", { name: /Continuar ensamble/ })).toBeVisible();
+    await page.getByRole("link", { name: /Continuar ensamble/ }).click();
 
     const production = await prisma.productionOrder.findFirstOrThrow({
       where: { sourceDocumentId: order.id },
@@ -433,12 +610,26 @@ test.describe.serial("mixed sales order continuity", () => {
     ]);
 
     const [finalOrder, finalAssembly] = await Promise.all([
-      prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: order.id }, select: { preparedForDeliveryAt: true, preparedForDeliveryLocation: { select: { code: true } }, deliveredToCustomerAt: true } }),
+      prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: order.id }, select: { preparedForDeliveryAt: true, preparedForDeliveryByUserId: true, preparedForDeliveryLocation: { select: { code: true, usageType: true } }, deliveredToCustomerAt: true, deliveredByUserId: true } }),
       prisma.productionOrder.findUniqueOrThrow({ where: { id: production.id }, select: { status: true } }),
+    ]);
+    const [preparedAudit, deliveredAudit] = await Promise.all([
+      prisma.auditLog.findFirst({ where: { entityId: order.id, action: "MARK_PREPARED_FOR_DELIVERY" } }),
+      prisma.auditLog.findFirst({ where: { entityId: order.id, action: "MARK_DELIVERED_TO_CUSTOMER" } }),
     ]);
     expect(finalOrder.preparedForDeliveryAt).toBeTruthy();
     expect(finalOrder.preparedForDeliveryLocation?.code).toBe(`${tag}-SHIP`);
+    expect(finalOrder.preparedForDeliveryLocation?.usageType).toBe("SHIPPING");
+    expect(finalOrder.preparedForDeliveryByUserId).toBe((await prisma.user.findUniqueOrThrow({ where: { email: USERS.WAREHOUSE_OPERATOR.email }, select: { id: true } })).id);
     expect(finalOrder.deliveredToCustomerAt).toBeTruthy();
+    expect(finalOrder.deliveredByUserId).toBe(fixture.salesUserId);
+    expect(preparedAudit?.actorUserId).toBe(finalOrder.preparedForDeliveryByUserId);
+    expect(deliveredAudit?.actorUserId).toBe(finalOrder.deliveredByUserId);
+    expect(await prisma.auditLog.count({ where: { entityId: order.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: order.id, action: "MARK_DELIVERED_TO_CUSTOMER" } })).toBe(1);
+    expect(await prisma.inventoryMovement.count({ where: { documentId: order.id } })).toBeGreaterThan(0);
     expect(finalAssembly.status).toBe("COMPLETADA");
+    expect(await prisma.salesInternalOrderPickList.count({ where: { orderId: order.id, status: "COMPLETED" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: order.id, action: "COMPLETE_WAREHOUSE_ASSEMBLY" } })).toBe(1);
   });
 });

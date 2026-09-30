@@ -17,7 +17,11 @@ export const dynamic = "force-dynamic";
 
 async function requireAssemblyExecutePermission(orderId: string) {
   try {
-    await (await import("@/lib/rbac")).requirePermission("production.execute");
+    const session = await (await import("@/lib/rbac")).requirePermission("production.execute");
+    return {
+      actorUserId: session.user.id,
+      actor: session.user.name ?? session.user.email ?? session.user.id,
+    };
   } catch {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent("No tienes permisos para operar ensamble")}`);
   }
@@ -25,7 +29,8 @@ async function requireAssemblyExecutePermission(orderId: string) {
 
 async function requireProductionExecutePermission(orderId: string) {
   try {
-    await (await import("@/lib/rbac")).requirePermission("production.execute");
+    const session = await (await import("@/lib/rbac")).requirePermission("production.execute");
+    return { actorUserId: session.user.id, actor: session.user.name ?? session.user.email ?? session.user.id };
   } catch {
     redirect(`/production/orders/${orderId}?error=${encodeURIComponent("No tienes permisos para operar la orden")}`);
   }
@@ -42,10 +47,10 @@ async function releaseAssemblyPick(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireAssemblyExecutePermission(orderId);
+  const auditActor = await requireAssemblyExecutePermission(orderId);
 
   try {
-    await releaseAssemblyPickList(prisma, orderId);
+    await releaseAssemblyPickList(prisma, orderId, auditActor);
   } catch (error) {
     const message = error instanceof InventoryServiceError
       ? error.message
@@ -60,10 +65,10 @@ async function confirmAssemblyBatch(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireAssemblyExecutePermission(orderId);
+  const auditActor = await requireAssemblyExecutePermission(orderId);
   const sessionCtx = await getSessionContext();
 
-  const operatorName = String(formData.get("operatorName") ?? "").trim();
+  const operatorName = auditActor.actor;
   const taskIds = formData
     .getAll("taskIds")
     .map((value) => String(value).trim())
@@ -122,7 +127,7 @@ async function confirmAssemblyBatch(formData: FormData) {
       orderState?.assemblyWorkOrder?.consumptionStatus !== "CONSUMED";
 
     if (canAutoClose) {
-      await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName, sessionCtx.user.id);
+      await closeAssemblyWorkOrderConsume(prisma, orderId, operatorName, auditActor.actorUserId);
       autoClosed = true;
     }
   } catch (error) {
@@ -153,9 +158,9 @@ async function cancelAssemblyOrder(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireAssemblyExecutePermission(orderId);
+  const auditActor = await requireAssemblyExecutePermission(orderId);
   try {
-    await cancelAssemblyWorkOrder(prisma, orderId);
+    await cancelAssemblyWorkOrder(prisma, orderId, auditActor);
   } catch (error) {
     const message = error instanceof InventoryServiceError
       ? error.message
@@ -178,7 +183,7 @@ async function addGenericItem(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireProductionExecutePermission(orderId);
+  const auditActor = await requireProductionExecutePermission(orderId);
 
   const parsed = productionOrderItemSchema.safeParse({
     orderId,
@@ -193,6 +198,7 @@ async function addGenericItem(formData: FormData) {
 
   try {
     await addGenericOrderItem(prisma, {
+      auditActor,
       orderId: parsed.data.orderId,
       productId: parsed.data.productId,
       locationId: parsed.data.locationId,
@@ -212,7 +218,7 @@ async function updateGenericItem(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireProductionExecutePermission(orderId);
+  const auditActor = await requireProductionExecutePermission(orderId);
 
   const itemId = String(formData.get("itemId") ?? "").trim();
   const quantityRaw = String(formData.get("quantityRaw") ?? "").trim();
@@ -222,7 +228,7 @@ async function updateGenericItem(formData: FormData) {
   }
 
   try {
-    await updateGenericOrderItemQty(prisma, { orderId, itemId, quantity });
+    await updateGenericOrderItemQty(prisma, { orderId, itemId, quantity, auditActor });
   } catch (error) {
     const message = error instanceof InventoryServiceError
       ? error.message
@@ -237,7 +243,7 @@ async function removeGenericItem(formData: FormData) {
   "use server";
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireProductionExecutePermission(orderId);
+  const auditActor = await requireProductionExecutePermission(orderId);
 
   const itemId = String(formData.get("itemId") ?? "").trim();
   if (!itemId) {
@@ -245,7 +251,7 @@ async function removeGenericItem(formData: FormData) {
   }
 
   try {
-    await removeGenericOrderItem(prisma, { orderId, itemId });
+    await removeGenericOrderItem(prisma, { orderId, itemId, auditActor });
   } catch (error) {
     const message = error instanceof InventoryServiceError
       ? error.message
@@ -261,7 +267,7 @@ async function transitionGenericStatus(formData: FormData) {
   const orderId = String(formData.get("orderId") ?? "").trim();
   const targetStatus = String(formData.get("targetStatus") ?? "").trim();
   if (!orderId) redirect("/production");
-  await requireProductionExecutePermission(orderId);
+  const auditActor = await requireProductionExecutePermission(orderId);
 
   const validTargets = new Set(["BORRADOR", "ABIERTA", "EN_PROCESO", "COMPLETADA", "CANCELADA"]);
   if (!validTargets.has(targetStatus)) {
@@ -270,6 +276,7 @@ async function transitionGenericStatus(formData: FormData) {
 
   try {
     const result = await transitionGenericOrderStatus(prisma, {
+      auditActor,
       orderId,
       targetStatus: targetStatus as "BORRADOR" | "ABIERTA" | "EN_PROCESO" | "COMPLETADA" | "CANCELADA",
     });

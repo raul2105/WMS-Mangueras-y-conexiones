@@ -124,6 +124,12 @@ function Load-WebConfig {
     }
 
     $config = Get-Content $path -Raw | ConvertFrom-Json
+    if ($env:WMS_OFFICE_IP_CIDR) {
+        $config.officeIpCidr = $env:WMS_OFFICE_IP_CIDR
+    }
+    if ($env:WMS_NETWORK_MODE) {
+        $config.networkMode = $env:WMS_NETWORK_MODE
+    }
     $required = @("environment", "region", "namePrefix", "stackName", "dbName", "dbUsername", "officeIpCidr")
     foreach ($key in $required) {
         if (-not $config.$key) {
@@ -218,24 +224,62 @@ function Build-DatabaseUrlFromStack {
     $passwordEnc = [System.Uri]::EscapeDataString($password)
     # connection_limit: conservative per-instance pool for db.t4g.micro.
     # pool_timeout: fail faster to avoid long perceived hangs in login/actions.
-    return "postgresql://${usernameEnc}:${passwordEnc}@${rdsEndpoint}:${rdsPort}/${dbname}?schema=public&connection_limit=2&pool_timeout=5"
+    return "postgresql://${usernameEnc}:${passwordEnc}@${rdsEndpoint}:${rdsPort}/${dbname}?schema=public&connection_limit=2&pool_timeout=5&sslmode=require"
 }
 
 function Assert-ProdConfigSafe {
     param([pscustomobject]$Config)
 
-    if ($Config.environment -ne "prod") {
+    if ($Config.environment -ne "prod" -and -not $Config.productionMode) {
         return
+    }
+
+    if ($Config.productionMode -and $Config.scheduleControl.enabled) {
+        throw "Producción no puede tener apagado programado de desarrollo."
+    }
+    if ($Config.productionMode -and [string]$Config.accountId -notmatch '^\d{12}$') {
+        throw "La promoción operativa exige una cuenta AWS explícita."
     }
 
     $officeIp = [string]$Config.officeIpCidr
     if (-not $officeIp -or $officeIp -eq "0.0.0.0/0" -or $officeIp -eq "CHANGE_ME/32") {
         throw "Configuración insegura para prod: officeIpCidr debe estar restringido y no puede ser '$officeIp'."
     }
+    $parsedOfficeIp = $null
+    if (-not $officeIp.EndsWith('/32') -or -not [System.Net.IPAddress]::TryParse($officeIp.Substring(0, $officeIp.Length - 3), [ref]$parsedOfficeIp) -or $parsedOfficeIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "Producción exige una dirección IPv4 /32 válida para el acceso administrativo."
+    }
 }
 
 function Set-AwsSdkCredentialsFromProfile {
     param([string]$CurrentProfile)
+
+    if ($CurrentProfile -notmatch '^[A-Za-z0-9_-]+$') { throw 'Perfil AWS inválido.' }
+    $usingLoginProvider = $env:WMS_AWS_LOGIN_PROFILE -eq $CurrentProfile -and $env:WMS_AWS_LOGIN_CONFIG_FILE
+    $loginSession = if ($usingLoginProvider) { 'configured' } else {
+        aws configure get login_session --profile $CurrentProfile 2>$null
+    }
+    if ($loginSession) {
+        # SDK/CDK operations can outlive a single console-login credential.
+        # Let credential_process refresh it instead of pinning an expiring copy.
+        if (-not $usingLoginProvider) {
+            $originalConfig = if ($env:AWS_CONFIG_FILE) { $env:AWS_CONFIG_FILE } else { Join-Path $env:USERPROFILE '.aws\config' }
+            $env:WMS_AWS_LOGIN_CONFIG_FILE = (Resolve-Path -LiteralPath $originalConfig).Path
+            $env:WMS_AWS_LOGIN_PROFILE = $CurrentProfile
+            $providerScript = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'aws-login-credential-process.cjs')).Path
+            $nodePath = (Get-Command node -ErrorAction Stop).Source
+            if ($providerScript.Contains('"') -or $nodePath.Contains('"')) { throw 'Ruta del proveedor inválida.' }
+            $providerDirectory = Join-Path $projectRoot 'output'
+            [System.IO.Directory]::CreateDirectory($providerDirectory) > $null
+            $providerConfig = Join-Path $providerDirectory ('aws-sdk-session-' + [Guid]::NewGuid().ToString('N') + '.ini')
+            @("[profile $CurrentProfile]", "region = $($config.region)", ('credential_process = "' + $nodePath + '" "' + $providerScript + '"')) | Set-Content -LiteralPath $providerConfig -Encoding ascii
+            $env:AWS_CONFIG_FILE = $providerConfig
+        }
+        foreach ($credentialKey in @('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_CREDENTIAL_EXPIRATION')) {
+            Remove-Item "Env:$credentialKey" -ErrorAction SilentlyContinue
+        }
+        return
+    }
 
     $result = Invoke-AwsCliWithRetry -Arguments @(
         "configure", "export-credentials",
@@ -534,7 +578,7 @@ function Update-LambdaEnvironment {
         $config.Variables | Add-Member -NotePropertyName "WMS_DISABLE_SYNC_EVENTS_IN_WEB" -NotePropertyValue "true" -Force
         $changed = $true
     }
-    $perfDebugExpected = if ($Environment -eq "dev") { "true" } else { "false" }
+    $perfDebugExpected = if ($runtimeEnvironment -eq "dev") { "true" } else { "false" }
     if (-not $config.Variables.PERF_DEBUG_LOGS -or $config.Variables.PERF_DEBUG_LOGS -ne $perfDebugExpected) {
         $config.Variables | Add-Member -NotePropertyName "PERF_DEBUG_LOGS" -NotePropertyValue $perfDebugExpected -Force
         $changed = $true
@@ -543,8 +587,8 @@ function Update-LambdaEnvironment {
         $config.Variables | Add-Member -NotePropertyName "APP_VERSION" -NotePropertyValue $packageVersion -Force
         $changed = $true
     }
-    if (-not $config.Variables.WMS_ENVIRONMENT -or $config.Variables.WMS_ENVIRONMENT -ne $Environment) {
-        $config.Variables | Add-Member -NotePropertyName "WMS_ENVIRONMENT" -NotePropertyValue $Environment -Force
+    if (-not $config.Variables.WMS_ENVIRONMENT -or $config.Variables.WMS_ENVIRONMENT -ne $runtimeEnvironment) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_ENVIRONMENT" -NotePropertyValue $runtimeEnvironment -Force
         $changed = $true
     }
     if (-not $config.Variables.WMS_COMMIT_SHA -or $config.Variables.WMS_COMMIT_SHA -ne $commitSha) {
@@ -705,6 +749,9 @@ function Invoke-AuthSmokeCheck {
 
 $restoreDefaultClient = $false
 $config = Load-WebConfig -TargetEnvironment $Environment
+$runtimeEnvironment = if ($config.productionMode -or $config.environment -eq "prod") { "prod" } else { $config.environment }
+$releaseId = "$runtimeEnvironment-$($commitSha.Substring(0, [Math]::Min(12, $commitSha.Length)))-$releaseTimestamp"
+$env:WMS_RELEASE_ID = $releaseId
 $resolvedStackName = if ($StackName) { $StackName } else { [string]$config.stackName }
 $resolvedLambdaFunctionName = if ($LambdaFunctionName) { $LambdaFunctionName } else { "$($config.namePrefix)-server" }
 $webRuntimeEnabled = ($null -eq $config.enableWebRuntime) -or [bool]$config.enableWebRuntime
@@ -724,12 +771,15 @@ try {
             throw $identityResult.Output
         }
         $identity = $identityResult.Output | ConvertFrom-Json
+        if ($config.accountId -and $identity.Account -ne $config.accountId) {
+            throw 'La identidad AWS no pertenece a la cuenta operativa configurada.'
+        }
         Write-Host "  Account: $($identity.Account) | ARN: $($identity.Arn)"
         $env:CDK_DEFAULT_ACCOUNT = [string]$identity.Account
         $env:CDK_DEFAULT_REGION = [string]$config.region
         Set-AwsSdkCredentialsFromProfile -CurrentProfile $Profile
     } catch {
-        throw "AWS credentials expired or unavailable. Run: aws sso login --profile $Profile"
+        throw "AWS credentials expired or unavailable. Renew the configured login for profile $Profile."
     }
 
     Write-Host "  Environment: $Environment"
@@ -812,7 +862,7 @@ try {
             -OutputsMap $outputsAfterDeploy
 
         Write-Phase "6" "Running smoke checks..."
-        Write-Host "  Expected prod protections: deletionProtection=$([bool]($config.environment -eq 'prod'))"
+        Write-Host "  Expected prod protections: deletionProtection=$([bool]($runtimeEnvironment -eq 'prod'))"
         Write-Host "  Expected DB secret resolved: $($outputsAfterDeploy['DbSecretArn'])"
 
         try {
@@ -821,8 +871,8 @@ try {
             if (-not $health.ok -or $health.db -ne "up") {
                 throw "Health degradado: ok=$($health.ok), db=$($health.db)"
             }
-            if ($health.environment -ne $Environment) {
-                throw "Entorno desplegado '$($health.environment)' no coincide con '$Environment'."
+            if ($health.environment -ne $runtimeEnvironment) {
+                throw "Entorno desplegado '$($health.environment)' no coincide con '$runtimeEnvironment'."
             }
             if ($health.commitSha -ne $commitSha) {
                 throw "SHA desplegado '$($health.commitSha)' no coincide con '$commitSha'."

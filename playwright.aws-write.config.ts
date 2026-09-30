@@ -20,7 +20,9 @@ export default defineConfig({
   outputDir: "test-results/aws-write",
   use: {
     baseURL,
-    trace: "on",
+    // Authenticated traces include request bodies and session material.
+    // Preserve visual proof without exporting private operational credentials.
+    trace: "off",
     screenshot: "on",
     video: "retain-on-failure",
   },

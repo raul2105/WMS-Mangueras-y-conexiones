@@ -42,7 +42,7 @@ async function releaseDirectPick(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.fulfillment.release_direct_pick");
   const requestId = await getRequestId();
-  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const authorizedSession = await (await import("@/lib/rbac")).requirePermission("production.execute");
 
   const parsed = salesOrderPickListTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -52,7 +52,10 @@ async function releaseDirectPick(formData: FormData) {
 
   try {
     const servicePerf = startPerf("action.production.fulfillment.release_direct_pick.service");
-    await releaseSalesRequestPickList(prisma, orderId);
+    await releaseSalesRequestPickList(prisma, orderId, {
+      actorUserId: authorizedSession.user.id,
+      actor: authorizedSession.user.name ?? authorizedSession.user.email ?? authorizedSession.user.id,
+    });
     servicePerf.end({ requestId, orderId });
     perf.end({ requestId, orderId, ok: true });
   } catch (error) {

@@ -24,10 +24,10 @@ export function ManagerHomeContent({
   operationalMetrics,
 }: ManagerHomeContentProps) {
   const stats = [
-    { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-red-600', href: '/production/requests?queue=overdue', live: true },
-    { label: 'Ensambles bloqueados', value: String(assemblyBlockedCount), icon: Flag, color: 'text-purple-600', href: '/production/requests?queue=assembly_blocked', live: true },
-    { label: 'OC por confirmar', value: String(purchaseDrafts), icon: ShoppingCart, color: 'text-amber-600', href: '/purchasing/orders?preset=borrador', live: true },
-    { label: 'Recepciones a resolver', value: String(purchaseAttention), icon: Truck, color: 'text-orange-600', href: '/purchasing/orders?preset=parciales', live: true },
+    { label: 'Pedidos Atrasados', value: String(overdueOrders), icon: AlertCircle, color: 'text-[var(--status-danger-text)]', iconBackground: 'bg-[var(--status-danger-bg)]', href: '/production/requests?queue=overdue', live: true },
+    { label: 'Ensambles bloqueados', value: String(assemblyBlockedCount), icon: Flag, color: 'text-[var(--text-accent)]', iconBackground: 'bg-[var(--accent-soft)]', href: '/production/requests?queue=assembly_blocked', live: true },
+    { label: 'OC por confirmar', value: String(purchaseDrafts), icon: ShoppingCart, color: 'text-[var(--status-warning-text)]', iconBackground: 'bg-[var(--status-warning-bg)]', href: '/purchasing/orders?preset=borrador', live: true },
+    { label: 'Recepciones a resolver', value: String(purchaseAttention), icon: Truck, color: 'text-[var(--status-warning-text)]', iconBackground: 'bg-[var(--status-warning-bg)]', href: '/purchasing/orders?preset=parciales', live: true },
   ];
 
   return (
@@ -42,7 +42,7 @@ export function ManagerHomeContent({
                     <p className="text-sm text-[var(--text-muted)]">{stat.label}</p>
                     <p className="mt-1 text-2xl font-bold text-[var(--text-primary)]">{stat.value}</p>
                   </div>
-                  <div className={`p-3 bg-gray-100 rounded-lg ${stat.color}`}>
+                  <div className={`rounded-lg p-3 ${stat.iconBackground} ${stat.color}`}>
                     <stat.icon size={24} />
                   </div>
                 </div>

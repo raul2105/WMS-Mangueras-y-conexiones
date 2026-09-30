@@ -2,6 +2,8 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { getCustomerById, resolveCustomerSnapshot } from "@/lib/customers/customer-service";
 import { cancelAssemblyWorkOrder, configureAssemblyOrderExact, createAssemblyOrderDraftHeader } from "@/lib/assembly/work-order-service";
+import type { AssemblyMutationActor } from "@/lib/assembly/types";
+import { evaluateCompatibilityRules, PRODUCT_SUBSTITUTION_RULE_TYPE } from "@/lib/catalog/compatibility";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
 import { startPerf } from "@/lib/perf";
 import { getAssemblyQuantityPolicy, getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
@@ -19,12 +21,16 @@ type ProductLineInput = {
   productId: string;
   requestedQty: number;
   notes?: string | null;
+  auditActor?: AssemblyMutationActor;
+  equivalenceOriginalProductId?: string | null;
 };
 
 type InitialProductLineInput = {
   productId: string;
   requestedQty: number;
   notes?: string | null;
+  auditActor?: AssemblyMutationActor;
+  equivalenceOriginalProductId?: string | null;
 };
 
 type AssemblyLineInput = {
@@ -43,6 +49,7 @@ type AssemblyLineInput = {
   application?: string | null;
   assemblyMethod?: string | null;
   compatibilityReviewApproved?: boolean;
+  auditActor?: AssemblyMutationActor;
 };
 
 export type CreateSalesRequestDraftArgs = {
@@ -54,6 +61,7 @@ export type CreateSalesRequestDraftArgs = {
   notes?: string | null;
   requestedByUserId?: string | null;
   requestedByRoles?: string[] | null;
+  auditActor?: AssemblyMutationActor;
   initialProductLine?: InitialProductLineInput | null;
 };
 
@@ -62,7 +70,7 @@ export type CreateSalesRequestAssemblyArgs = CreateSalesRequestDraftArgs & {
 };
 
 export type CreateSalesRequestLineInput =
-  | { kind: "PRODUCT"; productId: string; requestedQty: number; notes?: string | null }
+  | { kind: "PRODUCT"; productId: string; requestedQty: number; notes?: string | null; equivalenceOriginalProductId?: string | null }
   | {
       kind: "ASSEMBLY";
       entryFittingProductId: string;
@@ -360,7 +368,42 @@ export async function reconcileSalesRequestReservations(
   });
 }
 
-async function ensureEditableOrder(tx: Tx, orderId: string) {
+type TrustedSalesActor = AssemblyMutationActor & { roles: string[] };
+
+async function resolveTrustedSalesActor(tx: Tx, actor?: AssemblyMutationActor): Promise<TrustedSalesActor | undefined> {
+  if (!actor) return undefined;
+  const user = await tx.user.findUnique({
+    where: { id: actor.actorUserId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      isActive: true,
+      userRoles: { where: { role: { isActive: true } }, select: { role: { select: { code: true } } } },
+    },
+  });
+  if (!user?.isActive) {
+    throw new InventoryServiceError("FORBIDDEN", "El usuario autenticado ya no está activo o no existe");
+  }
+  return {
+    actorUserId: user.id,
+    actor: user.name || user.email || user.id,
+    roles: user.userRoles.map(({ role }) => role.code),
+  };
+}
+
+function canManageAnySalesRequest(actor: TrustedSalesActor) {
+  return actor.roles.includes("MANAGER") || actor.roles.includes("SYSTEM_ADMIN");
+}
+
+function assertSalesRequestOwner(order: { requestedByUserId: string | null }, actor?: TrustedSalesActor) {
+  if (actor && !canManageAnySalesRequest(actor) && order.requestedByUserId !== actor.actorUserId) {
+    throw new InventoryServiceError("FORBIDDEN", "Solo puedes modificar solicitudes propias");
+  }
+}
+
+async function ensureEditableOrder(tx: Tx, orderId: string, auditActor?: AssemblyMutationActor) {
+  const trustedActor = await resolveTrustedSalesActor(tx, auditActor);
   const order = await tx.salesInternalOrder.findUnique({
     where: { id: orderId },
     select: {
@@ -371,12 +414,14 @@ async function ensureEditableOrder(tx: Tx, orderId: string) {
       dueDate: true,
       warehouseId: true,
       notes: true,
+      requestedByUserId: true,
     },
   });
 
   if (!order) {
     throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
   }
+  assertSalesRequestOwner(order, trustedActor);
   if (order.status !== "BORRADOR") {
     throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se puede editar un pedido en borrador");
   }
@@ -613,7 +658,12 @@ async function buildProductAllocations(
   return allocations;
 }
 
-async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId: string) {
+async function rebuildDraftProductPickList(
+  tx: Tx,
+  prisma: PrismaClient,
+  orderId: string,
+  auditActor?: AssemblyMutationActor,
+) {
   const perf = startPerf("sales.rebuild_draft_product_picklist");
   const loadPerf = startPerf("sales.rebuild_draft_product_picklist.load_order");
   const order = await tx.salesInternalOrder.findUnique({
@@ -730,7 +780,7 @@ async function rebuildDraftProductPickList(tx: Tx, prisma: PrismaClient, orderId
     entityType: "SALES_INTERNAL_ORDER",
     entityId: order.id,
     action: "REBUILD_DIRECT_PICKLIST",
-    actor: "system",
+    ...auditFields(auditActor),
     source: "sales/request-service",
     after: {
       pickListCode,
@@ -753,12 +803,137 @@ function isInventoryServiceError(error: unknown, code: string) {
   return error instanceof InventoryServiceError && error.code === code;
 }
 
+function auditFields(actor: AssemblyMutationActor | undefined) {
+  return { actor: actor?.actor ?? "system", actorUserId: actor?.actorUserId ?? null };
+}
+
+async function buildTechnicalSelectionSnapshot(
+  tx: Tx,
+  args: { originalProductId?: string | null; selectedProductId: string; warehouseId: string | null; requestedQty: number; actor?: AssemblyMutationActor },
+) {
+  const originalProductId = args.originalProductId?.trim();
+  if (!originalProductId) return null;
+  const actor = await resolveTrustedSalesActor(tx, args.actor);
+  if (!actor) throw new InventoryServiceError("FORBIDDEN", "La selección de una equivalencia requiere un actor autenticado");
+  if (!args.warehouseId) throw new InventoryServiceError("WAREHOUSE_REQUIRED", "Selecciona un almacén antes de elegir un producto equivalente");
+  if (originalProductId === args.selectedProductId) throw new InventoryServiceError("INVALID_EQUIVALENCE", "El producto original y el sustituto deben ser distintos");
+
+  const equivalence = await tx.productEquivalence.findFirst({
+    where: {
+      active: true,
+      OR: [
+        { productId: originalProductId, equivProductId: args.selectedProductId },
+        { productId: args.selectedProductId, equivProductId: originalProductId },
+      ],
+    },
+    select: {
+      id: true, productId: true, equivProductId: true, basisNorm: true, basisDash: true,
+      sourceSheet: true, notes: true,
+    },
+  });
+  if (!equivalence) throw new InventoryServiceError("EQUIVALENCE_UNAVAILABLE", "La equivalencia seleccionada ya no está activa");
+
+  const [original, selected, rules, warehouse] = await Promise.all([
+    tx.product.findUnique({ where: { id: originalProductId }, select: { id: true, sku: true, name: true, brand: true, type: true, attributes: true } }),
+    tx.product.findUnique({ where: { id: args.selectedProductId }, select: { id: true, sku: true, name: true, brand: true, type: true, attributes: true } }),
+    tx.productCompatibilityRule.findMany({
+      where: {
+        active: true,
+        governanceStatus: "APPROVED",
+        ruleType: PRODUCT_SUBSTITUTION_RULE_TYPE,
+        source: { status: "APPROVED" },
+        OR: [
+          { productId: originalProductId, compatibleProductId: args.selectedProductId },
+          { productId: args.selectedProductId, compatibleProductId: originalProductId },
+        ],
+      },
+      select: {
+        id: true, productId: true, compatibleProductId: true, ruleType: true, description: true,
+        severity: true, decision: true, governanceStatus: true, ruleRevision: true,
+        validFrom: true, validTo: true, maxWorkingPressureBar: true, minTemperatureC: true,
+        maxTemperatureC: true, medium: true, application: true, assemblyMethod: true,
+        source: { select: { id: true, supplierName: true, documentRef: true, documentVersion: true, sourceUrl: true, status: true, reviewedAt: true, reviewedByUserId: true } },
+      },
+    }),
+    tx.warehouse.findUnique({ where: { id: args.warehouseId }, select: { id: true, isActive: true } }),
+  ]);
+  if (!original || !selected) throw new InventoryServiceError("PRODUCT_NOT_FOUND", "El producto de origen o sustituto ya no existe");
+  if (original.type !== selected.type) throw new InventoryServiceError("INVALID_EQUIVALENCE", "La sustitución técnica debe conservar la familia del producto original");
+  if (!warehouse?.isActive) throw new InventoryServiceError("WAREHOUSE_NOT_FOUND", "El almacén está inactivo o no existe");
+  if (rules.some((rule) => !rule.source?.reviewedAt || !rule.source.reviewedByUserId
+    || !rule.source.supplierName.trim() || !rule.source.documentRef.trim() || !rule.source.documentVersion?.trim())) {
+    throw new InventoryServiceError("TECHNICAL_SOURCE_NOT_APPROVED", "La evidencia de compatibilidad ya no tiene fabricante, documento y versión verificables");
+  }
+  const evaluatedAt = new Date();
+  const decision = evaluateCompatibilityRules([original.id, selected.id], rules, { evaluatedAt });
+  if (decision.status !== "APPROVED") {
+    throw new InventoryServiceError("EQUIVALENCE_REQUIRES_REVIEW", "La regla técnica aprobada ya no es vigente o requiere contexto técnico adicional");
+  }
+  const matchedRuleIds = new Set(decision.matchedRules.map((rule) => `${rule.productId}:${rule.compatibleProductId}:${rule.ruleType}:${rule.ruleRevision}`));
+  const approvedRules = rules.filter((rule) => matchedRuleIds.has(`${rule.productId}:${rule.compatibleProductId}:${rule.ruleType}:${rule.ruleRevision}`));
+  const availableRows = await tx.inventory.findMany({
+    where: {
+      productId: selected.id,
+      location: { warehouseId: args.warehouseId, isActive: true, usageType: "STORAGE", warehouse: { isActive: true } },
+    },
+    select: { available: true },
+  });
+  const availableAtSelection = availableRows.reduce((total, row) => total + row.available, 0);
+  return JSON.stringify({
+    version: 1,
+    selectedAt: evaluatedAt.toISOString(),
+    actor: { userId: actor.actorUserId, name: actor.actor },
+    originalProduct: original,
+    selectedProduct: selected,
+    equivalence: {
+      id: equivalence.id,
+      productId: equivalence.productId,
+      equivProductId: equivalence.equivProductId,
+      basisNorm: equivalence.basisNorm,
+      basisDash: equivalence.basisDash,
+      sourceSheet: equivalence.sourceSheet,
+      notes: equivalence.notes,
+    },
+    technicalRules: approvedRules.map((rule) => ({
+      id: rule.id,
+      revision: rule.ruleRevision,
+      productId: rule.productId,
+      compatibleProductId: rule.compatibleProductId,
+      ruleType: rule.ruleType,
+      description: rule.description,
+      validFrom: rule.validFrom?.toISOString() ?? null,
+      validTo: rule.validTo?.toISOString() ?? null,
+      limits: {
+        maxWorkingPressureBar: rule.maxWorkingPressureBar?.toString() ?? null,
+        minTemperatureC: rule.minTemperatureC?.toString() ?? null,
+        maxTemperatureC: rule.maxTemperatureC?.toString() ?? null,
+        medium: rule.medium,
+        application: rule.application,
+        assemblyMethod: rule.assemblyMethod,
+      },
+      source: rule.source,
+    })),
+    context: {
+      requestedQty: args.requestedQty,
+      warehouseId: args.warehouseId,
+      availableAtSelection,
+      workingPressureBar: null,
+      operatingTemperatureC: null,
+      medium: null,
+      application: null,
+      assemblyMethod: null,
+      evaluatedAt: evaluatedAt.toISOString(),
+    },
+  });
+}
+
 async function createSalesRequestProductLineInTx(
   tx: Tx,
   prisma: PrismaClient,
   input: ProductLineInput,
 ) {
-  const order = await ensureEditableOrder(tx, input.orderId);
+  const trustedActor = await resolveTrustedSalesActor(tx, input.auditActor);
+  const order = await ensureEditableOrder(tx, input.orderId, input.auditActor);
   assertValidRequestedQty(input.requestedQty);
 
   const product = await tx.product.findUnique({
@@ -772,6 +947,13 @@ async function createSalesRequestProductLineInTx(
   if (quantityError) {
     throw new InventoryServiceError("INVALID_QTY", quantityError);
   }
+  const technicalSelectionSnapshot = await buildTechnicalSelectionSnapshot(tx, {
+    originalProductId: input.equivalenceOriginalProductId,
+    selectedProductId: product.id,
+    warehouseId: order.warehouseId,
+    requestedQty: input.requestedQty,
+    actor: trustedActor ?? input.auditActor,
+  });
 
   const line = await tx.salesInternalOrderLine.create({
     data: {
@@ -780,17 +962,18 @@ async function createSalesRequestProductLineInTx(
       productId: product.id,
       requestedQty: input.requestedQty,
       notes: input.notes ?? null,
+      technicalSelectionSnapshot,
     },
     select: { id: true },
   });
 
-  await rebuildDraftProductPickList(tx, prisma, order.id);
+  await rebuildDraftProductPickList(tx, prisma, order.id, trustedActor ?? input.auditActor);
 
   await createAuditLogSafeWithDb({
     entityType: "SALES_INTERNAL_ORDER",
     entityId: order.id,
     action: "ADD_PRODUCT_LINE",
-    actor: "system",
+    ...auditFields(trustedActor ?? input.auditActor),
     source: "sales/request-service",
     after: {
       lineId: line.id,
@@ -816,6 +999,8 @@ async function tryCreateInitialSalesRequestProductLineInTx(
       productId: input.productId,
       requestedQty: input.requestedQty,
       notes: input.notes ?? null,
+      auditActor: input.auditActor,
+      equivalenceOriginalProductId: input.equivalenceOriginalProductId,
     });
   } catch (error) {
     if (isInventoryServiceError(error, "PRODUCT_NOT_FOUND")) {
@@ -831,6 +1016,26 @@ async function createSalesRequestDraftHeaderInTx(
   args: CreateSalesRequestDraftArgs,
 ) {
   const perf = startPerf("sales.create_request_draft_header");
+  const suppliedActor = args.auditActor ?? args.initialProductLine?.auditActor;
+  const trustedActor = await resolveTrustedSalesActor(tx, suppliedActor);
+  const auditActor = trustedActor ?? suppliedActor;
+  if (trustedActor && args.requestedByUserId !== trustedActor.actorUserId && !canManageAnySalesRequest(trustedActor)) {
+    throw new InventoryServiceError("FORBIDDEN", "Solo puedes crear solicitudes a tu nombre");
+  }
+  let requesterRoles = args.requestedByRoles ?? [];
+  if (trustedActor && args.requestedByUserId) {
+    const requester = await tx.user.findUnique({
+      where: { id: args.requestedByUserId },
+      select: {
+        isActive: true,
+        userRoles: { where: { role: { isActive: true } }, select: { role: { select: { code: true } } } },
+      },
+    });
+    if (!requester?.isActive) {
+      throw new InventoryServiceError("REQUESTER_INVALID", "El solicitante no existe o está inactivo");
+    }
+    requesterRoles = requester.userRoles.map(({ role }) => role.code);
+  }
   if (args.requireFormalCustomer && !args.customerId) {
     throw new InventoryServiceError("CUSTOMER_ID_REQUIRED", "Selecciona un cliente formal del catálogo");
   }
@@ -859,9 +1064,9 @@ async function createSalesRequestDraftHeaderInTx(
   const createPerf = startPerf("sales.create_request_draft_header.insert_order");
   const shouldAutoAssignToRequester = Boolean(
     args.requestedByUserId
-    && args.requestedByRoles?.includes("SALES_EXECUTIVE")
-    && !args.requestedByRoles?.includes("MANAGER")
-    && !args.requestedByRoles?.includes("SYSTEM_ADMIN")
+    && requesterRoles.includes("SALES_EXECUTIVE")
+    && !requesterRoles.includes("MANAGER")
+    && !requesterRoles.includes("SYSTEM_ADMIN")
   );
   const createData: Record<string, unknown> = {
         code,
@@ -889,6 +1094,8 @@ async function createSalesRequestDraftHeaderInTx(
       productId: args.initialProductLine.productId,
       requestedQty: args.initialProductLine.requestedQty,
       notes: args.initialProductLine.notes ?? null,
+      auditActor,
+      equivalenceOriginalProductId: args.initialProductLine.equivalenceOriginalProductId,
     });
   }
 
@@ -897,7 +1104,7 @@ async function createSalesRequestDraftHeaderInTx(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: created.id,
       action: "CREATE_REQUEST_DRAFT",
-      actor: "system",
+      ...auditFields(auditActor),
       source: "sales/request-service",
       after: {
         code: created.code,
@@ -934,7 +1141,8 @@ export async function addSalesRequestProductLine(prisma: PrismaClient, input: Pr
 }
 
 async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput) {
-    const order = await ensureEditableOrder(tx, input.orderId);
+    const trustedActor = await resolveTrustedSalesActor(tx, input.auditActor);
+    const order = await ensureEditableOrder(tx, input.orderId, input.auditActor);
 
     if (order.warehouseId !== input.warehouseId) {
       throw new InventoryServiceError("WAREHOUSE_MISMATCH", "La configuración debe usar el almacén del pedido");
@@ -1001,6 +1209,7 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
       dueDate: order.dueDate,
       priority: 3,
       notes: `Pedido ${order.code} - línea configurada`,
+      auditActor: trustedActor ?? input.auditActor,
     });
 
     await configureAssemblyOrderExact(tx, productionOrder.orderId, {
@@ -1018,6 +1227,7 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
       application: input.application,
       assemblyMethod: input.assemblyMethod,
       compatibilityReviewApproved: input.compatibilityReviewApproved,
+      auditActor: trustedActor ?? input.auditActor,
     });
 
     await tx.productionOrder.update({
@@ -1034,7 +1244,7 @@ async function addSalesRequestAssemblyLineInTx(tx: Tx, input: AssemblyLineInput)
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "ADD_CONFIGURED_ASSEMBLY_LINE",
-      actor: "system",
+      ...auditFields(trustedActor ?? input.auditActor),
       source: "sales/request-service",
       after: {
         lineId: line.id,
@@ -1065,6 +1275,7 @@ export async function createSalesRequestWithAssembly(
     const assembly = await addSalesRequestAssemblyLineInTx(tx, {
       ...args.assembly,
       orderId: created.id,
+      auditActor: args.auditActor,
     });
 
     return { ...created, assemblyLineId: assembly.lineId, productionOrderId: assembly.productionOrderId };
@@ -1088,6 +1299,8 @@ export async function createSalesRequestWithLines(
           productId: line.productId,
           requestedQty: line.requestedQty,
           notes: line.notes ?? null,
+          auditActor: args.auditActor,
+          equivalenceOriginalProductId: line.equivalenceOriginalProductId,
         });
       } else {
         await addSalesRequestAssemblyLineInTx(tx, {
@@ -1105,6 +1318,7 @@ export async function createSalesRequestWithLines(
           medium: line.medium ?? null,
           application: line.application ?? null,
           assemblyMethod: line.assemblyMethod ?? null,
+          auditActor: args.auditActor,
         });
       }
     }
@@ -1118,10 +1332,12 @@ export async function deleteSalesRequestLine(
   args: {
     orderId: string;
     lineId: string;
+    auditActor?: AssemblyMutationActor;
   }
 ) {
   return prisma.$transaction(async (tx) => {
-    const order = await ensureEditableOrder(tx, args.orderId);
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    const order = await ensureEditableOrder(tx, args.orderId, args.auditActor);
 
     const line = await tx.salesInternalOrderLine.findFirst({
       where: {
@@ -1142,7 +1358,7 @@ export async function deleteSalesRequestLine(
     if (line.lineKind === "PRODUCT") {
       await ensureNoDirectFulfillmentStarted(tx, order.id);
       await tx.salesInternalOrderLine.delete({ where: { id: line.id } });
-      await rebuildDraftProductPickList(tx, prisma, order.id);
+      await rebuildDraftProductPickList(tx, prisma, order.id, trustedActor ?? args.auditActor);
     } else {
       const linkedProductionOrder = await tx.productionOrder.findFirst({
         where: {
@@ -1166,7 +1382,7 @@ export async function deleteSalesRequestLine(
       }
 
       if (linkedProductionOrder && linkedProductionOrder.status !== "CANCELADA") {
-        await cancelAssemblyWorkOrder(tx, linkedProductionOrder.id);
+        await cancelAssemblyWorkOrder(tx, linkedProductionOrder.id, trustedActor ?? args.auditActor);
       }
 
       await tx.salesInternalOrderLine.delete({ where: { id: line.id } });
@@ -1176,7 +1392,7 @@ export async function deleteSalesRequestLine(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "DELETE_REQUEST_LINE",
-      actor: "system",
+      ...auditFields(trustedActor ?? args.auditActor),
       source: "sales/request-service",
       after: {
         lineId: line.id,
@@ -1191,9 +1407,14 @@ export async function pullSalesRequestOrder(
   args: {
     orderId: string;
     assignedToUserId: string;
+    auditActor?: AssemblyMutationActor;
   }
 ) {
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    if (trustedActor && trustedActor.actorUserId !== args.assignedToUserId) {
+      throw new InventoryServiceError("FORBIDDEN", "El actor auditado debe coincidir con el ejecutivo que toma el pedido");
+    }
     const [order, assignee] = await Promise.all([
       tx.salesInternalOrder.findUnique({
         where: { id: args.orderId },
@@ -1284,8 +1505,8 @@ export async function pullSalesRequestOrder(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "PULL_REQUEST",
-      actor: "system",
-      actorUserId: args.assignedToUserId,
+      actor: trustedActor?.actor ?? "system",
+      actorUserId: trustedActor?.actorUserId ?? args.assignedToUserId,
       source: "sales/request-service",
       after: {
         orderCode: order.code,
@@ -1391,6 +1612,7 @@ export async function markSalesRequestPreparedForDelivery(
     preparedLocationId: string;
     notes?: string | null;
     evidenceUrl?: string | null;
+    auditActor?: AssemblyMutationActor;
   },
 ): Promise<MarkSalesRequestPreparedForDeliveryResult> {
   const idempotentWarning = "Pedido ya preparado para entrega; operación idempotente";
@@ -1424,11 +1646,29 @@ export async function markSalesRequestPreparedForDelivery(
     });
 
     if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    const preparedBy = await tx.user.findUnique({
+      where: { id: args.preparedByUserId },
+      select: { isActive: true, name: true, email: true, userRoles: { select: { role: { select: { code: true } } } } },
+    });
+    if (!preparedBy?.isActive) {
+      throw new InventoryServiceError("PREPARATION_NOT_AUTHORIZED", "El usuario operativo no está activo");
+    }
+    const actorRoles = preparedBy.userRoles.map(({ role }) => role.code);
+    const ownsPhysicalWork = order.warehouseAssigneeUserId === args.preparedByUserId
+      || order.warehouseClaimedByUserId === args.preparedByUserId;
+    const isSupervisorOverride = !ownsPhysicalWork
+      && actorRoles.some((role) => role === "MANAGER" || role === "SYSTEM_ADMIN");
+    if (!ownsPhysicalWork && !isSupervisorOverride) {
+      throw new InventoryServiceError("PREPARATION_NOT_AUTHORIZED", "Sólo el responsable físico asignado puede preparar este pedido");
+    }
+    if (isSupervisorOverride && !args.notes?.trim()) {
+      throw new InventoryServiceError("PREPARATION_OVERRIDE_REASON_REQUIRED", "Manager/Admin debe registrar el motivo de la preparación excepcional");
+    }
     await assertSalesRequestReservationConsistency(tx, order.id);
     if (order.status !== "CONFIRMADA" || order.deliveredToCustomerAt) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido no está disponible para preparar entrega");
     }
-    if (!hasWarehouseFulfillmentOwnership(order)) {
+    if (!hasWarehouseFulfillmentOwnership(order) && !isSupervisorOverride) {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido debe tener responsable físico de almacén antes de prepararlo");
     }
     if (!order.warehouseId) {
@@ -1490,11 +1730,12 @@ export async function markSalesRequestPreparedForDelivery(
       where: {
         id: order.id,
         status: "CONFIRMADA",
-        OR: [
-          { warehouseAssigneeUserId: { not: null } },
-          { warehouseClaimedByUserId: { not: null } },
-          { assignedToUserId: { not: null }, pulledAt: { not: null } },
-        ],
+        ...(isSupervisorOverride ? {} : {
+          OR: [
+            { warehouseAssigneeUserId: args.preparedByUserId },
+            { warehouseClaimedByUserId: args.preparedByUserId },
+          ],
+        }),
         deliveredToCustomerAt: null,
         preparedForDeliveryAt: null,
       },
@@ -1526,6 +1767,7 @@ export async function markSalesRequestPreparedForDelivery(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "MARK_PREPARED_FOR_DELIVERY",
+      actor: args.auditActor?.actor ?? preparedBy.name ?? preparedBy.email ?? args.preparedByUserId,
       actorUserId: args.preparedByUserId,
       after: {
         preparedForDeliveryAt: preparedAt.toISOString(),
@@ -1534,6 +1776,8 @@ export async function markSalesRequestPreparedForDelivery(
         preparedForDeliveryLocationCode: preparedLocation.code,
         notes: args.notes?.trim() || null,
         evidenceUrl: args.evidenceUrl?.trim() || null,
+        supervisorOverride: isSupervisorOverride,
+        supervisorOverrideReason: isSupervisorOverride ? args.notes?.trim() : null,
       },
     }, tx);
 
@@ -1552,12 +1796,17 @@ export async function markSalesRequestDelivered(
     notes?: string | null;
     evidenceUrl?: string | null;
     exceptionReason?: string | null;
+    auditActor?: AssemblyMutationActor;
   }
 ) {
   const deliveryDocumentType = "SALES_INTERNAL_ORDER_DELIVERY";
   const idempotentWarning = "Pedido ya entregado; operación idempotente";
 
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    if (trustedActor && trustedActor.actorUserId !== args.deliveredByUserId) {
+      throw new InventoryServiceError("FORBIDDEN", "El actor auditado debe coincidir con quien confirma la entrega");
+    }
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
       select: {
@@ -1608,7 +1857,7 @@ export async function markSalesRequestDelivered(
     if (order.operationalExceptions.length > 0) {
       throw new InventoryServiceError("ORDER_BLOCKED_BY_EXCEPTION", "No se puede entregar mientras exista una excepción operativa abierta");
     }
-    const deliveredByRoles = args.deliveredByRoles ?? ["SALES_EXECUTIVE"];
+    const deliveredByRoles = trustedActor?.roles ?? args.deliveredByRoles ?? ["SALES_EXECUTIVE"];
     const recipientName = args.recipientName?.trim() || "No especificado (integración histórica)";
     const deliveryMethod = args.deliveryMethod?.trim() || "No especificado (integración histórica)";
     if (args.deliveredByRoles && (!args.recipientName?.trim() || !args.deliveryMethod?.trim())) {
@@ -1795,7 +2044,8 @@ export async function markSalesRequestDelivered(
             productId: item.productId,
             locationId: item.locationId,
             type: "OUT",
-            operatorName: "system",
+            operatorName: trustedActor?.actor ?? "system",
+            operatorUserId: trustedActor?.actorUserId ?? args.deliveredByUserId,
             quantity: item.qty,
             reference: order.code,
             notes: "Egreso final por entrega al cliente",
@@ -1839,8 +2089,8 @@ export async function markSalesRequestDelivered(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "MARK_DELIVERED_TO_CUSTOMER",
-      actor: "system",
-      actorUserId: args.deliveredByUserId,
+      actor: trustedActor?.actor ?? "system",
+      actorUserId: trustedActor?.actorUserId ?? args.deliveredByUserId,
       source: "sales/request-service",
       after: {
         orderCode: order.code,
@@ -1869,10 +2119,12 @@ export async function confirmSalesRequestOrder(
   args: {
     orderId: string;
     confirmedByUserId?: string | null;
+    auditActor?: AssemblyMutationActor;
   }
 ) {
   const perf = startPerf("sales.confirm_order");
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
       select: { id: true, code: true, status: true, _count: { select: { lines: true } } },
@@ -1887,23 +2139,25 @@ export async function confirmSalesRequestOrder(
       throw new InventoryServiceError("EMPTY_ORDER", "El pedido debe tener al menos una línea antes de confirmarse");
     }
 
-    await tx.salesInternalOrder.update({
-      where: { id: order.id },
+    const confirmedAt = new Date();
+    const claim = await tx.salesInternalOrder.updateMany({
+      where: { id: order.id, status: "BORRADOR" },
       data: {
         status: "CONFIRMADA",
-        confirmedAt: new Date(),
-        confirmedByUserId: args.confirmedByUserId ?? null,
+        confirmedAt,
+        confirmedByUserId: trustedActor?.actorUserId ?? args.confirmedByUserId ?? null,
       },
     });
+    if (claim.count !== 1) throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido cambió antes de confirmarse");
 
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "CONFIRM_REQUEST",
-      actor: "system",
-      actorUserId: args.confirmedByUserId ?? null,
+      actor: trustedActor?.actor ?? "system",
+      actorUserId: trustedActor?.actorUserId ?? args.confirmedByUserId ?? null,
       source: "sales/request-service",
-      after: { status: "CONFIRMADA", code: order.code },
+      after: { status: "CONFIRMADA", code: order.code, confirmedAt: confirmedAt.toISOString() },
     }, tx);
     perf.end({ orderId: order.id });
   });
@@ -1915,10 +2169,13 @@ export async function cancelSalesRequestOrder(
     orderId: string;
     cancelledByUserId?: string | null;
     reason?: string | null;
+    auditActor?: AssemblyMutationActor;
   }
 ) {
   const perf = startPerf("sales.cancel_order");
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    const auditActor = trustedActor ?? args.auditActor;
     const loadPerf = startPerf("sales.cancel_order.load_order");
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
@@ -1927,12 +2184,14 @@ export async function cancelSalesRequestOrder(
         code: true,
         status: true,
         deliveredToCustomerAt: true,
+        requestedByUserId: true,
       },
     });
     loadPerf.end();
     if (!order) {
       throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
     }
+    assertSalesRequestOwner(order, trustedActor);
     if (order.status === "CANCELADA") {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "El pedido ya está cancelado");
     }
@@ -1972,15 +2231,14 @@ export async function cancelSalesRequestOrder(
             type: "CANCELLATION_REQUEST",
             status: "OPEN",
             reason: cancellationReason,
-            reportedByUserId: args.cancelledByUserId ?? null,
+            reportedByUserId: trustedActor?.actorUserId ?? args.cancelledByUserId ?? null,
           },
         });
         await createAuditLogSafeWithDb({
           entityType: "SALES_INTERNAL_ORDER",
           entityId: order.id,
           action: "REQUEST_CANCELLATION_AFTER_PICK_RELEASE",
-          actor: "system",
-          actorUserId: args.cancelledByUserId ?? null,
+          ...auditFields(auditActor),
           source: "sales/request-service",
           after: { pickListCode: activeDirectPick.code, reason: cancellationReason },
         }, tx);
@@ -2037,7 +2295,7 @@ export async function cancelSalesRequestOrder(
           "No se puede cancelar porque una línea de ensamble ya fue liberada"
         );
       }
-      await cancelAssemblyWorkOrder(tx, linked.id);
+        await cancelAssemblyWorkOrder(tx, linked.id, auditActor);
     }
     linkedPerf.end({ linkedCount: linkedProductionOrders.length });
 
@@ -2046,7 +2304,7 @@ export async function cancelSalesRequestOrder(
       data: {
         status: "CANCELADA",
         cancelledAt: new Date(),
-        cancelledByUserId: args.cancelledByUserId ?? null,
+        cancelledByUserId: trustedActor?.actorUserId ?? args.cancelledByUserId ?? null,
       },
     });
 
@@ -2054,8 +2312,7 @@ export async function cancelSalesRequestOrder(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "CANCEL_REQUEST",
-      actor: "system",
-      actorUserId: args.cancelledByUserId ?? null,
+      ...auditFields(auditActor),
       source: "sales/request-service",
       after: { status: "CANCELADA", code: order.code },
     }, tx);
@@ -2070,6 +2327,7 @@ export async function resolveSalesRequestOperationalException(
     decidedByUserId: string;
     resolution: "WAIT_REPLENISHMENT" | "PARTIAL_DELIVERY" | "SUBSTITUTE_PRODUCT" | "REDUCE_QUANTITY" | "URGENT_PURCHASE" | "CANCEL_LINE" | "CANCEL_ORDER" | "REJECT_CANCELLATION";
     notes: string;
+    auditActor?: AssemblyMutationActor;
   },
 ) {
   return prisma.$transaction(async (tx) => {
@@ -2093,8 +2351,8 @@ export async function resolveSalesRequestOperationalException(
 
     const status = args.resolution === "REJECT_CANCELLATION" ? "REJECTED" as const : "RESOLVED" as const;
     const decidedAt = new Date();
-    await tx.salesInternalOrderException.update({
-      where: { id: exception.id },
+    const decisionClaim = await tx.salesInternalOrderException.updateMany({
+      where: { id: exception.id, status: "OPEN" },
       data: {
         status,
         resolution: args.resolution,
@@ -2103,6 +2361,9 @@ export async function resolveSalesRequestOperationalException(
         decidedAt,
       },
     });
+    if (decisionClaim.count !== 1) {
+      throw new InventoryServiceError("EXCEPTION_CLOSED", "La excepción ya tiene una decisión registrada");
+    }
 
     let returnId: string | null = null;
     if (exception.type === "CANCELLATION_REQUEST" && args.resolution === "CANCEL_ORDER") {
@@ -2145,7 +2406,7 @@ export async function resolveSalesRequestOperationalException(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: exception.orderId,
       action: "RESOLVE_OPERATIONAL_EXCEPTION",
-      actor: "system",
+      actor: args.auditActor?.actor ?? args.decidedByUserId,
       actorUserId: args.decidedByUserId,
       source: "sales/request-service",
       after: {
@@ -2162,12 +2423,16 @@ export async function resolveSalesRequestOperationalException(
 
 export async function requestSalesRequestCustomerReturn(
   prisma: PrismaClient,
-  args: { orderId: string; requestedByUserId: string; reason: string; notes?: string | null },
+  args: { orderId: string; requestedByUserId: string; reason: string; notes?: string | null; auditActor?: AssemblyMutationActor },
 ) {
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    if (trustedActor && trustedActor.actorUserId !== args.requestedByUserId) {
+      throw new InventoryServiceError("FORBIDDEN", "El actor auditado debe coincidir con quien solicita la devolución");
+    }
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
-      select: { id: true, code: true, deliveredToCustomerAt: true },
+      select: { id: true, code: true, deliveredToCustomerAt: true, updatedAt: true },
     });
     if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
     if (!order.deliveredToCustomerAt) throw new InventoryServiceError("INVALID_ORDER_STATE", "Sólo un pedido entregado puede iniciar una devolución");
@@ -2183,6 +2448,18 @@ export async function requestSalesRequestCustomerReturn(
       select: { productId: true, documentLineId: true, quantity: true },
     });
     if (delivered.length === 0) throw new InventoryServiceError("RETURN_SOURCE_NOT_FOUND", "No hay movimientos de entrega para devolver");
+    const orderClaim = await tx.salesInternalOrder.updateMany({
+      where: { id: order.id, updatedAt: order.updatedAt, deliveredToCustomerAt: order.deliveredToCustomerAt },
+      data: { updatedAt: new Date() },
+    });
+    if (orderClaim.count !== 1) {
+      const concurrentReturn = await tx.salesInternalOrderReturn.findFirst({
+        where: { orderId: order.id, kind: "CUSTOMER_RETURN", status: { in: ["REQUESTED", "RECEIVED"] } },
+        select: { id: true },
+      });
+      if (concurrentReturn) return { returnId: concurrentReturn.id, alreadyRequested: true };
+      throw new InventoryServiceError("RETURN_REQUEST_CONFLICT", "El pedido cambió mientras se solicitaba la devolución");
+    }
     const created = await tx.salesInternalOrderReturn.create({
       data: {
         orderId: order.id,
@@ -2206,8 +2483,8 @@ export async function requestSalesRequestCustomerReturn(
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "REQUEST_CUSTOMER_RETURN",
-      actor: "system",
-      actorUserId: args.requestedByUserId,
+      actor: trustedActor?.actor ?? "system",
+      actorUserId: trustedActor?.actorUserId ?? args.requestedByUserId,
       source: "sales/request-service",
       after: { returnId: created.id, reason: args.reason.trim() },
     }, tx);
@@ -2220,6 +2497,7 @@ export async function receiveSalesRequestReturn(
   args: {
     returnId: string;
     receivedByUserId: string;
+    auditActor?: AssemblyMutationActor;
     items: Array<{
       itemId: string;
       disposition: "RESTOCK" | "REPAIR" | "SCRAP" | "REJECT";
@@ -2230,6 +2508,10 @@ export async function receiveSalesRequestReturn(
 ) {
   const inventoryService = getInventoryService(prisma);
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    if (trustedActor && trustedActor.actorUserId !== args.receivedByUserId) {
+      throw new InventoryServiceError("FORBIDDEN", "El actor auditado debe coincidir con quien recibe la devolución");
+    }
     const record = await tx.salesInternalOrderReturn.findUnique({
       where: { id: args.returnId },
       select: {
@@ -2249,6 +2531,14 @@ export async function receiveSalesRequestReturn(
       throw new InventoryServiceError("RETURN_ITEMS_INVALID", "Los renglones de devolución no corresponden al registro");
     }
 
+    const receiveClaim = await tx.salesInternalOrderReturn.updateMany({
+      where: { id: record.id, status: "REQUESTED" },
+      data: { status: "RECEIVED", receivedByUserId: args.receivedByUserId, receivedAt: new Date() },
+    });
+    if (receiveClaim.count !== 1) {
+      throw new InventoryServiceError("RETURN_ALREADY_RECEIVED", "La devolución ya fue recibida por otra operación");
+    }
+
     for (const item of record.items) {
       const input = inputById.get(item.id)!;
       const destinationLocationId = input.destinationLocationId?.trim() || item.destinationLocationId || null;
@@ -2260,7 +2550,7 @@ export async function receiveSalesRequestReturn(
         if (input.disposition === "RESTOCK") {
           await inventoryService.transferStock(item.productId, item.sourceLocationId, destinationLocationId!, item.quantity, record.id, {
             tx,
-            actor: "system",
+            actor: trustedActor?.actor ?? "system",
             actorUserId: args.receivedByUserId,
             operatorUserId: args.receivedByUserId,
             notes: "Reversión física de surtido por cancelación",
@@ -2271,7 +2561,7 @@ export async function receiveSalesRequestReturn(
         } else {
           await inventoryService.adjustStock(item.productId, item.sourceLocationId, -item.quantity, `Disposición ${input.disposition} en reversión ${record.id}`, {
             tx,
-            actor: "system",
+            actor: trustedActor?.actor ?? "system",
             actorUserId: args.receivedByUserId,
             documentType: "SALES_INTERNAL_ORDER_RETURN",
             documentId: record.id,
@@ -2281,7 +2571,7 @@ export async function receiveSalesRequestReturn(
       } else if (input.disposition === "RESTOCK") {
         await inventoryService.adjustStock(item.productId, destinationLocationId!, item.quantity, `Reintegro aceptado de devolución ${record.id}`, {
           tx,
-          actor: "system",
+          actor: trustedActor?.actor ?? "system",
           actorUserId: args.receivedByUserId,
           documentType: "SALES_INTERNAL_ORDER_RETURN",
           documentId: record.id,
@@ -2294,7 +2584,7 @@ export async function receiveSalesRequestReturn(
             locationId: destinationLocationId,
             type: "ADJUSTMENT",
             quantity: 0,
-            operatorName: "system",
+            operatorName: trustedActor?.actor ?? "system",
             operatorUserId: args.receivedByUserId,
             reference: record.id,
             notes: `Devolución recibida sin reintegro: ${input.disposition}`,
@@ -2317,14 +2607,14 @@ export async function receiveSalesRequestReturn(
     const now = new Date();
     await tx.salesInternalOrderReturn.update({
       where: { id: record.id },
-      data: { status: "COMPLETED", receivedByUserId: args.receivedByUserId, receivedAt: now, completedByUserId: args.receivedByUserId, completedAt: now },
+      data: { status: "COMPLETED", completedByUserId: args.receivedByUserId, completedAt: now },
     });
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
       entityId: record.orderId,
       action: "COMPLETE_SALES_ORDER_RETURN",
-      actor: "system",
-      actorUserId: args.receivedByUserId,
+      actor: trustedActor?.actor ?? "system",
+      actorUserId: trustedActor?.actorUserId ?? args.receivedByUserId,
       source: "sales/request-service",
       after: { returnId: record.id, kind: record.kind },
     }, tx);
@@ -2334,16 +2624,21 @@ export async function receiveSalesRequestReturn(
 
 export async function finalizeSalesRequestCancellationAfterReversal(
   prisma: PrismaClient,
-  args: { orderId: string; cancelledByUserId: string },
+  args: { orderId: string; cancelledByUserId: string; auditActor?: AssemblyMutationActor },
 ) {
   const inventoryService = getInventoryService(prisma);
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, args.auditActor);
+    if (trustedActor && trustedActor.actorUserId !== args.cancelledByUserId) {
+      throw new InventoryServiceError("FORBIDDEN", "El actor auditado debe coincidir con quien confirma la cancelación");
+    }
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: args.orderId },
       select: {
         id: true,
         code: true,
         status: true,
+        updatedAt: true,
         operationalExceptions: { where: { type: "CANCELLATION_REQUEST", status: "RESOLVED", resolution: "CANCEL_ORDER" }, select: { id: true } },
         returns: { where: { kind: "CANCELLATION_REVERSAL" }, select: { status: true } },
       },
@@ -2359,6 +2654,16 @@ export async function finalizeSalesRequestCancellationAfterReversal(
     if (activeAssemblies > 0) {
       throw new InventoryServiceError("ASSEMBLY_CANCELLATION_REVIEW_REQUIRED", "Existe ensamble ligado; Manager/Admin debe decidir su disposición antes de cancelar");
     }
+    const cancelledAt = new Date();
+    const cancellationClaim = await tx.salesInternalOrder.updateMany({
+      where: { id: order.id, status: order.status, updatedAt: order.updatedAt },
+      data: { status: "CANCELADA", cancelledAt, cancelledByUserId: trustedActor?.actorUserId ?? args.cancelledByUserId },
+    });
+    if (cancellationClaim.count !== 1) {
+      const current = await tx.salesInternalOrder.findUnique({ where: { id: order.id }, select: { status: true } });
+      if (current?.status === "CANCELADA") return { alreadyCancelled: true };
+      throw new InventoryServiceError("CANCELLATION_CONFLICT", "El pedido cambió antes de completar la cancelación");
+    }
     const tasks = await tx.salesInternalOrderPickTask.findMany({
       where: { pickList: { orderId: order.id, status: { in: ["RELEASED", "IN_PROGRESS", "PARTIAL", "COMPLETED"] } }, orderLine: { productId: { not: null } } },
       select: { id: true, reservedQty: true, pickedQty: true, shortQty: true, sourceLocationId: true, orderLine: { select: { productId: true } } },
@@ -2368,8 +2673,8 @@ export async function finalizeSalesRequestCancellationAfterReversal(
       if (pendingReservedQty > 0 && task.orderLine.productId) {
         await inventoryService.releaseReservedStock(task.orderLine.productId, task.sourceLocationId, pendingReservedQty, {
           tx,
-          actor: "system",
-          actorUserId: args.cancelledByUserId,
+          actor: trustedActor?.actor ?? "system",
+          actorUserId: trustedActor?.actorUserId ?? args.cancelledByUserId,
           reference: order.code,
           notes: "Liberación por cancelación posterior a surtido",
           documentType: "SALES_INTERNAL_ORDER",
@@ -2379,15 +2684,14 @@ export async function finalizeSalesRequestCancellationAfterReversal(
     }
     await tx.salesInternalOrderPickTask.updateMany({ where: { pickList: { orderId: order.id } }, data: { status: "CANCELLED" } });
     await tx.salesInternalOrderPickList.updateMany({ where: { orderId: order.id, status: { not: "CANCELLED" } }, data: { status: "CANCELLED", canceledAt: new Date() } });
-    await tx.salesInternalOrder.update({ where: { id: order.id }, data: { status: "CANCELADA", cancelledAt: new Date(), cancelledByUserId: args.cancelledByUserId } });
     await createAuditLogSafeWithDb({
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "CONFIRM_CANCELLATION_AFTER_PHYSICAL_REVERSAL",
-      actor: "system",
-      actorUserId: args.cancelledByUserId,
+      actor: trustedActor?.actor ?? "system",
+      actorUserId: trustedActor?.actorUserId ?? args.cancelledByUserId,
       source: "sales/request-service",
-      after: { status: "CANCELADA", code: order.code },
+      after: { status: "CANCELADA", code: order.code, cancelledAt: cancelledAt.toISOString() },
     }, tx);
     return { alreadyCancelled: false };
   });
@@ -2405,13 +2709,19 @@ function computePickListStatusFromTasks(tasks: Array<{ status: string; pickedQty
   return anyPicked ? ("IN_PROGRESS" as const) : ("RELEASED" as const);
 }
 
-export async function releaseSalesRequestPickList(prisma: PrismaClient, orderId: string) {
+export async function releaseSalesRequestPickList(
+  prisma: PrismaClient,
+  orderId: string,
+  auditActor?: AssemblyMutationActor,
+) {
   return prisma.$transaction(async (tx) => {
+    const trustedActor = await resolveTrustedSalesActor(tx, auditActor);
     const order = await tx.salesInternalOrder.findUnique({
       where: { id: orderId },
       select: {
         id: true,
         status: true,
+        requestedByUserId: true,
         pickLists: {
           where: { status: "DRAFT" },
           orderBy: { createdAt: "desc" },
@@ -2422,6 +2732,12 @@ export async function releaseSalesRequestPickList(prisma: PrismaClient, orderId:
     });
     if (!order) {
       throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    }
+    if (trustedActor
+      && !canManageAnySalesRequest(trustedActor)
+      && !trustedActor.roles.includes("WAREHOUSE_OPERATOR")
+      && order.requestedByUserId !== trustedActor.actorUserId) {
+      throw new InventoryServiceError("FORBIDDEN", "No tienes permiso para liberar el surtido de esta solicitud");
     }
     if (order.status !== "CONFIRMADA") {
       throw new InventoryServiceError("INVALID_ORDER_STATE", "Solo se puede liberar surtido en pedidos confirmados");
@@ -2450,7 +2766,7 @@ export async function releaseSalesRequestPickList(prisma: PrismaClient, orderId:
       entityType: "SALES_INTERNAL_ORDER",
       entityId: order.id,
       action: "RELEASE_DIRECT_PICKLIST",
-      actor: "system",
+      ...auditFields(trustedActor ?? auditActor),
       source: "sales/request-service",
       after: { pickListId: pickList.id, pickListCode: pickList.code },
     }, tx);

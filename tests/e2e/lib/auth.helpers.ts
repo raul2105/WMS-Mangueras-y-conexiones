@@ -9,7 +9,7 @@ const CREDENTIAL_ENV_BY_ROLE = {
 
 // The checked-in Prisma seed provides deterministic credentials for a local
 // checkout. CI/AWS always supplies role-specific secrets; this fallback exists
-// only for local E2E runs and can be disabled with WMS_E2E_USE_SEEDED_CREDENTIALS=0.
+// only for an explicit local opt-in; AWS always requires private credentials.
 const LOCAL_SEEDED_CREDENTIALS = {
   SYSTEM_ADMIN: { email: "admin@scmayher.com", password: "Admin123*" },
   MANAGER: { email: "manager@scmayher.com", password: "Manager123*" },
@@ -22,7 +22,10 @@ function credentialFromEnv(role: keyof typeof CREDENTIAL_ENV_BY_ROLE) {
   const email = process.env[emailKey];
   const password = process.env[passwordKey];
   if (email && password) return { email, password };
-  if (!process.env.CI && process.env.WMS_E2E_USE_SEEDED_CREDENTIALS !== "0") {
+  const target = process.env.WMS_LIVE_BASE_URL;
+  const localTarget = !target || ["localhost", "127.0.0.1", "[::1]"].includes(new URL(target).hostname);
+  if (!process.env.CI && localTarget && process.env.WMS_E2E_USE_SEEDED_CREDENTIALS === "1"
+      && process.env.WMS_AWS_ACCEPTANCE_E2E !== "1" && process.env.WMS_AWS_WRITE_E2E !== "1") {
     return LOCAL_SEEDED_CREDENTIALS[role];
   }
   if (!email || !password) {

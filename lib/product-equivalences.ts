@@ -2,6 +2,7 @@ import prisma from "@/lib/prisma";
 import {
   compatibilityRuleSelect,
   evaluateCompatibilityRules,
+  PRODUCT_SUBSTITUTION_RULE_TYPE,
   type CompatibilityRuleDecision,
   type CompatibilityRuleRecord,
 } from "@/lib/catalog/compatibility";
@@ -75,23 +76,32 @@ export async function getEquivalentProducts(
 ): Promise<ProductEquivalentSuggestion[]> {
   const limit = options.limit ?? 5;
   const inStockOnly = options.inStockOnly ?? true;
+  const original = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, type: true } });
+  if (!original) return [];
+  if (options.warehouseId) {
+    const warehouse = await prisma.warehouse.findFirst({ where: { id: options.warehouseId, isActive: true }, select: { id: true } });
+    if (!warehouse) return [];
+  }
 
   const rows = await prisma.productEquivalence.findMany({
     where: {
       productId,
       active: true,
-      ...(inStockOnly
-        ? {
-            equivProduct: {
-              inventory: {
-                some: {
-                  available: { gt: 0 },
-                  ...(options.warehouseId ? { location: { warehouseId: options.warehouseId } } : {}),
-                },
+      equivProduct: {
+        type: original.type,
+        ...(inStockOnly ? {
+          inventory: {
+            some: {
+              available: { gt: 0 },
+              location: {
+                isActive: true,
+                usageType: "STORAGE",
+                warehouse: { isActive: true, ...(options.warehouseId ? { id: options.warehouseId } : {}) },
               },
             },
-          }
-        : {}),
+          },
+        } : {}),
+      },
     },
     select: {
       id: true,
@@ -111,11 +121,19 @@ export async function getEquivalentProducts(
             where: inStockOnly
               ? {
                   available: { gt: 0 },
-                  ...(options.warehouseId ? { location: { warehouseId: options.warehouseId } } : {}),
+                  location: {
+                    isActive: true,
+                    usageType: "STORAGE",
+                    warehouse: { isActive: true, ...(options.warehouseId ? { id: options.warehouseId } : {}) },
+                  },
                 }
-              : options.warehouseId
-                ? { location: { warehouseId: options.warehouseId } }
-                : undefined,
+              : {
+                  location: {
+                    isActive: true,
+                    usageType: "STORAGE",
+                    warehouse: { isActive: true, ...(options.warehouseId ? { id: options.warehouseId } : {}) },
+                  },
+                },
             select: {
               quantity: true,
               available: true,
@@ -139,6 +157,8 @@ export async function getEquivalentProducts(
     ? await prisma.productCompatibilityRule.findMany({
         where: {
           active: true,
+          governanceStatus: "APPROVED",
+          ruleType: PRODUCT_SUBSTITUTION_RULE_TYPE,
           source: { status: "APPROVED" },
           OR: [
             { productId, compatibleProductId: { in: candidateIds } },

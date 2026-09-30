@@ -1,9 +1,12 @@
+export type AssemblyMutationActor = { actorUserId: string; actor: string };
+
 export type AssemblyOrderDraftHeaderInput = {
   warehouseId: string;
   customerName: string;
   dueDate: Date;
   priority?: number | null;
   notes?: string | null;
+  auditActor?: AssemblyMutationActor;
 };
 
 export type AssemblyConfigInput = {
@@ -25,6 +28,7 @@ export type AssemblyConfigInput = {
   compatibilityReviewReason?: string | null;
   compatibilityReviewedByUserId?: string | null;
   compatibilityReviewerRoles?: string[];
+  auditActor?: AssemblyMutationActor;
 };
 
 export type AssemblyRequirement = {

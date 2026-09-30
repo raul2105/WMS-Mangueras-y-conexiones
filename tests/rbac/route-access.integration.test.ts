@@ -37,6 +37,8 @@ describe("rbac role-route access matrix", () => {
     "/sales/customers/new",
     "/sales/customers/abc",
     "/sales/customers/abc/edit",
+    "/catalog/compatibility",
+    "/catalog/technical-sources",
   ] as const;
 
   it("maps critical routes to expected permissions", () => {
@@ -92,6 +94,8 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("MANAGER", "/warehouse/abc")).toBe(true);
     expect(canAccess("MANAGER", "/audit")).toBe(true);
     expect(canAccess("MANAGER", "/purchasing/email")).toBe(true);
+    expect(canAccess("MANAGER", "/catalog/compatibility")).toBe(true);
+    expect(canAccess("MANAGER", "/catalog/technical-sources")).toBe(true);
   });
 
   it("WAREHOUSE_OPERATOR can execute controlled inventory work but not adjustments, warehouse admin, or audit", () => {
@@ -102,6 +106,8 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("WAREHOUSE_OPERATOR", "/warehouse/abc")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/audit")).toBe(false);
     expect(canAccess("WAREHOUSE_OPERATOR", "/purchasing/email")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/catalog/compatibility")).toBe(false);
+    expect(canAccess("WAREHOUSE_OPERATOR", "/catalog/technical-sources")).toBe(false);
   });
 
   it("SALES_EXECUTIVE cannot access physical inventory routes or audit", () => {
@@ -110,6 +116,8 @@ describe("rbac role-route access matrix", () => {
     expect(canAccess("SALES_EXECUTIVE", "/inventory/transfer")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/inventory/pick")).toBe(false);
     expect(canAccess("SALES_EXECUTIVE", "/audit")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/catalog/compatibility")).toBe(false);
+    expect(canAccess("SALES_EXECUTIVE", "/catalog/technical-sources")).toBe(false);
   });
 
   it("request routes are available for manager, sales executive, and operator cockpit execution", () => {

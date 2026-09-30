@@ -1,5 +1,5 @@
 /**
- * WMS Web Stack — VPC + RDS PostgreSQL (Free Tier) + SSM Parameters + Budget
+ * WMS Web Stack — VPC + RDS PostgreSQL + SSM Parameters + Budget
  *
  * Architecture (default legacy mode, retained until networkMode=ipv6-private):
  *   - Existing VPC with 2 AZ and public subnets (no NAT = $0)
@@ -11,7 +11,7 @@
  * The ipv6-private opt-in adds isolated dual-stack Lambda subnets and IPv6-only
  * egress; it preserves the existing VPC, public subnet group, and RDS resource.
  */
-const { Stack, RemovalPolicy, CfnOutput, Duration, Fn, Size } = require("aws-cdk-lib");
+const { Stack, RemovalPolicy, CfnOutput, Duration, Fn, Size, Tags } = require("aws-cdk-lib");
 const ec2 = require("aws-cdk-lib/aws-ec2");
 const rds = require("aws-cdk-lib/aws-rds");
 const ssm = require("aws-cdk-lib/aws-ssm");
@@ -44,6 +44,14 @@ class WmsWebStack extends Stack {
     super(scope, id, props);
 
     const config = props.webConfig;
+    // Promote the canonical stack in place without renaming its database or
+    // creating a second data silo. Resource identity is independent of mode.
+    const productionMode = config.environment === "prod" || config.productionMode === true;
+    const runtimeEnvironment = productionMode ? "prod" : config.environment;
+    if (productionMode) {
+      Tags.of(this).add("Environment", "prod");
+      Tags.of(this).add("cost-opt:enabled", "false");
+    }
     const prefix = config.namePrefix;
     const enableWebRuntime = config.enableWebRuntime !== false;
     const ipv6PrivateNetwork = config.networkMode === "ipv6-private";
@@ -147,7 +155,7 @@ class WmsWebStack extends Stack {
     });
 
     // ─── RDS PostgreSQL ───────────────────────────────────────────────
-    // Free Tier: db.t4g.micro, 20GB gp2, single-AZ, no Multi-AZ
+    // Small Single-AZ instance; actual charges depend on account credits and usage.
     const dbCredentials = new secretsmanager.Secret(this, "DbCredentials", {
       secretName: `${prefix}/db-credentials`,
       description: "RDS PostgreSQL credentials for WMS",
@@ -179,13 +187,14 @@ class WmsWebStack extends Stack {
       publiclyAccessible: config.rdsPubliclyAccessible !== false,
       autoMinorVersionUpgrade: true,
       backupRetention: Duration.days(7),
-      deletionProtection: config.environment === "prod",
+      deletionProtection: productionMode,
       removalPolicy:
-        config.environment === "prod"
+        productionMode
           ? RemovalPolicy.RETAIN
           : RemovalPolicy.DESTROY,
       storageEncrypted: true,
     });
+    if (productionMode) dbCredentials.applyRemovalPolicy(RemovalPolicy.RETAIN);
 
     // ─── SSM Parameters ───────────────────────────────────────────────
     // DATABASE_URL is built from the secret + endpoint at deploy time.
@@ -223,6 +232,7 @@ class WmsWebStack extends Stack {
         passwordLength: 48,
       },
     });
+    if (productionMode) nextAuthSecret.applyRemovalPolicy(RemovalPolicy.RETAIN);
 
     new ssm.StringParameter(this, "SsmNextAuthSecretArn", {
       parameterName: `/${prefix}/nextauth-secret-arn`,
@@ -328,8 +338,8 @@ class WmsWebStack extends Stack {
     const assetsBucket = new s3.Bucket(this, "AssetsBucket", {
       bucketName: `${prefix}-assets`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
+      autoDeleteObjects: !productionMode,
+      removalPolicy: productionMode ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
       enforceSSL: true,
     });
 
@@ -359,7 +369,7 @@ class WmsWebStack extends Stack {
       dbInstance.dbInstanceEndpointPort,
       "/",
       config.dbName,
-      "?schema=public&connection_limit=2&pool_timeout=5",
+      "?schema=public&connection_limit=2&pool_timeout=5&sslmode=require",
     ]);
     const serverReservedConcurrency =
       Number.isFinite(Number(config.serverReservedConcurrency)) &&
@@ -432,7 +442,7 @@ class WmsWebStack extends Stack {
       environment: {
         NODE_ENV: "production",
         APP_VERSION: packageJson.version || "unknown",
-        WMS_ENVIRONMENT: config.environment,
+        WMS_ENVIRONMENT: runtimeEnvironment,
         WMS_COMMIT_SHA: process.env.WMS_COMMIT_SHA || "unknown",
         WMS_RELEASE_ID: process.env.WMS_RELEASE_ID || "unknown",
         AUTH_TRUST_HOST: "true",
@@ -445,7 +455,7 @@ class WmsWebStack extends Stack {
         CACHE_BUCKET_REGION: this.region,
         OPEN_NEXT_ORIGIN: "default",
         WMS_DISABLE_SYNC_EVENTS_IN_WEB: "true",
-        PERF_DEBUG_LOGS: config.environment === "dev" ? "true" : "false",
+        PERF_DEBUG_LOGS: productionMode ? "false" : config.environment === "dev" ? "true" : "false",
         ...gmailEnvironment,
         ...(ipv6PrivateNetwork
           ? { WMS_IPV6_EGRESS: "1", NODE_OPTIONS: "--dns-result-order=ipv6first" }
@@ -640,7 +650,7 @@ exports.handler = async () => {
     });
 
     const scheduleControl = config.scheduleControl || {};
-    if (config.environment === "dev" && scheduleControl.enabled) {
+    if (!productionMode && config.environment === "dev" && scheduleControl.enabled) {
       const timezone = scheduleControl.timezone || "America/Mexico_City";
       const weekdaysStart = parseHourMinute(scheduleControl.weekdaysStart || "08:00", "scheduleControl.weekdaysStart");
       const weekdaysStop = parseHourMinute(scheduleControl.weekdaysStop || "20:00", "scheduleControl.weekdaysStop");
@@ -845,6 +855,34 @@ exports.handler = async () => {
         threshold: 1,
         evaluationPeriods: 1,
         datapointsToAlarm: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+    }
+
+    if (productionMode) {
+      new cloudwatch.Alarm(this, "ProductionServerErrorsAlarm", {
+        alarmDescription: "WMS server invocation failures; inspect Lambda logs and health before retrying writes",
+        metric: serverFn.metricErrors({ period: Duration.minutes(5), statistic: "Sum" }),
+        threshold: 1,
+        evaluationPeriods: 2,
+        datapointsToAlarm: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      new cloudwatch.Alarm(this, "ProductionHttpErrorsAlarm", {
+        alarmDescription: "WMS CloudFront 5xx errors; verify canonical /api/health and database availability",
+        metric: distribution.metric5xxErrorRate({ period: Duration.minutes(5), statistic: "Average" }),
+        threshold: 5,
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      new cloudwatch.Alarm(this, "ProductionDatabaseStorageAlarm", {
+        alarmDescription: "WMS PostgreSQL has less than 2 GiB free; review storage before further imports",
+        metric: dbInstance.metricFreeStorageSpace({ period: Duration.minutes(5), statistic: "Minimum" }),
+        threshold: 2 * 1024 * 1024 * 1024,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
     }

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { evaluateCompatibilityRules, getAssemblyCompatibilityDecision } from "@/lib/catalog/compatibility";
+import { ASSEMBLY_PAIR_RULE_TYPE, evaluateCompatibilityRules, getAssemblyCompatibilityDecision, PRODUCT_SUBSTITUTION_RULE_TYPE } from "@/lib/catalog/compatibility";
 import { validateAssemblyCompatibility } from "@/lib/assembly/availability-service";
 
 describe("technical compatibility contract", () => {
   const baseRule = {
     productId: "entry",
     compatibleProductId: "hose",
-    ruleType: "THREAD_MISMATCH",
+    ruleType: ASSEMBLY_PAIR_RULE_TYPE,
     description: "La rosca no corresponde",
     severity: "BLOCK",
   };
@@ -97,6 +97,12 @@ describe("technical compatibility contract", () => {
           severity: "WARN",
           decision: "REQUIRES_REVIEW",
           governanceStatus: "APPROVED",
+      source: {
+        supplierName: "Proveedor",
+        documentRef: "FICHA-REVISION-001",
+        documentVersion: "1",
+        status: "APPROVED",
+      },
         }],
       },
     };
@@ -146,9 +152,23 @@ describe("technical compatibility contract", () => {
     await getAssemblyCompatibilityDecision(db, ["entry", "hose"]);
     expect(capturedWhere).toEqual({
       active: true,
+      governanceStatus: "APPROVED",
+      ruleType: { not: PRODUCT_SUBSTITUTION_RULE_TYPE },
       productId: { in: ["entry", "hose"] },
       compatibleProductId: { in: ["entry", "hose"] },
       source: { status: "APPROVED" },
     });
+  });
+
+  it("does not reuse product substitution evidence to authorize an assembly pair", async () => {
+    const substitutionRule = { ...approvedRule, ruleType: PRODUCT_SUBSTITUTION_RULE_TYPE };
+    const db = {
+      productCompatibilityRule: {
+        findMany: async ({ where }: { where: { ruleType: { not: string } } }) =>
+          where.ruleType.not === substitutionRule.ruleType ? [] : [substitutionRule],
+      },
+    };
+    await expect(getAssemblyCompatibilityDecision(db, ["entry", "hose"]))
+      .resolves.toMatchObject({ status: "REQUIRES_REVIEW", reasonCode: "NO_APPROVED_RULE" });
   });
 });

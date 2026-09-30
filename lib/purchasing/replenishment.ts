@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
 
 export type ReplenishmentPolicyInput = {
@@ -36,6 +36,36 @@ function assertFiniteNonNegative(value: number, field: string) {
 
 function ceilToUnit(quantity: number, unit: number) {
   return Math.ceil(quantity / unit) * unit;
+}
+
+async function lockReplenishmentPolicy(tx: Prisma.TransactionClient, policyId: string) {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "ReplenishmentPolicy"
+    WHERE "id" = ${policyId}
+    FOR UPDATE
+  `;
+  if (rows.length !== 1) throw new Error("La política de reabasto ya no está disponible");
+}
+
+function proposalSnapshot(proposal: ReplenishmentProposal) {
+  return {
+    status: proposal.status,
+    availableStock: proposal.availableStock,
+    incomingQuantity: proposal.incomingQuantity,
+    consumedQuantity: proposal.consumedQuantity,
+    windowDays: proposal.windowDays,
+    averageDailyConsumption: proposal.averageDailyConsumption,
+    recommendedQuantity: proposal.recommendedQuantity,
+    reason: proposal.reason,
+  };
+}
+
+async function resolveAuditActor(tx: Prisma.TransactionClient, actorUserId: string | null) {
+  if (!actorUserId) return "system";
+  const actor = await tx.user.findUnique({ where: { id: actorUserId }, select: { name: true, email: true } });
+  if (!actor) throw new Error("No se pudo identificar al responsable de la operación");
+  return actor.name || actor.email;
 }
 
 /**
@@ -138,8 +168,20 @@ export async function generateReplenishmentProposals(
   actorUserId: string | null = null,
 ): Promise<GeneratedReplenishmentProposal[]> {
   return prisma.$transaction(async (tx) => {
+    // Serializing on the policy row makes repeated and concurrent refreshes
+    // converge on one active proposal per policy without a schema migration.
+    const lockedPolicies = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "ReplenishmentPolicy"
+      WHERE "active" = TRUE
+      ORDER BY "warehouseId" ASC, "productId" ASC
+      FOR UPDATE
+    `;
+    if (lockedPolicies.length === 0) return [];
+    const auditActor = await resolveAuditActor(tx, actorUserId);
+
     const policies = await tx.replenishmentPolicy.findMany({
-      where: { active: true },
+      where: { id: { in: lockedPolicies.map((policy) => policy.id) }, active: true },
       select: {
         id: true,
         productId: true,
@@ -170,7 +212,7 @@ export async function generateReplenishmentProposals(
             productId: policy.productId,
             purchaseOrder: {
               deliveryWarehouseId: policy.warehouseId,
-              status: { in: ["CONFIRMADA", "EN_TRANSITO"] },
+              status: { in: ["CONFIRMADA", "EN_TRANSITO", "PARCIAL"] },
             },
           },
           select: { qtyOrdered: true, qtyReceived: true },
@@ -186,6 +228,30 @@ export async function generateReplenishmentProposals(
         }),
       ]);
 
+      const replenishmentDrafts = await tx.replenishmentProposal.findMany({
+        where: {
+          policyId: policy.id,
+          status: "CONVERTED",
+          purchaseOrder: { is: { status: "BORRADOR" } },
+        },
+        select: {
+          purchaseOrder: {
+            select: {
+              lines: {
+                where: { productId: policy.productId },
+                select: { qtyOrdered: true, qtyReceived: true },
+              },
+            },
+          },
+        },
+      });
+      const replenishmentDraftQuantity = replenishmentDrafts.reduce((total, proposal) => {
+        const lines = proposal.purchaseOrder?.lines ?? [];
+        return total + lines.reduce((lineTotal, line) => lineTotal + Math.max(0, line.qtyOrdered - line.qtyReceived), 0);
+      }, 0);
+      const incomingQuantity = inboundRows.reduce((total, line) => total + Math.max(0, line.qtyOrdered - line.qtyReceived), 0)
+        + replenishmentDraftQuantity;
+
       const proposal = calculateReplenishmentProposal(
         {
           minimumStock: policy.minimumStock,
@@ -197,14 +263,49 @@ export async function generateReplenishmentProposals(
         },
         {
           availableStock: inventoryRows.reduce((total, row) => total + row.available, 0),
-          incomingQuantity: inboundRows.reduce((total, row) => total + Math.max(0, row.qtyOrdered - row.qtyReceived), 0),
+          incomingQuantity,
           consumedQuantity: consumption._sum.quantity ?? 0,
           windowDays,
         },
       );
 
-      let proposalId: string | null = null;
-      if (proposal.status !== "NO_ACTION") {
+      const activeProposals = await tx.replenishmentProposal.findMany({
+        where: { policyId: policy.id, status: { in: ["PROPOSED", "BLOCKED"] }, purchaseOrderId: null },
+        orderBy: [{ generatedAt: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          status: true,
+          availableStock: true,
+          incomingQuantity: true,
+          consumedQuantity: true,
+          windowDays: true,
+          averageDailyConsumption: true,
+          recommendedQuantity: true,
+          reason: true,
+        },
+      });
+      const currentProposal = activeProposals[0];
+
+      for (const duplicate of activeProposals.slice(1)) {
+        const superseded = await tx.replenishmentProposal.updateMany({
+          where: { id: duplicate.id, status: { in: ["PROPOSED", "BLOCKED"] }, purchaseOrderId: null },
+          data: { status: "SUPERSEDED", generatedAt: now },
+        });
+        if (superseded.count !== 1) throw new Error("La propuesta cambió durante la actualización; vuelve a intentarlo");
+        await createAuditLogRequiredWithDb({
+          entityType: "REPLENISHMENT_PROPOSAL",
+          entityId: duplicate.id,
+          action: "SUPERSEDE_DUPLICATE",
+          actor: auditActor,
+          actorUserId,
+          source: "purchasing/replenishment",
+          before: { status: duplicate.status },
+          after: { status: "SUPERSEDED", replacementProposalId: currentProposal?.id ?? null },
+        }, tx);
+      }
+
+      let proposalId = currentProposal?.id ?? null;
+      if (proposal.status !== "NO_ACTION" && !currentProposal) {
         const persisted = await tx.replenishmentProposal.create({
           data: {
             policyId: policy.id,
@@ -230,19 +331,44 @@ export async function generateReplenishmentProposals(
           entityType: "REPLENISHMENT_PROPOSAL",
           entityId: persisted.id,
           action: "GENERATE",
-          actor: actorUserId ?? "system",
+          actor: auditActor,
           actorUserId,
           source: "purchasing/replenishment",
           after: {
             policyId: policy.id,
             productId: policy.productId,
             warehouseId: policy.warehouseId,
-            status: proposal.status,
-            recommendedQuantity: proposal.recommendedQuantity,
-            availableStock: proposal.availableStock,
-            incomingQuantity: proposal.incomingQuantity,
-            averageDailyConsumption: proposal.averageDailyConsumption,
+            ...proposalSnapshot(proposal),
           },
+        }, tx);
+      } else if (currentProposal) {
+        const refreshed = await tx.replenishmentProposal.updateMany({
+          where: {
+            id: currentProposal.id,
+            status: { in: ["PROPOSED", "BLOCKED"] },
+            purchaseOrderId: null,
+          },
+          data: { ...proposalSnapshot(proposal), generatedAt: now },
+        });
+        if (refreshed.count !== 1) throw new Error("La propuesta cambió durante la actualización; vuelve a intentarlo");
+        await createAuditLogRequiredWithDb({
+          entityType: "REPLENISHMENT_PROPOSAL",
+          entityId: currentProposal.id,
+          action: proposal.status === "NO_ACTION" ? "CLOSE_NO_ACTION" : "REFRESH",
+          actor: auditActor,
+          actorUserId,
+          source: "purchasing/replenishment",
+          before: {
+            status: currentProposal.status,
+            availableStock: currentProposal.availableStock,
+            incomingQuantity: currentProposal.incomingQuantity,
+            consumedQuantity: currentProposal.consumedQuantity,
+            windowDays: currentProposal.windowDays,
+            averageDailyConsumption: currentProposal.averageDailyConsumption,
+            recommendedQuantity: currentProposal.recommendedQuantity,
+            reason: currentProposal.reason,
+          },
+          after: proposalSnapshot(proposal),
         }, tx);
       }
 
@@ -278,10 +404,19 @@ export async function approveReplenishmentProposal(
   const now = input.now ?? new Date();
 
   return prisma.$transaction(async (tx) => {
+    const initialProposal = await tx.replenishmentProposal.findUnique({
+      where: { id: input.proposalId },
+      select: { policyId: true },
+    });
+    if (!initialProposal) throw new Error("Propuesta de reabasto no encontrada");
+    await lockReplenishmentPolicy(tx, initialProposal.policyId);
+    const auditActor = await resolveAuditActor(tx, input.actorUserId);
+
     const proposal = await tx.replenishmentProposal.findUnique({
       where: { id: input.proposalId },
       select: {
         id: true,
+        policyId: true,
         status: true,
         productId: true,
         warehouseId: true,
@@ -374,7 +509,7 @@ export async function approveReplenishmentProposal(
       entityType: "REPLENISHMENT_PROPOSAL",
       entityId: proposal.id,
       action: "APPROVE_AND_CONVERT",
-      actor: input.actorUserId ?? "system",
+      actor: auditActor,
       actorUserId: input.actorUserId,
       source: "purchasing/replenishment/approval",
       before: { status: proposal.status, purchaseOrderId: proposal.purchaseOrderId },
@@ -384,7 +519,7 @@ export async function approveReplenishmentProposal(
       entityType: "PURCHASE_ORDER",
       entityId: order.id,
       action: "CREATE_FROM_REPLENISHMENT_PROPOSAL",
-      actor: input.actorUserId ?? "system",
+      actor: auditActor,
       actorUserId: input.actorUserId,
       source: "purchasing/replenishment/approval",
       after: { folio: order.folio, proposalId: proposal.id, supplierId: supplier.id, productId: proposal.productId, quantity: proposal.recommendedQuantity },

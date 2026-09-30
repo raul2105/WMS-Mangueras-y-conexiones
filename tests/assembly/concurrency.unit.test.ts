@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { reserveInventoryInTx } from "@/lib/assembly/work-order-service";
+import { claimAssemblyWorkOrderCancellationInTx, reserveInventoryInTx } from "@/lib/assembly/work-order-service";
 import {
+  claimAssemblyPickListReleaseInTx,
   claimAssemblyPickTaskInTx,
   claimAssemblyWorkOrderConfirmationInTx,
   confirmAssemblyPickTask,
+  releaseAssemblyPickList,
 } from "@/lib/assembly/picking-service";
 
 vi.mock("@/lib/assembly/compatibility-guard", () => ({
@@ -119,6 +121,56 @@ describe("assembly concurrency guards", () => {
     const call = updateMany.mock.calls[0][0];
     expect(call.where).toEqual({ id: "work-order-1", updatedAt });
     expect(call.data.updatedAt.getTime()).toBeGreaterThan(updatedAt.getTime());
+  });
+
+  it("uses the same unreleased, uncancelled work-order CAS for cancellation and release", async () => {
+    const updateMany = vi.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    const tx = { assemblyWorkOrder: { updateMany } } as never;
+
+    await claimAssemblyWorkOrderCancellationInTx(tx, "work-order-1", new Date("2026-09-30T12:00:00Z"));
+    await expect(claimAssemblyPickListReleaseInTx(tx, "work-order-1", new Date("2026-09-30T12:00:01Z")))
+      .rejects.toMatchObject({ code: "CONCURRENT_ORDER_TRANSITION" });
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: "work-order-1", pickStatus: "NOT_RELEASED", canceledAt: null },
+      data: { pickStatus: "CANCELED", canceledAt: new Date("2026-09-30T12:00:00Z"), updatedAt: new Date("2026-09-30T12:00:00Z") },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "work-order-1", pickStatus: "NOT_RELEASED", canceledAt: null },
+      data: { pickStatus: "RELEASED", releasedAt: expect.any(Date), updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("treats a repeated release as a no-op and does not regress pick progress", async () => {
+    const workOrderUpdateMany = vi.fn();
+    const pickListUpdateMany = vi.fn();
+    const productionOrderUpdateMany = vi.fn();
+    const tx = {
+      productionOrder: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "production-1",
+          kind: "ASSEMBLY_3PIECE",
+          status: "EN_PROCESO",
+          sourceDocumentType: "SalesInternalOrder",
+          sourceDocumentId: "sales-1",
+          assemblyWorkOrder: {
+            id: "work-order-1",
+            pickStatus: "IN_PROGRESS",
+            canceledAt: null,
+            pickLists: [{ id: "pick-list-1", status: "PARTIAL" }],
+          },
+        }),
+        updateMany: productionOrderUpdateMany,
+      },
+      assemblyWorkOrder: { updateMany: workOrderUpdateMany },
+      pickList: { updateMany: pickListUpdateMany },
+    };
+    const db = { $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx) } as never;
+
+    await expect(releaseAssemblyPickList(db, "production-1")).resolves.toBeUndefined();
+    expect(workOrderUpdateMany).not.toHaveBeenCalled();
+    expect(pickListUpdateMany).not.toHaveBeenCalled();
+    expect(productionOrderUpdateMany).not.toHaveBeenCalled();
   });
 
   it("does not touch inventory when another request already claimed the same task", async () => {

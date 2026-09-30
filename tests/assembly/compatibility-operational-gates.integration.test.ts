@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { getAssemblyCompatibilityDecision } from "@/lib/catalog/compatibility";
 import {
   confirmAssemblyPickTasksBatch,
   releaseAssemblyPickList,
 } from "@/lib/assembly/picking-service";
-import { closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
+import { cancelAssemblyWorkOrder, closeAssemblyWorkOrderConsume } from "@/lib/assembly/work-order-service";
+import { randomUUID } from "node:crypto";
 
 const describePostgres = process.env.RUN_POSTGRES_TESTS === "1" ? describe : describe.skip;
 
@@ -224,6 +225,46 @@ async function assertReleaseWasRolledBack(fixture: Fixture) {
   expect(auditCount).toBe(0);
 }
 
+function createBarrier(parties: number) {
+  let arrived = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  return async () => {
+    arrived += 1;
+    if (arrived === parties) release();
+    await released;
+  };
+}
+
+function prismaWithGatedProductionOrderRead(wait: () => Promise<void>) {
+  return {
+    $transaction: (
+      run: (tx: Prisma.TransactionClient) => Promise<unknown>,
+      options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
+    ) =>
+      prisma.$transaction((tx) => {
+        const productionOrder = new Proxy(tx.productionOrder, {
+          get(target, property, receiver) {
+            const value = Reflect.get(target, property, receiver);
+            if (property !== "findUnique" || typeof value !== "function") return value;
+            return async (...args: unknown[]) => {
+              const result = await value.apply(target, args);
+              await wait();
+              return result;
+            };
+          },
+        });
+        return run(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property === "productionOrder") return productionOrder;
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as Prisma.TransactionClient);
+      }, options),
+  } as unknown as PrismaClient;
+}
+
 describePostgres("KAN-20 PostgreSQL operational compatibility gates", () => {
   beforeAll(async () => {
     prisma = new PrismaClient();
@@ -375,4 +416,85 @@ describePostgres("KAN-20 PostgreSQL operational compatibility gates", () => {
     expect(wipInventory.every((row) => row.quantity === 1)).toBe(true);
     expect(consumptionMovements).toBe(0);
   });
+
+  it("serializes cancellation against release and records the authenticated actor exactly once", async () => {
+    const fixture = await createFixture();
+    const actor = await prisma.user.create({
+      data: {
+        email: `assembly-actor-${randomUUID()}@example.test`,
+        name: "Assembly actor",
+        passwordHash: "test-only",
+      },
+    });
+    const waitForBothSnapshots = createBarrier(2);
+    const db = prismaWithGatedProductionOrderRead(waitForBothSnapshots);
+    const auditActor = { actorUserId: actor.id, actor: actor.name };
+    const attempts = await Promise.allSettled([
+      releaseAssemblyPickList(db, fixture.productionOrder.id, auditActor),
+      cancelAssemblyWorkOrder(db, fixture.productionOrder.id, auditActor),
+    ]);
+    expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((result) => result.status === "rejected")).toHaveLength(1);
+
+    const [productionOrder, workOrder, pickList, lines, tasks, stock, movements, audits] = await Promise.all([
+      prisma.productionOrder.findUniqueOrThrow({ where: { id: fixture.productionOrder.id } }),
+      prisma.assemblyWorkOrder.findUniqueOrThrow({ where: { id: fixture.workOrder.id } }),
+      prisma.pickList.findUniqueOrThrow({ where: { id: fixture.pickList.id } }),
+      prisma.assemblyWorkOrderLine.findMany({ where: { assemblyWorkOrderId: fixture.workOrder.id } }),
+      prisma.pickTask.findMany({ where: { pickListId: fixture.pickList.id } }),
+      prisma.inventory.findMany({ where: { locationId: fixture.storage.id } }),
+      prisma.inventoryMovement.findMany({ where: { documentId: fixture.productionOrder.id } }),
+      prisma.auditLog.findMany({
+        where: { entityType: "ASSEMBLY_ORDER", entityId: fixture.productionOrder.id },
+      }),
+    ]);
+
+    if (productionOrder.status === "CANCELADA") {
+      expect(workOrder).toMatchObject({ pickStatus: "CANCELED", reservationStatus: "RELEASED" });
+      expect(pickList.status).toBe("CANCELLED");
+      expect(lines.every((line) => line.reservedQty === 0)).toBe(true);
+      expect(tasks.every((task) => task.status === "CANCELLED")).toBe(true);
+      expect(stock.every((row) => row.reserved === 0 && row.available === 1)).toBe(true);
+      expect(movements).toHaveLength(3);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({ action: "CANCEL", actor: actor.name, actorUserId: actor.id });
+    } else {
+      expect(productionOrder.status).toBe("EN_PROCESO");
+      expect(workOrder.pickStatus).toBe("RELEASED");
+      expect(pickList.status).toBe("RELEASED");
+      expect(lines.every((line) => line.reservedQty === 1)).toBe(true);
+      expect(tasks.every((task) => task.status === "PENDING")).toBe(true);
+      expect(stock.every((row) => row.reserved === 1 && row.available === 0)).toBe(true);
+      expect(movements).toHaveLength(0);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({ action: "RELEASE_PICK_LIST", actor: actor.name, actorUserId: actor.id });
+    }
+  }, 45_000);
+
+  it("rolls back cancellation effects if its required audit record cannot be written", async () => {
+    const fixture = await createFixture();
+    await expect(cancelAssemblyWorkOrder(prisma, fixture.productionOrder.id, {
+      actor: "missing audit user",
+      actorUserId: randomUUID(),
+    })).rejects.toBeDefined();
+
+    const [productionOrder, workOrder, pickList, lines, tasks, stock, movementCount, auditCount] = await Promise.all([
+      prisma.productionOrder.findUniqueOrThrow({ where: { id: fixture.productionOrder.id } }),
+      prisma.assemblyWorkOrder.findUniqueOrThrow({ where: { id: fixture.workOrder.id } }),
+      prisma.pickList.findUniqueOrThrow({ where: { id: fixture.pickList.id } }),
+      prisma.assemblyWorkOrderLine.findMany({ where: { assemblyWorkOrderId: fixture.workOrder.id } }),
+      prisma.pickTask.findMany({ where: { pickListId: fixture.pickList.id } }),
+      prisma.inventory.findMany({ where: { locationId: fixture.storage.id } }),
+      prisma.inventoryMovement.count({ where: { documentId: fixture.productionOrder.id } }),
+      prisma.auditLog.count({ where: { entityType: "ASSEMBLY_ORDER", entityId: fixture.productionOrder.id, action: "CANCEL" } }),
+    ]);
+    expect(productionOrder.status).toBe("ABIERTA");
+    expect(workOrder).toMatchObject({ pickStatus: "NOT_RELEASED", reservationStatus: "RESERVED", canceledAt: null });
+    expect(pickList.status).toBe("DRAFT");
+    expect(lines.every((line) => line.reservedQty === 1)).toBe(true);
+    expect(tasks.every((task) => task.status === "PENDING")).toBe(true);
+    expect(stock.every((row) => row.reserved === 1 && row.available === 0)).toBe(true);
+    expect(movementCount).toBe(0);
+    expect(auditCount).toBe(0);
+  }, 30_000);
 });

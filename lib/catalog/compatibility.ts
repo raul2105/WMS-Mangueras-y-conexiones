@@ -1,5 +1,8 @@
 export type CompatibilityRuleDecision = "APPROVED" | "BLOCKED" | "REQUIRES_REVIEW";
 
+export const PRODUCT_SUBSTITUTION_RULE_TYPE = "PRODUCT_SUBSTITUTION" as const;
+export const ASSEMBLY_PAIR_RULE_TYPE = "ASSEMBLY_PAIR" as const;
+
 export type CompatibilityRuleRecord = {
   productId: string;
   compatibleProductId: string;
@@ -23,6 +26,8 @@ export type CompatibilityRuleRecord = {
     documentVersion: string | null;
     sourceUrl?: string | null;
     status: string;
+    reviewedAt?: Date | string | null;
+    reviewedByUserId?: string | null;
   } | null;
 };
 
@@ -70,6 +75,14 @@ function normalizeDecision(rule: CompatibilityRuleRecord): CompatibilityRuleDeci
   const explicit = rule.decision?.toUpperCase();
   if (explicit === "APPROVED" || explicit === "BLOCKED" || explicit === "REQUIRES_REVIEW") return explicit;
   return rule.severity.toUpperCase() === "BLOCK" ? "BLOCKED" : "REQUIRES_REVIEW";
+}
+
+function hasCurrentDocumentedSource(rule: CompatibilityRuleRecord) {
+  const source = rule.source;
+  return source?.status?.toUpperCase() === "APPROVED"
+    && Boolean(source.supplierName.trim())
+    && Boolean(source.documentRef.trim())
+    && Boolean(source.documentVersion?.trim());
 }
 
 function isRuleCurrent(rule: CompatibilityRuleRecord, evaluatedAt: Date) {
@@ -163,9 +176,13 @@ export function evaluateCompatibilityRules(
     };
   }
 
-  const reviewRules = currentRules.filter((rule) => normalizeDecision(rule) === "REQUIRES_REVIEW");
+  const reviewRules = currentRules.filter((rule) =>
+    normalizeDecision(rule) === "REQUIRES_REVIEW" && hasCurrentDocumentedSource(rule)
+  );
   const approvedRules = currentRules.filter((rule) =>
-    normalizeDecision(rule) === "APPROVED" && rule.governanceStatus?.toUpperCase() === "APPROVED"
+    normalizeDecision(rule) === "APPROVED"
+    && rule.governanceStatus?.toUpperCase() === "APPROVED"
+    && hasCurrentDocumentedSource(rule)
   );
   const limitChecks = approvedRules.map((rule) => inspectApprovedLimits(rule, context));
   const violations = limitChecks.flatMap((result) => result.violations);
@@ -225,7 +242,7 @@ export const compatibilityRuleSelect = {
   decision: true, governanceStatus: true, ruleRevision: true, validFrom: true, validTo: true,
   maxWorkingPressureBar: true, minTemperatureC: true, maxTemperatureC: true,
   medium: true, application: true, assemblyMethod: true,
-  source: { select: { supplierName: true, documentRef: true, documentVersion: true, sourceUrl: true, status: true } },
+  source: { select: { id: true, supplierName: true, documentRef: true, documentVersion: true, sourceUrl: true, status: true, reviewedAt: true, reviewedByUserId: true } },
 } as const;
 
 export async function getAssemblyCompatibilityDecision(
@@ -241,6 +258,10 @@ export async function getAssemblyCompatibilityDecision(
   const rules = await ruleRepository.findMany({
     where: {
       active: true,
+      governanceStatus: "APPROVED",
+      // Preserve historical assembly rules; only the explicit substitution
+      // purpose is excluded from assembly authorization.
+      ruleType: { not: PRODUCT_SUBSTITUTION_RULE_TYPE },
       productId: { in: uniqueProductIds },
       compatibleProductId: { in: uniqueProductIds },
       source: { status: "APPROVED" },

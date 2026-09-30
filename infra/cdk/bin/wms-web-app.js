@@ -15,11 +15,14 @@ const { WmsWebStack } = require("../lib/wms-web-stack");
 
 const app = new cdk.App();
 const config = loadWebConfig(app);
+if (config.accountId && process.env.CDK_DEFAULT_ACCOUNT && config.accountId !== process.env.CDK_DEFAULT_ACCOUNT) {
+  throw new Error("AWS identity differs from the configured operational account");
+}
 
 new WmsWebStack(app, config.stackName, {
   env: {
     region: config.region,
-    account: process.env.CDK_DEFAULT_ACCOUNT,
+    account: config.accountId ?? process.env.CDK_DEFAULT_ACCOUNT,
   },
   webConfig: config,
   description: `WMS Web infrastructure (${config.environment}) — VPC, RDS, SSM`,

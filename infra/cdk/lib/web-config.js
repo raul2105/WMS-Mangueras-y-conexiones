@@ -29,6 +29,15 @@ function loadWebConfig(app) {
   }
 
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  if (config.productionMode !== undefined && typeof config.productionMode !== "boolean") {
+    throw new Error("productionMode must be an explicit boolean");
+  }
+  if (config.productionMode && config.scheduleControl?.enabled) {
+    throw new Error("Production services cannot use development shutdown schedules");
+  }
+  if ((config.accountId !== undefined || config.productionMode) && !/^\d{12}$/.test(config.accountId ?? "")) {
+    throw new Error("Production mode requires an explicit AWS accountId");
+  }
   // Keep an operator's current office address out of versioned configuration.
   if (process.env.WMS_NETWORK_MODE) config.networkMode = process.env.WMS_NETWORK_MODE;
   if (process.env.WMS_OFFICE_IP_CIDR) config.officeIpCidr = process.env.WMS_OFFICE_IP_CIDR;
@@ -67,7 +76,7 @@ function loadWebConfig(app) {
     return net.isIPv4(value.slice(0, -3));
   };
 
-  if (config.environment === "prod" && !isOfficeIpv4Host(config.officeIpCidr)) {
+  if ((config.environment === "prod" || config.productionMode) && !isOfficeIpv4Host(config.officeIpCidr)) {
     throw new Error(
       `Production config must set officeIpCidr to a specific IPv4 /32 in ${configPath}`
     );

@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { requirePermission } from "@/lib/rbac";
@@ -182,7 +182,7 @@ export async function listAssignableRoles() {
 }
 
 export async function createUser(input: CreateUserInput) {
-  await requirePermission("users.manage");
+  const session = await requirePermission("users.manage");
 
   const email = normalizeEmail(input.email);
   const name = input.name.trim();
@@ -218,6 +218,8 @@ export async function createUser(input: CreateUserInput) {
         entityType: "USER",
         entityId: createdUser.id,
         action: "CREATE",
+        actorUserId: session.user.id,
+        actor: session.user.name ?? session.user.email ?? session.user.id,
         source: "users/admin-service",
         after: {
           name: createdUser.name,
@@ -234,7 +236,7 @@ export async function createUser(input: CreateUserInput) {
 }
 
 export async function updateUser(userId: string, input: UpdateUserInput) {
-  await requirePermission("users.manage");
+  const session = await requirePermission("users.manage");
 
   const email = normalizeEmail(input.email);
   const name = input.name.trim();
@@ -320,6 +322,8 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
         entityType: "USER",
         entityId: userId,
         action: "UPDATE",
+        actorUserId: session.user.id,
+        actor: session.user.name ?? session.user.email ?? session.user.id,
         source: "users/admin-service",
         before: {
           email: existingUser.email,
@@ -334,11 +338,16 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
       },
       tx,
     );
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch((error: unknown) => {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      throw new UserAdminError("Otro administrador modificó los usuarios al mismo tiempo. Actualiza la página y vuelve a intentar.");
+    }
+    throw error;
   });
 }
 
 export async function resetUserPassword(userId: string, newPassword: string) {
-  await requirePermission("users.manage");
+  const session = await requirePermission("users.manage");
 
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
 
@@ -362,6 +371,8 @@ export async function resetUserPassword(userId: string, newPassword: string) {
         entityType: "USER",
         entityId: userId,
         action: "RESET_PASSWORD",
+        actorUserId: session.user.id,
+        actor: session.user.name ?? session.user.email ?? session.user.id,
         source: "users/admin-service",
         after: {
           email: existingUser.email,

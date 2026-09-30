@@ -6,17 +6,19 @@ import authConfig from "@/auth.config";
 import prisma from "@/lib/prisma";
 import { startPerf } from "@/lib/perf";
 import { getPermissionsForRoles } from "@/lib/rbac/role-permissions";
+import { getCredentialVersion } from "@/lib/auth/credential-version";
 
 function buildAuthUser(
   user: {
     id: string;
     name: string;
     email: string;
+    passwordHash: string;
   },
   roles: string[],
 ): NextAuthUser {
   const permissions = getPermissionsForRoles(roles);
-  return { id: user.id, name: user.name, email: user.email, roles, permissions };
+  return { id: user.id, name: user.name, email: user.email, roles, permissions, credentialVersion: getCredentialVersion(user.passwordHash) };
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -33,7 +35,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const currentUser = await prisma.user.findUnique({
         where: { id: userId },
         select: {
-          id: true, name: true, email: true, isActive: true,
+          id: true, name: true, email: true, isActive: true, passwordHash: true,
           userRoles: {
             where: { role: { isActive: true } },
             select: { role: { select: { code: true } } },
@@ -41,6 +43,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         },
       });
       if (!currentUser?.isActive) return null;
+
+      const credentialVersion = getCredentialVersion(currentUser.passwordHash);
+      const authenticatedVersion = args.user?.credentialVersion ?? token.credentialVersion;
+      // Legacy sessions must sign in again. A reset invalidates every earlier
+      // session, including a password change racing the initial JWT issuance.
+      if (authenticatedVersion !== credentialVersion) return null;
+      token.credentialVersion = credentialVersion;
 
       const roles = currentUser.userRoles.map((entry) => entry.role.code);
       token.uid = currentUser.id;

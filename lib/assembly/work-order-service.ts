@@ -2,12 +2,14 @@ import type { PrismaClient, Prisma } from "@prisma/client";
 import { InventoryServiceError } from "@/lib/inventory-service";
 import { reconcileProductionReservations } from "@/lib/reservation-policy";
 import { buildAssemblyRequirements, previewAssemblyAvailability, validateAssemblyCompatibility } from "@/lib/assembly/availability-service";
-import type { AssemblyConfigInput, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
+import type { AssemblyConfigInput, AssemblyMutationActor, AssemblyOrderDraftHeaderInput } from "@/lib/assembly/types";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { assertAssemblyOperationalCompatibility } from "@/lib/assembly/compatibility-guard";
 
 type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
+
+export type { AssemblyMutationActor } from "@/lib/assembly/types";
 
 function withDbTransaction<T>(db: Db, fn: (tx: Tx) => Promise<T>, timeout = 20000) {
   if ("$transaction" in db) {
@@ -137,8 +139,9 @@ async function releaseInventoryReservationInTx(args: {
   documentType: string;
   documentId: string;
   documentLineId: string;
+  actor?: AssemblyMutationActor;
 }) {
-  const { tx, productId, locationId, qty, reference, documentType, documentId, documentLineId } = args;
+  const { tx, productId, locationId, qty, reference, documentType, documentId, documentLineId, actor } = args;
   if (qty <= 0) return;
   const row = await tx.inventory.findUnique({
     where: { productId_locationId: { productId, locationId } },
@@ -158,6 +161,8 @@ async function releaseInventoryReservationInTx(args: {
       productId,
       locationId,
       type: "ADJUSTMENT",
+      operatorName: actor?.actor ?? null,
+      operatorUserId: actor?.actorUserId ?? null,
       quantity: 0,
       reference,
       notes: "Liberacion de reserva de ensamble",
@@ -317,7 +322,8 @@ async function createAssemblyOperationalRecordsInTx(args: {
         pickListCode: pickCode,
       }),
       source: "assembly/work-order-service",
-      actor: "system",
+      actor: input.auditActor?.actor ?? "system",
+      actorUserId: input.auditActor?.actorUserId ?? null,
     },
   });
 
@@ -362,7 +368,8 @@ export async function createAssemblyOrderDraftHeader(prisma: Db, input: Assembly
           priority: input.priority ?? 3,
         }),
         source: "assembly/work-order-service",
-        actor: "system",
+        actor: input.auditActor?.actor ?? "system",
+        actorUserId: input.auditActor?.actorUserId ?? null,
       },
     });
 
@@ -432,7 +439,25 @@ export async function configureAssemblyOrderExact(
   });
 }
 
-export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: string) {
+export async function claimAssemblyWorkOrderCancellationInTx(tx: Tx, assemblyWorkOrderId: string, canceledAt = new Date()) {
+  const claimed = await tx.assemblyWorkOrder.updateMany({
+    where: { id: assemblyWorkOrderId, pickStatus: "NOT_RELEASED", canceledAt: null },
+    data: { pickStatus: "CANCELED", canceledAt, updatedAt: canceledAt },
+  });
+  if (claimed.count !== 1) {
+    throw new InventoryServiceError(
+      "CONCURRENT_ORDER_TRANSITION",
+      "La orden de ensamble cambió durante otra operación; actualice la pantalla y reintente",
+    );
+  }
+  return canceledAt;
+}
+
+export async function cancelAssemblyWorkOrder(
+  prisma: Db,
+  productionOrderId: string,
+  actor?: AssemblyMutationActor,
+) {
   return withDbTransaction(prisma, async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: productionOrderId },
@@ -451,6 +476,7 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
           select: {
             id: true,
             pickStatus: true,
+            reservationStatus: true,
             lines: {
               select: {
                 id: true,
@@ -494,6 +520,10 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
       throw new InventoryServiceError("WIP_PENDING", "Cannot cancel an order with material already picked to WIP");
     }
 
+    // This CAS is the serialization point shared with releaseAssemblyPickList.
+    // It runs before releasing any reservation, so only one terminal transition wins.
+    const canceledAt = await claimAssemblyWorkOrderCancellationInTx(tx, order.assemblyWorkOrder.id);
+
     for (const line of order.assemblyWorkOrder.lines) {
       for (const task of line.pickTasks) {
         const pendingReserved = Math.max(0, task.reservedQty - task.pickedQty);
@@ -506,6 +536,7 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
           documentType: "ASSEMBLY_ORDER",
           documentId: order.id,
           documentLineId: line.id,
+          actor,
         });
       }
     }
@@ -516,7 +547,7 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
     });
     await tx.pickList.updateMany({
       where: { assemblyWorkOrderId: order.assemblyWorkOrder.id },
-      data: { status: "CANCELLED", canceledAt: new Date() },
+      data: { status: "CANCELLED", canceledAt },
     });
     await tx.assemblyWorkOrderLine.updateMany({
       where: { assemblyWorkOrderId: order.assemblyWorkOrder.id },
@@ -531,13 +562,16 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
       data: {
         reservationStatus: "RELEASED",
         pickStatus: "CANCELED",
-        canceledAt: new Date(),
+        canceledAt,
       },
     });
-    await tx.productionOrder.update({
-      where: { id: order.id },
-      data: { status: "CANCELADA" },
+    const productionOrderUpdate = await tx.productionOrder.updateMany({
+      where: { id: order.id, status: { notIn: ["COMPLETADA", "CANCELADA"] } },
+      data: { status: "CANCELADA", updatedAt: canceledAt },
     });
+    if (productionOrderUpdate.count !== 1) {
+      throw new InventoryServiceError("CONCURRENT_ORDER_TRANSITION", "La orden de producción cambió durante la cancelación; actualice la pantalla y reintente");
+    }
 
     const scopedFromItems = dedupeReservationScope(order.items);
     // Fallback: some legacy flows can have reserved pick tasks without ProductionOrderItem rows.
@@ -548,6 +582,27 @@ export async function cancelAssemblyWorkOrder(prisma: Db, productionOrderId: str
     );
 
     await reconcileProductionReservations(tx, scopedFromItems.length > 0 ? scopedFromItems : scopedFromTasks);
+
+    await createAuditLogSafeWithDb({
+      entityType: "ASSEMBLY_ORDER",
+      entityId: order.id,
+      action: "CANCEL",
+      actor: actor?.actor ?? "system",
+      actorUserId: actor?.actorUserId ?? null,
+      source: "assembly/work-order-service",
+      before: {
+        productionOrderStatus: order.status,
+        pickStatus: order.assemblyWorkOrder.pickStatus,
+        reservationStatus: order.assemblyWorkOrder.reservationStatus,
+        reservedQty: order.assemblyWorkOrder.lines.reduce((sum, line) => sum + line.reservedQty, 0),
+      },
+      after: {
+        productionOrderStatus: "CANCELADA",
+        pickStatus: "CANCELED",
+        reservationStatus: "RELEASED",
+        canceledAt: canceledAt.toISOString(),
+      },
+    }, tx);
   });
 }
 

@@ -131,6 +131,9 @@ async function updateProduct(id: string, formData: FormData) {
     redirect(`/catalog/${id}/edit?error=${encodeURIComponent("La fuente técnica requiere proveedor y documento")}`);
   }
   const hasTechnicalSource = hasTechnicalSourceSupplier && hasTechnicalSourceDocument;
+  if (hasTechnicalSource && !technicalSourceVersion) {
+    redirect(`/catalog/${id}/edit?error=${encodeURIComponent("La fuente técnica requiere versión o fecha documental")}`);
+  }
   const replacingPublishedImage = Boolean(
     resolvedImageUrl
       && hasTechnicalSource
@@ -361,7 +364,7 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <p className="text-sm font-semibold text-white md:col-span-2">Nueva fuente técnica curada</p>
             <label className="space-y-1"><span className="text-xs text-slate-400">Proveedor / marca fuente</span><input name="technicalSourceSupplier" className="w-full px-4 py-3 glass rounded-lg" placeholder="Gates, Parker, Dixon..." /></label>
             <label className="space-y-1"><span className="text-xs text-slate-400">Documento o ficha</span><input name="technicalSourceDocument" className="w-full px-4 py-3 glass rounded-lg" placeholder="Código de catálogo / PDF" /></label>
-            <label className="space-y-1"><span className="text-xs text-slate-400">Versión / fecha</span><input name="technicalSourceVersion" className="w-full px-4 py-3 glass rounded-lg" placeholder="2026-01" /></label>
+            <label className="space-y-1"><span className="text-xs text-slate-400">Versión / fecha</span><input name="technicalSourceVersion" className="w-full px-4 py-3 glass rounded-lg" placeholder="2026-01" /><span className="text-xs text-slate-500">Obligatoria cuando captures proveedor y documento.</span></label>
             <label className="space-y-1"><span className="text-xs text-slate-400">URL de origen</span><input name="technicalSourceUrl" className="w-full px-4 py-3 glass rounded-lg" placeholder="https://..." /></label>
             <p className="text-xs text-slate-500 md:col-span-2">Los cambios quedan pendientes de revisión antes de usarse como fuente de promesa o compatibilidad.</p>
           </div>

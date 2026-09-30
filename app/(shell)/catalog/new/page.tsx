@@ -87,6 +87,9 @@ async function createProduct(formData: FormData) {
     redirect(`/catalog/new?error=${encodeURIComponent("La fuente técnica requiere proveedor y documento")}`);
   }
   const hasTechnicalSource = hasTechnicalSourceSupplier && hasTechnicalSourceDocument;
+  if (hasTechnicalSource && !technicalSourceVersion) {
+    redirect(`/catalog/new?error=${encodeURIComponent("La fuente técnica requiere versión o fecha documental")}`);
+  }
 
   const attributesJsonValidation = validateTechnicalAttributesJson(attributes);
   if (!attributesJsonValidation.valid) {
@@ -359,7 +362,7 @@ export default async function NewCatalogItemPage({
               <p className="text-sm font-semibold text-[var(--text-primary)] md:col-span-2">Fuente técnica curada</p>
               <Input name="technicalSourceSupplier" label="Proveedor / marca fuente" placeholder="Gates, Parker, Dixon..." />
               <Input name="technicalSourceDocument" label="Documento o ficha" placeholder="Código de catálogo / PDF" />
-              <Input name="technicalSourceVersion" label="Versión / fecha" placeholder="2026-01" />
+              <Input name="technicalSourceVersion" label="Versión / fecha" placeholder="2026-01" hint="Obligatoria cuando captures proveedor y documento." />
               <Input name="technicalSourceUrl" label="URL de origen" placeholder="https://..." />
               <p className="text-xs text-[var(--text-muted)] md:col-span-2">La ficha y el asset quedan pendientes de revisión hasta ser aprobados por Administración.</p>
             </div>

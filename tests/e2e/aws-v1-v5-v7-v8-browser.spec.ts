@@ -1,14 +1,12 @@
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { InventoryService } from "@/lib/inventory-service";
-import {
-  addSalesRequestProductLine,
-  confirmSalesRequestOrder,
-  createSalesRequestDraftHeader,
-  releaseSalesRequestPickList,
-} from "@/lib/sales/request-service";
+import { addSalesRequestProductLine, confirmSalesRequestOrder, createSalesRequestDraftHeader, releaseSalesRequestPickList } from "@/lib/sales/request-service";
 import { loginAs, USERS } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
@@ -70,20 +68,30 @@ async function cleanupFixture() {
     ? await prisma.salesInternalOrder.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })
     : [];
   const orderIds = [...new Set([...fixture.orderIds, ...scopedOrders.map(({ id }) => id)])];
+  const locationIds = [fixture.storageLocationId, fixture.stagingLocationId, fixture.shippingLocationId].filter(Boolean);
+  const inventoryEntityIds = fixture.productId ? locationIds.map((locationId) => `${fixture.productId}:${locationId}`) : [];
+  const childEntityIds = orderIds.length
+    ? (await prisma.salesInternalOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } } }))
+      .flatMap((order) => [order.id, ...order.lines.map(({ id }) => id), ...order.pickLists.flatMap((pickList) => [pickList.id, ...pickList.tasks.map(({ id }) => id)])])
+    : [];
   const traceIds = fixture.warehouseId
     ? (await prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })).map(({ id }) => id)
     : [];
   if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { traceRecordId: { in: traceIds } } });
   if (traceIds.length) await prisma.traceRecord.deleteMany({ where: { id: { in: traceIds } } });
+  if (childEntityIds.length || inventoryEntityIds.length) {
+    await prisma.auditLog.deleteMany({ where: { entityId: { in: [...childEntityIds, ...inventoryEntityIds] } } });
+  }
   if (orderIds.length) {
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: orderIds } } });
     await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: orderIds } } });
     await prisma.salesInternalOrder.deleteMany({ where: { id: { in: orderIds } } });
   }
   if (fixture.warehouseId) {
-    const locationIds = [fixture.storageLocationId, fixture.stagingLocationId, fixture.shippingLocationId].filter(Boolean);
     await prisma.auditLog.deleteMany({ where: { entityId: fixture.warehouseId } });
     await prisma.inventoryMovement.deleteMany({ where: { OR: [...(locationIds.length ? [{ locationId: { in: locationIds } }] : []), ...(fixture.productId ? [{ productId: fixture.productId }] : [])] } });
+    if (fixture.productId && locationIds.length) {
+      await prisma.syncEvent.deleteMany({ where: { entityType: "INVENTORY", entityId: { in: locationIds.map((locationId) => `${fixture.productId}:${locationId}`) } } });
+    }
   }
   if (fixture.productId) {
     await prisma.inventory.deleteMany({ where: { productId: fixture.productId } });
@@ -264,7 +272,18 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
     await exceptions.locator('input[name="notes"]').fill("Reposición autorizada por manager gate");
     await exceptions.getByRole("button", { name: "Registrar decisión" }).click();
     await expect(page.getByTestId("operational-exceptions")).toContainText("WAIT_REPLENISHMENT");
-    await expect(prisma.salesInternalOrderException.findFirst({ where: { orderId: order.id, status: "RESOLVED" } })).resolves.toBeTruthy();
+    const resolvedException = await prisma.salesInternalOrderException.findFirstOrThrow({ where: { orderId: order.id, status: "RESOLVED" } });
+    const managerId = (await prisma.user.findUniqueOrThrow({ where: { email: USERS.MANAGER.email }, select: { id: true } })).id;
+    expect(resolvedException.resolution).toBe("WAIT_REPLENISHMENT");
+    expect(resolvedException.decidedByUserId).toBe(managerId);
+    expect(resolvedException.decidedAt).toBeTruthy();
+    const resolutionAudits = await prisma.auditLog.findMany({ where: { entityId: order.id, action: "RESOLVE_OPERATIONAL_EXCEPTION" } });
+    expect(resolutionAudits).toHaveLength(1);
+    expect(resolutionAudits[0]?.actorUserId).toBe(managerId);
+    await page.reload();
+    await expect(page.getByTestId("operational-exceptions")).toContainText("WAIT_REPLENISHMENT");
+    await expect(page.getByTestId("operational-exceptions").getByRole("button", { name: "Registrar decisión" })).toHaveCount(0);
+    await expect(prisma.auditLog.count({ where: { entityId: order.id, action: "RESOLVE_OPERATIONAL_EXCEPTION" } })).resolves.toBe(1);
   });
 
   test("V8 browser ejecuta dos claims concurrentes y conserva un solo ownership", async ({ browser }) => {
@@ -291,5 +310,333 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
       await primaryContext.close();
       await secondaryContext.close();
     }
+  });
+});
+
+const governancePrisma = new PrismaClient();
+const governanceTag = `E2E-GOV-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`;
+const governanceFixture = {
+  hoseSku: `${governanceTag}-HOSE`,
+  fittingSku: `${governanceTag}-SUBSTITUTE-HOSE`,
+  documentRef: `${governanceTag}-DOC`,
+  sourceId: "",
+  hoseId: "",
+  fittingId: "",
+  warehouseId: "",
+  locationId: "",
+  stagingLocationId: "",
+  customerId: "",
+  ruleId: "",
+  equivalenceId: "",
+  orderId: "",
+  managerUserId: "",
+  adminUserId: "",
+};
+let governanceBefore: Record<string, unknown> = {};
+let governanceDuring: Record<string, unknown> = {};
+
+async function expectCatalogAccessibilityBothThemes(page: Page) {
+  for (const theme of ["light", "dark"] as const) {
+    if (await page.locator("html").getAttribute("data-theme") !== theme) {
+      await page.getByRole("button", { name: "Cambiar tema" }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    }
+    const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+    expect(result.violations.filter((issue) => issue.impact === "critical" || issue.impact === "serious" || issue.id === "color-contrast")).toEqual([]);
+  }
+}
+
+async function captureGovernanceManifest() {
+  const [{ schema }] = await governancePrisma.$queryRaw<Array<{ schema: string }>>`SELECT current_schema() AS schema`;
+  const [products, sources, rules, equivalences, orders, warehouses, locations, stagingLocations, customers, inventory, movements] = await Promise.all([
+    governancePrisma.product.findMany({ where: { sku: { in: [governanceFixture.hoseSku, governanceFixture.fittingSku] } }, select: { id: true, sku: true } }),
+    governancePrisma.productTechnicalSource.findMany({ where: { documentRef: governanceFixture.documentRef }, select: { id: true, status: true, documentVersion: true } }),
+    governancePrisma.productCompatibilityRule.findMany({ where: { OR: [
+      { id: governanceFixture.ruleId || "00000000-0000-0000-0000-000000000000" },
+      { productId: governanceFixture.hoseId || "00000000-0000-0000-0000-000000000000", ruleType: "PRODUCT_SUBSTITUTION" },
+    ] }, select: { id: true, governanceStatus: true, decision: true, ruleRevision: true } }),
+    governancePrisma.productEquivalence.findMany({ where: { OR: [
+      { id: governanceFixture.equivalenceId || "00000000-0000-0000-0000-000000000000" },
+      { sourceSheet: `Commercial note ${governanceTag}` },
+    ] }, select: { id: true, active: true } }),
+    governancePrisma.salesInternalOrder.findMany({ where: { id: governanceFixture.orderId || "00000000-0000-0000-0000-000000000000" }, select: { id: true, code: true, lines: { select: { id: true, technicalSelectionSnapshot: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } } }),
+    governancePrisma.warehouse.findMany({ where: { id: governanceFixture.warehouseId || "00000000-0000-0000-0000-000000000000" }, select: { id: true, code: true } }),
+    governancePrisma.location.findMany({ where: { id: governanceFixture.locationId || "00000000-0000-0000-0000-000000000000" }, select: { id: true, code: true } }),
+    governancePrisma.location.findMany({ where: { id: governanceFixture.stagingLocationId || "00000000-0000-0000-0000-000000000000" }, select: { id: true, code: true } }),
+    governancePrisma.customer.findMany({ where: { id: governanceFixture.customerId || "00000000-0000-0000-0000-000000000000" }, select: { id: true, code: true } }),
+    governancePrisma.inventory.findMany({ where: { productId: { in: [governanceFixture.hoseId, governanceFixture.fittingId].filter(Boolean) } }, select: { id: true, productId: true, locationId: true, quantity: true, reserved: true, available: true } }),
+    governancePrisma.inventoryMovement.findMany({ where: { documentId: { in: [`${governanceTag}-RECEIPT`, governanceFixture.orderId || "00000000-0000-0000-0000-000000000000"] } }, select: { id: true, documentId: true, productId: true, quantity: true, type: true } }),
+  ]);
+  const inventoryEventEntityIds = productIdsForGovernance().flatMap((productId) =>
+    [governanceFixture.locationId, governanceFixture.stagingLocationId].filter(Boolean).map((locationId) => `${productId}:${locationId}`),
+  );
+  const syncEvents = inventoryEventEntityIds.length
+    ? await governancePrisma.syncEvent.findMany({ where: { entityType: "INVENTORY", entityId: { in: inventoryEventEntityIds } }, select: { id: true, entityId: true, action: true, status: true } })
+    : [];
+  const orderEntityIds = orders.flatMap((order) => [order.id, ...order.lines.map(({ id }) => id), ...order.pickLists.map(({ id }) => id), ...order.pickLists.flatMap(({ tasks }) => tasks.map(({ id }) => id))]);
+  const entityIds = [governanceFixture.sourceId, governanceFixture.orderId, ...orderEntityIds, ...rules.map(({ id }) => id), ...equivalences.map(({ id }) => id), ...inventoryEventEntityIds].filter(Boolean);
+  const audits = entityIds.length
+    ? await governancePrisma.auditLog.findMany({ where: { entityId: { in: entityIds } }, select: { id: true, entityType: true, entityId: true, action: true, actorUserId: true } })
+    : [];
+  return {
+    capturedAt: new Date().toISOString(),
+    schema,
+    runId: governanceTag,
+    actors: { managerUserId: governanceFixture.managerUserId, adminUserId: governanceFixture.adminUserId },
+    identities: { sourceId: governanceFixture.sourceId, hoseId: governanceFixture.hoseId, fittingId: governanceFixture.fittingId, ruleId: governanceFixture.ruleId, equivalenceId: governanceFixture.equivalenceId, warehouseId: governanceFixture.warehouseId, locationId: governanceFixture.locationId, stagingLocationId: governanceFixture.stagingLocationId, customerId: governanceFixture.customerId },
+    records: { products, sources, rules, equivalences, orders, warehouses, locations, stagingLocations, customers, inventory, movements, syncEvents, audits },
+  };
+}
+
+function productIdsForGovernance() {
+  return [governanceFixture.hoseId, governanceFixture.fittingId].filter(Boolean);
+}
+
+async function cleanupGovernanceFixture() {
+  const productIds = [governanceFixture.hoseId, governanceFixture.fittingId].filter(Boolean);
+  const [scopedRules, scopedEquivalences] = await Promise.all([
+    governanceFixture.ruleId
+      ? governancePrisma.productCompatibilityRule.findMany({ where: { id: governanceFixture.ruleId }, select: { id: true } })
+      : productIds.length
+        ? governancePrisma.productCompatibilityRule.findMany({ where: { productId: { in: productIds }, ruleType: "PRODUCT_SUBSTITUTION" }, select: { id: true } })
+        : Promise.resolve([]),
+    governanceFixture.equivalenceId
+      ? governancePrisma.productEquivalence.findMany({ where: { id: governanceFixture.equivalenceId }, select: { id: true } })
+      : productIds.length
+        ? governancePrisma.productEquivalence.findMany({ where: { productId: { in: productIds }, sourceSheet: `Commercial note ${governanceTag}` }, select: { id: true } })
+        : Promise.resolve([]),
+  ]);
+  const ruleIds = [...new Set([...scopedRules.map(({ id }) => id), governanceFixture.ruleId].filter(Boolean))];
+  const equivalenceIds = [...new Set([...scopedEquivalences.map(({ id }) => id), governanceFixture.equivalenceId].filter(Boolean))];
+  const relatedOrder = governanceFixture.orderId
+    ? await governancePrisma.salesInternalOrder.findUnique({
+        where: { id: governanceFixture.orderId },
+        select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } },
+      })
+    : null;
+  const orderEntityIds = relatedOrder
+    ? [relatedOrder.id, ...relatedOrder.lines.map(({ id }) => id), ...relatedOrder.pickLists.map(({ id }) => id), ...relatedOrder.pickLists.flatMap(({ tasks }) => tasks.map(({ id }) => id))]
+    : [];
+  const inventoryEventEntityIds = productIds.flatMap((productId) =>
+    [governanceFixture.locationId, governanceFixture.stagingLocationId].filter(Boolean).map((locationId) => `${productId}:${locationId}`),
+  );
+  const entityIds = [governanceFixture.sourceId, governanceFixture.orderId, ...orderEntityIds, ...ruleIds, ...equivalenceIds, ...inventoryEventEntityIds].filter(Boolean);
+  if (entityIds.length) await governancePrisma.auditLog.deleteMany({ where: { entityId: { in: entityIds } } });
+  if (inventoryEventEntityIds.length) await governancePrisma.syncEvent.deleteMany({ where: { entityType: "INVENTORY", entityId: { in: inventoryEventEntityIds } } });
+  if (governanceFixture.orderId) {
+    const order = await governancePrisma.salesInternalOrder.findUnique({ where: { id: governanceFixture.orderId }, select: { code: true } });
+    if (order) await governancePrisma.inventoryMovement.deleteMany({ where: { documentId: { in: [governanceFixture.orderId, order.code, `${governanceTag}-RECEIPT`] } } });
+    else await governancePrisma.inventoryMovement.deleteMany({ where: { documentId: `${governanceTag}-RECEIPT` } });
+    await governancePrisma.salesInternalOrder.deleteMany({ where: { id: governanceFixture.orderId } });
+  }
+  if (productIds.length) await governancePrisma.inventory.deleteMany({ where: { productId: { in: productIds } } });
+  if (ruleIds.length) await governancePrisma.productCompatibilityRule.deleteMany({ where: { id: { in: ruleIds } } });
+  if (equivalenceIds.length) await governancePrisma.productEquivalence.deleteMany({ where: { id: { in: equivalenceIds } } });
+  if (governanceFixture.orderId) await governancePrisma.salesInternalOrder.deleteMany({ where: { id: governanceFixture.orderId } });
+  if (governanceFixture.sourceId) {
+    await governancePrisma.productTechnicalSpecCandidate.deleteMany({ where: { sourceId: governanceFixture.sourceId } });
+    await governancePrisma.productTechnicalSpec.deleteMany({ where: { sourceId: governanceFixture.sourceId } });
+    await governancePrisma.productAsset.deleteMany({ where: { sourceId: governanceFixture.sourceId } });
+    await governancePrisma.productTechnicalSource.deleteMany({ where: { id: governanceFixture.sourceId } });
+  }
+  if (governanceFixture.customerId) await governancePrisma.customer.deleteMany({ where: { id: governanceFixture.customerId } });
+  if (governanceFixture.locationId) await governancePrisma.location.deleteMany({ where: { id: governanceFixture.locationId } });
+  if (governanceFixture.stagingLocationId) await governancePrisma.location.deleteMany({ where: { id: governanceFixture.stagingLocationId } });
+  if (governanceFixture.warehouseId) await governancePrisma.warehouse.deleteMany({ where: { id: governanceFixture.warehouseId } });
+  if (productIds.length) await governancePrisma.product.deleteMany({ where: { id: { in: productIds } } });
+}
+
+async function writeGovernanceManifest(during: Record<string, unknown>, after: Record<string, unknown>) {
+  const directory = process.env.WMS_AWS_EVIDENCE_DIR ?? path.join("output", governanceTag.toLowerCase());
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, "catalog-governance-manifest.json"), JSON.stringify({ before: governanceBefore, during, after }, null, 2), "utf8");
+}
+
+test.describe.serial("AWS browser governance KAN-19/21", () => {
+  test.skip(!enabled, "Set WMS_AWS_WRITE_E2E=1 only for the explicitly authorized AWS dev write lane.");
+
+  test.beforeAll(async () => {
+    governanceBefore = await captureGovernanceManifest();
+    const records = governanceBefore.records as Record<string, unknown[]>;
+    if (Object.values(records).some((rows) => rows.length > 0)) throw new Error(`UUID fixture collision before governance writes: ${governanceTag}`);
+    const [manager, admin] = await Promise.all([
+      governancePrisma.user.findUnique({ where: { email: USERS.MANAGER.email }, select: { id: true, isActive: true, userRoles: { select: { role: { select: { code: true, isActive: true } } } } } }),
+      governancePrisma.user.findUnique({ where: { email: USERS.SYSTEM_ADMIN.email }, select: { id: true, isActive: true, userRoles: { select: { role: { select: { code: true, isActive: true } } } } } }),
+    ]);
+    if (!manager?.isActive || !manager.userRoles.some(({ role }) => role.code === "MANAGER" && role.isActive)) throw new Error("Configured Manager account is not active or lacks MANAGER role");
+    if (!admin?.isActive || !admin.userRoles.some(({ role }) => role.code === "SYSTEM_ADMIN" && role.isActive)) throw new Error("Configured System Admin account is not active or lacks SYSTEM_ADMIN role");
+    governanceFixture.managerUserId = manager.id;
+    governanceFixture.adminUserId = admin.id;
+
+    const hose = await governancePrisma.product.create({ data: { sku: governanceFixture.hoseSku, name: `E2E manguera original ${governanceTag}`, type: "HOSE", brand: `E2E Marca ${governanceTag}`, attributes: "{}" }, select: { id: true } });
+    governanceFixture.hoseId = hose.id;
+    const fitting = await governancePrisma.product.create({ data: { sku: governanceFixture.fittingSku, name: `E2E manguera sustituta ${governanceTag}`, type: "HOSE", brand: `E2E Marca ${governanceTag}`, attributes: "{}" }, select: { id: true } });
+    governanceFixture.fittingId = fitting.id;
+    const warehouse = await governancePrisma.warehouse.create({ data: { code: `${governanceTag}-WH`, name: `Almacén ${governanceTag}`, isActive: true }, select: { id: true } });
+    governanceFixture.warehouseId = warehouse.id;
+    const location = await governancePrisma.location.create({ data: { code: `${governanceTag}-STO`, name: `Stock ${governanceTag}`, zone: "QA", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id }, select: { id: true } });
+    governanceFixture.locationId = location.id;
+    const staging = await governancePrisma.location.create({ data: { code: `STAGING-${governanceTag}-WH`, name: `Tránsito ${governanceTag}`, zone: "QA", usageType: "STAGING", isActive: true, warehouseId: warehouse.id }, select: { id: true } });
+    governanceFixture.stagingLocationId = staging.id;
+    await new InventoryService(governancePrisma).receiveStock(fitting.id, location.id, 10, `${governanceTag}-RECEIPT`);
+    const customer = await governancePrisma.customer.create({ data: { code: `${governanceTag}-C`, name: `Cliente ${governanceTag}`, isActive: true }, select: { id: true } });
+    governanceFixture.customerId = customer.id;
+    const source = await governancePrisma.productTechnicalSource.create({
+      data: { supplierName: `E2E Fabricante ${governanceTag}`, documentRef: governanceFixture.documentRef, documentVersion: null, sourceUrl: "https://manufacturer.example/e2e-source", status: "PENDING_REVIEW" },
+      select: { id: true },
+    });
+    governanceFixture.sourceId = source.id;
+    await governancePrisma.productTechnicalSpecCandidate.create({
+      data: { productId: hose.id, sourceId: source.id, family: "HOSE", key: "working_pressure", value: "250", normalizedValue: "250", unit: "bar", isSafetyCritical: true },
+    });
+  });
+
+  test.afterAll(async () => {
+    try {
+      await cleanupGovernanceFixture();
+      const after = await captureGovernanceManifest();
+      await writeGovernanceManifest(governanceDuring, after);
+      const records = after.records as Record<string, unknown[]>;
+      expect(Object.values(records).every((rows) => rows.length === 0)).toBe(true);
+    } finally {
+      await governancePrisma.$disconnect();
+    }
+  });
+
+  test("Manager reviews documented source and rule; Admin publishes the exact decision; equivalence stays commercial", async ({ page }, testInfo) => {
+    await loginAs(page, "MANAGER", "/catalog/technical-sources", "/catalog/technical-sources");
+    await page.goto("/catalog/technical-sources");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectCatalogAccessibilityBothThemes(page);
+    const sourceCard = page.locator("section").filter({ hasText: governanceFixture.documentRef });
+    await expect(sourceCard).toContainText("Falta versión documental");
+    await sourceCard.getByLabel("Versión / fecha del documento").fill("Rev. E2E-1");
+    await sourceCard.getByLabel("Motivo de corrección").fill("Versión cotejada contra ficha técnica del fabricante");
+    await sourceCard.getByRole("button", { name: "Guardar versión" }).click();
+    await expect(page).toHaveURL(/\/catalog\/technical-sources\?success=version-updated/);
+    const versionAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_TECHNICAL_SOURCE", entityId: governanceFixture.sourceId, action: "UPDATE_DOCUMENT_VERSION" }, select: { actorUserId: true, after: true } });
+    expect(versionAudit.actorUserId).toBe(governanceFixture.managerUserId);
+    expect(JSON.parse(versionAudit.after ?? "null")).toMatchObject({ documentVersion: "Rev. E2E-1", correctionReason: "Versión cotejada contra ficha técnica del fabricante" });
+    await expect(sourceCard).toContainText("Rev. E2E-1");
+    await sourceCard.getByLabel(/Confirmo que revisé/).check();
+    await sourceCard.getByRole("button", { name: "Aprobar fuente y publicar" }).click();
+    await expect(page).toHaveURL(/\/catalog\/technical-sources\?success=source-approved/);
+    const approvedSource = await governancePrisma.productTechnicalSource.findUniqueOrThrow({ where: { id: governanceFixture.sourceId }, select: { status: true, documentVersion: true, reviewedByUserId: true } });
+    expect(approvedSource).toMatchObject({ status: "APPROVED", documentVersion: "Rev. E2E-1", reviewedByUserId: governanceFixture.managerUserId });
+    const sourceAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_TECHNICAL_SOURCE", entityId: governanceFixture.sourceId, action: "APPROVE" }, select: { actorUserId: true, after: true } });
+    expect(sourceAudit.actorUserId).toBe(governanceFixture.managerUserId);
+    expect(JSON.parse(sourceAudit.after ?? "null")).toMatchObject({ status: "APPROVED", sourceId: governanceFixture.sourceId });
+
+    await page.goto("/catalog/compatibility");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectCatalogAccessibilityBothThemes(page);
+    const newRuleForm = page.locator("form").filter({ has: page.getByRole("button", { name: "Guardar borrador de regla" }) });
+    await newRuleForm.locator('select[name="productId"]').selectOption(governanceFixture.hoseId);
+    await newRuleForm.locator('select[name="compatibleProductId"]').selectOption(governanceFixture.fittingId);
+    await newRuleForm.locator('select[name="ruleType"]').selectOption("PRODUCT_SUBSTITUTION");
+    await newRuleForm.locator('textarea[name="description"]').fill(`La ficha ${governanceFixture.documentRef} confirma este par exacto de manguera y conexión.`);
+    await newRuleForm.locator('select[name="sourceId"]').selectOption(governanceFixture.sourceId);
+    await newRuleForm.getByRole("button", { name: "Guardar borrador de regla" }).click();
+    await expect(page).toHaveURL(/\/catalog\/compatibility\?success=rule-draft/);
+    let rule = await governancePrisma.productCompatibilityRule.findFirstOrThrow({ where: { productId: governanceFixture.hoseId, compatibleProductId: governanceFixture.fittingId, ruleType: "PRODUCT_SUBSTITUTION" } });
+    governanceFixture.ruleId = rule.id;
+    expect(rule).toMatchObject({ governanceStatus: "DRAFT", decision: "REQUIRES_REVIEW", sourceId: governanceFixture.sourceId });
+    const createdAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_COMPATIBILITY_RULE", entityId: rule.id, action: "CREATE_DRAFT" }, select: { actorUserId: true, after: true } });
+    expect(createdAudit.actorUserId).toBe(governanceFixture.managerUserId);
+    expect(JSON.parse(createdAudit.after ?? "null")).toMatchObject({ rule: { id: rule.id, governanceStatus: "DRAFT" }, source: { id: governanceFixture.sourceId, documentVersion: "Rev. E2E-1" } });
+
+    const ruleCard = page.locator("article").filter({ hasText: "PRODUCT_SUBSTITUTION" }).filter({ hasText: governanceFixture.hoseSku });
+    await ruleCard.getByRole("button", { name: "Revisar (Manager)" }).click();
+    await expect(page).toHaveURL(/\/catalog\/compatibility\?success=reviewed/);
+    rule = await governancePrisma.productCompatibilityRule.findUniqueOrThrow({ where: { id: rule.id } });
+    expect(rule.governanceStatus).toBe("REVIEWED");
+    await expect(page.locator("article").filter({ hasText: "PRODUCT_SUBSTITUTION" }).filter({ hasText: governanceFixture.hoseSku }).getByRole("button", { name: "Publicar decisión (Admin)" })).toHaveCount(0);
+
+    await loginAs(page, "SYSTEM_ADMIN", "/catalog/compatibility", "/catalog/compatibility");
+    await page.goto("/catalog/compatibility");
+    await expectCatalogAccessibilityBothThemes(page);
+    const reviewedCard = page.locator("article").filter({ hasText: "PRODUCT_SUBSTITUTION" }).filter({ hasText: governanceFixture.hoseSku });
+    await reviewedCard.locator('select[name="decision"]').selectOption("APPROVED");
+    await reviewedCard.getByRole("button", { name: "Publicar decisión (Admin)" }).click();
+    await expect(page).toHaveURL(/\/catalog\/compatibility\?success=approved/);
+    rule = await governancePrisma.productCompatibilityRule.findUniqueOrThrow({ where: { id: rule.id } });
+    expect(rule).toMatchObject({ governanceStatus: "APPROVED", decision: "APPROVED", ruleRevision: 2 });
+    const approvalAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_COMPATIBILITY_RULE", entityId: rule.id, action: "APPROVE" }, select: { actorUserId: true, after: true } });
+    expect(approvalAudit.actorUserId).toBe(governanceFixture.adminUserId);
+    expect(JSON.parse(approvalAudit.after ?? "null")).toMatchObject({ governanceStatus: "APPROVED", decision: "APPROVED", ruleRevision: 2 });
+
+    await loginAs(page, "MANAGER", "/catalog/compatibility", "/catalog/compatibility");
+    await page.goto("/catalog/compatibility");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectCatalogAccessibilityBothThemes(page);
+    const equivalenceForm = page.locator("form").filter({ has: page.getByRole("button", { name: "Guardar equivalencia comercial" }) });
+    await equivalenceForm.locator('select[name="productId"]').selectOption(governanceFixture.hoseId);
+    await equivalenceForm.locator('select[name="equivProductId"]').selectOption(governanceFixture.fittingId);
+    await equivalenceForm.locator('input[name="basisNorm"]').fill("E2E commercial equivalence");
+    await equivalenceForm.locator('input[name="sourceSheet"]').fill(`Commercial note ${governanceTag}`);
+    await equivalenceForm.getByRole("button", { name: "Guardar equivalencia comercial" }).click();
+    await expect(page).toHaveURL(/\/catalog\/compatibility\?success=equivalence-created/);
+    const equivalence = await governancePrisma.productEquivalence.findFirstOrThrow({ where: { productId: governanceFixture.hoseId, equivProductId: governanceFixture.fittingId, sourceSheet: `Commercial note ${governanceTag}` } });
+    governanceFixture.equivalenceId = equivalence.id;
+    expect(equivalence.active).toBe(true);
+    const equivalenceAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_EQUIVALENCE", entityId: equivalence.id, action: "CREATE" }, select: { actorUserId: true, after: true } });
+    expect(equivalenceAudit.actorUserId).toBe(governanceFixture.managerUserId);
+    expect(JSON.parse(equivalenceAudit.after ?? "null")).toMatchObject({ technicalApproval: "NONE", equivalence: { id: equivalence.id, active: true } });
+
+    await loginAs(page, "MANAGER", "/production/requests/new", "/production/requests/new");
+    const requestParams = new URLSearchParams({
+      productId: governanceFixture.fittingId,
+      sku: governanceFixture.fittingSku,
+      source: "equivalences",
+      equivalentProductId: governanceFixture.hoseId,
+      warehouseId: governanceFixture.warehouseId,
+      quantity: "1",
+    });
+    await page.goto(`/production/requests/new?${requestParams.toString()}`);
+    await page.getByLabel("Selecciona o crea el cliente").fill(`Cliente ${governanceTag}`);
+    await page.getByRole("button", { name: new RegExp(`${governanceTag}-C`) }).click();
+    await page.getByRole("button", { name: "Continuar a producto →" }).click();
+    await page.getByRole("button", { name: "Producto directo" }).click();
+    await page.getByTestId("new-order-direct-product-input").fill(governanceFixture.fittingSku);
+    await page.getByRole("button", { name: new RegExp(governanceFixture.fittingSku) }).click();
+    await page.getByLabel("Cantidad").fill("1");
+    await page.getByRole("button", { name: "Agregar producto al pedido" }).click();
+    await page.getByRole("button", { name: "Continuar a entrega →" }).click();
+    await page.getByLabel("Almacén").selectOption(governanceFixture.warehouseId);
+    await page.getByLabel("Fecha compromiso").fill("2026-12-31");
+    await page.getByLabel("Notas del pedido").fill(`Governance snapshot ${governanceTag}`);
+    await Promise.all([
+      page.waitForURL(/\/production\/requests\/[^/?]+\?ok=/),
+      page.getByTestId("create-order-button").click(),
+    ]);
+    const order = await governancePrisma.salesInternalOrder.findFirstOrThrow({ where: { notes: { contains: governanceTag } }, select: { id: true } });
+    governanceFixture.orderId = order.id;
+    const line = await governancePrisma.salesInternalOrderLine.findFirstOrThrow({ where: { orderId: order.id, lineKind: "PRODUCT", productId: governanceFixture.fittingId }, select: { id: true } });
+    const snapshotBeforeRetirement = (await governancePrisma.salesInternalOrderLine.findUniqueOrThrow({ where: { id: line.id }, select: { technicalSelectionSnapshot: true, requestedQty: true } }));
+    expect(snapshotBeforeRetirement.requestedQty).toBe(1);
+    const snapshotJsonBeforeRetirement = snapshotBeforeRetirement.technicalSelectionSnapshot;
+    expect(JSON.parse(snapshotJsonBeforeRetirement ?? "null")).toMatchObject({
+      originalProduct: { id: governanceFixture.hoseId },
+      selectedProduct: { id: governanceFixture.fittingId },
+      equivalence: { id: equivalence.id },
+      technicalRules: [{ id: rule.id, revision: 2, ruleType: "PRODUCT_SUBSTITUTION", source: { documentVersion: "Rev. E2E-1" } }],
+      context: { warehouseId: governanceFixture.warehouseId, requestedQty: 1, availableAtSelection: 10 },
+    });
+
+    await loginAs(page, "SYSTEM_ADMIN", "/catalog/compatibility", "/catalog/compatibility");
+    await page.goto("/catalog/compatibility");
+    const activeRuleCard = page.locator("article").filter({ hasText: "PRODUCT_SUBSTITUTION" }).filter({ hasText: governanceFixture.hoseSku });
+    await activeRuleCard.getByLabel("Motivo para retirar").fill("El fabricante retiró esta revisión técnica del catálogo");
+    await activeRuleCard.getByRole("button", { name: "Retirar" }).click();
+    await expect(page).toHaveURL(/\/catalog\/compatibility\?success=retired/);
+    rule = await governancePrisma.productCompatibilityRule.findUniqueOrThrow({ where: { id: rule.id } });
+    expect(rule).toMatchObject({ governanceStatus: "RETIRED", active: false, ruleRevision: 3 });
+    const snapshotAfterRetirement = (await governancePrisma.salesInternalOrderLine.findUniqueOrThrow({ where: { id: line.id }, select: { technicalSelectionSnapshot: true } })).technicalSelectionSnapshot;
+    expect(snapshotAfterRetirement).toBe(snapshotJsonBeforeRetirement);
+    const retireAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_COMPATIBILITY_RULE", entityId: rule.id, action: "RETIRE" }, select: { actorUserId: true, after: true } });
+    expect(retireAudit.actorUserId).toBe(governanceFixture.adminUserId);
+    expect(JSON.parse(retireAudit.after ?? "null")).toMatchObject({ governanceStatus: "RETIRED", active: false, ruleRevision: 3 });
+    governanceDuring = await captureGovernanceManifest();
+    await testInfo.attach("catalog-governance-approved-rule.png", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
   });
 });

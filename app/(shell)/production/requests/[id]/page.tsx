@@ -59,6 +59,10 @@ import { getRequestId } from "@/lib/request-meta";
 
 export const dynamic = "force-dynamic";
 
+function trustedAuditActor(user: { id: string; name?: string | null; email?: string | null }) {
+  return { actorUserId: user.id, actor: user.name ?? user.email ?? user.id };
+}
+
 function isNextRedirectError(error: unknown) {
   return Boolean(
     error &&
@@ -73,7 +77,7 @@ async function confirmRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.confirm");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -87,6 +91,7 @@ async function confirmRequest(formData: FormData) {
     await confirmSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
       confirmedByUserId: sessionCtx.user?.id ?? null,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
 
@@ -112,7 +117,7 @@ async function cancelRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.cancel");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderCancellationSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -128,6 +133,7 @@ async function cancelRequest(formData: FormData) {
       orderId: parsed.data.orderId,
       cancelledByUserId: sessionCtx.user?.id ?? null,
       reason: parsed.data.reason,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
 
@@ -153,7 +159,7 @@ async function takeRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.pull");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -170,6 +176,7 @@ async function takeRequest(formData: FormData) {
     await pullSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
       assignedToUserId: sessionCtx.user.id,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
@@ -216,7 +223,7 @@ async function markDelivered(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.delivered");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderDeliverySchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -244,6 +251,7 @@ async function markDelivered(formData: FormData) {
       notes: parsed.data.notes,
       evidenceUrl: parsed.data.evidenceUrl,
       exceptionReason: parsed.data.exceptionReason,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
@@ -263,7 +271,7 @@ async function markPreparedForDelivery(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.prepare_delivery");
   const requestId = await getRequestId();
-  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const authorizedSession = await (await import("@/lib/rbac")).requirePermission("production.execute");
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderPreparationSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -279,6 +287,7 @@ async function markPreparedForDelivery(formData: FormData) {
     const result = await markSalesRequestPreparedForDelivery(prisma, {
       ...parsed.data,
       preparedByUserId: sessionCtx.user.id,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true, alreadyPrepared: result.alreadyPrepared });
     redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent(result.alreadyPrepared ? result.warning : "Pedido preparado para entrega")}`);
@@ -292,7 +301,7 @@ async function markPreparedForDelivery(formData: FormData) {
 
 async function resolveOperationalException(formData: FormData) {
   "use server";
-  await requireSalesAssignmentAccess();
+  const authorizedSession = await requireSalesAssignmentAccess();
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   const exceptionId = String(formData.get("exceptionId") ?? "").trim();
@@ -308,6 +317,7 @@ async function resolveOperationalException(formData: FormData) {
       decidedByUserId: sessionCtx.user.id,
       resolution: resolution as typeof allowedResolutions[number],
       notes,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent(result.returnId ? "Cancelación aprobada; falta reversión física" : "Excepción operativa resuelta")}`);
   } catch (error) {
@@ -318,7 +328,7 @@ async function resolveOperationalException(formData: FormData) {
 
 async function receiveReturn(formData: FormData) {
   "use server";
-  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const authorizedSession = await (await import("@/lib/rbac")).requirePermission("production.execute");
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   const returnId = String(formData.get("returnId") ?? "").trim();
@@ -332,6 +342,7 @@ async function receiveReturn(formData: FormData) {
     await receiveSalesRequestReturn(prisma, {
       returnId,
       receivedByUserId: sessionCtx.user.id,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
       items: itemIds.map((itemId, index) => ({
         itemId,
         disposition: dispositions[index] as "RESTOCK" | "REPAIR" | "SCRAP" | "REJECT",
@@ -347,12 +358,16 @@ async function receiveReturn(formData: FormData) {
 
 async function finalizeCancellation(formData: FormData) {
   "use server";
-  await requireSalesAssignmentAccess();
+  const authorizedSession = await requireSalesAssignmentAccess();
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!sessionCtx.user?.id || !orderId) redirect(`/production/requests?error=${encodeURIComponent("Sesión o pedido inválido")}`);
   try {
-    await finalizeSalesRequestCancellationAfterReversal(prisma, { orderId, cancelledByUserId: sessionCtx.user.id });
+    await finalizeSalesRequestCancellationAfterReversal(prisma, {
+      orderId,
+      cancelledByUserId: sessionCtx.user.id,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
+    });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Cancelación confirmada después de la reversión física")}`);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -362,13 +377,18 @@ async function finalizeCancellation(formData: FormData) {
 
 async function requestCustomerReturn(formData: FormData) {
   "use server";
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
   if (!sessionCtx.user?.id || !orderId || !reason) redirect(`/production/requests/${orderId}?error=${encodeURIComponent("La devolución requiere un motivo")}`);
   try {
-    await requestSalesRequestCustomerReturn(prisma, { orderId, requestedByUserId: sessionCtx.user.id, reason });
+    await requestSalesRequestCustomerReturn(prisma, {
+      orderId,
+      requestedByUserId: sessionCtx.user.id,
+      reason,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
+    });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Devolución solicitada; pendiente de recepción e inspección")}`);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -380,7 +400,7 @@ async function addProductLine(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.add_line");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const productId = String(formData.get("productId") ?? "").trim();
@@ -404,6 +424,7 @@ async function addProductLine(formData: FormData) {
       productId: parsed.data.productId,
       requestedQty: parsed.data.requestedQtyRaw,
       notes: parsed.data.notes ?? null,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     servicePerf.end({ requestId, orderId, productId });
     perf.end({ requestId, orderId, productId, ok: true });
@@ -420,7 +441,7 @@ async function deleteLine(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.delete_line");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const lineId = String(formData.get("lineId") ?? "").trim();
@@ -430,7 +451,7 @@ async function deleteLine(formData: FormData) {
 
   try {
     const servicePerf = startPerf("action.production.requests.detail.delete_line.service");
-    await deleteSalesRequestLine(prisma, { orderId, lineId });
+    await deleteSalesRequestLine(prisma, { orderId, lineId, auditActor: trustedAuditActor(authorizedSession.user) });
     servicePerf.end({ requestId, orderId, lineId });
     perf.end({ requestId, orderId, lineId, ok: true });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Línea eliminada")}`);
@@ -783,11 +804,14 @@ export default async function ProductionRequestDetailPage({
     || sessionCtx.roles.includes("MANAGER")
     || sessionCtx.roles.includes("SYSTEM_ADMIN")
   );
+  const hasPhysicalFulfillmentOwner = hasWarehouseFulfillmentOwnership(order);
+  const canOverridePreparation = sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN");
+  const preparationNeedsSupervisorOverride = !hasPhysicalFulfillmentOwner && canOverridePreparation;
   const canPrepareForDelivery =
     !activeException &&
     (sessionCtx.roles.includes("WAREHOUSE_OPERATOR") || sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN")) &&
     orderStatus === "CONFIRMADA" &&
-    hasWarehouseFulfillmentOwnership(order) &&
+    (hasPhysicalFulfillmentOwner || canOverridePreparation) &&
     hasCompletedDirectPick &&
     hasCompletedConfiguredAssembly &&
     !order.preparedForDeliveryAt &&
@@ -815,7 +839,7 @@ export default async function ProductionRequestDetailPage({
     canExecuteProductionActions: canOperateDirectPick,
     canResolveExceptions: canManageAssignments,
     deliveryBlockedReason: canConfirmDelivery ? null : "La entrega corresponde al ejecutivo responsable o a supervisión.",
-    preparationBlockedReason: !hasWarehouseFulfillmentOwnership(order)
+    preparationBlockedReason: !hasPhysicalFulfillmentOwner && !canOverridePreparation
       ? "Falta asignar o tomar el trabajo físico antes de preparar el pedido."
       : deliveryLocations.length === 0 ? "No hay un área de entrega activa configurada para este almacén." : null,
   });
@@ -970,8 +994,8 @@ export default async function ProductionRequestDetailPage({
                   </select>
                 </label>
                 <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
-                  Nota (opcional)
-                  <input name="notes" maxLength={500} placeholder="Ej. esperando recolección del cliente" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
+                  {preparationNeedsSupervisorOverride ? "Motivo de override *" : "Nota (opcional)"}
+                  <input name="notes" maxLength={500} required={preparationNeedsSupervisorOverride} placeholder={preparationNeedsSupervisorOverride ? "Explica por qué supervisión cubre la preparación" : "Ej. esperando recolección del cliente"} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
                 </label>
                 <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
                   URL de evidencia (opcional)

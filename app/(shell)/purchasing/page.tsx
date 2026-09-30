@@ -17,8 +17,10 @@ import {
   getPurchaseOrderOperationalState,
 } from "@/lib/purchasing/purchase-order-operational";
 import { ReplenishmentProposalApproval } from "@/components/purchasing/ReplenishmentProposalApproval";
+import { ReplenishmentProposalRefresh } from "@/components/purchasing/ReplenishmentProposalRefresh";
 
 export const revalidate = 30;
+const PROPOSAL_PAGE_SIZE = 8;
 
 const STATUS_LABELS: Record<string, string> = {
   BORRADOR: "Borrador",
@@ -50,8 +52,18 @@ function canReceivePurchaseOrder(status: string) {
   return RECEIVABLE_STATUSES.includes(status as (typeof RECEIVABLE_STATUSES)[number]);
 }
 
-export default async function PurchasingPage() {
+function parseProposalPage(value: string | string[] | undefined) {
+  const parsed = Number.parseInt(Array.isArray(value) ? value[0] ?? "1" : value ?? "1", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export default async function PurchasingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ proposalPage?: string | string[] }>;
+}) {
   await pageGuard("purchasing.view");
+  const requestedProposalPage = parseProposalPage((await searchParams).proposalPage);
   const sessionCtx = await getSessionContext();
   const isOperatorView =
     sessionCtx.roles.includes("WAREHOUSE_OPERATOR") &&
@@ -81,6 +93,7 @@ export default async function PurchasingPage() {
     overdueCount,
     dueTodayCount,
     replenishmentProposals,
+    replenishmentProposalCount,
   ] = await Promise.all([
     prisma.supplier.count({ where: { isActive: true } }),
     prisma.purchaseOrder.groupBy({ by: ["status"], _count: { _all: true } }),
@@ -101,8 +114,9 @@ export default async function PurchasingPage() {
     canManagePurchasing
       ? prisma.replenishmentProposal.findMany({
           where: { status: { in: ["PROPOSED", "BLOCKED"] } },
-          orderBy: [{ status: "asc" }, { generatedAt: "desc" }],
-          take: 8,
+            orderBy: [{ status: "desc" }, { generatedAt: "desc" }],
+            skip: (requestedProposalPage - 1) * PROPOSAL_PAGE_SIZE,
+            take: PROPOSAL_PAGE_SIZE,
           select: {
             id: true,
             status: true,
@@ -115,7 +129,31 @@ export default async function PurchasingPage() {
           },
         })
       : Promise.resolve([]),
+    canManagePurchasing
+      ? prisma.replenishmentProposal.count({ where: { status: { in: ["PROPOSED", "BLOCKED"] } } })
+      : Promise.resolve(0),
   ]);
+
+  const proposalTotalPages = Math.max(1, Math.ceil(replenishmentProposalCount / PROPOSAL_PAGE_SIZE));
+  const proposalPage = Math.min(requestedProposalPage, proposalTotalPages);
+  const visibleReplenishmentProposals = canManagePurchasing && proposalPage !== requestedProposalPage
+    ? await prisma.replenishmentProposal.findMany({
+        where: { status: { in: ["PROPOSED", "BLOCKED"] } },
+        orderBy: [{ status: "desc" }, { generatedAt: "desc" }],
+        skip: (proposalPage - 1) * PROPOSAL_PAGE_SIZE,
+        take: PROPOSAL_PAGE_SIZE,
+        select: {
+          id: true,
+          status: true,
+          recommendedQuantity: true,
+          availableStock: true,
+          reason: true,
+          generatedAt: true,
+          product: { select: { sku: true, name: true } },
+          warehouse: { select: { code: true, name: true } },
+        },
+      })
+    : replenishmentProposals;
 
   const countsByStatus = Object.fromEntries(statusCounts.map((s) => [s.status, s._count._all]));
   const openCount =
@@ -232,16 +270,40 @@ export default async function PurchasingPage() {
         </div>
       </SectionCard>
 
-      {!isOperatorView ? (
+      {canManagePurchasing ? (
         <SectionCard
           title="Propuestas de reabasto"
           description="Señales min–max con inventario disponible, consumo reciente y entradas comprometidas. Requieren decisión antes de crear una OC."
+          actions={<ReplenishmentProposalRefresh />}
+          footer={proposalTotalPages > 1 ? (
+            <div className="flex w-full items-center justify-between gap-2 text-sm">
+              {proposalPage > 1 ? (
+                <Link href={proposalPage > 2 ? `/purchasing?proposalPage=${proposalPage - 1}` : "/purchasing"} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Anterior
+                </Link>
+              ) : (
+                <span aria-disabled="true" className={buttonStyles({ variant: "secondary", size: "sm", className: "pointer-events-none opacity-40" })}>
+                  Anterior
+                </span>
+              )}
+              <span className="text-[var(--text-muted)]">Página {proposalPage} de {proposalTotalPages}</span>
+              {proposalPage < proposalTotalPages ? (
+                <Link href={`/purchasing?proposalPage=${proposalPage + 1}`} className={buttonStyles({ variant: "secondary", size: "sm" })}>
+                  Siguiente
+                </Link>
+              ) : (
+                <span aria-disabled="true" className={buttonStyles({ variant: "secondary", size: "sm", className: "pointer-events-none opacity-40" })}>
+                  Siguiente
+                </span>
+              )}
+            </div>
+          ) : undefined}
         >
-          {replenishmentProposals.length === 0 ? (
+          {visibleReplenishmentProposals.length === 0 ? (
             <EmptyState compact title="Sin propuestas activas" description="No hay productos debajo de mínimo o con una política inválida registrada." />
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {replenishmentProposals.map((proposal) => (
+              {visibleReplenishmentProposals.map((proposal) => (
                 <article key={proposal.id} className="surface rounded-[var(--radius-lg)] p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -291,54 +353,104 @@ export default async function PurchasingPage() {
         {priorityOrders.length === 0 ? (
           <EmptyState compact title="Sin trabajo pendiente" description="No hay órdenes abiertas que requieran atención." />
         ) : (
-          <TableWrap striped>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Folio</Th>
-                  <Th>Proveedor</Th>
-                  <Th>Estado</Th>
-                  <Th>Fecha esperada</Th>
-                  <Th className="text-right">Recibido</Th>
-                  <Th>Riesgo</Th>
-                  <Th>Siguiente acción</Th>
-                  <Th className="text-right">Acción</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {priorityOrders.map((order) => {
-                  const operational = getPurchaseOrderOperationalState(order);
-                  const receiveNow = canReceivePurchasing && canReceivePurchaseOrder(order.status);
-                  return (
-                    <TableRow key={order.id}>
-                      <Td className="font-mono text-xs text-[var(--text-primary)]">{order.folio}</Td>
-                      <Td>{order.supplier.name}</Td>
-                      <Td>
-                        <Badge variant={STATUS_COLORS[order.status] ?? "neutral"}>
-                          {STATUS_LABELS[order.status] ?? order.status}
-                        </Badge>
-                      </Td>
-                      <Td>{formatDate(order.expectedDate)}</Td>
-                      <Td className="text-right font-semibold text-[var(--text-primary)]">{operational.receivedPercent}%</Td>
-                      <Td>
-                        <Badge variant={operational.riskTone}>{operational.riskLabel}</Badge>
-                      </Td>
-                      <Td className="text-[var(--text-secondary)]">{operational.nextAction}</Td>
-                      <Td className="text-right">
-                        <Link
-                          href={receiveNow ? `/purchasing/orders/${order.id}/receive` : `/purchasing/orders/${order.id}`}
-                          className={buttonStyles({ variant: receiveNow ? "primary" : "ghost", size: "sm" })}
-                        >
-                          {receiveNow ? "Recibir" : order.status === "BORRADOR" ? "Completar OC" : "Abrir orden"}
-                        </Link>
-                      </Td>
-                    </TableRow>
-                  );
-                })}
-              </tbody>
-            </Table>
-          </TableWrap>
+          <div className="grid gap-3 md:hidden">
+            {priorityOrders.map((order) => {
+              const operational = getPurchaseOrderOperationalState(order);
+              const receiveNow = canReceivePurchasing && canReceivePurchaseOrder(order.status);
+              const actionHref = receiveNow ? `/purchasing/orders/${order.id}/receive` : `/purchasing/orders/${order.id}`;
+              const actionLabel = receiveNow
+                ? order.status === "PARCIAL" ? "Continuar recepción" : "Recibir mercancía"
+                : order.status === "BORRADOR" ? "Completar OC" : "Abrir orden";
+
+              return (
+                <article key={order.id} className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface-secondary)] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Orden de compra</p>
+                      <p className="mt-1 break-all font-mono text-sm font-semibold text-[var(--text-primary)]">{order.folio}</p>
+                      <p className="mt-1 break-words text-sm text-[var(--text-secondary)]">{order.supplier.name}</p>
+                    </div>
+                    <Badge variant={STATUS_COLORS[order.status] ?? "neutral"} size="sm">
+                      {STATUS_LABELS[order.status] ?? order.status}
+                    </Badge>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Fecha esperada</dt>
+                      <dd className="mt-1 text-[var(--text-secondary)]">{formatDate(order.expectedDate)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Recibido</dt>
+                      <dd className="mt-1 font-semibold text-[var(--text-primary)]">{operational.receivedPercent}%</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Riesgo</dt>
+                      <dd className="mt-1"><Badge variant={operational.riskTone} size="sm">{operational.riskLabel}</Badge></dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-muted)]">Siguiente acción</dt>
+                      <dd className="mt-1 font-medium text-[var(--text-primary)]">{operational.nextAction}</dd>
+                    </div>
+                  </dl>
+                  <Link href={actionHref} className={`${buttonStyles({ variant: receiveNow ? "primary" : "secondary", size: "sm", fullWidth: true })} mt-4`}>
+                    {actionLabel}
+                  </Link>
+                </article>
+              );
+            })}
+          </div>
         )}
+        {priorityOrders.length > 0 ? (
+          <div className="hidden md:block">
+            <TableWrap striped>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Folio</Th>
+                    <Th>Proveedor</Th>
+                    <Th>Estado</Th>
+                    <Th>Fecha esperada</Th>
+                    <Th className="text-right">Recibido</Th>
+                    <Th>Riesgo</Th>
+                    <Th>Siguiente acción</Th>
+                    <Th className="text-right">Acción</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priorityOrders.map((order) => {
+                    const operational = getPurchaseOrderOperationalState(order);
+                    const receiveNow = canReceivePurchasing && canReceivePurchaseOrder(order.status);
+                    return (
+                      <TableRow key={order.id}>
+                        <Td className="font-mono text-xs text-[var(--text-primary)]">{order.folio}</Td>
+                        <Td>{order.supplier.name}</Td>
+                        <Td>
+                          <Badge variant={STATUS_COLORS[order.status] ?? "neutral"}>
+                            {STATUS_LABELS[order.status] ?? order.status}
+                          </Badge>
+                        </Td>
+                        <Td>{formatDate(order.expectedDate)}</Td>
+                        <Td className="text-right font-semibold text-[var(--text-primary)]">{operational.receivedPercent}%</Td>
+                        <Td>
+                          <Badge variant={operational.riskTone}>{operational.riskLabel}</Badge>
+                        </Td>
+                        <Td className="text-[var(--text-secondary)]">{operational.nextAction}</Td>
+                        <Td className="text-right">
+                          <Link
+                            href={receiveNow ? `/purchasing/orders/${order.id}/receive` : `/purchasing/orders/${order.id}`}
+                            className={buttonStyles({ variant: receiveNow ? "primary" : "ghost", size: "sm" })}
+                          >
+                            {receiveNow ? "Recibir" : order.status === "BORRADOR" ? "Completar OC" : "Abrir orden"}
+                          </Link>
+                        </Td>
+                      </TableRow>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </TableWrap>
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   );

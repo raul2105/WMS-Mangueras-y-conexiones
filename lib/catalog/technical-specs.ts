@@ -429,11 +429,51 @@ export async function syncProductTechnicalSpecCandidates(
 
 export async function promoteProductTechnicalSource(
   prisma: PrismaClient,
-  args: { sourceId: string; reviewerUserId: string },
+  args: { sourceId: string; reviewerUserId: string; expectedUpdatedAt?: Date },
 ) {
   return prisma.$transaction(async (tx) => {
+    const reviewer = await tx.user.findUnique({
+      where: { id: args.reviewerUserId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        isActive: true,
+        userRoles: {
+          where: { role: { isActive: true } },
+          select: { role: { select: { code: true } } },
+        },
+      },
+    });
+    const reviewerRoles = reviewer?.userRoles.map(({ role }) => role.code) ?? [];
+    if (!reviewer?.isActive || !reviewerRoles.some((code) => code === "MANAGER" || code === "SYSTEM_ADMIN")) {
+      throw new Error("Sólo un usuario activo de catálogo puede aprobar fuentes técnicas");
+    }
+
+    const pendingSource = await tx.productTechnicalSource.findUnique({
+      where: { id: args.sourceId },
+      select: { id: true, supplierName: true, documentRef: true, documentVersion: true, status: true, updatedAt: true },
+    });
+    if (!pendingSource) throw new Error("Fuente técnica no encontrada");
+    if (pendingSource.status !== "PENDING_REVIEW") {
+      throw new Error("Sólo una fuente pendiente puede aprobarse");
+    }
+    if (args.expectedUpdatedAt && pendingSource.updatedAt.getTime() !== args.expectedUpdatedAt.getTime()) {
+      throw new Error("La fuente cambió desde que la revisaste; actualiza la pantalla y revisa de nuevo");
+    }
+    if (!pendingSource.supplierName.trim() || !pendingSource.documentRef.trim() || !pendingSource.documentVersion?.trim()) {
+      throw new Error("La fuente requiere fabricante, documento y versión vigente antes de aprobarse");
+    }
+
     const claimed = await tx.productTechnicalSource.updateMany({
-      where: { id: args.sourceId, status: "PENDING_REVIEW" },
+      where: {
+        id: pendingSource.id,
+        status: "PENDING_REVIEW",
+        supplierName: pendingSource.supplierName,
+        documentRef: pendingSource.documentRef,
+        documentVersion: pendingSource.documentVersion,
+        updatedAt: pendingSource.updatedAt,
+      },
       data: { status: "APPROVING" },
     });
     if (claimed.count !== 1) throw new Error("La fuente técnica ya fue procesada o no está pendiente");
@@ -548,6 +588,7 @@ export async function promoteProductTechnicalSource(
       entityType: "PRODUCT_TECHNICAL_SOURCE",
       entityId: source.id,
       action: "APPROVE",
+      actor: reviewer.name || reviewer.email || reviewer.id,
       actorUserId: args.reviewerUserId,
       source: "catalog/technical-sources/approve",
       after: {

@@ -13,6 +13,7 @@ declare module "next-auth" {
     id: string;
     roles: string[];
     permissions: string[];
+    credentialVersion?: string;
   }
 }
 
@@ -21,5 +22,6 @@ declare module "next-auth/jwt" {
     uid?: string;
     roles?: string[];
     permVersion?: string;
+    credentialVersion?: string;
   }
 }

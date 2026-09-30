@@ -13,6 +13,8 @@ export const ROUTE_PERMISSION_RULES: RoutePermissionRule[] = [
 
   { prefix: "/catalog/new", permission: "catalog.edit" },
   { prefix: "/catalog/import", permission: "catalog.edit" },
+  { prefix: "/catalog/compatibility", permission: "catalog.edit" },
+  { prefix: "/catalog/technical-sources", permission: "catalog.edit" },
   { prefix: "/catalog/", permission: "catalog.view" },
   { prefix: "/catalog", permission: "catalog.view" },
 

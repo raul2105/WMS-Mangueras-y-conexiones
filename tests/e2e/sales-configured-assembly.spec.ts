@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { loginAs } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
-const tag = `TSA${Date.now().toString().slice(-8)}`;
+const tag = `TSA${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"];
 
 async function attachAccessibilityEvidence(page: import("@playwright/test").Page, testInfo: import("@playwright/test").TestInfo, state: string) {
@@ -66,38 +67,82 @@ const fixture = {
 
 async function cleanupFixture() {
   const salesOrders = fixture.warehouseId
-    ? await prisma.salesInternalOrder.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })
+    ? await prisma.salesInternalOrder.findMany({
+        where: { warehouseId: fixture.warehouseId },
+        select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } },
+      })
     : [];
   const salesOrderIds = salesOrders.map((order) => order.id);
   const productionOrders = fixture.warehouseId
-    ? await prisma.productionOrder.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })
+    ? await prisma.productionOrder.findMany({
+        where: { warehouseId: fixture.warehouseId },
+        select: {
+          id: true,
+          items: { select: { id: true } },
+          assemblyConfiguration: { select: { id: true } },
+          assemblyWorkOrder: {
+            select: {
+              id: true,
+              lines: { select: { id: true, pickTasks: { select: { id: true } } } },
+              pickLists: { select: { id: true, tasks: { select: { id: true } } } },
+            },
+          },
+        },
+      })
     : [];
   const productionOrderIds = productionOrders.map((order) => order.id);
+  const fixtureEntityIds = [
+    ...salesOrders.flatMap((order) => [order.id, ...order.lines.map((line) => line.id), ...order.pickLists.flatMap((list) => [list.id, ...list.tasks.map((task) => task.id)])]),
+    ...productionOrders.flatMap((order) => [
+      order.id,
+      ...order.items.map((item) => item.id),
+      ...(order.assemblyConfiguration ? [order.assemblyConfiguration.id] : []),
+      ...(order.assemblyWorkOrder ? [
+        order.assemblyWorkOrder.id,
+        ...order.assemblyWorkOrder.lines.flatMap((line) => [line.id, ...line.pickTasks.map((task) => task.id)]),
+        ...order.assemblyWorkOrder.pickLists.flatMap((list) => [list.id, ...list.tasks.map((task) => task.id)]),
+      ] : []),
+    ]),
+  ];
+  const inventoryEntityIds = fixture.productIds.flatMap((productId) => [
+    ...fixture.locationIds.map((locationId) => `${productId}:${locationId}`),
+    ...fixture.locationIds.flatMap((fromLocationId) => fixture.locationIds
+      .filter((toLocationId) => toLocationId !== fromLocationId)
+      .map((toLocationId) => `${productId}:${fromLocationId}->${toLocationId}`)),
+  ]);
+  const movementScope = [
+    ...(salesOrderIds.length ? [{ documentId: { in: salesOrderIds } }] : []),
+    ...(productionOrderIds.length ? [{ documentId: { in: productionOrderIds } }] : []),
+    ...(fixture.productIds.length ? [{ productId: { in: fixture.productIds } }] : []),
+    ...(fixture.locationIds.length ? [{ locationId: { in: fixture.locationIds } }] : []),
+  ];
+  const traceIds = fixture.warehouseId
+    ? (await prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })).map(({ id }) => id)
+    : [];
+  if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { traceRecordId: { in: traceIds } } });
+  if (traceIds.length) await prisma.traceRecord.deleteMany({ where: { id: { in: traceIds } } });
+  const auditEntityIds = [...fixtureEntityIds, ...inventoryEntityIds, ...fixture.productIds, ...fixture.locationIds, fixture.warehouseId].filter(Boolean);
+  if (auditEntityIds.length) await prisma.auditLog.deleteMany({ where: { entityId: { in: auditEntityIds } } });
+  if (inventoryEntityIds.length) await prisma.syncEvent.deleteMany({ where: { entityType: "INVENTORY", entityId: { in: inventoryEntityIds } } });
 
   if (productionOrderIds.length > 0) {
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: productionOrderIds } } });
     await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: productionOrderIds } } });
     await prisma.productionOrder.deleteMany({ where: { id: { in: productionOrderIds } } });
   }
 
   if (salesOrderIds.length > 0) {
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: salesOrderIds } } });
     await prisma.salesInternalOrder.deleteMany({ where: { id: { in: salesOrderIds } } });
   }
 
   if (fixture.productIds.length > 0 || fixture.locationIds.length > 0) {
     await prisma.inventoryMovement.deleteMany({
-      where: {
-        OR: [
-          fixture.productIds.length > 0 ? { productId: { in: fixture.productIds } } : undefined,
-          fixture.locationIds.length > 0 ? { locationId: { in: fixture.locationIds } } : undefined,
-        ].filter(Boolean) as never[],
-      },
+      where: { OR: movementScope },
     });
   }
 
   if (fixture.productIds.length > 0) {
     await prisma.inventory.deleteMany({ where: { productId: { in: fixture.productIds } } });
+    await prisma.productCompatibilityRule.deleteMany({ where: { OR: [{ productId: { in: fixture.productIds } }, { compatibleProductId: { in: fixture.productIds } }] } });
     await prisma.productTechnicalAttribute.deleteMany({ where: { productId: { in: fixture.productIds } } });
     await prisma.product.deleteMany({ where: { id: { in: fixture.productIds } } });
   }
@@ -114,6 +159,22 @@ async function cleanupFixture() {
     await prisma.location.deleteMany({ where: { warehouseId: fixture.warehouseId } });
     await prisma.warehouse.deleteMany({ where: { id: fixture.warehouseId } });
   }
+  const residualCounts = await Promise.all([
+    fixture.warehouseId ? prisma.warehouse.count({ where: { id: fixture.warehouseId } }) : 0,
+    fixture.customerId ? prisma.customer.count({ where: { id: fixture.customerId } }) : 0,
+    fixture.productIds.length ? prisma.product.count({ where: { id: { in: fixture.productIds } } }) : 0,
+    fixture.locationIds.length ? prisma.location.count({ where: { id: { in: fixture.locationIds } } }) : 0,
+    salesOrderIds.length ? prisma.salesInternalOrder.count({ where: { id: { in: salesOrderIds } } }) : 0,
+    productionOrderIds.length ? prisma.productionOrder.count({ where: { id: { in: productionOrderIds } } }) : 0,
+    auditEntityIds.length ? prisma.auditLog.count({ where: { entityId: { in: auditEntityIds } } }) : 0,
+    inventoryEntityIds.length ? prisma.syncEvent.count({ where: { entityType: "INVENTORY", entityId: { in: inventoryEntityIds } } }) : 0,
+    traceIds.length ? prisma.traceRecord.count({ where: { id: { in: traceIds } } }) : 0,
+    traceIds.length ? prisma.labelPrintJob.count({ where: { traceRecordId: { in: traceIds } } }) : 0,
+    movementScope.length ? prisma.inventoryMovement.count({ where: { OR: movementScope } }) : 0,
+    fixture.productIds.length ? prisma.inventory.count({ where: { productId: { in: fixture.productIds } } }) : 0,
+    fixture.productIds.length ? prisma.productCompatibilityRule.count({ where: { OR: [{ productId: { in: fixture.productIds } }, { compatibleProductId: { in: fixture.productIds } }] } }) : 0,
+  ]);
+  expect(residualCounts).toEqual(Array(residualCounts.length).fill(0));
 }
 
 test.beforeAll(async () => {
@@ -298,12 +359,21 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   expect(configuredLines.every((line) => line.assemblyConfiguration?.application === "Línea de retorno")).toBe(true);
   expect(configuredLines.every((line) => line.assemblyConfiguration?.assemblyMethod === "Prensado según ficha técnica")).toBe(true);
 
-  const productionOrder = await prisma.productionOrder.findFirstOrThrow({
+  const productionOrders = await prisma.productionOrder.findMany({
     where: { sourceDocumentId: order.id },
     include: { assemblyConfiguration: true, assemblyWorkOrder: { include: { pickLists: true } } },
+    orderBy: { createdAt: "asc" },
   });
+  const productionOrder = productionOrders[0];
+  expect(productionOrder).toBeTruthy();
+  if (!productionOrder) throw new Error("No se generaron órdenes para las líneas configuradas");
   fixture.productionOrderId = productionOrder.id;
-  expect(await prisma.productionOrder.count({ where: { sourceDocumentId: order.id } })).toBe(2);
+  expect(productionOrders).toHaveLength(configuredLines.length);
+  expect(productionOrders.map((item) => item.sourceDocumentLineId).sort()).toEqual(configuredLines.map((line) => line.id).sort());
+  expect(productionOrders.every((item) => item.status === "ABIERTA")).toBe(true);
+  expect(productionOrders.every((item) => item.assemblyWorkOrder?.reservationStatus === "RESERVED")).toBe(true);
+  expect(productionOrders.every((item) => item.assemblyWorkOrder?.pickLists.some((list) => list.status === "DRAFT"))).toBe(true);
+  expect(await prisma.productionOrder.count({ where: { sourceDocumentId: order.id, sourceDocumentLineId: { in: directLines.map((line) => line.id) } } })).toBe(0);
   const productionConfigurations = await prisma.assemblyConfiguration.findMany({
     where: { productionOrder: { sourceDocumentId: order.id } },
   });
@@ -339,6 +409,9 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
     where: { id: order.id },
     data: { status: "CONFIRMADA", confirmedAt: new Date() },
   });
+  await page.goto(`/production/requests/${order.id}`);
+  await expect(page.getByTestId("prepare-for-delivery-form")).toHaveCount(0);
+  expect(await prisma.auditLog.count({ where: { entityId: order.id, action: "MARK_PREPARED_FOR_DELIVERY" } })).toBe(0);
   await page.goto("/logout");
   await loginAs(
     page,

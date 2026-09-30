@@ -37,6 +37,7 @@ interface NewOrderFormProps {
     name: string;
     sku: string;
   } | null;
+  equivalenceOriginalProductId?: string;
   hasCommercialContext: boolean;
   displayQuery: string;
   sourceLabel: string;
@@ -65,6 +66,7 @@ export function NewOrderForm({
   warehouses,
   selectedProduct,
   originalProduct,
+  equivalenceOriginalProductId,
   hasCommercialContext,
   displayQuery,
   sourceLabel,
@@ -250,6 +252,10 @@ export function NewOrderForm({
     <form action={action} onSubmit={handleSubmit} className="space-y-6">
       <input type="hidden" name="lineKind" value={lineKind} />
       <input type="hidden" name="orderLines" value={JSON.stringify(orderLines)} />
+      {equivalenceOriginalProductId && selectedProduct ? <>
+        <input type="hidden" name="equivalenceOriginalProductId" value={equivalenceOriginalProductId} />
+        <input type="hidden" name="equivalenceSelectedProductId" value={selectedProduct.id} />
+      </> : null}
       {promiseAppliesToOrder && commercialPromise ? (
         <input type="hidden" name="commercialPromise" value={JSON.stringify(commercialPromise)} />
       ) : null}

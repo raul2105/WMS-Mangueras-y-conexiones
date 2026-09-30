@@ -4,6 +4,9 @@ import { reconcileProductionReservations } from "@/lib/reservation-policy";
 
 type Tx = Prisma.TransactionClient;
 
+export type ProductionActor = { actorUserId: string; actor: string };
+type MutationContext = { auditActor?: ProductionActor };
+
 type ItemScope = {
   productId: string;
   locationId: string;
@@ -44,6 +47,8 @@ async function loadGenericOrder(tx: Tx, orderId: string) {
       code: true,
       kind: true,
       status: true,
+      updatedAt: true,
+      warehouseId: true,
       items: {
         select: { id: true, productId: true, locationId: true, quantity: true },
       },
@@ -57,22 +62,36 @@ async function loadGenericOrder(tx: Tx, orderId: string) {
   return order;
 }
 
-async function writeAudit(tx: Tx, orderId: string, action: string, after: unknown) {
+// Serialize edits and terminal transitions before any inventory side effect.
+// A concurrent request must reload the order instead of consuming stale items.
+async function claimGenericMutation(tx: Tx, order: Awaited<ReturnType<typeof loadGenericOrder>>) {
+  const result = await tx.productionOrder.updateMany({
+    where: { id: order.id, status: order.status, updatedAt: order.updatedAt },
+    data: { updatedAt: new Date(Math.max(Date.now(), order.updatedAt.getTime() + 1)) },
+  });
+  if (result.count !== 1) {
+    throw new InventoryServiceError("CONCURRENT_MODIFICATION", "La orden cambió durante la operación; actualiza e intenta de nuevo");
+  }
+}
+
+async function writeAudit(tx: Tx, orderId: string, action: string, after: unknown, context: MutationContext, before: unknown) {
   await tx.auditLog.create({
     data: {
       entityType: "PRODUCTION_ORDER",
       entityId: orderId,
       action,
+      before: JSON.stringify(before),
       after: JSON.stringify(after),
       source: "production/generic-order-service",
-      actor: "system",
+      actor: context.auditActor?.actor ?? "system",
+      actorUserId: context.auditActor?.actorUserId ?? null,
     },
   });
 }
 
 export async function addGenericOrderItem(
   prisma: PrismaClient,
-  args: { orderId: string; productId: string; locationId: string; quantity: number }
+  args: { orderId: string; productId: string; locationId: string; quantity: number } & MutationContext
 ) {
   const qty = Number(args.quantity);
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -84,6 +103,14 @@ export async function addGenericOrderItem(
   return withTransaction(prisma, async (tx) => {
     const order = await loadGenericOrder(tx, args.orderId);
     assertGenericEditableStatus(order.status);
+    const location = await tx.location.findUnique({
+      where: { id: args.locationId },
+      select: { warehouseId: true, isActive: true },
+    });
+    if (!location?.isActive || location.warehouseId !== order.warehouseId) {
+      throw new InventoryServiceError("INVALID_LOCATION", "Selecciona una ubicación activa del almacén de la orden");
+    }
+    await claimGenericMutation(tx, order);
 
     const existing = await tx.productionOrderItem.findUnique({
       where: {
@@ -117,6 +144,7 @@ export async function addGenericOrderItem(
     if (isActiveStatus(order.status)) {
       await inventoryService.reserveStock(item.productId, item.locationId, qty, {
         tx,
+        ...args.auditActor,
         reference: order.code,
         notes: "Reserva automática por orden genérica activa",
         documentType: "PRODUCTION_ORDER_GENERIC",
@@ -132,7 +160,7 @@ export async function addGenericOrderItem(
       quantity: item.quantity,
       delta: qty,
       status: order.status,
-    });
+    }, args, { itemId: existing?.id ?? null, quantity: existing?.quantity ?? 0, status: order.status });
 
     return item;
   });
@@ -140,7 +168,7 @@ export async function addGenericOrderItem(
 
 export async function updateGenericOrderItemQty(
   prisma: PrismaClient,
-  args: { orderId: string; itemId: string; quantity: number }
+  args: { orderId: string; itemId: string; quantity: number } & MutationContext
 ) {
   const qty = Number(args.quantity);
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -152,6 +180,7 @@ export async function updateGenericOrderItemQty(
   return withTransaction(prisma, async (tx) => {
     const order = await loadGenericOrder(tx, args.orderId);
     assertGenericEditableStatus(order.status);
+    await claimGenericMutation(tx, order);
 
     const item = await tx.productionOrderItem.findFirst({
       where: { id: args.itemId, orderId: order.id },
@@ -168,6 +197,7 @@ export async function updateGenericOrderItemQty(
     if (isActive && delta > 0) {
       await inventoryService.reserveStock(item.productId, item.locationId, delta, {
         tx,
+        ...args.auditActor,
         reference: order.code,
         notes: "Ajuste de reserva por edición de orden genérica",
         documentType: "PRODUCTION_ORDER_GENERIC",
@@ -179,6 +209,7 @@ export async function updateGenericOrderItemQty(
     if (isActive && delta < 0) {
       await inventoryService.releaseReservedStock(item.productId, item.locationId, Math.abs(delta), {
         tx,
+        ...args.auditActor,
         reference: order.code,
         notes: "Liberación de reserva por edición de orden genérica",
         documentType: "PRODUCTION_ORDER_GENERIC",
@@ -205,7 +236,7 @@ export async function updateGenericOrderItemQty(
       quantity: updated.quantity,
       delta,
       status: order.status,
-    });
+    }, args, { itemId: item.id, quantity: item.quantity, status: order.status });
 
     return updated;
   });
@@ -213,13 +244,14 @@ export async function updateGenericOrderItemQty(
 
 export async function removeGenericOrderItem(
   prisma: PrismaClient,
-  args: { orderId: string; itemId: string }
+  args: { orderId: string; itemId: string } & MutationContext
 ) {
   const inventoryService = new InventoryService(prisma);
 
   return withTransaction(prisma, async (tx) => {
     const order = await loadGenericOrder(tx, args.orderId);
     assertGenericEditableStatus(order.status);
+    await claimGenericMutation(tx, order);
 
     const item = await tx.productionOrderItem.findFirst({
       where: { id: args.itemId, orderId: order.id },
@@ -233,6 +265,7 @@ export async function removeGenericOrderItem(
     if (isActiveStatus(order.status)) {
       await inventoryService.releaseReservedStock(item.productId, item.locationId, item.quantity, {
         tx,
+        ...args.auditActor,
         reference: order.code,
         notes: "Liberación de reserva por eliminación de línea genérica",
         documentType: "PRODUCTION_ORDER_GENERIC",
@@ -253,13 +286,13 @@ export async function removeGenericOrderItem(
       locationId: item.locationId,
       quantity: item.quantity,
       status: order.status,
-    });
+    }, args, { itemId: item.id, quantity: item.quantity, status: order.status });
   });
 }
 
 export async function transitionGenericOrderStatus(
   prisma: PrismaClient,
-  args: { orderId: string; targetStatus: ProductionOrderStatus }
+  args: { orderId: string; targetStatus: ProductionOrderStatus } & MutationContext
 ) {
   return withTransaction(prisma, async (tx) => {
     const order = await loadGenericOrder(tx, args.orderId);
@@ -274,6 +307,11 @@ export async function transitionGenericOrderStatus(
       throw new InventoryServiceError("INVALID_ORDER_STATE", "La orden ya está cerrada y no permite transición");
     }
 
+    if ((target === "ABIERTA" || target === "EN_PROCESO" || target === "COMPLETADA") && order.items.length === 0) {
+      throw new InventoryServiceError("EMPTY_ORDER", "Agrega materiales antes de activar o completar la orden");
+    }
+    await claimGenericMutation(tx, order);
+
     const activeScope = dedupeScope(order.items.map((item) => ({ productId: item.productId, locationId: item.locationId })));
 
     const inventoryService = new InventoryService(prisma);
@@ -284,6 +322,7 @@ export async function transitionGenericOrderStatus(
         for (const item of order.items) {
           await inventoryService.reserveStock(item.productId, item.locationId, item.quantity, {
             tx,
+            ...args.auditActor,
             reference: order.code,
             notes: "Reserva al activar orden genérica",
             documentType: "PRODUCTION_ORDER_GENERIC",
@@ -308,6 +347,7 @@ export async function transitionGenericOrderStatus(
       for (const item of order.items) {
         await inventoryService.releaseReservedStock(item.productId, item.locationId, item.quantity, {
           tx,
+          ...args.auditActor,
           reference: order.code,
           notes: "Liberación de reserva al cancelar orden genérica",
           documentType: "PRODUCTION_ORDER_GENERIC",
@@ -325,6 +365,7 @@ export async function transitionGenericOrderStatus(
       for (const item of order.items) {
         await inventoryService.releaseReservedStock(item.productId, item.locationId, item.quantity, {
           tx,
+          ...args.auditActor,
           reference: order.code,
           notes: "Liberación de reserva al completar orden genérica",
           documentType: "PRODUCTION_ORDER_GENERIC",
@@ -334,6 +375,7 @@ export async function transitionGenericOrderStatus(
 
         await inventoryService.pickStock(item.productId, item.locationId, item.quantity, order.code, {
           tx,
+          ...args.auditActor,
           notes: "Consumo final de orden genérica",
           documentType: "PRODUCTION_ORDER_GENERIC",
           documentId: order.id,
@@ -344,7 +386,7 @@ export async function transitionGenericOrderStatus(
 
     const updated = await tx.productionOrder.update({
       where: { id: order.id },
-      data: { status: target },
+      data: { status: target, updatedAt: new Date(Math.max(Date.now(), order.updatedAt.getTime() + 2)) },
       select: { id: true, status: true },
     });
 
@@ -357,7 +399,7 @@ export async function transitionGenericOrderStatus(
       status: target,
       itemCount: order.items.length,
       scopePairs: activeScope.length,
-    });
+    }, args, { status: current, itemCount: order.items.length });
 
     return { id: updated.id, status: updated.status, changed: true };
   });

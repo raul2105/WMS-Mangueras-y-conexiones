@@ -4,6 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("critical audit contract", () => {
+  it("rejects an unserializable change instead of recording an empty event", async () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    const db = { auditLog: { create: vi.fn() } };
+    await expect(createAuditLogSafeWithDb({
+      entityType: "INVENTORY", action: "ADJUST", after: circular,
+    }, db as never)).rejects.toThrow();
+    expect(db.auditLog.create).not.toHaveBeenCalled();
+  });
   it("does not swallow persistence failures", async () => {
     const failure = new Error("audit persistence unavailable");
     const db = {

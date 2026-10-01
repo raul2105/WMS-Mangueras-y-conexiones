@@ -1,28 +1,27 @@
 # KAN-133 - Mapa operativo de pedido ventas a almacén
 
-Fecha de corte: 2026-07-30
+Fecha de revisión estructural/código: 2026-10-01 UTC
 
-Estado: en revisión; reglas operativas implementadas en rama de integración, validación AWS pendiente de migración y prueba por rol
+Estado: mapa revisado contra criterios Jira y código actual. Aceptación global AWS, runtime y cierre de tickets siguen pendientes de evidencia de release; esta revisión documental no los certifica.
 Ámbito: pedido comercial directo, ensamble configurado y pedido mixto
 
 ## Propósito
 
 Definir un único proceso operativo desde la captura comercial hasta la entrega
-al cliente. Este documento describe el comportamiento existente que ha sido
-verificado en código y en AWS; no declara que todos los requisitos posteriores
-de KAN-127 a KAN-132 estén terminados.
+al cliente. Este documento distingue reglas encontradas en código de la
+aceptación operativa global, que continúa pendiente.
 
-La fuente técnica de los estados es `lib/sales/internal-orders.ts`. La fuente
-operativa de validación es la aplicación AWS Dev y PostgreSQL RDS. Las fechas
-de compromiso son días de negocio; las marcas de auditoría son instantes.
+Fuentes de revisión: `lib/sales/internal-orders.ts`,
+`lib/sales/request-service.ts` y las vistas/acciones de Ventas y Almacén. Las
+fechas de compromiso son días de negocio; las marcas de auditoría son instantes.
 
 ## Actores y responsabilidad
 
 | Actor | Responsabilidad | No puede hacer |
 |---|---|---|
-| Ejecutivo de Ventas | Captura, confirma el pedido, consulta promesa y da seguimiento comercial. Puede confirmar entrega sólo si se cumplen todas las precondiciones. | Surtir directamente ni preparar físicamente la entrega sin permiso operativo. |
-| Manager / Administrador | Supervisa, asigna o reasigna antes de la toma, atiende excepciones y puede intervenir según RBAC. | Saltar las validaciones de surtido, ensamble, preparado o entrega. |
-| Operador de almacén | Libera y ejecuta surtido directo, registra faltantes y prepara físicamente el pedido para entrega. | Prometer disponibilidad comercial ni declarar entrega al cliente. |
+| Ejecutivo de Ventas | Captura, confirma, toma/retira la propiedad comercial y da seguimiento. La propiedad comercial usa `assignedToUserId`/`assignedAt`; la toma se registra con `pulledAt`. Puede confirmar entrega si cumple las precondiciones. | Surtir ni preparar físicamente por el solo hecho de ser responsable comercial. |
+| Manager / Administrador | Supervisa, asigna o reasigna propiedad comercial y trabajo físico según RBAC, resuelve excepciones. Puede preparar como override sólo registrando motivo. | Saltar las validaciones de surtido, ensamble, preparado o entrega. |
+| Operador de almacén | Ejecuta el trabajo físico. La propiedad de almacén se representa por `warehouseAssigneeUserId`; reclamar registra `warehouseClaimedByUserId`/`warehouseClaimedAt`. El asignado o quien reclamó puede preparar el pedido. | Prometer disponibilidad comercial ni declarar entrega al cliente. |
 | Producción / ensamble | Completa las órdenes de ensamble configuradas ligadas a la línea comercial. | Marcar el pedido listo o entregado mientras haya trabajo pendiente. |
 | Sistema / auditoría | Crea reservas, listas de surtido, tareas, movimientos y eventos auditables. | Convertir una condición no cumplida en una transición válida. |
 
@@ -31,10 +30,10 @@ de compromiso son días de negocio; las marcas de auditoría son instantes.
 | Etapa visible | Condición de entrada | Propietario de la siguiente acción | Condición de salida | Evidencia requerida |
 |---|---|---|---|---|
 | Captura | Pedido `BORRADOR`. | Ventas. | Cliente, almacén, fecha y al menos una línea válidos; Ventas confirma. | Pedido y líneas guardadas. |
-| Por asignar | Pedido `CONFIRMADA` sin responsable. | Manager / Administrador. | Responsable asignado. | `assignedToUserId`, `assignedAt` y evento de asignación. |
-| En surtido | Pedido confirmado y asignado, con surtido directo o ensamble pendiente. | Almacén o Producción, según la línea. | Surtido directo completo y todos los ensambles requeridos completos. | Lista de surtido/tareas y órdenes de producción ligadas. |
-| Separar para entrega | Surtido directo completo y ensambles completos, sin ubicación física de entrega. | Almacén. | Se registra área de entrega. | `preparedForDeliveryAt`, ubicación, usuario y nota opcional. |
-| Preparado para entrega | Área de entrega registrada y trabajo requerido completado. | Ventas responsable, Manager o Administrador. | Se confirma la entrega al cliente. | Validación de entrega y evento de auditoría. |
+| Por asignar | Pedido `CONFIRMADA` sin responsable comercial. | Manager / Administrador. | Responsable comercial asignado; el ejecutivo elegible toma el pedido. | `assignedToUserId`, `assignedAt`, `pulledAt` y eventos correspondientes. |
+| En surtido | Pedido confirmado y tomado/comercialmente asignado, con surtido directo o ensamble pendiente. | Responsable físico de almacén y Producción, según la línea. | Surtido directo completo y todos los ensambles requeridos completos. | Lista/tareas, `warehouseAssigneeUserId` o reclamación física y órdenes de producción ligadas. |
+| Separar para entrega | Surtido directo completo y ensambles completos, aún sin preparación registrada. | Responsable físico asignado/reclamante; Manager/Admin puede intervenir con motivo. | Servicio valida el área activa del almacén y registra preparado. | `preparedForDeliveryAt`, ubicación y actor; nota opcional salvo override, donde el motivo es obligatorio. |
+| Preparado para entrega | `preparedForDeliveryAt` registrado tras completar trabajo requerido. | Ventas responsable para confirmar la entrega; Manager/Admin sólo conforme a la regla de excepción y motivo. | Se registra la entrega real al cliente. | Separación explícita entre preparación y entrega: marcas, actores y auditoría distintas. |
 | Entregado | `deliveredToCustomerAt` registrado. | Ninguno; sólo consulta y comprobante. | Terminal. | Usuario, fecha y PDF de entrega. |
 | Cancelado | Pedido cancelado. | Ninguno; sólo consulta y auditoría. | Terminal. | Evento de cancelación y liberación aplicable. |
 
@@ -47,11 +46,11 @@ de bloqueo; no puede sustituir las reglas de servicio.
 
 | Transición | Validación backend obligatoria | Presentación para Ventas | Presentación para Almacén / Producción | Supervisión |
 |---|---|---|---|---|
-| Captura → Por asignar | Pedido `BORRADOR`, cliente, almacén, fecha y líneas válidos; promesa revalidada y reserva/lista de surtido creadas cuando aplica. | Confirma el pedido y luego ve `Por asignar`. | No recibe trabajo hasta que exista pedido confirmado y asignado. | Puede localizar el pedido para asignar o reasignar. |
-| Por asignar → En surtido | La toma o asignación no puede duplicar responsable ni aceptar pedido cancelado o ya tomado. | El ejecutivo elegible puede `Tomar pedido` o `Continuar pedido`; si no, ve el responsable o bloqueo. | Recibe el trabajo de surtido o ensamble sólo después de la asignación. | Puede asignar o reasignar antes de la toma, dentro de RBAC. |
+| Captura → Por asignar | Pedido `BORRADOR`, cliente, almacén, fecha y líneas válidos; promesa revalidada y reserva/lista creada cuando aplica. Backend valida y crea compromisos; la etiqueta/vista es UI. | Confirma y ve `Por asignar`. | No recibe trabajo hasta confirmación y asignación. | Puede asignar la propiedad comercial; esto no equivale a asignar trabajo físico. |
+| Por asignar → En surtido | Backend valida asignación/toma comercial y evita duplicar o tomar pedido cancelado. | Ejecutivo elegible ve `Tomar pedido`/`Continuar pedido`, propietario o bloqueo. | Cola presenta trabajo físico elegible; assignment/claim físico se valida aparte. | Puede asignar/reasignar según RBAC antes de la toma. |
 | En surtido → Separar para entrega | Surtido directo completado y todos los ensambles configurados ligados completados. | Ve seguimiento y bloqueo mientras falte trabajo físico. | Ejecuta surtido o ensamble; al completarse recibe `Preparar pedido`. | Ve el avance y atiende excepciones. |
-| Separar para entrega → Preparado para entrega | Se registra área física, usuario responsable, nota/evidencia y marca de preparado; una excepción abierta bloquea la transición. | Ve `En espera de almacén`. | Registra el área y preparado físico. | Puede verificar responsable, ubicación y evidencia. |
-| Preparado para entrega → Entregado | Pedido confirmado, asignado y tomado; surtido/ensamble completos; área de entrega registrada; sin excepción abierta; se exige quién recibió y método. | Sólo el ejecutivo responsable confirma normalmente; Manager/Admin exige motivo excepcional. | No habilita la entrega comercial antes de completar preparación. | Puede confirmar sólo si las mismas precondiciones se cumplen. |
+| Separar para entrega → Preparado para entrega | Backend exige surtido/ensamble completo, sin excepción abierta, área activa compatible y almacén correcto; sólo responsable físico asignado/reclamante o Manager/Admin. Override requiere motivo. | Ve `En espera de almacén`/preparación pendiente. | El responsable físico prepara; Manager/Admin puede override con motivo auditado. | Estado y botones son UI; autorización, precondiciones y auditoría son backend. |
+| Preparado para entrega → Entregado | Backend exige pedido confirmado/tomado, surtido y ensamble completos, área registrada, sin excepción y datos de recepción/método requeridos. | Responsable comercial confirma la entrega real; no confundir con preparación. | Ve el estado preparado, sin declarar por ello recepción del cliente. | No se salta la validación; cambios y etiquetas de vista son UI. |
 | Activo → Solicitud de cancelación → Cancelado | Si el surtido ya fue liberado se crea una excepción, Manager/Admin decide, Almacén realiza reversión física y sólo entonces se confirma cancelación. | Ve el bloqueo y seguimiento. | Recibe reversión física antes del cierre. | Gestiona decisión y auditoría. |
 
 Los indicadores, tarjetas, etiquetas de etapa, PDFs de consulta y enlaces de
@@ -63,15 +62,15 @@ ejecutan transiciones por sí mismos.
 ```mermaid
 flowchart LR
   A["Captura - Ventas"] -->|"Confirmar pedido"| B["Por asignar"]
-  B -->|"Asignar responsable"| C["En surtido"]
+  B -->|"Asignar propiedad comercial / tomar"| C["En surtido"]
   C --> D{"Tipo de línea"}
   D -->|"Producto directo"| E["Reserva y surtido"]
   D -->|"Ensamble configurado"| F["Orden de ensamble"]
   E --> G{"Todo completado"}
   F --> G
   G -->|"Sí"| H["Separar para entrega"]
-  H -->|"Registrar área física"| I["Preparado para entrega"]
-  I -->|"Confirmar entrega"| J["Entregado"]
+  H -->|"Responsable físico prepara; Manager/Admin override con motivo"| I["Preparado para entrega"]
+  I -->|"Confirmar entrega real"| J["Entregado"]
   A --> K["Cancelado"]
   B --> K
   C --> K
@@ -93,6 +92,13 @@ flowchart LR
    crea una solicitud de cancelación y exige decisión, reversión física y auditoría.
 8. Un pedido entregado inicia una devolución; nunca se convierte en cancelación.
 
+Para registrar preparación, el servicio acepta una ubicación activa `STAGING`
+del almacén del pedido. La selección predeterminada prioriza primero
+`STAGING-${warehouse.code}`, luego otra ubicación `STAGING` activa por código,
+y usa una ubicación `SHIPPING` activa por código sólo como fallback. Si no hay
+ninguna, la preparación se rechaza. El destino de la evidencia histórica
+`STAGING-WH-02` no afirma que esa ubicación exista o esté activa actualmente.
+
 ## Diferencia por tipo de pedido
 
 | Caso | Trabajo operativo | Criterio para avanzar a preparado |
@@ -101,18 +107,19 @@ flowchart LR
 | Ensamble | Orden de producción ligada a la línea configurada. | Todas las órdenes ligadas en `COMPLETADA`. |
 | Mixto | Surtido directo y ensamble en paralelo. | Ambos criterios anteriores se cumplen. |
 
-## Evidencia AWS usada como referencia
+## Evidencia histórica AWS (no disponibilidad actual)
 
 El pedido controlado `PI-2026-0010` muestra la cadena ya existente:
 
 - producto `DEV-ASM-HOSE-DN10-R2AT` en almacén `WH-02`;
-- disponibilidad comercial actual: 19;
+- snapshot histórico reportó disponibilidad comercial 19 en la observación de origen; no garantiza disponibilidad actual;
 - pedido confirmado con una unidad;
 - reserva existente y tarea de surtido pendiente;
 - lista `PK-SUR-2026-0005` con destino `STAGING-WH-02`.
 
-Esta evidencia demuestra disponibilidad, confirmación, reserva y handoff; no
-autoriza por sí misma el cierre de las historias posteriores.
+Este registro se conserva como evidencia histórica de confirmación/reserva y
+handoff. No prueba inventario disponible hoy, runtime actual ni aceptación AWS
+global, y no autoriza por sí mismo cierre de historias.
 
 ## Excepciones y decisiones
 
@@ -143,13 +150,23 @@ siguientes tickets convierten el proceso en contrato y experiencia consistente:
 5. **KAN-130:** certificar directo, ensamble, mixto y excepciones mediante E2E.
 6. **KAN-125:** cerrar la capacidad integral sólo con evidencia operativa de toda la cadena.
 
-## Gate de revisión KAN-133
+## Criterios Jira KAN-133 y registro de revisión
 
-KAN-133 puede considerarse revisada cuando Producto/Operación confirme que:
+La revisión de código/documento deja explícitos los cinco criterios Jira; no
+declara aceptados el despliegue ni los tickets relacionados:
 
-- los siete estados visibles corresponden a su operación real;
-- la propiedad de cada transición es correcta;
-- las excepciones cubren faltantes, ensambles y cancelación;
-- no existe una transición administrativa que permita entregar antes de estar
-  preparado;
-- el mapa se enlace desde KAN-125 o desde la PR que introduzca KAN-127.
+1. **Enlace:** requisito de Jira: vincular este mapa desde KAN-125 o la PR de
+   implementación. El vínculo externo no se verificó en esta actualización.
+2. **Estados:** para cada etapa, la tabla identifica propietario, entrada,
+   salida y etiqueta visible.
+3. **Backend/UI:** cada transición mutante requiere validación del servicio;
+   etiquetas, tarjetas, navegación y presentación son UI y no autorización.
+4. **Vistas por rol:** la matriz distingue lo que ve Ventas frente a Almacén,
+   Producción y supervisión.
+5. **Revisión antes de KAN-127:** revisar este mapa antes de cerrar KAN-127.
+
+**Registro:** revisión estructural/código realizada el 2026-10-01 UTC por
+autorización del usuario; se contrastaron los criterios Jira y las reglas
+descritas con el servicio actual. No se requiere firma humana adicional según
+el texto de aceptación. El enlace Jira/PR y la aceptación global AWS/runtime
+deben verificarse por separado; no se declara KAN-133 ni KAN-127 cerrado.

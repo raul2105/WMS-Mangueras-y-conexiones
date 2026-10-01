@@ -42,7 +42,7 @@ async function receiveStock(formData: FormData) {
     locationId,
     reference,
     operatorName: actor.operatorName ?? "",
-    notes,
+    notes: notes ?? undefined,
     quantityRaw: qtyRaw,
   });
 

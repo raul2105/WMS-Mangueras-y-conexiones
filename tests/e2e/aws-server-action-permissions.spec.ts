@@ -1,7 +1,7 @@
 import { expect, test, type Page, type BrowserContext } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { loginAs } from "./lib/auth.helpers";
+import { loginAs, USERS } from "./lib/auth.helpers";
 import { createLocationTraceAndLabelJob } from "@/lib/labeling-service";
 
 type MultipartValue = string | { name: string; mimeType: string; buffer: Buffer };
@@ -20,6 +20,32 @@ async function actionFields(page: Page, button: RegExp) {
   return descriptor;
 }
 
+function safeActionDiagnostic(actionUrl: string, hiddenEntries: Array<[string, string]>) {
+  const actionIdField = hiddenEntries.find(([key]) => key.startsWith("$ACTION_ID_"))?.[0];
+  const actionRef = hiddenEntries.find(([key]) => key.startsWith("$ACTION_REF_"));
+  let actionId = actionIdField?.slice("$ACTION_ID_".length);
+  if (!actionId && actionRef) {
+    const prefix = actionRef[0].slice("$ACTION_REF_".length);
+    const descriptor = hiddenEntries.find(([key]) => key === `$ACTION_${prefix}:0`)?.[1];
+    if (descriptor) {
+      try {
+        const parsed = JSON.parse(descriptor) as { id?: unknown };
+        if (typeof parsed.id === "string") actionId = parsed.id;
+      } catch {
+        // Keep diagnostics limited to field names when the descriptor is malformed.
+      }
+    }
+  }
+  const { pathname, search } = new URL(actionUrl);
+  return {
+    actionPath: `${pathname}${search}`,
+    hiddenFieldNames: hiddenEntries.map(([key]) => key),
+    actionId: actionId ?? null,
+    hasNextActionHeader: false,
+    transport: "multipart-form-post",
+  };
+}
+
 function multipartActionData(hiddenEntries: Array<[string, string]>, overrides: Record<string, MultipartValue>) {
   const data = new FormData();
   for (const [key, value] of hiddenEntries) data.append(key, value);
@@ -32,6 +58,18 @@ function multipartActionData(hiddenEntries: Array<[string, string]>, overrides: 
     }
   }
   return data;
+}
+
+async function encodeMultipartAction(actionUrl: string, hiddenEntries: Array<[string, string]>, overrides: Record<string, MultipartValue>) {
+  const request = new Request(actionUrl, {
+    method: "POST",
+    body: multipartActionData(hiddenEntries, overrides),
+  });
+  const contentType = request.headers.get("content-type");
+  if (!contentType?.startsWith("multipart/form-data; boundary=")) {
+    throw new Error("WHATWG Request did not produce a multipart boundary");
+  }
+  return { body: Buffer.from(await request.arrayBuffer()), contentType };
 }
 
 function addRenderNonce(actionUrl: string, renderedPageUrl: string) {
@@ -63,14 +101,33 @@ test("direct Server Action requests enforce permissions before import, warehouse
   ];
   const contexts: Array<Awaited<ReturnType<typeof browser.newContext>>> = [];
   const evidence: Array<{ route: string; actor: string; controlStatus: number; deniedStatus: number }> = [];
+  const importSku = `${tag}-IMPORT-SKU`;
+  const importWriteFileName = `${tag}-admin-write.csv`;
   let warehouseId = "";
   let locationId = "";
   let labelLocationId = "";
   let traceId = "";
   let jobId = "";
+  let committedImportEvidence: Record<string, unknown> | null = null;
+  let importWriteFixtureReserved = false;
+  let importWriteAttempted = false;
+  let committedProductIdsForCleanup: string[] = [];
+  let committedImportLogIdsForCleanup: string[] = [];
   const initialJobCount = await db.labelPrintJob.count();
 
   try {
+    const [existingImportProduct, existingWriteLogs] = await Promise.all([
+      db.product.findUnique({ where: { sku: importSku }, select: { id: true } }),
+      db.importLog.count({ where: { fileName: importWriteFileName } }),
+    ]);
+    expect(existingImportProduct).toBeNull();
+    expect(existingWriteLogs).toBe(0);
+    importWriteFixtureReserved = true;
+    const adminActor = await db.user.findUnique({
+      where: { email: USERS.SYSTEM_ADMIN.email },
+      select: { id: true, name: true, email: true },
+    });
+
     expect(await db.warehouse.count({ where: { code: { in: warehouseCodes } } })).toBe(0);
     expect(await db.location.count({ where: { code: { in: locationCodes } } })).toBe(0);
     const warehouse = await db.warehouse.create({ data: { code: tag, name: tag, isActive: true } });
@@ -86,8 +143,8 @@ test("direct Server Action requests enforce permissions before import, warehouse
     jobId = prepared.job.id;
 
     const importCount = await db.importLog.count();
-    const importSku = `${tag}-IMPORT-SKU`;
     const importCsv = `sku,name,type,quantity\n${importSku},Permission probe,ACCESSORY,0\n`;
+    const importWriteCsv = `sku,name,type,quantity\n${importSku},Authorized import write probe,ACCESSORY,0\n`;
     const authenticatedAdmin = await browser.newContext();
     contexts.push(authenticatedAdmin);
     await loginAs(await authenticatedAdmin.newPage(), "SYSTEM_ADMIN");
@@ -195,8 +252,15 @@ test("direct Server Action requests enforce permissions before import, warehouse
       const descriptor = await actionFields(adminPage, entry.button);
       const actionUrl = addRenderNonce(descriptor.actionUrl, adminPage.url());
       const headers = { origin: new URL(adminPage.url()).origin, referer: adminPage.url() };
+      const adminPayload = await encodeMultipartAction(actionUrl, descriptor.hiddenEntries, entry.control);
       const control = await admin.request.post(actionUrl, {
-        multipart: multipartActionData(descriptor.hiddenEntries, entry.control), headers, maxRedirects: 0,
+        data: adminPayload.body,
+        headers: { ...headers, "content-type": adminPayload.contentType },
+        maxRedirects: 0,
+      });
+      await testInfo.attach(`server-action-transport-${entry.route.replaceAll("/", "-")}`, {
+        body: Buffer.from(JSON.stringify({ ...safeActionDiagnostic(actionUrl, descriptor.hiddenEntries), responseStatus: control.status() }, null, 2)),
+        contentType: "application/json",
       });
       expect(control.status(), `Authorized control for ${entry.route} must reach the action successfully`).toBeLessThan(400);
       const controlLocation = control.headers().location ?? "";
@@ -206,8 +270,11 @@ test("direct Server Action requests enforce permissions before import, warehouse
       expect(afterAdminControl.importedSku).toBeNull();
 
       for (const actor of entry.deniedRoles) {
+        const deniedPayload = await encodeMultipartAction(actionUrl, descriptor.hiddenEntries, entry.denied(actor));
         const denied = await contextsByRole[actor].request.post(actionUrl, {
-          multipart: multipartActionData(descriptor.hiddenEntries, entry.denied(actor)), headers, maxRedirects: 0,
+          data: deniedPayload.body,
+          headers: { ...headers, "content-type": deniedPayload.contentType },
+          maxRedirects: 0,
         });
         // Valid inputs and the successful authorized control distinguish permission rejection from form validation.
         expect(denied.status(), `${actor} must be rejected by the Server Action guard for ${entry.route}`).toBeGreaterThanOrEqual(400);
@@ -216,19 +283,109 @@ test("direct Server Action requests enforce permissions before import, warehouse
       }
     }
 
+    // Real, zero-stock commit control. The earlier dry-run and denied probes remain unchanged.
+    await adminPage.goto(cacheBustedRoute("/catalog/import"));
+    const importWriteDescriptor = await actionFields(adminPage, /^Importar$/);
+    const importWriteUrl = addRenderNonce(importWriteDescriptor.actionUrl, adminPage.url());
+    const importWriteHeaders = { origin: new URL(adminPage.url()).origin, referer: adminPage.url() };
+    const importWritePayload = await encodeMultipartAction(importWriteUrl, importWriteDescriptor.hiddenEntries, {
+      file: { name: importWriteFileName, mimeType: "text/csv", buffer: Buffer.from(importWriteCsv) },
+    });
+    importWriteAttempted = true;
+    const importWriteResponse = await admin.request.post(importWriteUrl, {
+      data: importWritePayload.body,
+      headers: { ...importWriteHeaders, "content-type": importWritePayload.contentType },
+      maxRedirects: 0,
+    });
+
+    const [committedProduct, committedImportLogs] = await Promise.all([
+      db.product.findUnique({ where: { sku: importSku } }),
+      db.importLog.findMany({ where: { fileName: importWriteFileName }, orderBy: { createdAt: "asc" } }),
+    ]);
+    const committedImportLogIds = committedImportLogs.map(log => log.id);
+    committedProductIdsForCleanup = committedProduct ? [committedProduct.id] : [];
+    committedImportLogIdsForCleanup = committedImportLogIds;
+    const committedProductAssetIds = committedProduct
+      ? (await db.productAsset.findMany({ where: { productId: committedProduct.id }, select: { id: true } })).map(asset => asset.id)
+      : [];
+    const importEntityIds = [...(committedProduct ? [committedProduct.id] : []), ...committedImportLogIds];
+    const committedAuditLogs = importEntityIds.length
+      ? await db.auditLog.findMany({ where: { entityId: { in: importEntityIds } }, orderBy: { id: "asc" } })
+      : [];
+    const committedTechnicalAttributes = committedProduct
+      ? await db.productTechnicalAttribute.findMany({ where: { productId: committedProduct.id }, select: { id: true } })
+      : [];
+    const committedInventory = committedProduct
+      ? await db.inventory.findMany({ where: { productId: committedProduct.id }, select: { id: true, locationId: true } })
+      : [];
+    const committedMovements = committedProduct
+      ? await db.inventoryMovement.findMany({ where: { productId: committedProduct.id }, select: { id: true } })
+      : [];
+    const committedSyncEvents = importEntityIds.length + committedProductAssetIds.length
+      ? await db.syncEvent.findMany({
+          where: {
+            entityType: { in: ["PRODUCT", "PRODUCT_ASSET"] },
+            entityId: { in: [...importEntityIds, ...committedProductAssetIds] },
+          },
+          select: { id: true },
+        })
+      : [];
+    const expectedAdminActor = adminActor?.name?.trim() || adminActor?.email?.trim() || adminActor?.id || null;
+    committedImportEvidence = {
+      fileName: importWriteFileName,
+      sku: importSku,
+      responseStatus: importWriteResponse.status(),
+      productId: committedProduct?.id ?? null,
+      importLogIds: committedImportLogIds,
+      auditIds: committedAuditLogs.map(row => row.id),
+      productAssetIds: committedProductAssetIds,
+      technicalAttributeIds: committedTechnicalAttributes.map(row => row.id),
+      inventoryIds: committedInventory.map(row => row.id),
+      movementIds: committedMovements.map(row => row.id),
+      syncEventIds: committedSyncEvents.map(row => row.id),
+      actorUserId: adminActor?.id ?? null,
+    };
+
+    expect(importWriteResponse.status(), "Authorized CSV write must redirect after commit").toBe(303);
+    expect(importWriteResponse.headers().location ?? "").not.toMatch(/[?&]error=/);
+    expect(committedProduct).not.toBeNull();
+    expect(committedProduct?.name).toBe("Authorized import write probe");
+    expect(committedProduct?.type).toBe("ACCESSORY");
+    expect(committedInventory, "A zero-quantity import must not create stock").toHaveLength(0);
+    expect(committedMovements, "A zero-quantity import must not create stock movements").toHaveLength(0);
+    expect(committedImportLogs).toHaveLength(1);
+    expect(committedImportLogs[0]).toMatchObject({
+      fileName: importWriteFileName,
+      rows: 1,
+      skus: 1,
+      dryRun: false,
+      status: "IMPORTED",
+      error: null,
+    });
+    expect(adminActor).not.toBeNull();
+    expect(committedAuditLogs.filter(row => row.entityType === "PRODUCT" && row.action === "IMPORT_CREATE")).toEqual([
+      expect.objectContaining({ entityId: committedProduct?.id, actorUserId: adminActor?.id, actor: expectedAdminActor }),
+    ]);
+    expect(committedAuditLogs.filter(row => row.entityType === "IMPORT_LOG" && row.action === "IMPORT_COMPLETED")).toEqual([
+      expect.objectContaining({ entityId: committedImportLogs[0].id, actorUserId: adminActor?.id, actor: expectedAdminActor }),
+    ]);
+
     // Positive and concurrent permission control: exactly one audit records the authorized print transition.
     await adminPage.goto(cacheBustedRoute(`/labels/jobs/${jobId}`));
     const printDescriptor = await actionFields(adminPage, /^Marcar impresa$/);
     const printUrl = addRenderNonce(printDescriptor.actionUrl, adminPage.url());
     const printHeaders = { origin: new URL(adminPage.url()).origin, referer: adminPage.url() };
-    const printed = await Promise.all([0, 1].map(() => admin.request.post(printUrl, {
-      multipart: multipartActionData(printDescriptor.hiddenEntries, { jobId, next: `/labels/jobs/${jobId}` }), headers: printHeaders, maxRedirects: 0,
+    const printPayloads = await Promise.all([0, 1].map(() => encodeMultipartAction(printUrl, printDescriptor.hiddenEntries, { jobId, next: `/labels/jobs/${jobId}` })));
+    const printed = await Promise.all(printPayloads.map(payload => admin.request.post(printUrl, {
+      data: payload.body,
+      headers: { ...printHeaders, "content-type": payload.contentType },
+      maxRedirects: 0,
     })));
     for (const response of printed) expect(response.status()).toBe(303);
     expect((await db.labelPrintJob.findUniqueOrThrow({ where: { id: jobId } })).status).toBe("PRINTED");
     const printAudits = await db.auditLog.findMany({ where: { entityId: jobId, action: "MARK_PRINTED" } });
     expect(printAudits).toHaveLength(1);
-    expect(printAudits[0].actorUserId).toBe("b4cb2a97-3e63-4990-9b45-b15a3376bede");
+    expect(printAudits[0].actorUserId).toBe(adminActor?.id);
   } finally {
     await Promise.allSettled(contexts.map(context => context.close()));
     // Discover by exact UUID-derived codes so even a broken unauthorized create is removed without broad-prefix deletion.
@@ -257,8 +414,73 @@ test("direct Server Action requests enforce permissions before import, warehouse
       audits: entityIds.length ? await db.auditLog.count({ where: { entityId: { in: entityIds } } }) : 0,
       labelsRestored: await db.labelPrintJob.count() === initialJobCount,
     };
+    const ownedProducts = importWriteFixtureReserved && importWriteAttempted
+      ? await db.product.findMany({
+          where: committedProductIdsForCleanup.length ? { id: { in: committedProductIdsForCleanup } } : { sku: importSku },
+          select: { id: true },
+        })
+      : [];
+    const ownedProductIds = ownedProducts.map(product => product.id);
+    const ownedImportLogs = importWriteFixtureReserved && importWriteAttempted
+      ? await db.importLog.findMany({
+          where: committedImportLogIdsForCleanup.length ? { id: { in: committedImportLogIdsForCleanup } } : { fileName: importWriteFileName },
+          select: { id: true },
+        })
+      : [];
+    const ownedImportLogIds = ownedImportLogs.map(log => log.id);
+    const ownedAssets = ownedProductIds.length
+      ? await db.productAsset.findMany({ where: { productId: { in: ownedProductIds } }, select: { id: true } })
+      : [];
+    const ownedAssetIds = ownedAssets.map(asset => asset.id);
+    const ownedInventory = ownedProductIds.length
+      ? await db.inventory.findMany({ where: { productId: { in: ownedProductIds } }, select: { id: true, locationId: true } })
+      : [];
+    const ownedProductEntityIds = [...ownedProductIds, ...ownedAssetIds, ...ownedImportLogIds,
+      ...ownedInventory.map(row => `${ownedProductIds[0]}:${row.locationId}`)];
+    const ownedMovements = ownedProductIds.length
+      ? await db.inventoryMovement.findMany({ where: { productId: { in: ownedProductIds } }, select: { id: true } })
+      : [];
+    const ownedSyncEvents = ownedProductEntityIds.length
+      ? await db.syncEvent.findMany({
+          where: {
+            entityType: { in: ["PRODUCT", "PRODUCT_ASSET"] },
+            entityId: { in: [...ownedProductIds, ...ownedAssetIds] },
+          },
+          select: { id: true },
+        })
+      : [];
+    const ownedTechnicalAttributes = ownedProductIds.length
+      ? await db.productTechnicalAttribute.findMany({ where: { productId: { in: ownedProductIds } }, select: { id: true } })
+      : [];
+    const ownedImportAudits = ownedProductEntityIds.length
+      ? await db.auditLog.findMany({ where: { entityId: { in: ownedProductEntityIds } }, select: { id: true } })
+      : [];
+
+    await db.$transaction(async tx => {
+      if (ownedImportAudits.length) await tx.auditLog.deleteMany({ where: { id: { in: ownedImportAudits.map(row => row.id) } } });
+      if (ownedSyncEvents.length) await tx.syncEvent.deleteMany({ where: { id: { in: ownedSyncEvents.map(row => row.id) } } });
+      if (ownedMovements.length) await tx.inventoryMovement.deleteMany({ where: { id: { in: ownedMovements.map(row => row.id) } } });
+      if (ownedInventory.length) await tx.inventory.deleteMany({ where: { id: { in: ownedInventory.map(row => row.id) } } });
+      if (ownedTechnicalAttributes.length) await tx.productTechnicalAttribute.deleteMany({ where: { id: { in: ownedTechnicalAttributes.map(row => row.id) } } });
+      if (ownedAssets.length) await tx.productAsset.deleteMany({ where: { id: { in: ownedAssetIds } } });
+      if (ownedProducts.length) await tx.product.deleteMany({ where: { id: { in: ownedProductIds } } });
+      if (ownedImportLogs.length) await tx.importLog.deleteMany({ where: { id: { in: ownedImportLogIds } } });
+    });
+
+    const importResiduals = {
+      products: importWriteFixtureReserved && importWriteAttempted ? await db.product.count({ where: { sku: importSku } }) : 0,
+      importLogs: importWriteFixtureReserved && importWriteAttempted ? await db.importLog.count({ where: { fileName: importWriteFileName } }) : 0,
+      assets: ownedProductIds.length ? await db.productAsset.count({ where: { productId: { in: ownedProductIds } } }) : 0,
+      technicalAttributes: ownedProductIds.length ? await db.productTechnicalAttribute.count({ where: { productId: { in: ownedProductIds } } }) : 0,
+      movements: ownedProductIds.length ? await db.inventoryMovement.count({ where: { productId: { in: ownedProductIds } } }) : 0,
+      inventory: ownedProductIds.length ? await db.inventory.count({ where: { productId: { in: ownedProductIds } } }) : 0,
+      syncEvents: ownedProductIds.length || ownedAssetIds.length
+        ? await db.syncEvent.count({ where: { entityType: { in: ["PRODUCT", "PRODUCT_ASSET"] }, entityId: { in: [...ownedProductIds, ...ownedAssetIds] } } })
+        : 0,
+      audits: ownedProductEntityIds.length ? await db.auditLog.count({ where: { entityId: { in: ownedProductEntityIds } } }) : 0,
+    };
     await testInfo.attach("server-action-permission-evidence.json", {
-      body: Buffer.from(JSON.stringify({ tag, requests: evidence, residuals })),
+      body: Buffer.from(JSON.stringify({ tag, requests: evidence, committedImport: committedImportEvidence, importResiduals, residuals })),
       contentType: "application/json",
     });
     await db.$disconnect();
@@ -268,5 +490,13 @@ test("direct Server Action requests enforce permissions before import, warehouse
     expect(residuals.jobs).toBe(0);
     expect(residuals.audits).toBe(0);
     expect(residuals.labelsRestored).toBe(true);
+    expect(importResiduals.products).toBe(0);
+    expect(importResiduals.importLogs).toBe(0);
+    expect(importResiduals.assets).toBe(0);
+    expect(importResiduals.technicalAttributes).toBe(0);
+    expect(importResiduals.movements).toBe(0);
+    expect(importResiduals.inventory).toBe(0);
+    expect(importResiduals.syncEvents).toBe(0);
+    expect(importResiduals.audits).toBe(0);
   }
 });

@@ -1655,6 +1655,8 @@ describe("sales request service", () => {
     expect(deliveryAudits).toHaveLength(1);
   });
 
+  // On AWS RDS the four-user/two-order setup requires many serial round-trips;
+  // reserve the longer deadline for fixture preparation before the concurrency race.
   it("prevents over-delivery when two different orders consume the same inventory row concurrently", async () => {
     const manager = await createUserWithRole({
       email: "manager-deliver-shared@scmayher.com",
@@ -1780,7 +1782,7 @@ describe("sales request service", () => {
     expect(sharedInventory?.quantity).toBe(1);
     expect(sharedInventory?.available).toBe(1);
     expect(sharedInventory?.reserved).toBe(0);
-  });
+  }, 60_000);
 
   it("runs full operational flow: manager request -> sales pull -> direct pick + assembly -> delivered", async () => {
     const manager = await createUserWithRole({

@@ -1,5 +1,26 @@
 # Matriz transversal de auditoría y pruebas WMS — 2026-09-30
 
+## Adenda de reconciliación — evidencia disponible al 2026-10-01
+
+Esta adenda conserva las corridas históricas y separa pruebas del working tree
+de la aceptación del runtime. El navegador completo `runaws-acceptance-20261001T143152Z-8aa17911`
+contra runtime `9da425e55adaa9e9a8d8fa8064324be9323f13d8` seguía ejecutándose
+al redactar esta adenda; no hay resultado final que registrar aquí. No se
+considera aprobado por la existencia de health, release o ejecución iniciada.
+
+| Evidencia | Resultado que puede afirmarse | Límite / situación pendiente |
+|---|---|---|
+| Browser Chromium `aws-acceptance-20261001T014258Z-0d7371c1`, runtime `f76241438391a884496ba42160ebb1e1e4702d40` | 40 casos esperados pasaron, 3 fallaron y 10 se omitieron. El manifest identifica el runtime `prod-f76241438391-20261001T012548Z`. | Corrida fallida, no aceptación integral. Falló la prueba de recepción repetida/contraste (caso documentado como `02120bfcf`); no convertir los 40 pases en aprobación del flujo completo. Ver [manifest](../../output/aws-acceptance-20261001T014258Z-0d7371c1-manifest.json) y [resultados únicos](../../output/aws-acceptance/runs/aws-acceptance-20261001T014258Z-0d7371c1/results.json). |
+| Navegadores y móvil sobre `f762414` | Mobile Chrome 8/8; Firefox 11/11; WebKit 11/11. | Son corridas separadas del runtime `f762414`; no atribuirlas a `9da425e` ni usarlas para encubrir los 3 fallos y 10 omisiones del Chromium completo. |
+| PG agregado `flows0930_85a2e58199` | 199 pruebas pasaron; una terminó por timeout de 200 s; 22 schemas aislados reportaron cleanup. | No es un gate verde: 1 timeout sigue pendiente de diagnóstico/reintento; tampoco es aceptación de browser ni del runtime desplegado. |
+| PG focal de recepción `02120bfcf` | Repetición/contraste de recepción falló. | Mantener visible como fallo hasta que una corrida posterior del mismo criterio termine verde con evidencia de estado antes/después; no reemplazarlo por un resultado distinto de otro escenario. |
+| Transporte de Server Action nativo/API | El artefacto [root cause](../../output/production-server-action-transport-root-cause-20261001.json) registra respuesta nativa HTTP 303 y envío API HTTP 500. La serialización multipart de Playwright omitió el campo vacío `$ACTION_ID`; causa confirmada en `playwright-core/lib/server/fetch.js:587`. | El 500 no demuestra rechazo de autorización ni invariancia de datos. La barrida de guardas por POST directo queda **sin prueba válida** hasta corregir el transporte del campo vacío y obtener respuesta esperada más verificación before/after. No interpretar el 303 aislado como prueba del permiso. |
+| Candidato/runtime `9da425e` | Se identificó health/release y comenzó la aceptación Chromium `runaws-acceptance-20261001T143152Z-8aa17911`. | Resultado final todavía no disponible al redactar; no afirmar `PASS`, aceptación global ni cobertura de los flujos a partir de esta corrida incompleta. |
+
+Exclusiones vigentes para el alcance productivo de esta reconciliación: Gmail,
+Prisma 7, fiscal y capacidades de IA. Las exclusiones no equivalen a aceptación
+ni bloquean la lectura de evidencia de los flujos incluidos.
+
 ## Alcance y estado de evidencia
 
 Matriz estática de operaciones críticas de ventas, inventario, ensamble, compras, catálogo y usuarios. Se siguieron Server Actions/rutas hasta sus servicios, escrituras de estado, movimientos y eventos. Las filas de abajo distinguen pruebas declaradas de corridas terminadas; los artefactos AWS revisados son ejecuciones de prueba en schemas aislados contra el working tree, no aceptación de una versión desplegada. Esta revisión no ejecutó pruebas ni escribió en la base de datos.

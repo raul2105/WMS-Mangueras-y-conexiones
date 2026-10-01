@@ -598,6 +598,17 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
   });
 
   test("Manager reviews documented source and rule; Admin publishes the exact decision; equivalence stays commercial", async ({ page }, testInfo) => {
+    // This journey includes multiple role changes, eight theme/accessibility
+    // scans and a complete order snapshot against the remote AWS runtime.
+    // Keep each UI expectation bounded while allowing the whole journey to finish.
+    test.setTimeout(600000);
+    const journeyStarted = Date.now();
+    const recordPhase = async (phase: string) => {
+      await testInfo.attach(`governance-${phase}-timing`, {
+        body: Buffer.from(JSON.stringify({ phase, elapsedMs: Date.now() - journeyStarted })),
+        contentType: "application/json",
+      });
+    };
     await loginAs(page, "MANAGER", "/catalog/technical-sources", "/catalog/technical-sources");
     await page.goto("/catalog/technical-sources");
     await page.setViewportSize({ width: 390, height: 844 });
@@ -620,6 +631,7 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
     const sourceAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_TECHNICAL_SOURCE", entityId: governanceFixture.sourceId, action: "APPROVE" }, select: { actorUserId: true, after: true } });
     expect(sourceAudit.actorUserId).toBe(governanceFixture.managerUserId);
     expect(JSON.parse(sourceAudit.after ?? "null")).toMatchObject({ status: "APPROVED", sourceId: governanceFixture.sourceId });
+    await recordPhase("source-approved");
 
     await page.goto("/catalog/compatibility");
     await page.setViewportSize({ width: 390, height: 844 });
@@ -658,6 +670,7 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
     const approvalAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_COMPATIBILITY_RULE", entityId: rule.id, action: "APPROVE" }, select: { actorUserId: true, after: true } });
     expect(approvalAudit.actorUserId).toBe(governanceFixture.adminUserId);
     expect(JSON.parse(approvalAudit.after ?? "null")).toMatchObject({ governanceStatus: "APPROVED", decision: "APPROVED", ruleRevision: 2 });
+    await recordPhase("rule-published");
 
     await loginAs(page, "MANAGER", "/catalog/compatibility", "/catalog/compatibility");
     await page.goto("/catalog/compatibility");
@@ -676,6 +689,7 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
     const equivalenceAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_EQUIVALENCE", entityId: equivalence.id, action: "CREATE" }, select: { actorUserId: true, after: true } });
     expect(equivalenceAudit.actorUserId).toBe(governanceFixture.managerUserId);
     expect(JSON.parse(equivalenceAudit.after ?? "null")).toMatchObject({ technicalApproval: "NONE", equivalence: { id: equivalence.id, active: true } });
+    await recordPhase("commercial-equivalence-created");
 
     await loginAs(page, "MANAGER", "/production/requests/new", "/production/requests/new");
     const requestParams = new URLSearchParams({
@@ -716,6 +730,7 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
       technicalRules: [{ id: rule.id, revision: 2, ruleType: "PRODUCT_SUBSTITUTION", source: { documentVersion: "Rev. E2E-1" } }],
       context: { warehouseId: governanceFixture.warehouseId, requestedQty: 1, availableAtSelection: 10 },
     });
+    await recordPhase("order-snapshot-captured");
 
     await loginAs(page, "SYSTEM_ADMIN", "/catalog/compatibility", "/catalog/compatibility");
     await page.goto("/catalog/compatibility");
@@ -730,6 +745,7 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
     const retireAudit = await governancePrisma.auditLog.findFirstOrThrow({ where: { entityType: "PRODUCT_COMPATIBILITY_RULE", entityId: rule.id, action: "RETIRE" }, select: { actorUserId: true, after: true } });
     expect(retireAudit.actorUserId).toBe(governanceFixture.adminUserId);
     expect(JSON.parse(retireAudit.after ?? "null")).toMatchObject({ governanceStatus: "RETIRED", active: false, ruleRevision: 3 });
+    await recordPhase("retired-snapshot-preserved");
     governanceDuring = await captureGovernanceManifest();
     await testInfo.attach("catalog-governance-approved-rule.png", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
   });

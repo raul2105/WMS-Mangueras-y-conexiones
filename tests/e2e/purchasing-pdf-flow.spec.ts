@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { updatePurchaseOrderStatusWithDocument } from "@/lib/purchasing/purchase-order-document-service";
-import { loginAs } from "./lib/auth.helpers";
+import { loginAs, resolveAuditActorForRole } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 const tag = `E2E-PDF-${randomUUID().replaceAll("-", "").toUpperCase()}`;
@@ -100,9 +100,11 @@ test.describe("PDF Flow - Purchase Order Document", () => {
     });
 
     orderWithDocumentId = orderWithDocument.id;
+    const auditActor = await resolveAuditActorForRole(prisma, "MANAGER");
     await updatePurchaseOrderStatusWithDocument({
       purchaseOrderId: orderWithDocument.id,
       newStatus: "CONFIRMADA",
+      auditActor,
       prismaClient: prisma,
     });
 

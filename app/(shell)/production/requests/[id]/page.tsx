@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import type { SalesInternalOrderStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { getSessionContext } from "@/lib/auth/session-context";
-import { formatBusinessDate } from "@/lib/business-date";
+import { formatBusinessDate, parseBusinessDate } from "@/lib/business-date";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { LocalDateTime } from "@/components/ui/local-date-time";
@@ -18,6 +18,7 @@ import {
   requireSalesWriteAccess,
 } from "@/lib/rbac/sales";
 import {
+  changeSalesRequestCommitmentDate,
   addSalesRequestProductLine,
   cancelSalesRequestOrder,
   assignSalesRequestOrder,
@@ -61,6 +62,17 @@ export const dynamic = "force-dynamic";
 
 function trustedAuditActor(user: { id: string; name?: string | null; email?: string | null }) {
   return { actorUserId: user.id, actor: user.name ?? user.email ?? user.id };
+}
+
+function parseCommitmentDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? parseBusinessDate(value) : null;
+}
+
+function parseExpectedCommitmentDate(value: string) {
+  if (value === "") return { valid: true as const, date: null };
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) return { valid: false as const, date: null };
+  return { valid: true as const, date };
 }
 
 function isNextRedirectError(error: unknown) {
@@ -216,6 +228,41 @@ async function assignRequest(formData: FormData) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "No se pudo asignar el pedido";
     redirect(`/production/requests/${parsed.data.orderId}?error=${encodeURIComponent(message)}`);
+  }
+}
+
+async function changeCommitmentDate(formData: FormData) {
+  "use server";
+  const authorizedSession = await requireSalesAssignmentAccess();
+  const orderId = String(formData.get("orderId") ?? "").trim();
+  const expectedDueDateRaw = String(formData.get("expectedDueDate") ?? "");
+  const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+  const parsedOrder = salesInternalOrderTransitionSchema.safeParse({ orderId });
+  if (!parsedOrder.success || !authorizedSession.user?.id) {
+    const message = parsedOrder.success ? "Sesión inválida para cambiar el compromiso" : firstErrorMessage(parsedOrder.error);
+    redirect(`/production/requests?error=${encodeURIComponent(message)}`);
+  }
+  const safeOrderId = parsedOrder.data.orderId;
+  const dueDate = parseCommitmentDate(dueDateRaw);
+  const expectedDueDate = parseExpectedCommitmentDate(expectedDueDateRaw);
+  if (!dueDate || !expectedDueDate.valid || !reason || reason.length > 500) {
+    redirect(`/production/requests/${safeOrderId}?error=${encodeURIComponent("Indica una fecha válida y un motivo de hasta 500 caracteres")}`);
+  }
+
+  try {
+    await changeSalesRequestCommitmentDate(prisma, {
+      orderId: safeOrderId,
+      expectedDueDate: expectedDueDate.date,
+      dueDate,
+      reason,
+      auditActor: trustedAuditActor(authorizedSession.user),
+    });
+    redirect(`/production/requests/${safeOrderId}?ok=${encodeURIComponent("Fecha compromiso actualizada y registrada")}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "No se pudo cambiar la fecha compromiso";
+    redirect(`/production/requests/${safeOrderId}?error=${encodeURIComponent(message)}`);
   }
 }
 
@@ -911,6 +958,24 @@ export default async function ProductionRequestDetailPage({
               {activeException ? <Badge variant="danger">Excepción abierta</Badge> : null}
             </div>
             <p>Compromiso: {formatDate(order.dueDate)} · Responsable comercial: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
+            {canManageAssignments && order.status !== "CANCELADA" && !order.deliveredToCustomerAt ? (
+              <form action={changeCommitmentDate} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3" data-testid="change-commitment-date-form">
+                <input type="hidden" name="orderId" value={order.id} />
+                <input type="hidden" name="expectedDueDate" value={order.dueDate?.toISOString() ?? ""} />
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="min-w-48 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                    Nueva fecha compromiso *
+                    <input name="dueDate" type="date" required defaultValue={order.dueDate?.toISOString().slice(0, 10) ?? ""} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
+                  </label>
+                  <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
+                    Motivo del cambio *
+                    <input name="reason" required maxLength={500} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
+                  </label>
+                  <button type="submit" className="btn-secondary">Actualizar compromiso</button>
+                </div>
+                <p className="mt-2 text-xs text-[var(--text-muted)]">El motivo queda registrado en el historial del pedido.</p>
+              </form>
+            ) : null}
             <p>Responsable físico: {order.warehouseAssigneeUser?.name ?? order.warehouseClaimedByUser?.name ?? order.warehouseAssigneeUser?.email ?? order.warehouseClaimedByUser?.email ?? "Sin asignar"}</p>
             {activeException ? (
               <p className="text-[var(--status-danger-text)]">

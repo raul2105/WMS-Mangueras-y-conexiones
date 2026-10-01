@@ -411,6 +411,7 @@ const PURCHASE_ORDER_STATUS_TRANSITIONS: Record<string, string[]> = {
 export async function updatePurchaseOrderStatusWithDocument(input: {
   purchaseOrderId: string;
   newStatus: string;
+  auditActor: { actorUserId: string; actor: string };
   prismaClient?: PrismaClient;
 }): Promise<{ ok: true } | { error: string }> {
   const db = input.prismaClient ?? prisma;
@@ -494,6 +495,8 @@ export async function updatePurchaseOrderStatusWithDocument(input: {
           entityType: "PURCHASE_ORDER_DOCUMENT",
           entityId: documentRecord.id,
           action: "CREATE_PURCHASE_ORDER_DOCUMENT_VERSION",
+          actor: input.auditActor.actor,
+          actorUserId: input.auditActor.actorUserId,
           after: {
             purchaseOrderId: input.purchaseOrderId,
             versionNumber: documentRecord.versionNumber,
@@ -513,6 +516,8 @@ export async function updatePurchaseOrderStatusWithDocument(input: {
         action: "STATUS_CHANGE",
         before: { status: order.status },
         after: { status: input.newStatus },
+        actor: input.auditActor.actor,
+        actorUserId: input.auditActor.actorUserId,
         source: "purchasing/orders",
       },
       tx,

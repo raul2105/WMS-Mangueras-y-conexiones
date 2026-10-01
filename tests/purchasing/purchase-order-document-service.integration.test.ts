@@ -220,10 +220,19 @@ describePostgres("purchase order document service integration", () => {
 
   it("confirms BORRADOR to CONFIRMADA creates one document v1", async () => {
     const { order } = await createFixture();
+    const actor = await prisma.user.create({
+      data: {
+        email: `purchasing-audit-${unique()}@example.test`,
+        name: "Manager de compras",
+        passwordHash: "integration-test-only",
+      },
+      select: { id: true, name: true },
+    });
 
     const result = await updatePurchaseOrderStatusWithDocument({
       purchaseOrderId: order.id,
       newStatus: "CONFIRMADA",
+      auditActor: { actorUserId: actor.id, actor: actor.name },
       prismaClient: prisma,
     });
 
@@ -237,10 +246,32 @@ describePostgres("purchase order document service integration", () => {
       where: { purchaseOrderId: order.id },
       orderBy: { versionNumber: "asc" },
     });
+    const statusAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { entityType: "PURCHASE_ORDER", entityId: order.id, action: "STATUS_CHANGE" },
+    });
+    const documentAudit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        entityType: "PURCHASE_ORDER_DOCUMENT",
+        action: "CREATE_PURCHASE_ORDER_DOCUMENT_VERSION",
+        after: { contains: order.id },
+      },
+    });
 
     expect(updated?.status).toBe("CONFIRMADA");
     expect(documents).toHaveLength(1);
     expect(documents[0]?.versionNumber).toBe(1);
     expect(documents[0]?.createdForStatus).toBe("CONFIRMADA");
+    expect(statusAudit).toMatchObject({
+      actor: actor.name,
+      actorUserId: actor.id,
+      source: "purchasing/orders",
+      before: JSON.stringify({ status: "BORRADOR" }),
+      after: JSON.stringify({ status: "CONFIRMADA" }),
+    });
+    expect(documentAudit).toMatchObject({
+      actor: actor.name,
+      actorUserId: actor.id,
+      source: "purchasing/order-confirmation",
+    });
   });
 });

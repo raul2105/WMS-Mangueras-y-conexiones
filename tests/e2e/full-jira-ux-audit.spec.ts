@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { updatePurchaseOrderStatusWithDocument } from "@/lib/purchasing/purchase-order-document-service";
-import { loginAs } from "./lib/auth.helpers";
+import { loginAs, resolveAuditActorForRole } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 const unique = () => `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -112,9 +112,11 @@ test.describe
       select: { id: true },
     });
 
+    const auditActor = await resolveAuditActorForRole(prisma, "MANAGER");
     await updatePurchaseOrderStatusWithDocument({
       purchaseOrderId: confirmedDraft.id,
       newStatus: "CONFIRMADA",
+      auditActor,
       prismaClient: prisma,
     });
 

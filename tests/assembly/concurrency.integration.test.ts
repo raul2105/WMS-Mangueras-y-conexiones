@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { confirmAssemblyPickTask } from "@/lib/assembly/picking-service";
-import { reserveInventoryInTx } from "@/lib/assembly/work-order-service";
+import { configureAssemblyOrderExact, createAssemblyOrderDraftHeader, reserveInventoryInTx } from "@/lib/assembly/work-order-service";
 
 const describePostgres = process.env.RUN_POSTGRES_TESTS === "1" ? describe : describe.skip;
 
@@ -166,6 +166,107 @@ afterAll(async () => {
 }, 60_000);
 
 describePostgres("assembly inventory concurrency (PostgreSQL)", () => {
+  it("audits an owned draft header and exact configuration with the authenticated actor and before/after source", async () => {
+    const token = randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase();
+    const actor = await prisma.user.create({
+      data: {
+        email: `assembly-audit-${token.toLowerCase()}@test.invalid`,
+        name: `Assembly auditor ${token}`,
+        passwordHash: "test-only",
+        isActive: true,
+      },
+      select: { id: true, name: true },
+    });
+    const warehouse = await prisma.warehouse.create({ data: { code: `AUD-WH-${token}`, name: `Audit warehouse ${token}` } });
+    const [storage, wip] = await Promise.all([
+      prisma.location.create({ data: { code: `AUD-STO-${token}`, name: "Audit storage", usageType: "STORAGE", warehouseId: warehouse.id } }),
+      prisma.location.create({ data: { code: `AUD-WIP-${token}`, name: "Audit WIP", usageType: "WIP", warehouseId: warehouse.id } }),
+    ]);
+    const [entry, hose, exit] = await Promise.all([
+      prisma.product.create({ data: { sku: `AUD-ENTRY-${token}`, name: "Audit entry", type: "FITTING" } }),
+      prisma.product.create({ data: { sku: `AUD-HOSE-${token}`, name: "Audit hose", type: "HOSE" } }),
+      prisma.product.create({ data: { sku: `AUD-EXIT-${token}`, name: "Audit exit", type: "FITTING" } }),
+    ]);
+    const source = await prisma.productTechnicalSource.create({
+      data: { supplierName: "Audit test supplier", documentRef: `AUD-DOC-${token}`, documentVersion: "1", status: "APPROVED", reviewedAt: new Date() },
+    });
+    let orderId: string | undefined;
+    let orderCode: string | undefined;
+
+    try {
+      await Promise.all([entry, hose, exit].map((product) => prisma.inventory.create({
+        data: { productId: product.id, locationId: storage.id, quantity: 2, reserved: 0, available: 2 },
+      })));
+      await Promise.all([
+        prisma.productCompatibilityRule.create({
+          data: { productId: entry.id, compatibleProductId: hose.id, ruleType: "ASSEMBLY", description: "Entry-hose approved", severity: "INFO", decision: "APPROVED", governanceStatus: "APPROVED", sourceId: source.id },
+        }),
+        prisma.productCompatibilityRule.create({
+          data: { productId: hose.id, compatibleProductId: exit.id, ruleType: "ASSEMBLY", description: "Hose-exit approved", severity: "INFO", decision: "APPROVED", governanceStatus: "APPROVED", sourceId: source.id },
+        }),
+      ]);
+
+      const draft = await createAssemblyOrderDraftHeader(prisma, {
+        warehouseId: warehouse.id,
+        customerName: `Customer ${token}`,
+        dueDate: new Date(Date.now() + 86_400_000),
+        auditActor: { actorUserId: actor.id, actor: actor.name },
+      });
+      orderId = draft.orderId;
+      orderCode = draft.code;
+      const draftAudit = await prisma.auditLog.findFirstOrThrow({ where: { entityType: "ASSEMBLY_ORDER", entityId: orderId, action: "CREATE_DRAFT_HEADER" } });
+      expect(draftAudit).toMatchObject({ actor: actor.name, actorUserId: actor.id, before: null, source: "assembly/work-order-service" });
+      expect(JSON.parse(draftAudit.after ?? "null")).toMatchObject({ code: draft.code, warehouseId: warehouse.id, customerName: `Customer ${token}` });
+
+      await configureAssemblyOrderExact(prisma, orderId, {
+        warehouseId: warehouse.id,
+        entryFittingProductId: entry.id,
+        hoseProductId: hose.id,
+        exitFittingProductId: exit.id,
+        hoseLength: 1,
+        assemblyQuantity: 1,
+        workingPressureBar: 100,
+        operatingTemperatureC: 40,
+        medium: "Hydraulic oil",
+        application: "Test assembly",
+        assemblyMethod: "Crimped",
+        auditActor: { actorUserId: actor.id, actor: actor.name },
+      });
+      const configureAudit = await prisma.auditLog.findFirstOrThrow({ where: { entityType: "ASSEMBLY_ORDER", entityId: orderId, action: "CONFIGURE_EXACT" } });
+      expect(configureAudit).toMatchObject({ actor: actor.name, actorUserId: actor.id, before: null, source: "assembly/work-order-service" });
+      expect(JSON.parse(configureAudit.after ?? "null")).toMatchObject({
+        code: draft.code,
+        warehouseId: warehouse.id,
+        compatibilityReviewApproved: false,
+        compatibilityReviewReason: null,
+      });
+      expect(await prisma.auditLog.count({ where: { entityType: "ASSEMBLY_ORDER", entityId: orderId, actorUserId: actor.id } })).toBe(2);
+      const reservedInventory = await prisma.inventory.findMany({ where: { productId: { in: [entry.id, hose.id, exit.id] }, locationId: storage.id }, orderBy: { productId: "asc" } });
+      expect(reservedInventory).toHaveLength(3);
+      expect(reservedInventory.every((row) => row.quantity === 2 && row.reserved === 1 && row.available === 1)).toBe(true);
+    } finally {
+      if (orderId) {
+        const workOrder = await prisma.assemblyWorkOrder.findUnique({ where: { productionOrderId: orderId }, select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true } } } });
+        const pickListIds = workOrder?.pickLists.map(({ id }) => id) ?? [];
+        await prisma.auditLog.deleteMany({ where: { entityId: orderId } });
+        await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: [orderId, orderCode ?? ""] } } });
+        if (pickListIds.length) await prisma.pickTask.deleteMany({ where: { pickListId: { in: pickListIds } } });
+        await prisma.pickList.deleteMany({ where: { assemblyWorkOrderId: workOrder?.id ?? "" } });
+        if (workOrder?.lines.length) await prisma.assemblyWorkOrderLine.deleteMany({ where: { id: { in: workOrder.lines.map(({ id }) => id) } } });
+        if (workOrder) await prisma.assemblyWorkOrder.delete({ where: { id: workOrder.id } });
+        await prisma.assemblyConfiguration.deleteMany({ where: { productionOrderId: orderId } });
+        await prisma.productionOrder.deleteMany({ where: { id: orderId } });
+      }
+      await prisma.productCompatibilityRule.deleteMany({ where: { productId: { in: [entry.id, hose.id, exit.id] } } });
+      await prisma.inventory.deleteMany({ where: { productId: { in: [entry.id, hose.id, exit.id] } } });
+      await prisma.productTechnicalSource.delete({ where: { id: source.id } });
+      await prisma.product.deleteMany({ where: { id: { in: [entry.id, hose.id, exit.id] } } });
+      await prisma.location.deleteMany({ where: { id: { in: [storage.id, wip.id] } } });
+      await prisma.warehouse.delete({ where: { id: warehouse.id } });
+      await prisma.user.delete({ where: { id: actor.id } });
+    }
+  }, 45_000);
+
   it("allows only one reservation from two transactions that read the same stock snapshot", async () => {
     const fixture = await createInventoryFixture();
     const waitForBothReads = createBarrier(2);

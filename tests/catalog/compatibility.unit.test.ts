@@ -62,6 +62,16 @@ describe("technical compatibility contract", () => {
     expect(result.reasonCode).toBe("OUTSIDE_APPROVED_LIMITS");
   });
 
+  it("blocks temperature independently when it exceeds the approved maximum", () => {
+    const result = evaluateCompatibilityRules(["entry", "hose"], [{
+      ...approvedRule,
+      maxTemperatureC: 80,
+    }], { operatingTemperatureC: 81 });
+    expect(result.status).toBe("BLOCKED");
+    expect(result.reasonCode).toBe("OUTSIDE_APPROVED_LIMITS");
+    expect(result.explanation).toContain("temperatura 81 °C > 80 °C");
+  });
+
   it("requires operating context when a governed limit needs it", () => {
     const result = evaluateCompatibilityRules(["entry", "hose"], [{
       ...approvedRule,

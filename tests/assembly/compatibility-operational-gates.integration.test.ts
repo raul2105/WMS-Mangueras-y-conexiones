@@ -280,6 +280,43 @@ describePostgres("KAN-20 PostgreSQL operational compatibility gates", () => {
     await prisma.$disconnect();
   });
 
+  it("revalidates a persisted approved temperature limit before release and leaves the reservation snapshot untouched", async () => {
+    const fixture = await createFixture();
+    await prisma.productCompatibilityRule.update({
+      where: { id: fixture.entryHoseRule.id },
+      data: { maxTemperatureC: 50 },
+    });
+
+    const withinLimit = await getAssemblyCompatibilityDecision(
+      prisma,
+      [fixture.entry.id, fixture.hose.id, fixture.exit.id],
+      { workingPressureBar: 180, operatingTemperatureC: 40, medium: "Aceite hidráulico" },
+    );
+    expect(withinLimit.status).toBe("APPROVED");
+    expect(withinLimit.reasonCode).toBe("APPROVED_RULE_SET");
+
+    const captureState = async () => {
+      const [configuration, productionOrder, workOrder, workOrderLines, pickList, tasks, inventory, movements, audits] = await Promise.all([
+        prisma.assemblyConfiguration.findUnique({ where: { productionOrderId: fixture.productionOrder.id } }),
+        prisma.productionOrder.findUnique({ where: { id: fixture.productionOrder.id } }),
+        prisma.assemblyWorkOrder.findUnique({ where: { id: fixture.workOrder.id } }),
+        prisma.assemblyWorkOrderLine.findMany({ where: { assemblyWorkOrderId: fixture.workOrder.id }, orderBy: { componentRole: "asc" } }),
+        prisma.pickList.findUnique({ where: { id: fixture.pickList.id } }),
+        prisma.pickTask.findMany({ where: { pickListId: fixture.pickList.id }, orderBy: { sequence: "asc" } }),
+        prisma.inventory.findMany({ where: { locationId: fixture.storage.id }, orderBy: { productId: "asc" } }),
+        prisma.inventoryMovement.findMany({ where: { documentId: fixture.productionOrder.id }, orderBy: { id: "asc" } }),
+        prisma.auditLog.findMany({ where: { entityType: "ASSEMBLY_ORDER", entityId: fixture.productionOrder.id }, orderBy: { id: "asc" } }),
+      ]);
+      return { configuration, productionOrder, workOrder, workOrderLines, pickList, tasks, inventory, movements, audits };
+    };
+    const before = await captureState();
+
+    await expect(releaseAssemblyPickList(prisma, fixture.productionOrder.id))
+      .rejects.toMatchObject({ code: "INCOMPATIBLE_COMPONENTS" });
+
+    expect(await captureState()).toEqual(before);
+  });
+
   it("blocks release atomically when an approved rule becomes explicitly blocked", async () => {
     const fixture = await createFixture();
     await prisma.productCompatibilityRule.update({

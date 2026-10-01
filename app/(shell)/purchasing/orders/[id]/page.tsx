@@ -146,12 +146,16 @@ function formatDateInput(value: string | Date | null | undefined) {
 
 async function updateStatus(orderId: string, formData: FormData) {
   "use server";
-  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const session = await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const newStatus = String(formData.get("status") ?? "").trim();
   const result = await updatePurchaseOrderStatusWithDocument({
     purchaseOrderId: orderId,
     newStatus,
+    auditActor: {
+      actorUserId: session.user.id,
+      actor: session.user.name ?? session.user.email ?? session.user.id,
+    },
     prismaClient: prisma,
   });
 

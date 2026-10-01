@@ -1,5 +1,23 @@
 # Promoción del entorno canónico para operación
 
+## Corrección del presupuesto durante la promoción de main
+
+El 01/10/2026 la promoción de `103e1c5` volvió a
+`UPDATE_ROLLBACK_COMPLETE`: cambiar `NotificationsWithSubscribers` exige
+reemplazar el recurso AWS Budgets y el nombre explícito anterior impidió crear
+el sustituto. La revisión inicial sólo rechazaba reemplazos `True`; el plan
+marcaba este cambio como `Conditional`. El health posterior conservó el
+runtime `9d3311d`, `environment=prod` y `db=up`.
+
+En producción el presupuesto pasa a llamarse
+`wms-web-dev-production-monthly-limit`, manteniendo USD 5, costo mensual y
+umbral real de 80 %. El nombre distinto permite crear el presupuesto conectado
+al topic de alertas antes de retirar el presupuesto anterior. La revisión del
+próximo plan debe permitir exclusivamente ese reemplazo de `MonthlyBudget`;
+RDS, red y recursos persistentes siguen protegidos. Esto no acredita aún el
+despliegue ni la entrega de notificaciones.
+[Contrato de reemplazo de AWS Budgets](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-budgets-budget.html).
+
 ## Corte vigente — 2026-10-01 UTC
 
 El candidato productivo vigente de este corte es

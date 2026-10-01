@@ -14,9 +14,13 @@ let sourceReviewerId = "";
 let originalId = "";
 let substituteId = "";
 let crossFamilyId = "";
+let noStockSubstituteId = "";
+let otherWarehouseSubstituteId = "";
 let warehouseId = "";
+let otherWarehouseId = "";
 let storageLocationId = "";
 let stagingLocationId = "";
+let otherWarehouseStorageLocationId = "";
 let orderId = "";
 let sourceMovementRef = "";
 
@@ -52,9 +56,10 @@ async function cleanup() {
     }
   }
   if (sourceMovementRef) await prisma.inventoryMovement.deleteMany({ where: { documentId: sourceMovementRef } });
-  if (substituteId) await prisma.inventory.deleteMany({ where: { productId: substituteId } });
-  await prisma.productEquivalence.deleteMany({ where: { productId: { in: [originalId, substituteId, crossFamilyId].filter(Boolean) } } });
-  await prisma.productCompatibilityRule.deleteMany({ where: { productId: { in: [originalId, substituteId, crossFamilyId].filter(Boolean) } } });
+  const fixtureProductIds = [originalId, substituteId, crossFamilyId, noStockSubstituteId, otherWarehouseSubstituteId].filter(Boolean);
+  if (fixtureProductIds.length) await prisma.inventory.deleteMany({ where: { productId: { in: fixtureProductIds } } });
+  await prisma.productEquivalence.deleteMany({ where: { productId: { in: fixtureProductIds } } });
+  await prisma.productCompatibilityRule.deleteMany({ where: { productId: { in: fixtureProductIds } } });
   if (sourceId) {
     await prisma.productTechnicalSpecCandidate.deleteMany({ where: { sourceId } });
     await prisma.productTechnicalSpec.deleteMany({ where: { sourceId } });
@@ -63,12 +68,12 @@ async function cleanup() {
   }
   if (sourceReviewerId) await prisma.user.deleteMany({ where: { id: sourceReviewerId } });
   await prisma.auditLog.deleteMany({ where: { actorUserId: managerId } });
-  if (originalId || substituteId || crossFamilyId) {
-    await prisma.product.deleteMany({ where: { id: { in: [originalId, substituteId, crossFamilyId].filter(Boolean) } } });
-  }
+  if (fixtureProductIds.length) await prisma.product.deleteMany({ where: { id: { in: fixtureProductIds } } });
   if (storageLocationId) await prisma.location.deleteMany({ where: { id: storageLocationId } });
   if (stagingLocationId) await prisma.location.deleteMany({ where: { id: stagingLocationId } });
+  if (otherWarehouseStorageLocationId) await prisma.location.deleteMany({ where: { id: otherWarehouseStorageLocationId } });
   if (warehouseId) await prisma.warehouse.deleteMany({ where: { id: warehouseId } });
+  if (otherWarehouseId) await prisma.warehouse.deleteMany({ where: { id: otherWarehouseId } });
   if (managerId) await prisma.user.deleteMany({ where: { id: managerId } });
 }
 
@@ -92,14 +97,18 @@ describePostgres("product substitution purpose and immutable Sales snapshot (Pos
       select: { id: true },
     });
     managerId = manager.id;
-    const [original, substitute, crossFamily] = await Promise.all([
+    const [original, substitute, crossFamily, noStockSubstitute, otherWarehouseSubstitute] = await Promise.all([
       prisma.product.create({ data: { sku: `${runTag}-ORIGINAL`, name: "Original hose", type: "HOSE", brand: runTag, attributes: "{}" }, select: { id: true } }),
       prisma.product.create({ data: { sku: `${runTag}-SUBSTITUTE`, name: "Substitute hose", type: "HOSE", brand: runTag, attributes: "{}" }, select: { id: true } }),
       prisma.product.create({ data: { sku: `${runTag}-FITTING`, name: "Cross-family fitting", type: "FITTING", brand: runTag, attributes: "{}" }, select: { id: true } }),
+      prisma.product.create({ data: { sku: `${runTag}-NO-STOCK`, name: "Approved substitute without stock", type: "HOSE", brand: runTag, attributes: "{}" }, select: { id: true } }),
+      prisma.product.create({ data: { sku: `${runTag}-OTHER-WH`, name: "Substitute stocked elsewhere", type: "HOSE", brand: runTag, attributes: "{}" }, select: { id: true } }),
     ]);
     originalId = original.id;
     substituteId = substitute.id;
     crossFamilyId = crossFamily.id;
+    noStockSubstituteId = noStockSubstitute.id;
+    otherWarehouseSubstituteId = otherWarehouseSubstitute.id;
 
     const warehouse = await prisma.warehouse.create({ data: { code: `${runTag}-WH`, name: `Warehouse ${runTag}`, isActive: true }, select: { id: true } });
     warehouseId = warehouse.id;
@@ -109,9 +118,14 @@ describePostgres("product substitution purpose and immutable Sales snapshot (Pos
     ]);
     storageLocationId = storage.id;
     stagingLocationId = staging.id;
+    const otherWarehouse = await prisma.warehouse.create({ data: { code: `${runTag}-WH2`, name: `Other warehouse ${runTag}`, isActive: true }, select: { id: true } });
+    otherWarehouseId = otherWarehouse.id;
+    const otherStorage = await prisma.location.create({ data: { code: `${runTag}-STO2`, name: "Other warehouse storage", usageType: "STORAGE", isActive: true, warehouseId: otherWarehouse.id }, select: { id: true } });
+    otherWarehouseStorageLocationId = otherStorage.id;
     sourceMovementRef = `${runTag}-RECEIPT`;
     await new InventoryService(prisma).receiveStock(substitute.id, storage.id, 10, sourceMovementRef);
     await prisma.inventory.create({ data: { productId: substitute.id, locationId: staging.id, quantity: 90, reserved: 0, available: 90 } });
+    await prisma.inventory.create({ data: { productId: otherWarehouseSubstitute.id, locationId: otherStorage.id, quantity: 7, reserved: 0, available: 7 } });
 
     const sourceReviewer = await prisma.user.create({ data: { email: `${runTag.toLowerCase()}-reviewer@test.invalid`, name: `Reviewer ${runTag}`, passwordHash: "test-hash", isActive: true }, select: { id: true } });
     sourceReviewerId = sourceReviewer.id;
@@ -122,8 +136,18 @@ describePostgres("product substitution purpose and immutable Sales snapshot (Pos
     sourceId = source.id;
     await prisma.productEquivalence.create({ data: { productId: original.id, equivProductId: substitute.id, active: true, basisNorm: "Same family" } });
     await prisma.productEquivalence.create({ data: { productId: original.id, equivProductId: crossFamily.id, active: true, basisNorm: "Commercial reference only" } });
+    await prisma.productEquivalence.create({ data: { productId: original.id, equivProductId: noStockSubstitute.id, active: true, basisNorm: "Same family, no stock" } });
+    await prisma.productEquivalence.create({ data: { productId: original.id, equivProductId: otherWarehouseSubstitute.id, active: true, basisNorm: "Same family, other warehouse" } });
     const assemblyRule = await createApprovedRule(original.id, substitute.id, ASSEMBLY_PAIR_RULE_TYPE);
     await createApprovedRule(original.id, crossFamily.id, PRODUCT_SUBSTITUTION_RULE_TYPE);
+    const noStockRule = await createApprovedRule(original.id, noStockSubstitute.id, PRODUCT_SUBSTITUTION_RULE_TYPE);
+    const otherWarehouseRule = await createApprovedRule(original.id, otherWarehouseSubstitute.id, PRODUCT_SUBSTITUTION_RULE_TYPE);
+
+    const approvedWithoutStock = await getEquivalentProducts(original.id, { warehouseId, inStockOnly: false });
+    expect(approvedWithoutStock).toContainEqual(expect.objectContaining({ productId: noStockSubstitute.id, technicalStatus: "APPROVED", totalAvailable: 0, locations: [] }));
+    expect((await getEquivalentProducts(original.id, { warehouseId })).map(({ productId }) => productId)).not.toContain(noStockSubstitute.id);
+    expect((await getEquivalentProducts(original.id, { warehouseId })).map(({ productId }) => productId)).not.toContain(otherWarehouseSubstitute.id);
+    expect(await getEquivalentProducts(original.id, { warehouseId: otherWarehouseId })).toContainEqual(expect.objectContaining({ productId: otherWarehouseSubstitute.id, technicalStatus: "APPROVED", totalAvailable: 7 }));
 
     const reviewable = await getEquivalentProducts(original.id, { warehouseId, inStockOnly: true, includeReviewRequired: true });
     expect(reviewable.map(({ productId }) => productId)).toEqual([substitute.id]);
@@ -177,8 +201,17 @@ describePostgres("product substitution purpose and immutable Sales snapshot (Pos
       { productId: substitute.id, technicalStatus: "APPROVED", totalAvailable: 9, locations: [{ code: storage.code, available: 9 }] },
     ]);
     await prisma.productCompatibilityRule.update({ where: { id: approvedSubstitutionRule.id }, data: { governanceStatus: "RETIRED", active: false, ruleRevision: 2 } });
+    const afterRetirement = await getEquivalentProducts(original.id, { warehouseId });
+    expect(afterRetirement.map(({ productId }) => productId)).not.toContain(substitute.id);
+    expect(afterRetirement.map(({ productId }) => productId)).not.toContain(noStockSubstitute.id);
+    const reviewAfterRetirement = await getEquivalentProducts(original.id, { warehouseId, includeReviewRequired: true });
+    expect(reviewAfterRetirement).toContainEqual(expect.objectContaining({ productId: substitute.id, technicalStatus: "REQUIRES_REVIEW" }));
     const unchanged = await prisma.salesInternalOrderLine.findUniqueOrThrow({ where: { id: selected.id }, select: { technicalSelectionSnapshot: true } });
     expect(unchanged.technicalSelectionSnapshot).toBe(line.technicalSelectionSnapshot);
+
+    // Keep the extra approved recommendations live through the assertions above,
+    // then retire them so fixture cleanup also exercises only test-owned rules.
+    await prisma.productCompatibilityRule.updateMany({ where: { id: { in: [noStockRule.id, otherWarehouseRule.id] } }, data: { governanceStatus: "RETIRED", active: false, ruleRevision: 2 } });
 
     await expect(addSalesRequestProductLine(prisma, {
       orderId, productId: crossFamily.id, requestedQty: 1, equivalenceOriginalProductId: original.id,

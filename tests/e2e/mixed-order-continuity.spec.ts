@@ -469,11 +469,47 @@ test.describe.serial("mixed sales order continuity", () => {
     expect(draftPickList.tasks).toHaveLength(1);
 
     await loginFresh(page, "MANAGER", `/production/requests/${directOrder.id}`);
+    const dueDateBeforeChange = (await prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: directOrder.id }, select: { dueDate: true } })).dueDate;
+    const managerUser = await prisma.user.findUniqueOrThrow({ where: { email: USERS.MANAGER.email }, select: { id: true, name: true, email: true } });
+    const commitmentForm = page.getByTestId("change-commitment-date-form");
+    await expect(commitmentForm).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await commitmentForm.locator('input[name="dueDate"]').fill("2027-01-05");
+    await commitmentForm.locator('input[name="reason"]').fill("Cliente confirmó nueva fecha de entrega");
+    await Promise.all([
+      page.waitForURL((url) => url.pathname.endsWith(`/production/requests/${directOrder.id}`) && url.searchParams.has("ok")),
+      commitmentForm.getByRole("button", { name: "Actualizar compromiso" }).click(),
+    ]);
+    const [orderAfterDateChange, auditAfterDateChange, inventoryAfterDateChange, pickListAfterDateChange] = await Promise.all([
+      prisma.salesInternalOrder.findUniqueOrThrow({ where: { id: directOrder.id }, select: { dueDate: true } }),
+      prisma.auditLog.findFirstOrThrow({ where: { entityId: directOrder.id, action: "CHANGE_COMMITMENT_DATE" } }),
+      prisma.inventory.findFirstOrThrow({ where: { productId: fixture.productIds[3], locationId: fixture.locationIds[0] }, select: { reserved: true, available: true } }),
+      prisma.salesInternalOrderPickList.findFirstOrThrow({ where: { orderId: directOrder.id }, include: { tasks: true } }),
+    ]);
+    expect(orderAfterDateChange.dueDate).toEqual(new Date("2027-01-05T00:00:00.000Z"));
+    expect(auditAfterDateChange.actorUserId).toBe(managerUser.id);
+    expect(auditAfterDateChange.actor).toBe(managerUser.name || managerUser.email || managerUser.id);
+    expect(auditAfterDateChange.source).toBe("sales/request-service/commitment-date");
+    expect(JSON.parse(auditAfterDateChange.before ?? "{}")).toEqual({ dueDate: dueDateBeforeChange?.toISOString() ?? null });
+    expect(JSON.parse(auditAfterDateChange.after ?? "{}")).toEqual({
+      dueDate: orderAfterDateChange.dueDate?.toISOString(),
+      reason: "Cliente confirmó nueva fecha de entrega",
+    });
+    expect(inventoryAfterDateChange.reserved).toBe(directInventory.reserved);
+    expect(inventoryAfterDateChange.available).toBe(directInventory.available);
+    expect(pickListAfterDateChange.id).toBe(draftPickList.id);
+    expect(pickListAfterDateChange.status).toBe(draftPickList.status);
+    expect(pickListAfterDateChange.tasks.map(({ id, status, reservedQty, pickedQty }) => ({ id, status, reservedQty, pickedQty })))
+      .toEqual(draftPickList.tasks.map(({ id, status, reservedQty, pickedQty }) => ({ id, status, reservedQty, pickedQty })));
+
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole("button", { name: "Confirmar pedido" }).click();
     await page.getByTestId("manager-assign-order").locator("select").selectOption(fixture.salesUserId);
     await page.getByTestId("manager-assign-order").getByRole("button", { name: /Asignar vendedor|Reasignar antes de toma/ }).click();
 
     await loginFresh(page, "SALES_EXECUTIVE", `/production/requests/${directOrder.id}`);
+    await expect(page.getByTestId("change-commitment-date-form")).toHaveCount(0);
     await page.getByRole("button", { name: /Tomar pedido|Continuar pedido/ }).click();
 
     await loginFresh(page, "WAREHOUSE_OPERATOR", `/production/fulfillment/${directOrder.id}`);

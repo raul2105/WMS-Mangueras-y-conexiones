@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { PrismaClient } from "@prisma/client";
 
 const CREDENTIAL_ENV_BY_ROLE = {
   SYSTEM_ADMIN: ["WMS_E2E_SYSTEM_ADMIN_EMAIL", "WMS_E2E_SYSTEM_ADMIN_PASSWORD"],
@@ -42,6 +43,18 @@ export const USERS = {
   get WAREHOUSE_OPERATOR() { return credentialFromEnv("WAREHOUSE_OPERATOR"); },
   get SALES_EXECUTIVE() { return credentialFromEnv("SALES_EXECUTIVE"); },
 } as const;
+
+export async function resolveAuditActorForRole(prisma: PrismaClient, role: RoleKey) {
+  const configuredUser = USERS[role];
+  const user = await prisma.user.findUnique({
+    where: { email: configuredUser.email },
+    select: { id: true, name: true, isActive: true },
+  });
+  if (!user?.isActive) {
+    throw new Error(`Configured ${role} E2E account is not an active database user.`);
+  }
+  return { actorUserId: user.id, actor: user.name };
+}
 
 export type RoleKey = keyof typeof USERS;
 

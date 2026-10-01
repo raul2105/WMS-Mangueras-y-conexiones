@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { loginAs } from "./lib/auth.helpers";
+import { loginAs, USERS } from "./lib/auth.helpers";
 
 const prisma = new PrismaClient();
 const tag = `E2E-PO-${randomUUID().replaceAll("-", "").toUpperCase()}`;
@@ -227,6 +227,19 @@ test.describe.serial("AWS purchasing proposal to receipt acceptance", () => {
     await expect(purchaseOrderLine.getByText(fixture.sku, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Confirmar OC" }).click();
     await expect(page.getByText("Confirmada", { exact: true }).first()).toBeVisible();
+    const manager = await prisma.user.findUniqueOrThrow({
+      where: { email: USERS.MANAGER.email },
+      select: { id: true, name: true, email: true },
+    });
+    const statusAudits = await prisma.auditLog.findMany({
+      where: { entityType: "PURCHASE_ORDER", entityId: fixture.purchaseOrderId, action: "STATUS_CHANGE" },
+    });
+    expect(statusAudits).toHaveLength(1);
+    expect(statusAudits[0].actorUserId).toBe(manager.id);
+    expect(statusAudits[0].actor).toBe(manager.name ?? manager.email);
+    expect(statusAudits[0].source).toBe("purchasing/orders");
+    expect(JSON.parse(statusAudits[0].before ?? "null")).toEqual({ status: "BORRADOR" });
+    expect(JSON.parse(statusAudits[0].after ?? "null")).toEqual({ status: "CONFIRMADA" });
     await expect(page.getByRole("link", { name: /Descargar PDF/i })).toBeVisible();
 
     await setMobileTheme(page, "light");

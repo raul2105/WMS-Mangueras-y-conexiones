@@ -17,7 +17,7 @@ import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity
 
 async function createOrder(formData: FormData) {
   "use server";
-  await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
+  const session = await (await import("@/lib/rbac")).requirePermission("purchasing.manage");
 
   const supplierId = String(formData.get("supplierId") ?? "").trim();
   const deliveryWarehouseId = String(formData.get("deliveryWarehouseId") ?? "").trim();
@@ -118,6 +118,8 @@ async function createOrder(formData: FormData) {
       action: "CREATE",
       after: JSON.stringify({ folio: createdOrder.folio, supplierId }),
       source: "purchasing/orders/new",
+      actor: session.user.name ?? session.user.email ?? session.user.id,
+      actorUserId: session.user.id,
     }, tx);
 
     return createdOrder;

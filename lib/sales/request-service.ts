@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { createAuditLogSafeWithDb } from "@/lib/audit-log";
+import { createAuditLogRequiredWithDb, createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { getCustomerById, resolveCustomerSnapshot } from "@/lib/customers/customer-service";
 import { cancelAssemblyWorkOrder, configureAssemblyOrderExact, createAssemblyOrderDraftHeader } from "@/lib/assembly/work-order-service";
 import type { AssemblyMutationActor } from "@/lib/assembly/types";
@@ -1609,6 +1609,83 @@ export async function assignSalesRequestOrder(
     }, tx);
 
     return { alreadyAssigned: false, orderCode: order.code };
+  });
+}
+
+export async function changeSalesRequestCommitmentDate(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    expectedDueDate: Date | null;
+    dueDate: Date;
+    reason: string;
+    auditActor: AssemblyMutationActor;
+  },
+) {
+  const reason = args.reason.trim();
+  if (!reason || reason.length > 500) {
+    throw new InventoryServiceError("COMMITMENT_REASON_REQUIRED", "Indica un motivo de hasta 500 caracteres para cambiar la fecha compromiso");
+  }
+  if (!(args.dueDate instanceof Date) || !Number.isFinite(args.dueDate.getTime())) {
+    throw new InventoryServiceError("INVALID_COMMITMENT_DATE", "La nueva fecha compromiso no es válida");
+  }
+  if (args.expectedDueDate !== null && (!(args.expectedDueDate instanceof Date) || !Number.isFinite(args.expectedDueDate.getTime()))) {
+    throw new InventoryServiceError("INVALID_EXPECTED_COMMITMENT_DATE", "La fecha compromiso original no es válida; actualiza el pedido");
+  }
+  if (args.expectedDueDate?.toISOString().slice(0, 10) === args.dueDate.toISOString().slice(0, 10)) {
+    throw new InventoryServiceError("COMMITMENT_DATE_UNCHANGED", "La nueva fecha debe ser distinta al compromiso actual");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const actor = await resolveTrustedSalesActor(tx, args.auditActor);
+    if (!actor || !canManageAnySalesRequest(actor)) {
+      throw new InventoryServiceError("FORBIDDEN", "Sólo Manager o Administrador puede cambiar la fecha compromiso");
+    }
+
+    const order = await tx.salesInternalOrder.findUnique({
+      where: { id: args.orderId },
+      select: { id: true, code: true, status: true, dueDate: true, deliveredToCustomerAt: true },
+    });
+    if (!order) throw new InventoryServiceError("ORDER_NOT_FOUND", "Pedido no encontrado");
+    if (order.status === "CANCELADA" || order.deliveredToCustomerAt) {
+      throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede cambiar el compromiso de un pedido cancelado o entregado");
+    }
+    if ((order.dueDate?.getTime() ?? null) !== (args.expectedDueDate?.getTime() ?? null)) {
+      throw new InventoryServiceError("COMMITMENT_DATE_CONFLICT", "La fecha compromiso cambió; actualiza el pedido antes de volver a intentar");
+    }
+
+    const claim = await tx.salesInternalOrder.updateMany({
+      where: {
+        id: order.id,
+        dueDate: args.expectedDueDate,
+        status: { not: "CANCELADA" },
+        deliveredToCustomerAt: null,
+      },
+      data: { dueDate: args.dueDate },
+    });
+    if (claim.count !== 1) {
+      const current = await tx.salesInternalOrder.findUnique({
+        where: { id: order.id },
+        select: { status: true, deliveredToCustomerAt: true },
+      });
+      if (!current || current.status === "CANCELADA" || current.deliveredToCustomerAt) {
+        throw new InventoryServiceError("INVALID_ORDER_STATE", "No se puede cambiar el compromiso de un pedido cancelado o entregado");
+      }
+      throw new InventoryServiceError("COMMITMENT_DATE_CONFLICT", "La fecha compromiso cambió; actualiza el pedido antes de volver a intentar");
+    }
+
+    await createAuditLogRequiredWithDb({
+      entityType: "SALES_INTERNAL_ORDER",
+      entityId: order.id,
+      action: "CHANGE_COMMITMENT_DATE",
+      actor: actor.actor,
+      actorUserId: actor.actorUserId,
+      source: "sales/request-service/commitment-date",
+      before: { dueDate: order.dueDate?.toISOString() ?? null },
+      after: { dueDate: args.dueDate.toISOString(), reason },
+    }, tx);
+
+    return { orderId: order.id, orderCode: order.code, dueDate: args.dueDate };
   });
 }
 

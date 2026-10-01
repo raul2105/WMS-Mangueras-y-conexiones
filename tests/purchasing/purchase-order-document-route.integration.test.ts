@@ -18,6 +18,9 @@ describePostgres("purchase order document pdf route integration", () => {
   const unique = () => `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
   async function resetDb() {
+    await prisma.auditLog.deleteMany({
+      where: { entityType: { in: ["PURCHASE_ORDER", "PURCHASE_ORDER_DOCUMENT"] } },
+    });
     await prisma.purchaseOrderDocument.deleteMany();
     await prisma.purchaseReceiptLine.deleteMany();
     await prisma.purchaseReceipt.deleteMany();
@@ -29,6 +32,14 @@ describePostgres("purchase order document pdf route integration", () => {
   }
 
   async function createFixture() {
+    const actor = await prisma.user.create({
+      data: {
+        email: `purchase-route-actor-${unique()}@example.test`,
+        name: "Manager de compras",
+        passwordHash: "integration-test-only",
+      },
+      select: { id: true, name: true },
+    });
     const supplier = await prisma.supplier.create({
       data: {
         code: `SUP-${unique()}`,
@@ -62,6 +73,7 @@ describePostgres("purchase order document pdf route integration", () => {
     await updatePurchaseOrderStatusWithDocument({
       purchaseOrderId: order.id,
       newStatus: "CONFIRMADA",
+      auditActor: { actorUserId: actor.id, actor: actor.name },
       prismaClient: prisma,
     });
 

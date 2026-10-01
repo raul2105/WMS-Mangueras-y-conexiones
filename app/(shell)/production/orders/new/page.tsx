@@ -45,7 +45,7 @@ function formatDateLabel(value: Date | string | null | undefined) {
 
 async function createAssemblyDraft(formData: FormData) {
   "use server";
-  await requirePermission("production.execute");
+  const session = await requirePermission("production.execute");
 
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const customerName = String(formData.get("customerName") ?? "").trim();
@@ -82,6 +82,10 @@ async function createAssemblyDraft(formData: FormData) {
       dueDate,
       priority,
       notes: notes || null,
+      auditActor: {
+        actorUserId: session.user.id,
+        actor: session.user.name ?? session.user.email ?? session.user.id,
+      },
     });
   } catch (error) {
     const message = error instanceof InventoryServiceError
@@ -158,6 +162,10 @@ async function configureAssemblyOrder(formData: FormData) {
     compatibilityReviewReason: compatibilityReviewApproved ? compatibilityReviewReason : null,
     compatibilityReviewedByUserId: compatibilityReviewApproved ? session.user.id : null,
     compatibilityReviewerRoles: sessionContext.roles,
+    auditActor: {
+      actorUserId: session.user.id,
+      actor: session.user.name ?? session.user.email ?? session.user.id,
+    },
   };
 
   let result: Awaited<ReturnType<typeof configureAssemblyOrderExact>>;

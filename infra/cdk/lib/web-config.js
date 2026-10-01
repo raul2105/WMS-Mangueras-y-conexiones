@@ -41,6 +41,16 @@ function loadWebConfig(app) {
   // Keep an operator's current office address out of versioned configuration.
   if (process.env.WMS_NETWORK_MODE) config.networkMode = process.env.WMS_NETWORK_MODE;
   if (process.env.WMS_OFFICE_IP_CIDR) config.officeIpCidr = process.env.WMS_OFFICE_IP_CIDR;
+  const productionAlertEmail = process.env.WMS_PRODUCTION_ALERT_EMAIL?.trim();
+  if (productionAlertEmail) {
+    if (config.environment !== "prod" && config.productionMode !== true) {
+      throw new Error("WMS_PRODUCTION_ALERT_EMAIL can only be used with production configuration");
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(productionAlertEmail)) {
+      throw new Error("WMS_PRODUCTION_ALERT_EMAIL must be a valid email address");
+    }
+    config.productionAlertEmail = productionAlertEmail;
+  }
   if (config.appBaseUrl) {
     const baseUrl = new URL(config.appBaseUrl);
     if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password || baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {

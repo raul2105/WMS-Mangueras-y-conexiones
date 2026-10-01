@@ -2,6 +2,54 @@
 
 El propietario solicita completar el WMS con todos sus perfiles y relaciones de datos, especialmente producción y ensamble. Excluye expresamente Gmail, Prisma 7, backlog fiscal e IA. Producción comprende tanto el proceso de fabricación/surtido como la preparación del sistema para uso operativo; una prueba de DEV no convierte automáticamente ese entorno en producción.
 
+## Corte vigente del candidato — 2026-10-01 UTC
+
+Runtime productivo actual: SHA
+`9d3311d05706f360c23b2ce7813fe999393fa044`, release
+`prod-9d3311d05706-20261001T145012Z`; health `environment=prod`, DB `up`, y
+CloudFormation `UPDATE_COMPLETE`. La promoción revisada tuvo 12 cambios, cero
+reemplazos y 42 recursos de infraestructura sin cambio. Fuentes:
+`output/production-runtime-9d3311d-health-20261001.json`,
+`output/production-9d3311d-cloudformation-complete-20261001.json` y
+`output/production-9d3311d-changeset-executed-20261001.json`.
+
+El CI manual [36881811703](https://github.com/raul2105/WMS-Mangueras-y-conexiones/actions/runs/36881811703)
+terminó exitoso para el mismo SHA, con Quality Gate, Security Audit, AWS
+Read-only E2E y smoke PWA móvil. El job AWS es de sólo lectura y no sustituye
+la aceptación mutable. Browser completo `9da425e` aprobó los recorridos directo,
+ensamble configurado y mixto. Focos posteriores sobre `9d3311d`: inventario,
+incluida la corrección de notas nullable,
+`aws-acceptance-20261001T151004Z-f553a689` 1/1; pedido mixto keyboard-first
+`aws-acceptance-20261001T151310Z-93b66483` 3/3. Cada ejecución valida el SHA
+del runtime y limpia sólo sus fixtures. Los retries focales previos de
+gobierno `aws-acceptance-20261001T144747Z-357472df` (1/1) y Server Actions/CSV
+`aws-acceptance-20261001T145139Z-301efca8` (1/1) también aprobaron en
+`9da425e`; siguen siendo evidencia focal de ese runtime.
+
+Esto actualiza los cortes históricos de `3f2b4de`, `f762414` y la suite
+completa `9da425e`. Los fallos de aquellos candidatos se conservan como
+historial; la corrección focal posterior no se etiqueta como una repetición
+completa. La aceptación final requiere: integrar `main` y runtime con el SHA
+final; ejecutar el conjunto browser terminal para Chromium, móvil, Firefox y
+WebKit; y completar la restauración controlada con TLS obligatorio. La
+restauración sigue preparada pero no ejecutada: debe comparar fingerprints de
+`public`, las 26 migraciones, las cinco cuentas/roles activos y las 25
+fixtures históricas inactivas, preservando el estado y eliminando sólo la
+instancia temporal.
+
+También queda un gate separado de alertamiento: las tres alarmas revisadas
+estaban `OK`, pero sin acciones configuradas (`actions: []`); el presupuesto
+`wms-web-dev-monthly-limit` de USD 5 apunta a un topic SNS inexistente
+`wms-web-dev-budget-alerts` y SNS no reporta suscripciones. Los estados sanos
+no demuestran que alguien reciba alertas. La IaC para corregirlo está en
+preparación; configurar y comprobar el destino sigue pendiente. Evidencia:
+[`production-monitoring-actions-20261001.json`](../../output/production-monitoring-actions-20261001.json)
+y `output/production-alarm-state-refresh-20261001.json`.
+
+Gmail, Prisma 7, fiscal/contabilidad e IA permanecen excluidos y abiertos.
+No atribuir aceptación 100% ni cerrar tickets hasta satisfacer los criterios
+del SHA final y adjuntar evidencia terminal a Jira/GitHub.
+
 ## Jira consultado en esta revisión
 
 La consulta `project = KAN AND statusCategory != Done ORDER BY key ASC` devolvió 49 pendientes sin páginas adicionales: 25 incluidos y 24 excluidos. No se cambiaron sus estados por esta clasificación.
@@ -18,7 +66,7 @@ Excluidos: KAN-85 y KAN-121–124 (correo); KAN-99–109 y KAN-111 (fiscal); KAN
 
 ## Evidencia y brechas
 
-El candidato anterior `9020001355360a5f7e82332fbb70a81aa8748bf0` tiene evidencia de CI y AWS en `output/aws-seedguard-*` y CI manual [36693182582](https://github.com/raul2105/WMS-Mangueras-y-conexiones/actions/runs/36693182582). Es una evidencia histórica de ese SHA, no validación de los cambios de esta revisión. El PR [108](https://github.com/raul2105/WMS-Mangueras-y-conexiones/pull/108) permanecía draft; falta reconciliar integración final y runtime del nuevo candidato.
+El candidato anterior `9020001355360a5f7e82332fbb70a81aa8748bf0` tiene evidencia histórica de CI y AWS en `output/aws-seedguard-*` y CI manual [36693182582](https://github.com/raul2105/WMS-Mangueras-y-conexiones/actions/runs/36693182582). No acredita el SHA actual. El estado draft de PR #108 también corresponde a ese corte anterior; revisar integración de `9d3311d` en main/rama final por separado.
 
 Las suites existentes cubren los recorridos directo, sólo ensamble y mixto, además de V1/V5/V7/V8. Para cerrar V1–V8 se requiere mapear las aserciones específicas de V2/V3/V4/V6 y completar la evidencia faltante, incluyendo excepciones y acciones por perfil. El mapa operativo está en `docs/process/kan-133-sales-to-warehouse-process-map.md`.
 
@@ -40,7 +88,12 @@ Los logs y manifiestos están bajo `output/aws-production-*20260930*`. Las compr
 
 KAN-138 resolvió técnicamente la exposición de las claves públicas: las cinco identidades conservaron IDs, correos y perfiles; sus claves privadas y los secretos E2E se renovaron, con recuperación DPAPI guardada antes de escribir. Los cinco accesos aprobaron en el navegador AWS y rechazaron claves públicas y JWT previos (`output/live-credential-rotation-20260930/evidence.json`). Las 25 fixtures históricas se desactivaron sin borrar relaciones (`output/historical-test-user-retirement-20260930.json`). `rrios@rigentec.com` pertenece al contexto Google y no sustituye sus correos WMS.
 
-## Validación y despliegue pendientes
+## Validación y despliegue pendientes — corte histórico 30 de septiembre
+
+Los seis puntos siguientes describen el estado antes de desplegar `9d3311d`;
+para el corte vigente, aplicar el resumen fechado arriba y la lista de cierre
+al final de este documento. Los fallos registrados a continuación son
+históricos por SHA y no se reutilizan como fallos del candidato actual.
 
 1. AWS `Raul_ITsupport` confirmó la cuenta `904891391424`. CloudFormation terminó `UPDATE_COMPLETE`; el runtime canónico `3f2b4de9513a89fdd71b0cbcd2fe662b6971744f` respondió `environment: prod`, `db: up`. Las 26 migraciones están aplicadas en `public`, incluida la columna de snapshot técnico con datos históricos conservados. No ejecutar pruebas locales como sustituto.
 2. Confirmar cuenta/región, estado RDS y runtime canónicos. Recuperar conexión únicamente en la sesión y preservar snapshots, migraciones e historial operativo.
@@ -69,10 +122,10 @@ La aceptación browser `aws-acceptance-20261001T014258Z-0d7371c1` obtuvo 40 apro
 
 La repetición de inventario `aws-acceptance-20261001T020120Z-bfcf3553`, con el toggle real, reveló contraste insuficiente en una ayuda del formulario oscuro (3.31:1 frente al mínimo 4.5:1). La comprobación se conserva, y se corrige el componente. La vista de preparación se alinea con el backend: responsable físico autenticado o supervisor con motivo de override. Cada corrección requiere su nueva evidencia AWS antes del cierre.
 
-### Aceptación 9da425e — 1 de octubre, 14:46 UTC
+### Aceptación completa 9da425e — 1 de octubre, 14:46 UTC (histórica)
 
-La corrida `aws-acceptance-20261001T143152Z-8aa17911` terminó con 43 aprobadas, dos fallidas y ocho omisiones exclusivas de móvil. Completó los tres pedidos directo, ensamblado y mixto, ownership físico, controles directos de permisos de Server Actions, compras/recepción de OC y auditoría. El transporte de prueba usa WHATWG Request para conservar los campos ocultos vacíos; Playwright multipart omitía `$ACTION_ID` vacío y causaba el 500 previo. Los controles autorizados y denegados se ejecutaron y verificaron sus efectos.
+La corrida `aws-acceptance-20261001T143152Z-8aa17911` terminó con 43 aprobadas, dos fallidas y ocho omisiones exclusivas de móvil. Completó los tres pedidos directo, ensamblado y mixto, ownership físico, controles directos de permisos de Server Actions, compras/recepción de OC y auditoría. El transporte se corrigió con WHATWG Request para conservar campos ocultos vacíos. Los controles válidos confirmaron el efecto autorizado y que la denegación no produjo cambios; la respuesta framework fue HTTP 500 sanitizado, no 403.
 
-Persisten dos gates: recepción manual sin notas, que el validador rechazaba por recibir `null` en vez de `undefined`, y revisión técnica extensa, que agotó el límite global de 240 segundos después de publicar fuente/regla/equivalencia. Se corrige el dato opcional de recepción y se permite un límite total de diez minutos sólo a ese recorrido, manteniendo los límites por acción y añadiendo tiempos de fase. Sus repeticiones y la importación CSV web confirmada siguen pendientes; no se declara aceptación global.
+La corrida conservó dos fallos: recepción manual por notas nullable y timeout de 240 segundos en el recorrido de gobierno durante order-entry, después de aprobar source/rule/equivalence. El timeout se resolvió en retry focal `aws-acceptance-20261001T144747Z-357472df` (1 pass, 0 skips; source, rule, equivalence, order snapshot, retire). Server Actions y CSV se verificaron después en `aws-acceptance-20261001T145139Z-301efca8` (1 pass, 0 skips); import real creó producto y dos auditorías Admin, con residual counts en cero y labels restauradas. El fix de notes-nullable se verificó luego en el foco del candidato `9d3311d`, descrito arriba; esto no reescribe los resultados históricos ni reemplaza el set browser final.
 
-La regresión PostgreSQL consolidada `finalflows0930_85a2e58` conservó 199 aprobadas y un timeout de 30 segundos entre 200 casos, con 22 esquemas limpios. La repetición `finalshareddelivery0930_ad52eb7` aprobó el único caso pendiente (una entrega exitosa, una rechazada por disponibilidad insuficiente, un solo movimiento y saldo correcto), con su esquema eliminado. Son evidencias separadas; no representan una única corrida de 200/200.
+La regresión PostgreSQL consolidada `finalflows0930_85a2e58` conservó 199 aprobadas y un timeout de 30 segundos entre 200 casos, con 22 esquemas limpios. El focal `finalshareddelivery0930_ad52eb7` aprobó el único caso pendiente (una entrega exitosa, una rechazada por disponibilidad insuficiente, un solo movimiento y saldo correcto) y limpió su schema. El único timeout de ese agregado queda resuelto sin invalidar los otros 199 casos ni convertir los dos logs en una única corrida de 200/200.

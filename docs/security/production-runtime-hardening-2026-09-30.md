@@ -1,5 +1,51 @@
 # Promoción del entorno canónico para operación
 
+## Corte vigente — 2026-10-01 UTC
+
+El candidato productivo vigente de este corte es
+`9d3311d05706f360c23b2ce7813fe999393fa044`, release
+`prod-9d3311d05706-20261001T145012Z`. CloudFormation está en
+`UPDATE_COMPLETE`; el health devuelve `environment=prod`, `db=up` y coincide
+con ese SHA. El change set de promoción tuvo 12 cambios, cero reemplazos y 42
+recursos de infraestructura sin cambios. Evidencia: `output/production-9d3311d-cloudformation-complete-20261001.json`,
+`output/production-9d3311d-changeset-executed-20261001.json`,
+`output/production-runtime-9d3311d-health-20261001.json` y la revisión del
+plan sin reemplazos.
+
+El CI manual 36881811703 terminó exitoso para este SHA, incluidos Quality
+Gate, Security Audit, AWS Read-only E2E y smoke PWA móvil. La evidencia AWS de
+sólo lectura confirma identidad de runtime/DB y vistas; no sustituye las
+pruebas mutables. En este corte ya terminaron los focos browser de inventario
+(`aws-acceptance-20261001T151004Z-f553a689`, 1/1) y continuidad mixta con
+teclado (`aws-acceptance-20261001T151310Z-93b66483`, 3/3), ambos con cleanup
+de fixtures propios. Los resultados 9da425e de gobierno (`357472df`) y
+Server Actions/CSV (`301efca8`) también pasaron sus escenarios focales; no
+convertirlos en una aceptación de navegador completa.
+
+El estado del sistema queda desplegado y validado por los focos enumerados,
+pero la entrega final aún requiere integrar main/runtime al SHA final, ejecutar
+la suite browser final completa en Chromium, móvil, Firefox y WebKit, y probar
+la restauración controlada contra las 26 migraciones. El script de recuperación
+refuerza `sslmode=require` y los chequeos previos; el restore final todavía no
+se ejecutó. Debe comparar en `public` los fingerprints, cinco identidades y
+roles protegidos, 25 usuarios históricos inactivos y las migraciones antes de
+eliminar sólo la instancia temporal.
+
+Hay un gate operativo independiente de la salud del runtime: la inspección de
+monitoreo del 2026-10-01 encontró las tres alarmas productivas en estado `OK`,
+pero todas tienen `actions: []`; el presupuesto `wms-web-dev-monthly-limit`
+(USD 5) referencia el topic inexistente `wms-web-dev-budget-alerts` y SNS no
+tiene suscripciones. Por tanto, no hay evidencia de entrega de notificaciones
+de alarmas ni de presupuesto. La IaC correctiva está en preparación; la
+configuración y verificación de un destino de alertas siguen pendientes.
+Evidencia: `output/production-monitoring-actions-20261001.json` y
+`output/production-alarm-state-refresh-20261001.json`.
+
+Gmail, Prisma 7, fiscal/contabilidad e IA siguen fuera del alcance de esta
+entrega y abiertos para trabajo posterior. No declarar el WMS 100% terminado
+hasta completar los gates anteriores y reconciliar Jira/GitHub con evidencia
+terminal del SHA final.
+
 El propietario autorizó terminar producción y justificar cualquier exceso sobre la alerta mensual de USD 5. La instancia canónica sigue siendo `wms-web-dev-pg`, dentro de `WmsWebDevStack`, cuenta `904891391424`, región `us-east-1`. Los nombres históricos se conservan para evitar reemplazar RDS, separar datos o crear una infraestructura duplicada. `productionMode` distingue el uso operativo del nombre físico; el runtime debe declarar `WMS_ENVIRONMENT=prod`.
 
 ## Cambio aplicado y comprobación de infraestructura
@@ -42,8 +88,8 @@ La migración `20260930210000_add_technical_selection_snapshot` se aplicó en el
 
 La lectura de cuentas encontró cinco identidades del seed y 25 fixtures históricas activas de junio. `scripts/security/retire-historical-test-users.cjs` desactivó exclusivamente esas 25 fixtures el 30/09, manteniendo IDs, correos, roles y relaciones. Comprobó el manifiesto exacto, coincidencia de los 25 hashes con el marcador estático de prueba y cuenta/host/esquema canónicos. La transacción serializable conservó fingerprints de las demás tablas y añadió 25 auditorías del Admin real. Evidencia: `output/historical-test-user-retirement-20260930.json`. Los cinco accesos operativos se mantienen activos y aprobaron su rotación privada, rechazo de claves públicas y revocación de JWT previos: `output/live-credential-rotation-20260930/evidence.json`.
 
-## Validación posterior
+## Validación posterior — corte histórico del runtime 3f2b4de
 
 Las alarmas efectivas incluyen Lambda Errors, RDS FreeStorageSpace y CloudFront 5xx con las dimensiones `DistributionId` y `Region=Global`; esta última dimensión es necesaria para observar métricas reales. Evidencias: `output/production-alarms-20260930.json` y `output/cloudfront-global-metric-proof-20260930.json`. RDS conserva `Environment=prod` y `cost-opt:enabled=false`, por lo que queda fuera del selector dev/test/staging del optimizador inspeccionado. La retirada del antiguo helper de borrado automático de S3 terminó sin vaciar assets ni recrear permisos amplios; el stack quedó estable.
 
-La primera corrida de aceptación del SHA 3f2b4de terminó con 35 pruebas aprobadas, cuatro fallidas y once omitidas. Aprobó accesibilidad, roles, auditoría, PDF y gates operativos individuales; no acredita todavía la aceptación completa. El resultado íntegro se conserva en `output/aws-acceptance/runs/aws-acceptance-20260930T204315Z-f2075ba3/results.json`. Los recorridos fallidos deben repetirse tras corregir sus selectores, sincronización e identificadores de entrada. Toda versión posterior debe comprobar su SHA efectivo y ejecutar los gates restantes, incluida la restauración final de las 26 migraciones y los usuarios protegidos.
+La primera corrida de aceptación del SHA 3f2b4de terminó con 35 pruebas aprobadas, cuatro fallidas y once omitidas. Esta cifra pertenece sólo a ese candidato y se conserva como historial; no describe el runtime vigente. El resultado íntegro se conserva en `output/aws-acceptance/runs/aws-acceptance-20260930T204315Z-f2075ba3/results.json`. Para el corte actual, aplicar la sección vigente al principio: el runtime es `9d3311d` y quedan las pruebas finales de navegador/móvil/Firefox/WebKit y restauración controlada, no una repetición genérica de todos los fallos de SHA anteriores.

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -29,6 +29,15 @@ const fixture = {
   hoseSku: `${tag}-HOSE`,
   directSku: `${tag}-DIRECT`,
 };
+
+async function focusWithTab(page: Page, target: Locator, maxTabs = 80) {
+  await expect(target).toBeVisible();
+  for (let step = 0; step < maxTabs; step += 1) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Keyboard focus did not reach the expected control after 80 Tab presses.");
+}
 
 async function captureBeforeManifest() {
   const [{ schema }] = await prisma.$queryRaw<Array<{ schema: string }>>`SELECT current_schema() AS schema`;
@@ -374,21 +383,76 @@ test.describe.serial("mixed sales order continuity", () => {
     }
   });
 
-  test("V2/V6/V8 direct order reserves, fulfills under assignment, and prepares/delivers idempotently", async ({ browser, page }) => {
+  test("KAN-16 keyboard-first V2/V6/V8 direct request keeps the full operational assertions", async ({ browser, page }) => {
     await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new", "/production/requests/new");
-    await page.getByLabel("Selecciona o crea el cliente").fill(fixture.customerName);
-    await page.getByRole("button", { name: new RegExp(fixture.customerName) }).click();
-    await page.getByRole("button", { name: "Continuar a producto →" }).click();
-    await page.getByRole("button", { name: "Producto directo" }).click();
-    await page.getByLabel("Almacén para surtido").selectOption(fixture.warehouseId);
-    await page.getByTestId("new-order-direct-product-input").fill(fixture.directSku);
-    await page.getByRole("button", { name: new RegExp(fixture.directSku) }).click();
-    await page.getByRole("button", { name: "Agregar producto al pedido" }).click();
-    await page.getByRole("button", { name: "Continuar a entrega →" }).click();
-    await page.getByLabel("Fecha compromiso").fill("2026-12-31");
+    const customerSearch = page.getByLabel("Selecciona o crea el cliente");
+    const continueToProduct = page.getByRole("button", { name: "Continuar a producto →" });
+    await expect(continueToProduct).toBeDisabled();
+    await focusWithTab(page, customerSearch);
+    await expect(customerSearch).toBeFocused();
+    await page.keyboard.type(fixture.customerName);
+    const customerOption = page.getByRole("button", { name: new RegExp(fixture.customerName) });
+    await expect(customerOption).toBeVisible();
+    await focusWithTab(page, customerOption);
+    await expect(customerOption).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(continueToProduct).toBeEnabled();
+    await focusWithTab(page, continueToProduct);
+    await page.keyboard.press("Enter");
+
+    const directProductChoice = page.getByRole("button", { name: "Producto directo" });
+    await focusWithTab(page, directProductChoice);
+    await page.keyboard.press("Enter");
+    const warehouseSelect = page.getByLabel("Almacén para surtido");
+    await focusWithTab(page, warehouseSelect);
+    const warehouseOptions = await warehouseSelect.locator("option").evaluateAll((options) =>
+      options.map((option) => (option as HTMLOptionElement).value),
+    );
+    const warehouseIndex = warehouseOptions.indexOf(fixture.warehouseId);
+    expect(warehouseIndex).toBeGreaterThan(0);
+    await page.keyboard.press("Home");
+    for (let index = 0; index < warehouseIndex; index += 1) {
+      await page.keyboard.press("ArrowDown");
+    }
+    await page.keyboard.press("Enter");
+    await expect(warehouseSelect).toHaveValue(fixture.warehouseId);
+
+    const productSearch = page.getByTestId("new-order-direct-product-input");
+    await focusWithTab(page, productSearch);
+    await page.keyboard.type(fixture.directSku);
+    const productOption = page.getByRole("button", { name: new RegExp(fixture.directSku) });
+    await expect(productOption).toBeVisible();
+    await focusWithTab(page, productOption);
+    await expect(productOption).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    const quantity = page.locator('input[type="number"]').first();
+    await focusWithTab(page, quantity);
+    await expect(quantity).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.type("1");
+    await expect(quantity).toHaveValue("1");
+    const addProduct = page.getByRole("button", { name: "Agregar producto al pedido" });
+    await focusWithTab(page, addProduct);
+    await page.keyboard.press("Enter");
+    const continueToDelivery = page.getByRole("button", { name: "Continuar a entrega →" });
+    await focusWithTab(page, continueToDelivery);
+    await page.keyboard.press("Enter");
+
+    const createOrder = page.getByTestId("create-order-button");
+    await expect(createOrder).toBeDisabled();
+    const dueDate = page.getByLabel("Fecha compromiso");
+    await focusWithTab(page, dueDate);
+    await expect(dueDate).toBeFocused();
+    // Playwright's fill handles the browser-native date control; all navigation and actions remain keyboard-driven.
+    await dueDate.fill("2026-12-31");
+    await expect(createOrder).toBeEnabled();
     await Promise.all([
       page.waitForURL(/\/production\/requests\/[^/?]+\?ok=/),
-      page.getByTestId("create-order-button").click(),
+      (async () => {
+        await focusWithTab(page, createOrder);
+        await page.keyboard.press("Enter");
+      })(),
     ]);
 
     const directOrder = await prisma.salesInternalOrder.findFirstOrThrow({

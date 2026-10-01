@@ -71,12 +71,13 @@ async function main(){
       if(!/^[A-Za-z0-9_]+$/.test(tablename))throw new Error('Unrecognized recovery table');
       fingerprints[tablename]=(await tx.$queryRawUnsafe(`SELECT count(*)::int AS count,md5(COALESCE(string_agg(to_jsonb(t)::text,'|' ORDER BY to_jsonb(t)::text),'')) AS fingerprint FROM "${tablename}" t`))[0];
     }
+    const [transport]=await tx.$queryRawUnsafe("SELECT ssl,version,current_setting('rds.force_ssl',true) AS force_ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()");
     const [inventory]=await tx.$queryRawUnsafe('SELECT count(*)::int AS total,count(*) FILTER (WHERE quantity<0 OR reserved<0 OR available<0 OR abs(quantity-reserved-available)>0.000001)::int AS inconsistent FROM "Inventory"');
     const [foreignKeys]=await tx.$queryRawUnsafe("SELECT count(*)::int AS total,count(*) FILTER (WHERE NOT convalidated)::int AS unvalidated FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace");
     const [migrations]=await tx.$queryRawUnsafe('SELECT count(*)::int AS total,count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)::int AS applied,count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL)::int AS unfinished,count(*) FILTER (WHERE rolled_back_at IS NOT NULL)::int AS rolledBack FROM "_prisma_migrations"');
     const expectedMigrationRows=await tx.$queryRawUnsafe('SELECT migration_name,checksum,finished_at,rolled_back_at FROM "_prisma_migrations" WHERE migration_name=$1',expectedMigration.name);
     const userRows=await tx.$queryRawUnsafe('SELECT u.id,u.email,u."isActive",r.code AS "roleCode",r."isActive" AS "roleActive" FROM "User" u LEFT JOIN "UserRole" ur ON ur."userId"=u.id LEFT JOIN "Role" r ON r.id=ur."roleId" ORDER BY u.id');
-    return {mode,at:new Date().toISOString(),endpoint:url.hostname,fingerprints,inventory,foreignKeys,migrations,expectedMigrationRows,userRows};
+    return {mode,at:new Date().toISOString(),endpoint:url.hostname,fingerprints,transport,inventory,foreignKeys,migrations,expectedMigrationRows,userRows};
   },{isolationLevel:'RepeatableRead',timeout:60000});
   const expectedRetirement=expectedRetiredUsers();
   const usersById=new Map();
@@ -101,7 +102,8 @@ async function main(){
   proof.migration26={name:expectedMigration.name,checksumMatch:expectedMigrationRow?.checksum===expectedMigration.checksum,applied:!!expectedMigrationRow?.finished_at&&!expectedMigrationRow?.rolled_back_at};
   delete proof.expectedMigrationRows;
   delete proof.userRows;
-  proof.passed=proof.inventory.inconsistent===0&&proof.foreignKeys.unvalidated===0&&proof.migrations.total===26
+  proof.passed=proof.transport?.ssl===true&&['TLSv1.2','TLSv1.3'].includes(proof.transport.version)
+    &&['1','on','true'].includes(proof.transport.force_ssl)&&proof.inventory.inconsistent===0&&proof.foreignKeys.unvalidated===0&&proof.migrations.total===26
     &&proof.migrations.applied===26&&proof.migrations.unfinished===0&&proof.migrations.rolledBack===0
     &&proof.migration26.checksumMatch&&proof.migration26.applied&&proof.users.passed;
   if(mode==='restored'){
@@ -111,7 +113,7 @@ async function main(){
   }
   fs.mkdirSync(directory,{recursive:true});
   fs.writeFileSync(path.join(directory,mode+'.json'),JSON.stringify(proof,null,2));
-  process.stdout.write(JSON.stringify({mode,passed:proof.passed,preserved:proof.preserved,tables:Object.keys(proof.fingerprints).length,inventory:proof.inventory,foreignKeys:proof.foreignKeys,migrations:proof.migrations,migration26:proof.migration26,users:proof.users}));
+  process.stdout.write(JSON.stringify({mode,passed:proof.passed,preserved:proof.preserved,tables:Object.keys(proof.fingerprints).length,transport:proof.transport,inventory:proof.inventory,foreignKeys:proof.foreignKeys,migrations:proof.migrations,migration26:proof.migration26,users:proof.users}));
   if(!proof.passed)process.exitCode=1;
 }
 main().catch(error=>{process.stderr.write(`Recovery fingerprints failed (${error?.code??error?.name??'error'}); details suppressed.\n`);process.exitCode=1;}).finally(()=>db.$disconnect());

@@ -338,7 +338,7 @@ test.describe.serial("AWS inventory operations through browser", () => {
     await expect(page.getByText("Transferencia registrada.")).toBeVisible();
     await expectState("after-transfer", 7, 4, 4, "TRANSFER_STOCK", operator.id, "TRANSFER", 4);
 
-    await loginAs(page, "SALES_EXECUTIVE", "/requests", "/requests");
+    await loginAs(page, "SALES_EXECUTIVE", "/home/sales", "/home/sales");
     const beforeDenied = await expectPreState("before-sales-denials", 7, 4, 4);
     await expectForbidden(page, "/inventory/receive");
     await expectForbidden(page, "/inventory/pick");

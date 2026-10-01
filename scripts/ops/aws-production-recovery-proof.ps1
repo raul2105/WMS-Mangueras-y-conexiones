@@ -44,7 +44,7 @@ try {
   $taskSg=$taskDb.VpcSecurityGroups[0].VpcSecurityGroupId
   $taskGroup=(Read-AwsJson @('ec2','describe-security-groups','--group-ids',$taskSg)).SecurityGroups[0]
   if(@($taskGroup.IpPermissions.IpRanges.CidrIp|Where-Object{$_ -eq '0.0.0.0/0'}).Count -or @($taskGroup.IpPermissions.Ipv6Ranges.CidrIpv6|Where-Object{$_ -eq '::/0'}).Count){throw 'Refusing unrestricted recovery ingress'}
-  $null=Read-AwsJson @('rds','restore-db-instance-from-db-snapshot','--db-instance-identifier',$taskRestoreId,'--db-snapshot-identifier',$taskSnapshotId,'--db-instance-class','db.t4g.micro','--db-subnet-group-name',$taskDb.DBSubnetGroup.DBSubnetGroupName,'--vpc-security-group-ids',$taskSg,'--publicly-accessible','--no-multi-az','--no-deletion-protection','--tags','Key=Environment,Value=validation','Key=Project,Value=WMS',("Key=ValidationRun,Value="+$taskRun))
+  $null=Read-AwsJson @('rds','restore-db-instance-from-db-snapshot','--db-instance-identifier',$taskRestoreId,'--db-snapshot-identifier',$taskSnapshotId,'--db-instance-class','db.t4g.micro','--db-subnet-group-name',$taskDb.DBSubnetGroup.DBSubnetGroupName,'--db-parameter-group-name',$taskDb.DBParameterGroups[0].DBParameterGroupName,'--vpc-security-group-ids',$taskSg,'--publicly-accessible','--no-multi-az','--no-deletion-protection','--tags','Key=Environment,Value=validation','Key=Project,Value=WMS',("Key=ValidationRun,Value="+$taskRun))
   $taskCreated=$true
   $taskProof.created=$true
   Save-RecoveryProof

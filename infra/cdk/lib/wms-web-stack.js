@@ -25,6 +25,9 @@ const origins = require("aws-cdk-lib/aws-cloudfront-origins");
 const events = require("aws-cdk-lib/aws-events");
 const targets = require("aws-cdk-lib/aws-events-targets");
 const cloudwatch = require("aws-cdk-lib/aws-cloudwatch");
+const cloudwatchActions = require("aws-cdk-lib/aws-cloudwatch-actions");
+const sns = require("aws-cdk-lib/aws-sns");
+const snsSubscriptions = require("aws-cdk-lib/aws-sns-subscriptions");
 const iam = require("aws-cdk-lib/aws-iam");
 const scheduler = require("aws-cdk-lib/aws-scheduler");
 const path = require("node:path");
@@ -234,6 +237,49 @@ class WmsWebStack extends Stack {
     });
     if (productionMode) nextAuthSecret.applyRemovalPolicy(RemovalPolicy.RETAIN);
 
+    // Production notifications share one unencrypted topic so AWS Budgets can
+    // publish to it. Email is opt-in at synth/deploy time through the operator's
+    // WMS_PRODUCTION_ALERT_EMAIL environment variable.
+    const productionAlertTopic = productionMode
+      ? new sns.Topic(this, "ProductionOperationalAlerts", {
+          topicName: `${prefix}-operational-alerts`,
+          displayName: "WMS production alerts",
+        })
+      : undefined;
+    if (productionAlertTopic) {
+      productionAlertTopic.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: "AllowBudgetsFromThisAccount",
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.ServicePrincipal("budgets.amazonaws.com")],
+          actions: ["sns:Publish"],
+          resources: [productionAlertTopic.topicArn],
+          conditions: {
+            StringEquals: { "aws:SourceAccount": this.account },
+            ArnLike: { "aws:SourceArn": `arn:${this.partition}:budgets::${this.account}:*` },
+          },
+        }),
+      );
+      productionAlertTopic.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: "AllowCloudWatchAlarmsFromThisRegionAndAccount",
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+          actions: ["sns:Publish"],
+          resources: [productionAlertTopic.topicArn],
+          conditions: {
+            StringEquals: { "aws:SourceAccount": this.account },
+            ArnLike: { "aws:SourceArn": `arn:${this.partition}:cloudwatch:${this.region}:${this.account}:alarm:*` },
+          },
+        }),
+      );
+      if (config.productionAlertEmail) {
+        productionAlertTopic.addSubscription(
+          new snsSubscriptions.EmailSubscription(config.productionAlertEmail),
+        );
+      }
+    }
+
     new ssm.StringParameter(this, "SsmNextAuthSecretArn", {
       parameterName: `/${prefix}/nextauth-secret-arn`,
       stringValue: nextAuthSecret.secretArn,
@@ -242,6 +288,9 @@ class WmsWebStack extends Stack {
 
     // ─── Budget Alert ─────────────────────────────────────────────────
     if (config.budgetLimitUsd) {
+      if (productionMode && !productionAlertTopic) {
+        throw new Error("Production budget notifications require the production alert topic");
+      }
       new budgets.CfnBudget(this, "MonthlyBudget", {
         budget: {
           budgetName: `${prefix}-monthly-limit`,
@@ -263,7 +312,9 @@ class WmsWebStack extends Stack {
             subscribers: [
               {
                 subscriptionType: "SNS",
-                address: `arn:aws:sns:${this.region}:${this.account}:${prefix}-budget-alerts`,
+                address: productionAlertTopic
+                  ? productionAlertTopic.topicArn
+                  : `arn:aws:sns:${this.region}:${this.account}:${prefix}-budget-alerts`,
               },
             ],
           },
@@ -860,7 +911,7 @@ exports.handler = async () => {
     }
 
     if (productionMode) {
-      new cloudwatch.Alarm(this, "ProductionServerErrorsAlarm", {
+      const productionServerErrorsAlarm = new cloudwatch.Alarm(this, "ProductionServerErrorsAlarm", {
         alarmDescription: "WMS server invocation failures; inspect Lambda logs and health before retrying writes",
         metric: serverFn.metricErrors({ period: Duration.minutes(5), statistic: "Sum" }),
         threshold: 1,
@@ -868,7 +919,8 @@ exports.handler = async () => {
         datapointsToAlarm: 1,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
-      new cloudwatch.Alarm(this, "ProductionHttpErrorsAlarm", {
+      productionServerErrorsAlarm.addAlarmAction(new cloudwatchActions.SnsAction(productionAlertTopic));
+      const productionHttpErrorsAlarm = new cloudwatch.Alarm(this, "ProductionHttpErrorsAlarm", {
         alarmDescription: "WMS CloudFront 5xx errors; verify canonical /api/health and database availability",
         metric: distribution.metric5xxErrorRate({
           period: Duration.minutes(5),
@@ -880,7 +932,8 @@ exports.handler = async () => {
         datapointsToAlarm: 2,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
-      new cloudwatch.Alarm(this, "ProductionDatabaseStorageAlarm", {
+      productionHttpErrorsAlarm.addAlarmAction(new cloudwatchActions.SnsAction(productionAlertTopic));
+      const productionDatabaseStorageAlarm = new cloudwatch.Alarm(this, "ProductionDatabaseStorageAlarm", {
         alarmDescription: "WMS PostgreSQL has less than 2 GiB free; review storage before further imports",
         metric: dbInstance.metricFreeStorageSpace({ period: Duration.minutes(5), statistic: "Minimum" }),
         threshold: 2 * 1024 * 1024 * 1024,
@@ -889,6 +942,7 @@ exports.handler = async () => {
         datapointsToAlarm: 2,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
+      productionDatabaseStorageAlarm.addAlarmAction(new cloudwatchActions.SnsAction(productionAlertTopic));
     }
 
     // ─── Outputs (Lambda / CloudFront) ────────────────────────────────

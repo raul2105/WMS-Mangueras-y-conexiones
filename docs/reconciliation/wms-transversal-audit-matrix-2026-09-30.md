@@ -1,29 +1,47 @@
 # Matriz transversal de auditoría y pruebas WMS — 2026-09-30
 
-## Adenda de reconciliación — evidencia disponible al 2026-10-01
+## Corte de reconciliación vigente — 2026-10-01 UTC
 
-Esta adenda conserva las corridas históricas y separa pruebas del working tree
-de la aceptación del runtime. El navegador completo `runaws-acceptance-20261001T143152Z-8aa17911`
-contra runtime `9da425e55adaa9e9a8d8fa8064324be9323f13d8` seguía ejecutándose
-al redactar esta adenda; no hay resultado final que registrar aquí. No se
-considera aprobado por la existencia de health, release o ejecución iniciada.
+El corte productivo actual es SHA `9d3311d05706f360c23b2ce7813fe999393fa044`,
+release `prod-9d3311d05706-20261001T145012Z`. Health confirma `environment=prod`,
+DB `up`, y CloudFormation terminó `UPDATE_COMPLETE`. El change set tuvo 12
+cambios, cero reemplazos y 42 recursos de infraestructura sin cambio. El CI
+manual 36881811703 terminó exitoso con Quality, Security, AWS Read-only E2E y
+smoke PWA móvil; el trabajo AWS del CI es sólo lectura y no sustituye evidencia
+mutable. Referencias: `output/production-runtime-9d3311d-health-20261001.json`,
+`output/production-9d3311d-cloudformation-complete-20261001.json`,
+`output/production-9d3311d-changeset-executed-20261001.json`,
+`output/ci-9d3311d-release-20261001.json`.
 
-| Evidencia | Resultado que puede afirmarse | Límite / situación pendiente |
+| Evidencia a este corte | Resultado comprobable | Límite actual |
 |---|---|---|
-| Browser Chromium `aws-acceptance-20261001T014258Z-0d7371c1`, runtime `f76241438391a884496ba42160ebb1e1e4702d40` | 40 casos esperados pasaron, 3 fallaron y 10 se omitieron. El manifest identifica el runtime `prod-f76241438391-20261001T012548Z`. | Corrida fallida, no aceptación integral. Falló la prueba de recepción repetida/contraste (caso documentado como `02120bfcf`); no convertir los 40 pases en aprobación del flujo completo. Ver [manifest](../../output/aws-acceptance-20261001T014258Z-0d7371c1-manifest.json) y [resultados únicos](../../output/aws-acceptance/runs/aws-acceptance-20261001T014258Z-0d7371c1/results.json). |
-| Navegadores y móvil sobre `f762414` | Mobile Chrome 8/8; Firefox 11/11; WebKit 11/11. | Son corridas separadas del runtime `f762414`; no atribuirlas a `9da425e` ni usarlas para encubrir los 3 fallos y 10 omisiones del Chromium completo. |
-| PG agregado `flows0930_85a2e58199` | 199 pruebas pasaron; una terminó por timeout de 200 s; 22 schemas aislados reportaron cleanup. | No es un gate verde: 1 timeout sigue pendiente de diagnóstico/reintento; tampoco es aceptación de browser ni del runtime desplegado. |
-| PG focal de recepción `02120bfcf` | Repetición/contraste de recepción falló. | Mantener visible como fallo hasta que una corrida posterior del mismo criterio termine verde con evidencia de estado antes/después; no reemplazarlo por un resultado distinto de otro escenario. |
-| Transporte de Server Action nativo/API | El artefacto [root cause](../../output/production-server-action-transport-root-cause-20261001.json) registra respuesta nativa HTTP 303 y envío API HTTP 500. La serialización multipart de Playwright omitió el campo vacío `$ACTION_ID`; causa confirmada en `playwright-core/lib/server/fetch.js:587`. | El 500 no demuestra rechazo de autorización ni invariancia de datos. La barrida de guardas por POST directo queda **sin prueba válida** hasta corregir el transporte del campo vacío y obtener respuesta esperada más verificación before/after. No interpretar el 303 aislado como prueba del permiso. |
-| Candidato/runtime `9da425e` | Se identificó health/release y comenzó la aceptación Chromium `runaws-acceptance-20261001T143152Z-8aa17911`. | Resultado final todavía no disponible al redactar; no afirmar `PASS`, aceptación global ni cobertura de los flujos a partir de esta corrida incompleta. |
+| Chromium completo de `9da425e`, `aws-acceptance-20261001T143152Z-8aa17911` | 43 pass, 2 fail, 8 mobile-only skip. Los recorridos directo, ensamble configurado y mixto aprobaron. [Manifest](../../output/aws-acceptance-20261001T143152Z-8aa17911-manifest.json), [resultados únicos](../../output/aws-acceptance/runs/aws-acceptance-20261001T143152Z-8aa17911/results.json). | Históricamente falló inventario manual por notas nullable y gobierno/order-entry por timeout. Los dos escenarios fueron reprobados focalmente en `9d3311d` (`f553a689` y `357472df` respectivamente); la cuenta 43/2/8 describe sólo la suite `9da425e`, no el nuevo corte. |
+| Gobierno focal `aws-acceptance-20261001T144747Z-357472df` | 1/1 pass en 34.5 s: fuente, regla, equivalencia, order snapshot y retiro; resuelve el timeout de order-entry de 9da. [Manifest](../../output/aws-acceptance-20261001T144747Z-357472df-manifest.json), [resultados](../../output/aws-acceptance/runs/aws-acceptance-20261001T144747Z-357472df/results.json). | Es una ejecución focal, no suite browser completa. |
+| Server Actions/CSV focal `aws-acceptance-20261001T145139Z-301efca8` | 1/1 pass en 38.9 s. Transporte WHATWG: control positivo 303 y denegación sanitizada HTTP 500; snapshot before/after sin cambios. Import CSV real creó producto y dos auditorías Admin, residuos en cero y labels restauradas. [Manifest](../../output/aws-acceptance-20261001T145139Z-301efca8-manifest.json), [resultados](../../output/aws-acceptance/runs/aws-acceptance-20261001T145139Z-301efca8/results.json). | La denegación fue 500, no afirmar status 403. Se distinguen estos checks válidos del intento API mal serializado que omitió `$ACTION_ID` vacío y produjo 500 sin guardar guard-proof. |
+| Inventario focal candidato actual `aws-acceptance-20261001T151004Z-f553a689` | 1/1 pass, 0 omitidos, 30 s, SHA/runtime `9d3311d`; escenario Warehouse recibe/surte, Manager ajusta/transfiere y Sales queda bloqueado. [Manifest](../../output/aws-acceptance-20261001T151004Z-f553a689-manifest.json), [resultados](../../output/aws-acceptance/runs/aws-acceptance-20261001T151004Z-f553a689/results.json). | Evidencia focal de un scenario; no es aprobación del resto del navegador ni del lane mobile-only. |
+| Continuidad mixta/teclado `aws-acceptance-20261001T151310Z-93b66483` | 3/3 pass, 0 omitidos, 130 s, SHA/runtime `9d3311d`; evidencia propia before/during/after y limpieza. [Manifest](../../output/aws-acceptance-20261001T151310Z-93b66483-manifest.json), [resultados](../../output/aws-acceptance/runs/aws-acceptance-20261001T151310Z-93b66483/results.json). | Focal de continuidad mixta, no suite completa de móvil, Firefox o WebKit. |
+| PostgreSQL agregado `flows0930_85a2e58` + focal `shareddelivery0930_ad52eb7` | Agregado: 199 pass, un timeout de 30 s, 22 schemas limpios. Focal del caso timeout: 1 pass, 31 omitidos, un schema limpio; resuelve ese único caso. | No invalidar los 199 resultados verdes ni exigir repetirlos por ese timeout resuelto. Mantener evidencia separada por run/schema. |
+| Historial anterior `f762414` y contraste `02120bfcf` | Chromium `f762`: 40 pass/3 fail/10 skip. Mobile Chrome 8/8, Firefox 11/11 y WebKit 11/11 corrieron sobre ese SHA. | Los fallos y navegadores son históricos de `f762`; no atribuirlos a `9d3311d`. `02120bfcf` queda como resultado histórico, no estado actual de todos los recibos. |
+| Alertamiento y presupuesto | El refresco de estado mostró las tres alarmas productivas `OK`, pero la inspección encontró `actions: []` en las tres. El presupuesto USD 5 `wms-web-dev-monthly-limit` apunta a `wms-web-dev-budget-alerts`, topic SNS inexistente, y SNS no tiene suscripciones. [Acciones observadas](../../output/production-monitoring-actions-20261001.json); [estados](../../output/production-alarm-state-refresh-20261001.json). | Gate operativo pendiente: IaC correctiva en preparación; aún no está probado un destino de notificaciones ni la entrega de alertas. Estado `OK` no equivale a notificación. |
 
-Exclusiones vigentes para el alcance productivo de esta reconciliación: Gmail,
-Prisma 7, fiscal y capacidades de IA. Las exclusiones no equivalen a aceptación
-ni bloquean la lectura de evidencia de los flujos incluidos.
+Para cierre final todavía falta integrar `main` y runtime con el SHA final,
+ejecutar aceptación browser terminal en Chromium, móvil, Firefox y WebKit y
+terminar la restauración controlada. El helper de recuperación aplica
+`sslmode=require`, pero la restauración final no se ha ejecutado: debe cotejar
+fingerprints de `public`, 26 migraciones, las cinco identidades/roles activos,
+25 fixtures inactivas, y limpiar sólo la instancia temporal. Gmail, Prisma 7,
+fiscal/contabilidad e IA continúan excluidos y abiertos.
+El gate independiente de alertamiento descrito en la tabla también debe
+resolverse y verificarse antes de declarar completitud operativa.
 
 ## Alcance y estado de evidencia
 
 Matriz estática de operaciones críticas de ventas, inventario, ensamble, compras, catálogo y usuarios. Se siguieron Server Actions/rutas hasta sus servicios, escrituras de estado, movimientos y eventos. Las filas de abajo distinguen pruebas declaradas de corridas terminadas; los artefactos AWS revisados son ejecuciones de prueba en schemas aislados contra el working tree, no aceptación de una versión desplegada. Esta revisión no ejecutó pruebas ni escribió en la base de datos.
+
+Las tablas y brechas debajo preservan el corte histórico con el que se
+compilaron; cuando nombren un test como pendiente, la tabla de **Corte de
+reconciliación vigente** arriba determina su situación actual. Los focos
+recientes no convierten todos los suites en una sola aceptación global.
 
 ### Evidencia de regresión AWS del 30 de septiembre
 
@@ -79,7 +97,7 @@ El evento crítico debe persistir en la misma transacción que el cambio, conser
 
 La prueba por navegador de permisos de auditoría está declarada en [rbac-browser.spec.ts](../../tests/e2e/rbac-browser.spec.ts:28) para Manager y :50/:72 para denegaciones de Warehouse/Sales; falta acreditar su ejecución actual y probar búsqueda por nombre/email.
 
-## Cobertura de navegador V1–V8 y brechas para aceptación
+## Cobertura de navegador V1–V8 — corte histórico previo a los últimos focos
 
 Los E2E AWS declarados en [aws-v1-v5-v7-v8-browser.spec.ts](../../tests/e2e/aws-v1-v5-v7-v8-browser.spec.ts:147) cubren V1/V5/V7/V8; los recorridos directo, solo ensamble y mixto están en [mixed-order-continuity.spec.ts](../../tests/e2e/mixed-order-continuity.spec.ts:165) y [sales-configured-assembly.spec.ts](../../tests/e2e/sales-configured-assembly.spec.ts:226). Se reforzaron asserts V2/V3/V4/V6/V8 y cleanup por IDs propios. Ya existen resultados browser del runtime prod `3f2b4de`: inicial 35/4/11 y focalizado 7/2/2. Este último falló V2/V6/V8 directo y tuvo timeout en recepción de Compras; assembly-only y mixed no se ejecutaron. La spec nueva de inventario individual no aparece en los manifests anteriores y sigue pendiente de deploy y ejecución.
 

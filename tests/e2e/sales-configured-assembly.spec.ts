@@ -50,6 +50,88 @@ async function reachActionWithKeyboard(page: import("@playwright/test").Page, ac
   throw new Error(`La acción ${actionName} no fue alcanzable por teclado. Secuencia: ${visited.join(" -> ")}`);
 }
 
+type RenderedAction = { url: string; fields: Array<[string, string]> };
+
+async function captureRenderedActionFromNativeSsr(browser: import("@playwright/test").Browser, route: string, buttonName: string): Promise<RenderedAction> {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const page = await context.newPage();
+    await loginAs(page, "WAREHOUSE_OPERATOR", route, route);
+    await page.goto(route);
+    const form = page.getByRole("button", { name: buttonName }).locator("xpath=ancestor::form");
+    await expect(form).toHaveCount(1);
+    // Native HTML forms with an omitted/empty action submit to the current
+    // document URL. Preserve that browser behavior for the direct POST.
+    const action = (await form.getAttribute("action"))?.trim() || page.url();
+    const fields = await form.locator("input[name],select[name],textarea[name]").evaluateAll((nodes) =>
+      nodes.flatMap((node) => {
+        const control = node as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+        if (control.disabled || !control.name || (control instanceof HTMLInputElement && ["button", "submit", "reset", "file"].includes(control.type))) return [];
+        if (control instanceof HTMLInputElement && ["checkbox", "radio"].includes(control.type) && !control.checked) return [];
+        return [[control.name, control.value] as [string, string]];
+      }),
+    );
+    const url = new URL(action, page.url());
+    expect(["https:", "http:"].includes(url.protocol)).toBe(true);
+    expect(fields.some(([name]) => name.startsWith("$ACTION_")), "Debe conservarse el descriptor SSR real de Next").toBe(true);
+    return { url: url.toString(), fields };
+  } finally {
+    await context.close();
+  }
+}
+
+async function postRenderedAction(page: import("@playwright/test").Page, action: RenderedAction, overrides: Array<[string, string]> = []) {
+  const formData = new FormData();
+  for (const [name, value] of action.fields) formData.append(name, value);
+  for (const [name, value] of overrides) {
+    formData.delete(name);
+    formData.append(name, value);
+  }
+  const request = new Request(action.url, { method: "POST", body: formData });
+  const response = await page.request.post(request.url, {
+    data: Buffer.from(await request.arrayBuffer()),
+    headers: {
+      origin: new URL(page.url()).origin,
+      referer: page.url(),
+      "content-type": request.headers.get("content-type")!,
+    },
+    maxRedirects: 0,
+  });
+  return response;
+}
+
+async function captureAssemblyOperationalSnapshot(productionOrderId: string) {
+  const [order, configuration] = await Promise.all([prisma.productionOrder.findUniqueOrThrow({
+    where: { id: productionOrderId },
+    select: {
+      id: true, status: true,
+      assemblyWorkOrder: {
+        select: {
+          id: true, reservationStatus: true, pickStatus: true, wipStatus: true, consumptionStatus: true,
+          lines: { orderBy: { componentRole: "asc" }, select: { id: true, componentRole: true, productId: true, requiredQty: true, reservedQty: true, pickedQty: true, wipQty: true, consumedQty: true, shortQty: true, reservationStatus: true, pickStatus: true } },
+          pickLists: { orderBy: { createdAt: "asc" }, select: { id: true, status: true, tasks: { orderBy: { sequence: "asc" }, select: { id: true, assemblyWorkOrderLineId: true, requestedQty: true, reservedQty: true, pickedQty: true, shortQty: true, status: true, shortReason: true } } } },
+        },
+      },
+    },
+  }), prisma.assemblyConfiguration.findUnique({
+    where: { productionOrderId },
+    select: { id: true, entryFittingProductId: true, hoseProductId: true, exitFittingProductId: true, workingPressureBar: true, operatingTemperatureC: true, compatibilityStatus: true },
+  })]);
+  const ids = [
+    productionOrderId,
+    configuration?.id ?? "",
+    order.assemblyWorkOrder?.id ?? "",
+    ...(order.assemblyWorkOrder?.lines.map((line) => line.id) ?? []),
+    ...(order.assemblyWorkOrder?.pickLists.flatMap((list) => [list.id, ...list.tasks.map((task) => task.id)]) ?? []),
+  ].filter(Boolean);
+  const [inventory, movements, audit] = await Promise.all([
+    prisma.inventory.findMany({ where: { productId: { in: fixture.productIds }, locationId: { in: fixture.locationIds } }, orderBy: [{ productId: "asc" }, { locationId: "asc" }], select: { productId: true, locationId: true, quantity: true, reserved: true, available: true } }),
+    prisma.inventoryMovement.findMany({ where: { productId: { in: fixture.productIds }, OR: [{ documentId: productionOrderId }, { documentId: { in: ids } }] }, orderBy: { id: "asc" }, select: { id: true, type: true, quantity: true, productId: true, locationId: true, documentType: true, documentId: true, documentLineId: true } }),
+    prisma.auditLog.findMany({ where: { entityId: { in: ids } }, orderBy: { id: "asc" }, select: { id: true, entityType: true, entityId: true, action: true, before: true, after: true, actor: true, actorUserId: true } }),
+  ]);
+  return { order, configuration, inventory, movements, audit };
+}
+
 const fixture = {
   warehouseCode: `${tag}-WH`,
   customerCode: `${tag}-C`,
@@ -368,7 +450,7 @@ test.afterAll(async () => {
   }
 });
 
-test("Ventas mezcla productos directos y varios ensambles en un solo pedido", async ({ page }, testInfo) => {
+test("Ventas mezcla productos directos y varios ensambles en un solo pedido", async ({ browser, page }, testInfo) => {
   await loginAs(page, "SALES_EXECUTIVE");
   await page.goto("/production/requests/new");
 
@@ -514,6 +596,66 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   await attachAccessibilityEvidence(page, testInfo, "warehouse-approved");
   await page.screenshot({ path: testInfo.outputPath("warehouse-technical-approved-1440.png"), fullPage: true });
 
+  const renderedRelease = await captureRenderedActionFromNativeSsr(browser, `/production/orders/${productionOrder.id}`, "Liberar materiales");
+  const siblingOrder = productionOrders.find((candidate) => candidate.id !== productionOrder.id);
+  expect(siblingOrder).toBeTruthy();
+  if (!siblingOrder) throw new Error("Falta el segundo ensamble del fixture para el control positivo");
+  const siblingRelease = await captureRenderedActionFromNativeSsr(browser, `/production/orders/${siblingOrder.id}`, "Liberar materiales");
+  const actionFieldName = (action: RenderedAction) => action.fields.find(([name]) => name.startsWith("$ACTION_ID_"))?.[0];
+  expect(actionFieldName(siblingRelease)).toBe(actionFieldName(renderedRelease));
+  const positiveSiblingRelease = await postRenderedAction(page, siblingRelease);
+  expect(positiveSiblingRelease.status()).toBe(303);
+  expect(new URL(positiveSiblingRelease.headers().location!, page.url()).searchParams.has("ok")).toBe(true);
+  const siblingPickList = await prisma.pickList.findFirstOrThrow({ where: { assemblyWorkOrder: { productionOrderId: siblingOrder.id } } });
+  expect(siblingPickList.status).toBe("RELEASED");
+  expect(await prisma.auditLog.count({ where: { entityId: siblingOrder.id, action: "RELEASE_PICK_LIST" } })).toBe(1);
+  const configuration = await prisma.assemblyConfiguration.findUniqueOrThrow({ where: { productionOrderId: productionOrder.id } });
+  const entryHoseRule = await prisma.productCompatibilityRule.findFirstOrThrow({
+    where: { sourceId: fixture.technicalSourceId, productId: configuration.entryFittingProductId, compatibleProductId: configuration.hoseProductId },
+  });
+  const orderRules = await prisma.productCompatibilityRule.findMany({
+    where: { sourceId: fixture.technicalSourceId, OR: [
+      { productId: configuration.entryFittingProductId, compatibleProductId: configuration.hoseProductId },
+      { productId: configuration.hoseProductId, compatibleProductId: configuration.exitFittingProductId },
+    ] },
+  });
+  const assertRejectedReleaseUnchanged = async (expectedStatus: "REQUIERE REVISIÓN" | "BLOQUEADO", expectedMessage: string, expectedHttpMessage: string) => {
+    await page.reload();
+    await expect(page.getByTestId("assembly-technical-status")).toHaveText(expectedStatus);
+    await expect(page.getByTestId("assembly-technical-safety")).toContainText(expectedMessage);
+    await expect(page.getByRole("button", { name: "Liberar materiales" })).toHaveCount(0);
+    const before = await captureAssemblyOperationalSnapshot(productionOrder.id);
+    const response = await postRenderedAction(page, renderedRelease);
+    expect(response.status()).toBe(303);
+    const errorMessage = new URL(response.headers().location!, page.url()).searchParams.get("error") ?? "";
+    expect(errorMessage).toContain(expectedHttpMessage);
+    expect(await captureAssemblyOperationalSnapshot(productionOrder.id)).toEqual(before);
+  };
+
+  // KAN-20 no-rule case: deactivate only the two rules attached to this fixture.
+  await prisma.productCompatibilityRule.updateMany({ where: { id: { in: orderRules.map(({ id }) => id) } }, data: { active: false } });
+  await assertRejectedReleaseUnchanged("REQUIERE REVISIÓN", "regla técnica aprobada", "regla técnica aprobada");
+  await prisma.productCompatibilityRule.updateMany({ where: { id: { in: orderRules.map(({ id }) => id) } }, data: { active: true } });
+
+  // KAN-20 pressure boundary: the configured context is one bar above the
+  // fixture rule's bound. Restore both values immediately after the rejection.
+  const pressureBound = Math.max(0, configuration.workingPressureBar! - 1);
+  await prisma.productCompatibilityRule.update({ where: { id: entryHoseRule.id }, data: { maxWorkingPressureBar: pressureBound } });
+  await prisma.assemblyConfiguration.update({ where: { id: configuration.id }, data: { workingPressureBar: pressureBound + 1 } });
+  await assertRejectedReleaseUnchanged("BLOQUEADO", "presión", "presión");
+  await prisma.productCompatibilityRule.update({ where: { id: entryHoseRule.id }, data: { maxWorkingPressureBar: entryHoseRule.maxWorkingPressureBar } });
+  await prisma.assemblyConfiguration.update({ where: { id: configuration.id }, data: { workingPressureBar: configuration.workingPressureBar } });
+
+  // KAN-20 temperature boundary; use the selected rule's exact bound and
+  // preserve the original valid context for the rest of the journey.
+  const temperatureBound = configuration.operatingTemperatureC! - 1;
+  await prisma.productCompatibilityRule.update({ where: { id: entryHoseRule.id }, data: { maxTemperatureC: temperatureBound } });
+  await prisma.assemblyConfiguration.update({ where: { id: configuration.id }, data: { operatingTemperatureC: temperatureBound + 1 } });
+  await assertRejectedReleaseUnchanged("BLOQUEADO", "temperatura", "temperatura");
+  await prisma.productCompatibilityRule.update({ where: { id: entryHoseRule.id }, data: { maxTemperatureC: entryHoseRule.maxTemperatureC } });
+  await prisma.assemblyConfiguration.update({ where: { id: configuration.id }, data: { operatingTemperatureC: configuration.operatingTemperatureC } });
+  await page.reload();
+
   const ruleToBlock = await prisma.productCompatibilityRule.findFirstOrThrow({
     where: {
       sourceId: fixture.technicalSourceId,
@@ -573,4 +715,48 @@ test("Ventas mezcla productos directos y varios ensambles en un solo pedido", as
   }));
   expect(mobileReflow.scrollWidth).toBeLessThanOrEqual(mobileReflow.clientWidth);
   await page.screenshot({ path: testInfo.outputPath("assembly-technical-blocked-390.png"), fullPage: true });
+
+  // Now restore the valid rule and release the target through the same SSR
+  // action before testing the confirmation bypass.
+  await prisma.productCompatibilityRule.update({ where: { id: ruleToBlock.id }, data: { decision: "APPROVED", severity: "INFO" } });
+  await page.goto(`/production/orders/${productionOrder.id}`);
+  await expect(page.getByTestId("assembly-technical-status")).toHaveText("APROBADO");
+  const inventoryBeforeRelease = await prisma.inventory.findMany({
+    where: { productId: { in: fixture.productIds }, locationId: { in: fixture.locationIds } },
+    orderBy: [{ productId: "asc" }, { locationId: "asc" }], select: { productId: true, locationId: true, quantity: true },
+  });
+  const positiveRelease = await postRenderedAction(page, renderedRelease);
+  expect(positiveRelease.status()).toBe(303);
+  expect(new URL(positiveRelease.headers().location!, page.url()).searchParams.has("ok")).toBe(true);
+  const targetPickList = await prisma.pickList.findFirstOrThrow({ where: { assemblyWorkOrder: { productionOrderId: productionOrder.id } } });
+  expect(targetPickList.status).toBe("RELEASED");
+  expect(await prisma.auditLog.count({ where: { entityId: productionOrder.id, action: "RELEASE_PICK_LIST" } })).toBe(1);
+  expect(await prisma.inventory.findMany({
+    where: { productId: { in: fixture.productIds }, locationId: { in: fixture.locationIds } },
+    orderBy: [{ productId: "asc" }, { locationId: "asc" }], select: { productId: true, locationId: true, quantity: true },
+  })).toEqual(inventoryBeforeRelease);
+
+  // Incompatible substitution bypass: the accessory is already stocked and
+  // fixture-owned. Change only the target order's exit component after saving
+  // a genuine confirmation action descriptor; the POST must fail closed.
+  await page.goto(`/production/orders/${productionOrder.id}`);
+  const confirmForm = page.getByTestId("confirm-assembly-materials").locator("xpath=ancestor::form");
+  await expect(confirmForm).toBeVisible();
+  const renderedConfirm = await captureRenderedActionFromNativeSsr(browser, `/production/orders/${productionOrder.id}`, "Confirmar materiales y cerrar si aplica");
+  const exitWorkOrderLine = await prisma.assemblyWorkOrderLine.findFirstOrThrow({
+    where: { assemblyWorkOrder: { productionOrderId: productionOrder.id }, componentRole: "EXIT_FITTING" },
+    select: { id: true },
+  });
+  await prisma.$transaction([
+    prisma.assemblyWorkOrderLine.update({ where: { id: exitWorkOrderLine.id }, data: { productId: fixture.productIds[3] } }),
+    prisma.assemblyConfiguration.update({ where: { productionOrderId: productionOrder.id }, data: { exitFittingProductId: fixture.productIds[3] } }),
+  ]);
+  await page.reload();
+  await expect(page.getByTestId("assembly-technical-status")).toHaveText("REQUIERE REVISIÓN");
+  const beforeSubstitutionBypass = await captureAssemblyOperationalSnapshot(productionOrder.id);
+  const substitutionResponse = await postRenderedAction(page, renderedConfirm);
+  expect(substitutionResponse.status()).toBe(303);
+  const substitutionError = new URL(substitutionResponse.headers().location!, page.url()).searchParams.get("error") ?? "";
+  expect(substitutionError).toBe("Las reglas aprobadas no cubren todos los componentes de la combinación.");
+  expect(await captureAssemblyOperationalSnapshot(productionOrder.id)).toEqual(beforeSubstitutionBypass);
 });

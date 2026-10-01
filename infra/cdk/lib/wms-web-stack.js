@@ -293,7 +293,12 @@ class WmsWebStack extends Stack {
       }
       new budgets.CfnBudget(this, "MonthlyBudget", {
         budget: {
-          budgetName: `${prefix}-monthly-limit`,
+          // Updating NotificationsWithSubscribers replaces an AWS budget. Use a
+          // distinct production name so the replacement can be created before
+          // CloudFormation removes the legacy budget with its old SNS target.
+          budgetName: productionMode
+            ? `${prefix}-production-monthly-limit`
+            : `${prefix}-monthly-limit`,
           budgetType: "COST",
           timeUnit: "MONTHLY",
           budgetLimit: {

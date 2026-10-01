@@ -9,6 +9,7 @@ $taskRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $taskFolder=Join-Path $taskRoot 'output\production-restore-proof-20260930'
 [System.IO.Directory]::CreateDirectory($taskFolder)>$null
 $taskCreated=$false
+$taskRestoreAttempted=$false
 $taskProof=@{instance=$taskRestoreId;snapshot=$taskSnapshotId;runId=$taskRun;commitSha=$ExpectedCommitSha;startedAt=[DateTime]::UtcNow.ToString('o');cleaned=$false}
 function Read-AwsJson([string[]]$Arguments) {
   $taskResult=& aws @Arguments --profile Raul_ITsupport --region us-east-1 --output json 2>&1
@@ -43,7 +44,28 @@ try {
   if(!$taskSnapshot.Encrypted -or $taskSnapshot.Status -ne 'available'){throw 'Snapshot protection guard'}
   $taskSg=$taskDb.VpcSecurityGroups[0].VpcSecurityGroupId
   $taskGroup=(Read-AwsJson @('ec2','describe-security-groups','--group-ids',$taskSg)).SecurityGroups[0]
-  if(@($taskGroup.IpPermissions.IpRanges.CidrIp|Where-Object{$_ -eq '0.0.0.0/0'}).Count -or @($taskGroup.IpPermissions.Ipv6Ranges.CidrIpv6|Where-Object{$_ -eq '::/0'}).Count){throw 'Refusing unrestricted recovery ingress'}
+  $taskResources=Read-AwsJson @('cloudformation','describe-stack-resources','--stack-name','WmsWebDevStack')
+  $taskLambdaSg=($taskResources.StackResources|Where-Object LogicalResourceId -eq 'LambdaSecurityGroup0BD9FC99').PhysicalResourceId
+  $taskOfficeIp=(Get-Content -LiteralPath (Join-Path $taskRoot 'output\office-public-address-20260929.txt') -Raw).Trim()
+  $taskParsedOfficeIp=$null
+  if(!$taskLambdaSg -or ![System.Net.IPAddress]::TryParse($taskOfficeIp,[ref]$taskParsedOfficeIp) -or $taskParsedOfficeIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork){throw 'Recovery network allowlist unavailable'}
+  if(@($taskDb.VpcSecurityGroups).Count -ne 1 -or @($taskGroup.IpPermissions).Count -lt 1 -or @($taskGroup.IpPermissions).Count -gt 2){throw 'Unexpected recovery security groups or ingress rules'}
+  $taskOfficeRule=0; $taskLambdaRule=0
+  foreach($taskIngress in $taskGroup.IpPermissions){
+    if($taskIngress.IpProtocol -ne 'tcp' -or $taskIngress.FromPort -ne 5432 -or $taskIngress.ToPort -ne 5432 -or @($taskIngress.Ipv6Ranges).Count -or @($taskIngress.PrefixListIds).Count){throw 'Unexpected recovery ingress protocol, port or source'}
+    if(@($taskIngress.IpRanges).Count + @($taskIngress.UserIdGroupPairs).Count -eq 0){throw 'Recovery ingress source missing'}
+    foreach($taskRange in $taskIngress.IpRanges){
+      if($taskRange.CidrIp -ne ($taskOfficeIp+'/32')){throw 'Recovery IPv4 ingress differs from the office allowlist'}
+      $taskOfficeRule++
+    }
+    foreach($taskPair in $taskIngress.UserIdGroupPairs){
+      if($taskPair.GroupId -ne $taskLambdaSg -or $taskPair.UserId -ne $taskIdentity.Account){throw 'Recovery group ingress differs from the Lambda allowlist'}
+      $taskLambdaRule++
+    }
+  }
+  if($taskOfficeRule -ne 1 -or $taskLambdaRule -ne 1){throw 'Recovery ingress allowlist incomplete'}
+  $taskProof.networkAllowlistVerified=$true
+  $taskRestoreAttempted=$true
   $null=Read-AwsJson @('rds','restore-db-instance-from-db-snapshot','--db-instance-identifier',$taskRestoreId,'--db-snapshot-identifier',$taskSnapshotId,'--db-instance-class','db.t4g.micro','--db-subnet-group-name',$taskDb.DBSubnetGroup.DBSubnetGroupName,'--db-parameter-group-name',$taskDb.DBParameterGroups[0].DBParameterGroupName,'--vpc-security-group-ids',$taskSg,'--publicly-accessible','--no-multi-az','--no-deletion-protection','--tags','Key=Environment,Value=validation','Key=Project,Value=WMS',("Key=ValidationRun,Value="+$taskRun))
   $taskCreated=$true
   $taskProof.created=$true
@@ -58,15 +80,18 @@ try {
   $taskProof.outcome='PASS'
 } catch {$taskProof.outcome='FAIL';$taskProof.error=$_.Exception.Message}
 finally {
-  if($taskCreated){
+  if($taskCreated -or $taskRestoreAttempted){
     try {
-      $taskOwned=(Read-AwsJson @('rds','describe-db-instances','--db-instance-identifier',$taskRestoreId)).DBInstances[0]
+      $taskOwned=(Read-AwsJson @('rds','describe-db-instances')).DBInstances|Where-Object DBInstanceIdentifier -eq $taskRestoreId
+      if(!$taskOwned){$taskProof.cleaned=$true; $taskProof.restoreAbsentAtCleanup=$true}
+      else {
       $taskTags=(Read-AwsJson @('rds','list-tags-for-resource','--resource-name',$taskOwned.DBInstanceArn)).TagList
       if($taskRestoreId -notmatch '^wms-prod-restore-20260930-[0-9a-f]{12}$' -or !($taskTags|Where-Object{$_.Key -eq 'ValidationRun' -and $_.Value -eq $taskRun})){throw 'Recovery cleanup ownership mismatch'}
       $null=Read-AwsJson @('rds','delete-db-instance','--db-instance-identifier',$taskRestoreId,'--skip-final-snapshot','--delete-automated-backups')
       aws rds wait db-instance-deleted --db-instance-identifier $taskRestoreId --profile Raul_ITsupport --region us-east-1
       if($LASTEXITCODE -ne 0){throw 'Owned restore deletion unconfirmed'}
       $taskProof.cleaned=$true
+      }
     }catch{$taskProof.cleanupError=$_.Exception.Message}
   }
   Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue

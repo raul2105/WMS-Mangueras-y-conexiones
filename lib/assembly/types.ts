@@ -1,9 +1,12 @@
+export type AssemblyMutationActor = { actorUserId: string; actor: string };
+
 export type AssemblyOrderDraftHeaderInput = {
   warehouseId: string;
   customerName: string;
   dueDate: Date;
   priority?: number | null;
   notes?: string | null;
+  auditActor?: AssemblyMutationActor;
 };
 
 export type AssemblyConfigInput = {
@@ -15,8 +18,17 @@ export type AssemblyConfigInput = {
   assemblyQuantity: number;
   sourceDocumentRef?: string | null;
   notes?: string | null;
-  /** Required when an active WARN compatibility rule was reviewed by the operator. */
+  workingPressureBar?: number | null;
+  operatingTemperatureC?: number | null;
+  medium?: string | null;
+  application?: string | null;
+  assemblyMethod?: string | null;
+  /** Explicit technical review; accepted only for a governed rule that permits an override. */
   compatibilityReviewApproved?: boolean;
+  compatibilityReviewReason?: string | null;
+  compatibilityReviewedByUserId?: string | null;
+  compatibilityReviewerRoles?: string[];
+  auditActor?: AssemblyMutationActor;
 };
 
 export type AssemblyRequirement = {

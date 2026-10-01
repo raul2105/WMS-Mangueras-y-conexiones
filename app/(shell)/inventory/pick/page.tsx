@@ -18,6 +18,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
+import { lockAndAssertActiveInventoryLocations } from "@/lib/inventory-active-location";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +100,7 @@ async function pickStock(formData: FormData) {
 
   try {
     createdJobId = await prisma.$transaction(async (tx) => {
+      await lockAndAssertActiveInventoryLocations(tx, [location.id]);
       const result = await service.pickStock(product.id, location.id, quantity, reference, {
         tx,
         notes,
@@ -135,6 +137,9 @@ async function pickStock(formData: FormData) {
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {
+        LOCATION_NOT_FOUND: "La ubicación ya no existe; recarga el formulario",
+        LOCATION_INACTIVE: error.message,
+        WAREHOUSE_INACTIVE: error.message,
         INSUFFICIENT_AVAILABLE: "Stock disponible insuficiente en esa ubicación",
         INVENTORY_NOT_FOUND: "No hay inventario registrado en esa ubicación para ese producto",
         RESERVED_EXCEEDS_QUANTITY: "No se puede despachar: la cantidad reservada supera el stock resultante",
@@ -178,7 +183,7 @@ export default async function PickPage({
   const sp = await searchParams;
   const actor = resolveAuthenticatedActor(await getSessionContext());
   const locations = await prisma.location.findMany({
-    where: { isActive: true },
+    where: { isActive: true, warehouse: { isActive: true } },
     orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
     select: {
       code: true,

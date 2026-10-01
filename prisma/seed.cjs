@@ -1,6 +1,22 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
+// Demo provisioning resets passwords, roles and activation. It must never run
+// against the canonical AWS database or a production environment.
+const seedUrl = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL) : null;
+if ([process.env.WMS_ENVIRONMENT, process.env.WMS_ENV].includes('prod') || process.env.NODE_ENV === 'production') {
+  throw new Error('Demo seed is prohibited in production. Provision operational users independently.');
+}
+if (seedUrl && ['postgres:', 'postgresql:'].includes(seedUrl.protocol)) {
+  const seedSchema = seedUrl.searchParams.get('schema') || 'public';
+  if (seedUrl.hostname === 'wms-web-dev-pg.cvb2fezndc4e.us-east-1.rds.amazonaws.com' && seedUrl.pathname === '/wms' && seedSchema === 'public') {
+    throw new Error('Demo seed is prohibited against canonical AWS DEV/public. Existing users and records must be preserved.');
+  }
+  if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(seedUrl.hostname) && process.env.WMS_ALLOW_REMOTE_DEMO_SEED !== '1') {
+    throw new Error('Remote demo seed requires WMS_ALLOW_REMOTE_DEMO_SEED=1 and an isolated disposable database/schema.');
+  }
+}
+
 const prisma = new PrismaClient();
 const { seedDemoData } = require('./seed-demo.cjs');
 

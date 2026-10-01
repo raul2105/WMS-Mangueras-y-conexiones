@@ -1,4 +1,11 @@
 import prisma from "@/lib/prisma";
+import {
+  compatibilityRuleSelect,
+  evaluateCompatibilityRules,
+  PRODUCT_SUBSTITUTION_RULE_TYPE,
+  type CompatibilityRuleDecision,
+  type CompatibilityRuleRecord,
+} from "@/lib/catalog/compatibility";
 
 type EquivalentInventoryRow = {
   quantity: number;
@@ -26,6 +33,10 @@ export type ProductEquivalentSuggestion = {
   basisDash: number | null;
   sourceSheet: string | null;
   notes: string | null;
+  technicalStatus: CompatibilityRuleDecision;
+  technicalReasonCode: string;
+  technicalExplanation: string;
+  technicalSources: string[];
   totalAvailable: number;
   locations: Array<{
     code: string;
@@ -61,27 +72,36 @@ function toSortedLocations(rows: EquivalentInventoryRow[], warehouseId?: string)
 
 export async function getEquivalentProducts(
   productId: string,
-  options: { warehouseId?: string; limit?: number; inStockOnly?: boolean } = {}
+  options: { warehouseId?: string; limit?: number; inStockOnly?: boolean; includeReviewRequired?: boolean } = {}
 ): Promise<ProductEquivalentSuggestion[]> {
   const limit = options.limit ?? 5;
   const inStockOnly = options.inStockOnly ?? true;
+  const original = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, type: true } });
+  if (!original) return [];
+  if (options.warehouseId) {
+    const warehouse = await prisma.warehouse.findFirst({ where: { id: options.warehouseId, isActive: true }, select: { id: true } });
+    if (!warehouse) return [];
+  }
 
   const rows = await prisma.productEquivalence.findMany({
     where: {
       productId,
       active: true,
-      ...(inStockOnly
-        ? {
-            equivProduct: {
-              inventory: {
-                some: {
-                  available: { gt: 0 },
-                  ...(options.warehouseId ? { location: { warehouseId: options.warehouseId } } : {}),
-                },
+      equivProduct: {
+        type: original.type,
+        ...(inStockOnly ? {
+          inventory: {
+            some: {
+              available: { gt: 0 },
+              location: {
+                isActive: true,
+                usageType: "STORAGE",
+                warehouse: { isActive: true, ...(options.warehouseId ? { id: options.warehouseId } : {}) },
               },
             },
-          }
-        : {}),
+          },
+        } : {}),
+      },
     },
     select: {
       id: true,
@@ -101,11 +121,19 @@ export async function getEquivalentProducts(
             where: inStockOnly
               ? {
                   available: { gt: 0 },
-                  ...(options.warehouseId ? { location: { warehouseId: options.warehouseId } } : {}),
+                  location: {
+                    isActive: true,
+                    usageType: "STORAGE",
+                    warehouse: { isActive: true, ...(options.warehouseId ? { id: options.warehouseId } : {}) },
+                  },
                 }
-              : options.warehouseId
-                ? { location: { warehouseId: options.warehouseId } }
-                : undefined,
+              : {
+                  location: {
+                    isActive: true,
+                    usageType: "STORAGE",
+                    warehouse: { isActive: true, ...(options.warehouseId ? { id: options.warehouseId } : {}) },
+                  },
+                },
             select: {
               quantity: true,
               available: true,
@@ -124,10 +152,35 @@ export async function getEquivalentProducts(
     take: Math.max(limit * 3, limit),
   });
 
+  const candidateIds = Array.from(new Set(rows.map((row) => row.equivProduct.id)));
+  const rules = candidateIds.length > 0
+    ? await prisma.productCompatibilityRule.findMany({
+        where: {
+          active: true,
+          governanceStatus: "APPROVED",
+          ruleType: PRODUCT_SUBSTITUTION_RULE_TYPE,
+          source: { status: "APPROVED" },
+          OR: [
+            { productId, compatibleProductId: { in: candidateIds } },
+            { productId: { in: candidateIds }, compatibleProductId: productId },
+          ],
+        },
+        select: compatibilityRuleSelect,
+      })
+    : [];
+
   return rows
     .map((row) => {
       const inventoryRows = row.equivProduct.inventory as EquivalentInventoryRow[];
       const totalAvailable = sumAvailable(inventoryRows, options.warehouseId);
+      const candidateRules = (rules as CompatibilityRuleRecord[]).filter((rule) =>
+        (rule.productId === productId && rule.compatibleProductId === row.equivProduct.id)
+        || (rule.productId === row.equivProduct.id && rule.compatibleProductId === productId)
+      );
+      const technicalDecision = evaluateCompatibilityRules([productId, row.equivProduct.id], candidateRules);
+      const technicalSources = Array.from(new Set(technicalDecision.matchedRules
+        .map((rule) => rule.source?.documentRef)
+        .filter((value): value is string => Boolean(value))));
 
       return {
         equivalenceId: row.id,
@@ -141,11 +194,16 @@ export async function getEquivalentProducts(
         basisDash: row.basisDash ?? null,
         sourceSheet: row.sourceSheet ?? null,
         notes: row.notes ?? null,
+        technicalStatus: technicalDecision.status,
+        technicalReasonCode: technicalDecision.reasonCode,
+        technicalExplanation: technicalDecision.explanation,
+        technicalSources,
         totalAvailable,
         locations: toSortedLocations(inventoryRows, options.warehouseId),
       };
     })
     .filter((row) => !inStockOnly || row.totalAvailable > 0)
+    .filter((row) => options.includeReviewRequired || row.technicalStatus === "APPROVED")
     .sort((a, b) => {
       if (b.totalAvailable !== a.totalAvailable) return b.totalAvailable - a.totalAvailable;
       return a.sku.localeCompare(b.sku, "es");

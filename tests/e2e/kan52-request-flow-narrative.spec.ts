@@ -243,7 +243,7 @@ test.describe.serial("KAN-52 request flow narrative", () => {
 
     await page.getByRole("link", { name: /^En surtido$/i }).click();
     await expect(page).toHaveURL(/stage=en_surtido/);
-    await expectRequestCardNarrative(page, fulfillmentOrderCode, "En surtido", "Revisar bloqueo");
+    await expectRequestCardNarrative(page, fulfillmentOrderCode, "En surtido", "En espera de almacén");
 
     await page.getByRole("link", { name: /^Listo para entrega$/i }).click();
     await expect(page).toHaveURL(/stage=listo_entrega/);
@@ -251,7 +251,7 @@ test.describe.serial("KAN-52 request flow narrative", () => {
 
     await page.getByRole("link", { name: /^Cancelado$/i }).click();
     await expect(page).toHaveURL(/stage=cancelado/);
-    await expectRequestCardNarrative(page, cancelledOrderCode, "Cancelado", "Revisar bloqueo");
+    await expectRequestCardNarrative(page, cancelledOrderCode, "Cancelado", "Ver historial");
   });
 
   test("keeps list and detail coherent for delivery-ready and cancelled requests", async ({
@@ -282,7 +282,7 @@ test.describe.serial("KAN-52 request flow narrative", () => {
     await expect(readyTimeline.getByRole("listitem").nth(4)).toContainText("Cancelación");
 
     await page.goto("/production/requests?status=CANCELADA");
-    await expectRequestCardNarrative(page, cancelledOrderCode, "Cancelado", "Revisar bloqueo");
+    await expectRequestCardNarrative(page, cancelledOrderCode, "Cancelado", "Ver historial");
     await page
       .getByTestId("request-card")
       .filter({ hasText: cancelledOrderCode })
@@ -291,7 +291,7 @@ test.describe.serial("KAN-52 request flow narrative", () => {
       .click();
 
     await expect(page.getByText("Cancelado", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText("Revisar bloqueo", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ver historial", { exact: true })).toBeVisible();
     await expect(page.getByText("Marcar entrega", { exact: true })).toHaveCount(0);
 
     const cancelledTimeline = page.locator("section").filter({ hasText: "Timeline operativo" }).first();

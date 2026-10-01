@@ -1,89 +1,3 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
-
-model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  name          String?
-  passwordHash  String
-  role          Role      @default(USER)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-}
-
-model Product {
-  id            String    @id @default(uuid())
-  description   String?
-  type          ProductType
-  brand         String?
-  baseCost      Float     @default(0)
-  price         Float     @default(0)
-    purchaseMoq   Float?    // Minimum order quantity for purchase ordering
-  attributes    Json?
-  categoryId    String?
-  category      Category? @relation(fields: [categoryId], references: [id])
-  inventory     Inventory[]
-  movements     InventoryMovement[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-    purchaseMoq   Float? // Minimum order quantity
-
-model Category {
-  id          String    @id @default(uuid())
-  description String?
-  products    Product[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-model Inventory {
-  id        String   @id @default(uuid())
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  location  String
-  quantity  Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([productId, location])
-}
-  id          String           @id @default(uuid())
-  productId   String
-  product     Product          @relation(fields: [productId], references: [id])
-  type        MovementType
-  quantity    Int
-  location    String
-  reference   String?
-  notes       String?
-  createdAt   DateTime         @default(now())
-}
-
-enum Role {
-  ADMIN
-  MANAGER
-  USER
-}
-
-enum ProductType {
-  HOSE
-  FITTING
-  ASSEMBLY
-  ACCESSORY
-}
-
-enum MovementType {
-  IN
-  OUT
-  ADJUSTMENT
-  TRANSFER
-  ASSEMBLY
-}
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -115,6 +29,7 @@ model User {
   traceRecords       TraceRecord[]       @relation("TraceOperatorUser")
   auditLogs          AuditLog[]          @relation("AuditActorUser")
   purchaseOrderEmailAttempts PurchaseOrderEmailAttempt[] @relation("PurchaseOrderEmailTriggeredByUser")
+  gmailConnection UserGmailConnection?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -640,6 +555,7 @@ model SalesInternalOrderLine {
   productId String?
   requestedQty Float
   notes String?
+  technicalSelectionSnapshot String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -666,6 +582,11 @@ model SalesInternalOrderAssemblyConfig {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
+  workingPressureBar Float?
+  operatingTemperatureC Float?
+  medium String?
+  application String?
+  assemblyMethod String?
 
   orderLine SalesInternalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
   entryFittingProduct Product @relation("SalesAssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
@@ -801,6 +722,11 @@ model AssemblyConfiguration {
   totalHoseRequired Float
   sourceDocumentRef String?
   notes String?
+  workingPressureBar Float?
+  operatingTemperatureC Float?
+  medium String?
+  application String?
+  assemblyMethod String?
 
   productionOrder ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
   entryFittingProduct Product @relation("AssemblyEntryFittingProduct", fields: [entryFittingProductId], references: [id], onDelete: Restrict)
@@ -975,6 +901,13 @@ enum PurchaseOrderEmailSendState {
   SENT
   RESENT
   FAILED
+  SENDING
+  SEND_UNKNOWN
+}
+
+enum UserGmailConnectionStatus {
+  CONNECTED
+  REAUTH_REQUIRED
 }
 
 model Supplier {
@@ -1039,6 +972,8 @@ model PurchaseOrder {
   deliveryWarehouseId String?
   status       PurchaseOrderStatus @default(BORRADOR)
   emailSendState PurchaseOrderEmailSendState @default(NOT_SENT)
+  emailSendClaimToken String?
+  emailSendClaimedAt DateTime?
   emailRecipientSnapshot String?
   emailSubjectSnapshot String?
   emailBodySnapshot String?
@@ -1116,6 +1051,9 @@ model PurchaseOrderEmailAttempt {
   errorMessage    String?
   triggeredByUserId String?
   triggerSource   String
+  senderEmail     String?
+  provider        String?
+  providerMessageId String?
   createdAt       DateTime @default(now())
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -1127,6 +1065,25 @@ model PurchaseOrderEmailAttempt {
   @@index([sendState])
   @@index([triggeredByUserId])
   @@index([purchaseOrderDocumentId])
+}
+
+model UserGmailConnection {
+  id                    String                    @id @default(uuid())
+  userId                String                    @unique
+  googleSub             String                    @unique
+  email                 String
+  encryptedRefreshToken String
+  scopes                String
+  status                String                    @default("CONNECTED")
+  connectedAt           DateTime                  @default(now())
+  lastValidatedAt       DateTime?
+  reauthRequiredAt      DateTime?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
 }
 
 model PurchaseReceipt {

@@ -329,6 +329,12 @@ export default async function CatalogPage({ searchParams }: PageProps) {
         actions={
           canEditCatalog ? (
             <>
+              <Link href="/catalog/compatibility" className={buttonStyles({ variant: "secondary" })}>
+                Reglas técnicas y equivalencias
+              </Link>
+              <Link href="/catalog/technical-sources" className={buttonStyles({ variant: "secondary" })}>
+                Revisar fuentes técnicas
+              </Link>
               <Link href="/catalog/import" className={buttonStyles({ variant: "secondary" })}>
                 Importar CSV
               </Link>

@@ -12,6 +12,7 @@ function isPublicPath(pathname: string) {
     pathname === "/logout" ||
     pathname === "/forbidden" ||
     pathname === "/api/health" ||
+    pathname === "/privacy-gmail.html" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
     pathname.startsWith("/api/auth/")

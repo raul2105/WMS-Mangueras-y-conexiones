@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProductSearchMatch } from "@/lib/product-search";
 import ProductSearchField from "@/components/ProductSearchField";
+import AssemblyOperatingContextFields from "@/components/AssemblyOperatingContextFields";
 
 type WarehouseOption = {
   id: string;
@@ -19,6 +20,11 @@ type AssemblyFormValues = {
   assemblyQuantity: string;
   sourceDocumentRef: string;
   notes: string;
+  workingPressureBar: string;
+  operatingTemperatureC: string;
+  medium: string;
+  application: string;
+  assemblyMethod: string;
 };
 
 type Props = {
@@ -277,6 +283,8 @@ export default function AssemblyConfiguratorForm({
             className="w-full px-4 py-3 glass rounded-lg"
           />
         </label>
+
+        <AssemblyOperatingContextFields values={initialValues} />
 
         <label className="space-y-1 md:col-span-2">
           <span className="text-sm text-slate-400">{notesLabel}</span>

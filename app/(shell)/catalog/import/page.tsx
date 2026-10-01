@@ -6,6 +6,7 @@ import path from "path";
 import os from "os";
 import crypto from "crypto";
 import prisma from "@/lib/prisma";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,10 @@ type ActionState = { ok?: string; error?: string };
 
 async function importCsv(formData: FormData) {
   "use server";
+  const authorizedSession = await requirePermission("catalog.edit");
+  const actorUserId = authorizedSession.user?.id;
+  if (!actorUserId) redirect("/login");
+  const actor = authorizedSession.user?.name?.trim() || authorizedSession.user?.email?.trim() || actorUserId;
 
   const file = formData.get("file");
   const dryRun = formData.get("dryRun") === "on";
@@ -31,13 +36,7 @@ async function importCsv(formData: FormData) {
     redirect(`/catalog/import?error=${encodeURIComponent("El archivo debe ser CSV")}`);
   }
 
-  const { importProductsFromCsv } = (await import("../../../../scripts/data/import-products-from-csv.cjs")) as {
-    importProductsFromCsv: (input: {
-      filePath: string;
-      dryRun: boolean;
-      prismaClient: typeof prisma;
-    }) => Promise<{ rows?: number; skus?: number } | null>;
-  };
+  const { importProductsFromCsv } = await import("../../../../scripts/data/import-products-from-csv.cjs");
 
   const tmpDir = path.join(os.tmpdir(), "wms-imports");
   await fs.mkdir(tmpDir, { recursive: true });
@@ -49,31 +48,44 @@ async function importCsv(formData: FormData) {
 
   let stats: { rows?: number; skus?: number } | null = null;
   try {
-    const result = await importProductsFromCsv({ filePath, dryRun, prismaClient: prisma });
-    stats = result ?? null;
-    await prisma.importLog.create({
-      data: {
-        fileName: file.name || "import.csv",
-        fileSize: file.size,
-        rows: stats?.rows ?? null,
-        skus: stats?.skus ?? null,
-        dryRun,
-        status: dryRun ? "VALIDATED" : "IMPORTED",
-      },
+    const result = await importProductsFromCsv({
+      filePath,
+      dryRun,
+      prismaClient: prisma,
+      actor,
+      actorUserId,
+      importLog: { fileName: file.name || "import.csv", fileSize: file.size },
     });
+    stats = result ?? null;
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo importar el CSV";
-    await prisma.importLog.create({
-      data: {
-        fileName: file.name || "import.csv",
-        fileSize: file.size,
-        rows: stats?.rows ?? null,
-        skus: stats?.skus ?? null,
-        dryRun,
-        status: "FAILED",
-        error: message,
-      },
-    });
+    if (!dryRun) {
+      await prisma.$transaction(async (tx) => {
+        const log = await tx.importLog.create({
+          data: {
+            fileName: file.name || "import.csv",
+            fileSize: file.size,
+            rows: stats?.rows ?? null,
+            skus: stats?.skus ?? null,
+            dryRun: false,
+            status: "FAILED",
+            error: message,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            entityType: "IMPORT_LOG",
+            entityId: log.id,
+            action: "IMPORT_FAILED",
+            before: null,
+            after: JSON.stringify({ fileName: log.fileName, rows: log.rows, skus: log.skus, status: log.status, error: log.error }),
+            actor,
+            actorUserId,
+            source: "catalog.import-csv",
+          },
+        });
+      }, { maxWait: 1000, timeout: 5000 });
+    }
     redirect(`/catalog/import?error=${encodeURIComponent(message)}`);
   } finally {
     try {

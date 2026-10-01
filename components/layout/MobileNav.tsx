@@ -19,7 +19,13 @@ type Props = {
 
 export default function MobileNav({ open, pathname, modules, userName, userEmail, onClose }: Props) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +36,32 @@ export default function MobileNav({ open, pathname, modules, userName, userEmail
     closeButtonRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (!first || !last) {
+        event.preventDefault();
+        panel.focus();
+      } else if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
     document.addEventListener("keydown", onKeyDown);
@@ -39,7 +70,7 @@ export default function MobileNav({ open, pathname, modules, userName, userEmail
       document.removeEventListener("keydown", onKeyDown);
       previousFocusRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <div
@@ -51,6 +82,7 @@ export default function MobileNav({ open, pathname, modules, userName, userEmail
     >
       <button
         type="button"
+        tabIndex={-1}
         aria-label="Cerrar menu"
         className={cn(
           "absolute inset-0 bg-black/40 transition-opacity duration-150",
@@ -59,6 +91,8 @@ export default function MobileNav({ open, pathname, modules, userName, userEmail
         onClick={onClose}
       />
       <aside
+        ref={panelRef}
+        tabIndex={-1}
         className={cn(
           "relative h-full w-[86%] max-w-[20rem] border-r border-[var(--border-subtle)] bg-[var(--shell-bg)] p-3 shadow-xl transition-transform duration-150",
           open ? "translate-x-0" : "-translate-x-full",

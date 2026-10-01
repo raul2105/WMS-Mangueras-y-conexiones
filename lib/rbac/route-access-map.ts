@@ -89,6 +89,18 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     permission: "catalog.edit",
     roles: ["SYSTEM_ADMIN", "MANAGER"],
   },
+  {
+    route: "/catalog/compatibility",
+    description: "Gobierno de reglas técnicas de compatibilidad y equivalencias comerciales",
+    permission: "catalog.edit",
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
+  },
+  {
+    route: "/catalog/technical-sources",
+    description: "Revisión, corrección de versión y publicación de fuentes técnicas documentales",
+    permission: "catalog.edit",
+    roles: ["SYSTEM_ADMIN", "MANAGER"],
+  },
 
   // ── Inventario ─────────────────────────────────────────────────────────
   {
@@ -356,6 +368,12 @@ export const ROUTE_ACCESS_MAP: RouteAccessEntry[] = [
     description: "Recepción de artículos de una orden de compra",
     permission: "purchasing.receive",
     roles: ["SYSTEM_ADMIN", "MANAGER", "WAREHOUSE_OPERATOR"],
+  },
+  {
+    route: "/purchasing/email",
+    description: "Configuración personal de Gmail para envío de órdenes de compra",
+    permission: "purchasing.manage",
+    roles: ["MANAGER"],
   },
 
   // ── Auditoría & Trazabilidad ───────────────────────────────────────────

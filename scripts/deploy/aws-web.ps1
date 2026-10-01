@@ -48,6 +48,13 @@ $awsPrismaSchemaPath = Join-Path $projectRoot "prisma\postgresql\schema.prisma"
 $configDir = Join-Path $projectRoot "infra\cdk\config"
 $packageJsonPath = Join-Path $projectRoot "package.json"
 $packageVersion = if (Test-Path $packageJsonPath) { (Get-Content $packageJsonPath -Raw | ConvertFrom-Json).version } else { "unknown" }
+$commitSha = (git -C $projectRoot rev-parse HEAD 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $commitSha) {
+    $commitSha = "unknown"
+}
+$commitSha = $commitSha.Trim()
+$releaseTimestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$releaseId = "$Environment-$($commitSha.Substring(0, [Math]::Min(12, $commitSha.Length)))-$releaseTimestamp"
 
 $toolPaths = @(
     "C:\Program Files\nodejs",
@@ -62,7 +69,11 @@ foreach ($toolPath in $toolPaths) {
 $env:AWS_PROFILE = $Profile
 $env:AWS_PAGER = ""
 $env:WMS_ENV = $Environment
+$env:WMS_COMMIT_SHA = $commitSha
+$env:WMS_RELEASE_ID = $releaseId
 $env:AWS_SDK_LOAD_CONFIG = "1"
+$env:AWS_RETRY_MODE = "adaptive"
+$env:AWS_MAX_ATTEMPTS = "8"
 
 function Write-Phase {
     param(
@@ -70,6 +81,38 @@ function Write-Phase {
         [string]$Label
     )
     Write-Host "`n[$Index] $Label" -ForegroundColor Yellow
+}
+
+function Invoke-AwsCliWithRetry {
+    param(
+        [string[]]$Arguments,
+        [int]$MaxAttempts = 4
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $raw = & aws @Arguments 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+
+        $output = ($raw | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        if ($exitCode -eq 0) {
+            return [pscustomobject]@{ ExitCode = 0; Output = $output }
+        }
+
+        $retryable = $output -match "(?i)(429|Rate exceeded|TooManyRequests|Throttl|CreateOAuth2Token|temporarily unavailable)"
+        if (-not $retryable -or $attempt -eq $MaxAttempts) {
+            return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
+        }
+
+        $delaySeconds = [Math]::Min(8, [Math]::Pow(2, $attempt - 1))
+        Write-Warning "AWS CLI throttled; retrying in $delaySeconds second(s) ($attempt/$MaxAttempts)."
+        Start-Sleep -Seconds $delaySeconds
+    }
 }
 
 function Load-WebConfig {
@@ -81,6 +124,12 @@ function Load-WebConfig {
     }
 
     $config = Get-Content $path -Raw | ConvertFrom-Json
+    if ($env:WMS_OFFICE_IP_CIDR) {
+        $config.officeIpCidr = $env:WMS_OFFICE_IP_CIDR
+    }
+    if ($env:WMS_NETWORK_MODE) {
+        $config.networkMode = $env:WMS_NETWORK_MODE
+    }
     $required = @("environment", "region", "namePrefix", "stackName", "dbName", "dbUsername", "officeIpCidr")
     foreach ($key in $required) {
         if (-not $config.$key) {
@@ -94,19 +143,37 @@ function Load-WebConfig {
 function Test-StackExists {
     param([string]$CurrentStackName)
 
-    aws cloudformation describe-stacks --stack-name $CurrentStackName --query "Stacks[0].StackName" --output text *> $null
-    return $LASTEXITCODE -eq 0
+    $result = Invoke-AwsCliWithRetry -Arguments @(
+        "cloudformation", "describe-stacks",
+        "--stack-name", $CurrentStackName,
+        "--query", "Stacks[0].StackName",
+        "--output", "text",
+        "--no-cli-pager"
+    )
+    if ($result.ExitCode -eq 0) {
+        return $true
+    }
+    if ($result.Output -match "(?i)(ValidationError.*does not exist|Stack with id .* does not exist)") {
+        return $false
+    }
+    throw "No se pudo determinar si existe el stack ${CurrentStackName}: $($result.Output)"
 }
 
 function Get-StackOutputsMap {
     param([string]$CurrentStackName)
 
-    $raw = aws cloudformation describe-stacks --stack-name $CurrentStackName --query "Stacks[0].Outputs" --output json 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo leer outputs de stack ${CurrentStackName}: $raw"
+    $result = Invoke-AwsCliWithRetry -Arguments @(
+        "cloudformation", "describe-stacks",
+        "--stack-name", $CurrentStackName,
+        "--query", "Stacks[0].Outputs",
+        "--output", "json",
+        "--no-cli-pager"
+    )
+    if ($result.ExitCode -ne 0) {
+        throw "No se pudo leer outputs de stack ${CurrentStackName}: $($result.Output)"
     }
 
-    $outputs = $raw | ConvertFrom-Json
+    $outputs = $result.Output | ConvertFrom-Json
     $map = @{}
     foreach ($entry in $outputs) {
         $map[$entry.OutputKey] = $entry.OutputValue
@@ -157,31 +224,73 @@ function Build-DatabaseUrlFromStack {
     $passwordEnc = [System.Uri]::EscapeDataString($password)
     # connection_limit: conservative per-instance pool for db.t4g.micro.
     # pool_timeout: fail faster to avoid long perceived hangs in login/actions.
-    return "postgresql://${usernameEnc}:${passwordEnc}@${rdsEndpoint}:${rdsPort}/${dbname}?schema=public&connection_limit=2&pool_timeout=5"
+    return "postgresql://${usernameEnc}:${passwordEnc}@${rdsEndpoint}:${rdsPort}/${dbname}?schema=public&connection_limit=2&pool_timeout=5&sslmode=require"
 }
 
 function Assert-ProdConfigSafe {
     param([pscustomobject]$Config)
 
-    if ($Config.environment -ne "prod") {
+    if ($Config.environment -ne "prod" -and -not $Config.productionMode) {
         return
+    }
+
+    if ($Config.productionMode -and $Config.scheduleControl.enabled) {
+        throw "Producción no puede tener apagado programado de desarrollo."
+    }
+    if ($Config.productionMode -and [string]$Config.accountId -notmatch '^\d{12}$') {
+        throw "La promoción operativa exige una cuenta AWS explícita."
     }
 
     $officeIp = [string]$Config.officeIpCidr
     if (-not $officeIp -or $officeIp -eq "0.0.0.0/0" -or $officeIp -eq "CHANGE_ME/32") {
         throw "Configuración insegura para prod: officeIpCidr debe estar restringido y no puede ser '$officeIp'."
     }
+    $parsedOfficeIp = $null
+    if (-not $officeIp.EndsWith('/32') -or -not [System.Net.IPAddress]::TryParse($officeIp.Substring(0, $officeIp.Length - 3), [ref]$parsedOfficeIp) -or $parsedOfficeIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "Producción exige una dirección IPv4 /32 válida para el acceso administrativo."
+    }
 }
 
 function Set-AwsSdkCredentialsFromProfile {
     param([string]$CurrentProfile)
 
-    $raw = aws configure export-credentials --profile $CurrentProfile --format process 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo exportar credenciales del profile '$CurrentProfile': $raw"
+    if ($CurrentProfile -notmatch '^[A-Za-z0-9_-]+$') { throw 'Perfil AWS inválido.' }
+    $usingLoginProvider = $env:WMS_AWS_LOGIN_PROFILE -eq $CurrentProfile -and $env:WMS_AWS_LOGIN_CONFIG_FILE
+    $loginSession = if ($usingLoginProvider) { 'configured' } else {
+        aws configure get login_session --profile $CurrentProfile 2>$null
+    }
+    if ($loginSession) {
+        # SDK/CDK operations can outlive a single console-login credential.
+        # Let credential_process refresh it instead of pinning an expiring copy.
+        if (-not $usingLoginProvider) {
+            $originalConfig = if ($env:AWS_CONFIG_FILE) { $env:AWS_CONFIG_FILE } else { Join-Path $env:USERPROFILE '.aws\config' }
+            $env:WMS_AWS_LOGIN_CONFIG_FILE = (Resolve-Path -LiteralPath $originalConfig).Path
+            $env:WMS_AWS_LOGIN_PROFILE = $CurrentProfile
+            $providerScript = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'aws-login-credential-process.cjs')).Path
+            $nodePath = (Get-Command node -ErrorAction Stop).Source
+            if ($providerScript.Contains('"') -or $nodePath.Contains('"')) { throw 'Ruta del proveedor inválida.' }
+            $providerDirectory = Join-Path $projectRoot 'output'
+            [System.IO.Directory]::CreateDirectory($providerDirectory) > $null
+            $providerConfig = Join-Path $providerDirectory ('aws-sdk-session-' + [Guid]::NewGuid().ToString('N') + '.ini')
+            @("[profile $CurrentProfile]", "region = $($config.region)", ('credential_process = "' + $nodePath + '" "' + $providerScript + '"')) | Set-Content -LiteralPath $providerConfig -Encoding ascii
+            $env:AWS_CONFIG_FILE = $providerConfig
+        }
+        foreach ($credentialKey in @('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_CREDENTIAL_EXPIRATION')) {
+            Remove-Item "Env:$credentialKey" -ErrorAction SilentlyContinue
+        }
+        return
     }
 
-    $credentials = $raw | ConvertFrom-Json
+    $result = Invoke-AwsCliWithRetry -Arguments @(
+        "configure", "export-credentials",
+        "--profile", $CurrentProfile,
+        "--format", "process"
+    )
+    if ($result.ExitCode -ne 0) {
+        throw "No se pudo exportar credenciales del profile '$CurrentProfile': $($result.Output)"
+    }
+
+    $credentials = $result.Output | ConvertFrom-Json
     if (-not $credentials.AccessKeyId -or -not $credentials.SecretAccessKey -or -not $credentials.SessionToken) {
         throw "Credenciales exportadas incompletas para profile '$CurrentProfile'."
     }
@@ -221,23 +330,25 @@ function Restore-DefaultPrismaClient {
 }
 
 function Repair-OpenNextWindowsDependencies {
-    if (-not $IsWindows) {
+    $runningOnWindows = $env:OS -eq "Windows_NT"
+    if (-not $runningOnWindows) {
         return
     }
 
     $imageOptimizationDir = Join-Path $openNextDir "image-optimization-function"
     $sharpPackageJson = Join-Path $imageOptimizationDir "node_modules\sharp\package.json"
-    if (Test-Path $sharpPackageJson) {
+    $sharpLinuxArm64Binary = Join-Path $imageOptimizationDir "node_modules\@img\sharp-linux-arm64\lib\sharp-linux-arm64-0.35.4.node"
+    if ((Test-Path $sharpPackageJson) -and (Test-Path $sharpLinuxArm64Binary)) {
         return
     }
 
     Write-Warning "OpenNext no instaló dependencias Linux para image-optimization-function en Windows; aplicando reparación local."
     Invoke-Checked `
-        -Command "node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir `"$imageOptimizationDir`" --packages sharp@0.32.6 --os linux --arch arm64 --target 18 --libc glibc" `
+        -Command "node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir `"$imageOptimizationDir`" --packages sharp@0.35.4 --os linux --arch arm64 --target 22 --libc glibc" `
         -FailureMessage "No se pudieron instalar dependencias del bundle OpenNext"
 
-    if (-not (Test-Path $sharpPackageJson)) {
-        throw "La reparación de dependencias OpenNext no creó node_modules/sharp en $imageOptimizationDir"
+    if (-not (Test-Path $sharpPackageJson) -or -not (Test-Path $sharpLinuxArm64Binary)) {
+        throw "La reparación de dependencias OpenNext no creó sharp para Linux ARM64 en $imageOptimizationDir"
     }
 }
 
@@ -316,6 +427,12 @@ function Remove-WindowsPrismaArtifacts {
     $prismaRuntimeDir = Join-Path $serverBundle "node_modules\@prisma\client\runtime"
     $prismaDbFile = Join-Path $serverBundle "prisma\dev.db"
     $cleaned = 0
+    # Next's file tracing may copy the operator's local .env into the artifact.
+    # Runtime configuration must come from Lambda/Secrets Manager instead.
+    foreach ($envFile in Get-ChildItem -LiteralPath $serverBundle -Filter ".env*" -File) {
+        Remove-Item -LiteralPath $envFile.FullName -Force
+        $cleaned++
+    }
     foreach ($file in @($windowsEngines) + @($tmpFiles)) {
         if ($file -and (Test-Path -LiteralPath $file.FullName)) {
             Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
@@ -405,6 +522,15 @@ function Invoke-CdkDeploy {
         [string]$CurrentEnvironment
     )
 
+    $cdkExecutable = Join-Path $WorkingDirectory "node_modules\.bin\cdk.cmd"
+    if (-not (Test-Path $cdkExecutable)) {
+        Write-Host "  Installing locked CDK dependencies..."
+        Invoke-Checked `
+            -Command "npm ci" `
+            -WorkingDirectory $WorkingDirectory `
+            -FailureMessage "npm ci for CDK dependencies failed"
+    }
+
     Push-Location $WorkingDirectory
     try {
         $env:WMS_ENV = $CurrentEnvironment
@@ -452,13 +578,25 @@ function Update-LambdaEnvironment {
         $config.Variables | Add-Member -NotePropertyName "WMS_DISABLE_SYNC_EVENTS_IN_WEB" -NotePropertyValue "true" -Force
         $changed = $true
     }
-    $perfDebugExpected = if ($Environment -eq "dev") { "true" } else { "false" }
+    $perfDebugExpected = if ($runtimeEnvironment -eq "dev") { "true" } else { "false" }
     if (-not $config.Variables.PERF_DEBUG_LOGS -or $config.Variables.PERF_DEBUG_LOGS -ne $perfDebugExpected) {
         $config.Variables | Add-Member -NotePropertyName "PERF_DEBUG_LOGS" -NotePropertyValue $perfDebugExpected -Force
         $changed = $true
     }
     if (-not $config.Variables.APP_VERSION -or $config.Variables.APP_VERSION -ne $packageVersion) {
         $config.Variables | Add-Member -NotePropertyName "APP_VERSION" -NotePropertyValue $packageVersion -Force
+        $changed = $true
+    }
+    if (-not $config.Variables.WMS_ENVIRONMENT -or $config.Variables.WMS_ENVIRONMENT -ne $runtimeEnvironment) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_ENVIRONMENT" -NotePropertyValue $runtimeEnvironment -Force
+        $changed = $true
+    }
+    if (-not $config.Variables.WMS_COMMIT_SHA -or $config.Variables.WMS_COMMIT_SHA -ne $commitSha) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_COMMIT_SHA" -NotePropertyValue $commitSha -Force
+        $changed = $true
+    }
+    if (-not $config.Variables.WMS_RELEASE_ID -or $config.Variables.WMS_RELEASE_ID -ne $releaseId) {
+        $config.Variables | Add-Member -NotePropertyName "WMS_RELEASE_ID" -NotePropertyValue $releaseId -Force
         $changed = $true
     }
     if (-not $config.Variables.AUTH_SECRET) {
@@ -483,8 +621,14 @@ function Update-LambdaEnvironment {
             $json,
             (New-Object System.Text.UTF8Encoding($false))
         )
-        aws lambda update-function-configuration --function-name $CurrentLambdaFunctionName --environment "file://$envFile" --query "LastUpdateStatus" --output text
-        aws lambda wait function-updated-v2 --function-name $CurrentLambdaFunctionName
+        aws lambda update-function-configuration --function-name $CurrentLambdaFunctionName --environment "file://$envFile" --query "LastUpdateStatus" --output text --no-cli-pager
+        if ($LASTEXITCODE -ne 0) {
+            throw "No se pudieron actualizar las variables de entorno de Lambda"
+        }
+        aws lambda wait function-updated-v2 --function-name $CurrentLambdaFunctionName --no-cli-pager
+        if ($LASTEXITCODE -ne 0) {
+            throw "Lambda no alcanzó el estado actualizado"
+        }
         Write-Host "  Lambda env vars updated"
     } else {
         Write-Host "  Lambda env vars already correct"
@@ -605,6 +749,9 @@ function Invoke-AuthSmokeCheck {
 
 $restoreDefaultClient = $false
 $config = Load-WebConfig -TargetEnvironment $Environment
+$runtimeEnvironment = if ($config.productionMode -or $config.environment -eq "prod") { "prod" } else { $config.environment }
+$releaseId = "$runtimeEnvironment-$($commitSha.Substring(0, [Math]::Min(12, $commitSha.Length)))-$releaseTimestamp"
+$env:WMS_RELEASE_ID = $releaseId
 $resolvedStackName = if ($StackName) { $StackName } else { [string]$config.stackName }
 $resolvedLambdaFunctionName = if ($LambdaFunctionName) { $LambdaFunctionName } else { "$($config.namePrefix)-server" }
 $webRuntimeEnabled = ($null -eq $config.enableWebRuntime) -or [bool]$config.enableWebRuntime
@@ -615,13 +762,24 @@ try {
     Write-Phase "1" "Validating AWS access and environment config..."
     Assert-ProdConfigSafe -Config $config
     try {
-        $identity = aws sts get-caller-identity --output json 2>&1 | ConvertFrom-Json
+        $identityResult = Invoke-AwsCliWithRetry -Arguments @(
+            "sts", "get-caller-identity",
+            "--output", "json",
+            "--no-cli-pager"
+        )
+        if ($identityResult.ExitCode -ne 0) {
+            throw $identityResult.Output
+        }
+        $identity = $identityResult.Output | ConvertFrom-Json
+        if ($config.accountId -and $identity.Account -ne $config.accountId) {
+            throw 'La identidad AWS no pertenece a la cuenta operativa configurada.'
+        }
         Write-Host "  Account: $($identity.Account) | ARN: $($identity.Arn)"
         $env:CDK_DEFAULT_ACCOUNT = [string]$identity.Account
         $env:CDK_DEFAULT_REGION = [string]$config.region
         Set-AwsSdkCredentialsFromProfile -CurrentProfile $Profile
     } catch {
-        throw "AWS credentials expired or unavailable. Run: aws sso login --profile $Profile"
+        throw "AWS credentials expired or unavailable. Renew the configured login for profile $Profile."
     }
 
     Write-Host "  Environment: $Environment"
@@ -643,13 +801,14 @@ try {
     if ($webRuntimeEnabled) {
         if (-not $SkipBuild) {
             Invoke-Checked -Command "npx @opennextjs/aws build" -FailureMessage "OpenNext build failed"
-            Repair-OpenNextWindowsDependencies
         } else {
             Write-Host "  Skipping build (using existing .open-next/)"
             if (-not (Test-Path $openNextDir)) {
                 throw ".open-next/ not found. Run without -SkipBuild."
             }
         }
+
+        Repair-OpenNextWindowsDependencies
 
         Remove-WindowsPrismaArtifacts -TargetDir $prismaClientDir
     } else {
@@ -677,6 +836,9 @@ try {
     Write-Phase "4" "Deploying via CDK..."
     Invoke-CdkDeploy -WorkingDirectory $cdkDir -CurrentEnvironment $Environment
 
+    # CDK asset publication can outlive short-lived CLI credentials. Refresh them
+    # before post-deploy reconciliation and fail closed if renewal is unavailable.
+    Set-AwsSdkCredentialsFromProfile -CurrentProfile $Profile
     $outputsAfterDeploy = Get-StackOutputsMap -CurrentStackName $resolvedStackName
     if ($webRuntimeEnabled) {
         Assert-RequiredOutputs -OutputsMap $outputsAfterDeploy -Keys @("CloudFrontUrl", "DbSecretArn", "RdsEndpoint", "RdsPort", "NextAuthSecretArn")
@@ -700,15 +862,24 @@ try {
             -OutputsMap $outputsAfterDeploy
 
         Write-Phase "6" "Running smoke checks..."
-        Write-Host "  Expected prod protections: deletionProtection=$([bool]($config.environment -eq 'prod'))"
+        Write-Host "  Expected prod protections: deletionProtection=$([bool]($runtimeEnvironment -eq 'prod'))"
         Write-Host "  Expected DB secret resolved: $($outputsAfterDeploy['DbSecretArn'])"
 
         try {
-            $response = Invoke-WebRequest -Uri "$cloudFrontUrl/api/health" -UseBasicParsing
+            $response = Invoke-WebRequest -Uri "$cloudFrontUrl/api/health" -UseBasicParsing -TimeoutSec 30
             $health = $response.Content | ConvertFrom-Json
-            Write-Host "  Health: ok=$($health.ok) | db=$($health.db)"
+            if (-not $health.ok -or $health.db -ne "up") {
+                throw "Health degradado: ok=$($health.ok), db=$($health.db)"
+            }
+            if ($health.environment -ne $runtimeEnvironment) {
+                throw "Entorno desplegado '$($health.environment)' no coincide con '$runtimeEnvironment'."
+            }
+            if ($health.commitSha -ne $commitSha) {
+                throw "SHA desplegado '$($health.commitSha)' no coincide con '$commitSha'."
+            }
+            Write-Host "  Health: ok=$($health.ok) | db=$($health.db) | sha=$($health.commitSha)"
         } catch {
-            Write-Warning "Health check failed for $cloudFrontUrl/api/health. Cold start or runtime issue may need review."
+            throw "Health check falló para $cloudFrontUrl/api/health: $($_.Exception.Message)"
         }
 
         Invoke-AuthSmokeCheck -BaseUrl $cloudFrontUrl -Email $SmokeAuthEmail -Password $SmokeAuthPassword

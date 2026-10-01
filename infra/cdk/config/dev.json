@@ -1,11 +1,17 @@
 {
   "environment": "dev",
+  "productionMode": true,
+  "accountId": "904891391424",
   "region": "us-east-1",
   "namePrefix": "wms-web-dev",
   "stackName": "WmsWebDevStack",
   "enableWebRuntime": true,
+  "gmailOAuth": { "enabled": false, "secretName": null },
+  "appBaseUrl": "https://d2b1ltxtvypxr4.cloudfront.net",
+  "enableServerWarmer": false,
+  "networkMode": "ipv6-private",
   "scheduleControl": {
-    "enabled": true,
+    "enabled": false,
     "timezone": "America/Mexico_City",
     "weekdaysStart": "08:00",
     "weekdaysStop": "20:00",
@@ -16,7 +22,7 @@
     "manageWarmer": true
   },
   "serverInVpc": false,
-  "officeIpCidr": "0.0.0.0/0",
+  "officeIpCidr": "CHANGE_ME/32",
   "dbInstanceClass": "db.t4g.micro",
   "dbAllocatedStorageGb": 20,
   "dbName": "wms",

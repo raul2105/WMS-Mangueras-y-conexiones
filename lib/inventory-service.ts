@@ -112,6 +112,45 @@ function assertNumber(value: unknown, code: string, message: string): asserts va
   }
 }
 
+type InventorySnapshot = { id: string; quantity: number; reserved: number; available: number };
+
+function concurrentInventoryError(operation: string) {
+  return new InventoryServiceError("CONCURRENT_MODIFICATION", `Conflicto concurrente al ${operation}; reintente la operación`);
+}
+
+async function updateInventorySnapshot(
+  tx: TxClient,
+  snapshot: InventorySnapshot,
+  data: Prisma.InventoryUpdateManyMutationInput,
+  operation: string,
+) {
+  const result = await tx.inventory.updateMany({
+    where: {
+      id: snapshot.id,
+      quantity: snapshot.quantity,
+      reserved: snapshot.reserved,
+      available: snapshot.available,
+    },
+    data,
+  });
+  if (result.count !== 1) throw concurrentInventoryError(operation);
+}
+
+async function createInventoryRow(
+  tx: TxClient,
+  data: Prisma.InventoryUncheckedCreateInput,
+  operation: string,
+) {
+  try {
+    return await tx.inventory.create({ data });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+      throw concurrentInventoryError(operation);
+    }
+    throw error;
+  }
+}
+
 export class InventoryService {
   private prisma: PrismaClient;
 
@@ -165,14 +204,9 @@ export class InventoryService {
       const available = newQty - reserved;
 
       if (existing) {
-        await tx.inventory.update({
-          where: { id: existing.id },
-          data: { quantity: newQty, available },
-        });
+        await updateInventorySnapshot(tx, existing, { quantity: newQty, available }, "recibir inventario");
       } else {
-        await tx.inventory.create({
-          data: { productId, locationId, quantity: newQty, reserved: 0, available },
-        });
+        await createInventoryRow(tx, { productId, locationId, quantity: newQty, reserved: 0, available }, "crear saldo de recepción");
       }
 
       const movement = await tx.inventoryMovement.create({
@@ -256,10 +290,7 @@ export class InventoryService {
 
       const available = newQty - existing.reserved;
 
-      await tx.inventory.update({
-        where: { id: existing.id },
-        data: { quantity: newQty, available },
-      });
+      await updateInventorySnapshot(tx, existing, { quantity: newQty, available }, "surtir inventario");
 
       const movement = await tx.inventoryMovement.create({
         select: { id: true },
@@ -319,7 +350,7 @@ export class InventoryService {
     return this.withTransaction(options.tx, async (tx) => {
       const existing = await tx.inventory.findUnique({
         where: { productId_locationId: { productId, locationId } },
-        select: { id: true, quantity: true, reserved: true },
+        select: { id: true, quantity: true, reserved: true, available: true },
       });
 
       if (!existing && deltaQty < 0) {
@@ -341,14 +372,9 @@ export class InventoryService {
       const available = newQty - reserved;
 
       if (existing) {
-        await tx.inventory.update({
-          where: { id: existing.id },
-          data: { quantity: newQty, available },
-        });
+        await updateInventorySnapshot(tx, existing, { quantity: newQty, available }, "ajustar inventario");
       } else {
-        await tx.inventory.create({
-          data: { productId, locationId, quantity: newQty, reserved: 0, available },
-        });
+        await createInventoryRow(tx, { productId, locationId, quantity: newQty, reserved: 0, available }, "crear saldo de ajuste");
       }
 
       const movement = await tx.inventoryMovement.create({
@@ -423,29 +449,21 @@ export class InventoryService {
 
       const toInv = await tx.inventory.findUnique({
         where: { productId_locationId: { productId, locationId: toLocationId } },
-        select: { id: true, quantity: true, reserved: true },
+        select: { id: true, quantity: true, reserved: true, available: true },
       });
 
       const newFromQty = fromInv.quantity - qty;
       const newFromAvailable = newFromQty - fromInv.reserved;
-      await tx.inventory.update({
-        where: { id: fromInv.id },
-        data: { quantity: newFromQty, available: newFromAvailable },
-      });
+      await updateInventorySnapshot(tx, fromInv, { quantity: newFromQty, available: newFromAvailable }, "transferir desde la ubicación origen");
 
       const toReserved = toInv?.reserved ?? 0;
       const newToQty = (toInv?.quantity ?? 0) + qty;
       const newToAvailable = newToQty - toReserved;
 
       if (toInv) {
-        await tx.inventory.update({
-          where: { id: toInv.id },
-          data: { quantity: newToQty, available: newToAvailable },
-        });
+        await updateInventorySnapshot(tx, toInv, { quantity: newToQty, available: newToAvailable }, "transferir a la ubicación destino");
       } else {
-        await tx.inventory.create({
-          data: { productId, locationId: toLocationId, quantity: newToQty, reserved: 0, available: newToQty },
-        });
+        await createInventoryRow(tx, { productId, locationId: toLocationId, quantity: newToQty, reserved: 0, available: newToQty }, "crear saldo destino de transferencia");
       }
 
       const movement = await tx.inventoryMovement.create({
@@ -706,29 +724,21 @@ export class InventoryService {
 
       const toInv = await tx.inventory.findUnique({
         where: { productId_locationId: { productId, locationId: toLocationId } },
-        select: { id: true, quantity: true, reserved: true },
+        select: { id: true, quantity: true, reserved: true, available: true },
       });
 
       const newFromQty = fromInv.quantity - qty;
       const newFromReserved = fromInv.reserved - qty;
       const newFromAvailable = newFromQty - newFromReserved;
-      await tx.inventory.update({
-        where: { id: fromInv.id },
-        data: { quantity: newFromQty, reserved: newFromReserved, available: newFromAvailable },
-      });
+      await updateInventorySnapshot(tx, fromInv, { quantity: newFromQty, reserved: newFromReserved, available: newFromAvailable }, "mover la reserva desde la ubicación origen");
 
       const toReserved = toInv?.reserved ?? 0;
       const newToQty = (toInv?.quantity ?? 0) + qty;
       const newToAvailable = newToQty - toReserved;
       if (toInv) {
-        await tx.inventory.update({
-          where: { id: toInv.id },
-          data: { quantity: newToQty, available: newToAvailable },
-        });
+        await updateInventorySnapshot(tx, toInv, { quantity: newToQty, available: newToAvailable }, "mover la reserva a la ubicación destino");
       } else {
-        await tx.inventory.create({
-          data: { productId, locationId: toLocationId, quantity: newToQty, reserved: 0, available: newToQty },
-        });
+        await createInventoryRow(tx, { productId, locationId: toLocationId, quantity: newToQty, reserved: 0, available: newToQty }, "crear saldo destino de reserva");
       }
 
       await tx.inventoryMovement.create({
@@ -821,10 +831,7 @@ export class InventoryService {
         throw new InventoryServiceError("RESERVED_EXCEEDS_QUANTITY", "Reserved exceeds quantity");
       }
       const newAvailable = newQty - existing.reserved;
-      await tx.inventory.update({
-        where: { id: existing.id },
-        data: { quantity: newQty, available: newAvailable },
-      });
+      await updateInventorySnapshot(tx, existing, { quantity: newQty, available: newAvailable }, "consumir inventario");
 
       await tx.inventoryMovement.create({
         data: {

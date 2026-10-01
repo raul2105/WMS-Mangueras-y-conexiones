@@ -8,6 +8,76 @@ import {
 } from "@/lib/sales/console";
 
 describe("sales internal order flow stage", () => {
+  it("keeps preparation disabled when physical ownership is missing", () => {
+    const flowNarrative = getSalesOrderFlowNarrative({
+      orderId: "ready-without-owner",
+      roles: ["WAREHOUSE_OPERATOR"],
+      status: "CONFIRMADA",
+      assignedToUserId: "commercial-owner",
+      hasProductLines: true,
+      latestPickStatus: "COMPLETED",
+    });
+    const action = resolveSalesConsolePrimaryActionState({
+      flowNarrative,
+      canExecuteSalesActions: false,
+      canExecuteProductionActions: true,
+      preparationBlockedReason: "Falta asignar o tomar el trabajo físico",
+    });
+    expect(action.code).toBe("PREPARE_DELIVERY");
+    expect(action.state).toBe("blocked");
+    expect(action.blockedReason).toContain("trabajo físico");
+  });
+  it("keeps delivery disabled for a sales user who does not own the order", () => {
+    const flowNarrative = getSalesOrderFlowNarrative({
+      orderId: "ready-other-owner",
+      roles: ["SALES_EXECUTIVE"],
+      status: "CONFIRMADA",
+      assignedToUserId: "other-sales-owner",
+      hasProductLines: true,
+      latestPickStatus: "COMPLETED",
+      preparedForDeliveryAt: new Date("2026-09-04T12:00:00Z"),
+      deliveredEligibility: { canMarkDelivered: true, deliveredBlockedReason: null },
+    });
+    const action = resolveSalesConsolePrimaryActionState({
+      flowNarrative,
+      canExecuteSalesActions: true,
+      canExecuteProductionActions: false,
+      deliveryBlockedReason: "La entrega corresponde al ejecutivo responsable",
+    });
+    expect(action.code).toBe("MARK_DELIVERED");
+    expect(action.state).toBe("blocked");
+  });
+  it.each(["SALES_EXECUTIVE", "WAREHOUSE_OPERATOR", "MANAGER", "SYSTEM_ADMIN"])(
+    "gates exception decisions independently of production permission for %s",
+    (role) => {
+      const flowNarrative = getSalesOrderFlowNarrative({
+        orderId: "exception-order",
+        roles: [role],
+        status: "CONFIRMADA",
+        assignedToUserId: "sales-owner",
+        hasProductLines: true,
+        latestPickStatus: "PARTIAL",
+        activeException: { type: "SHORTAGE", reason: "Diferencia física" },
+      });
+      const authorized = role === "MANAGER" || role === "SYSTEM_ADMIN";
+      const action = resolveSalesConsolePrimaryActionState({
+        flowNarrative,
+        canExecuteSalesActions: true,
+        canExecuteProductionActions: true,
+        canResolveExceptions: authorized,
+      });
+      expect(action.state === "allowed").toBe(authorized);
+      expect(action.label).toBe(authorized ? "Resolver excepción" : "En espera de supervisor");
+      if (authorized) {
+        expect(resolveSalesConsolePrimaryActionState({
+          flowNarrative,
+          canExecuteSalesActions: true,
+          canExecuteProductionActions: true,
+          canResolveExceptions: false,
+        }).state).toBe("blocked");
+      }
+    },
+  );
   it("returns captura for draft orders", () => {
     expect(getSalesOrderFlowStage({ status: "BORRADOR" })).toBe("captura");
   });
@@ -131,7 +201,7 @@ describe("sales internal order flow stage", () => {
     expect(cta.action.label).toBe("Operar surtido");
   });
 
-  it("blocks assembly CTA for sales executive when assembly is pending", () => {
+  it("keeps sales informed without presenting normal warehouse work as a blocker", () => {
     const cta = resolveSalesOrderPrimaryCta({
       orderId: "ord-4",
       roles: ["SALES_EXECUTIVE"],
@@ -143,7 +213,75 @@ describe("sales internal order flow stage", () => {
     });
     expect(cta.code).toBe("REVIEW_BLOCK");
     expect(cta.isAllowed).toBe(false);
-    expect(cta.action.label).toBe("Revisar bloqueo");
+    expect(cta.action.label).toBe("En espera de almacén");
+    expect(cta.blockedReason).toContain("Almacén o Producción");
+  });
+
+  it("uses the same allowed take CTA while fulfillment is active", () => {
+    const cta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-sales-active",
+      roles: ["SALES_EXECUTIVE"],
+      flowStage: "en_surtido",
+      hasProductLines: true,
+      latestPickStatus: "IN_PROGRESS",
+      takeEligibility: {
+        canTakeOrder: true,
+        takeBlockedReason: null,
+        takeActionLabel: "Continuar pedido",
+      },
+    });
+
+    expect(cta.code).toBe("TAKE_ORDER");
+    expect(cta.isAllowed).toBe(true);
+    expect(cta.action.label).toBe("Continuar pedido");
+    expect(cta.blockedReason).toBeUndefined();
+  });
+
+  it("routes an open exception to manager and keeps sales waiting for that decision", () => {
+    const managerCta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-exception",
+      roles: ["MANAGER"],
+      flowStage: "en_surtido",
+      hasProductLines: true,
+      latestPickStatus: "PARTIAL",
+      activeException: { type: "SHORTAGE", reason: "Faltan dos piezas" },
+    });
+    const salesCta = resolveSalesOrderPrimaryCta({
+      orderId: "ord-exception",
+      roles: ["SALES_EXECUTIVE"],
+      flowStage: "en_surtido",
+      hasProductLines: true,
+      latestPickStatus: "PARTIAL",
+      activeException: { type: "SHORTAGE", reason: "Faltan dos piezas" },
+    });
+
+    expect(managerCta.code).toBe("RESOLVE_EXCEPTION");
+    expect(managerCta.isAllowed).toBe(true);
+    expect(managerCta.action.href).toBe("/production/requests/ord-exception#excepciones");
+    expect(salesCta.code).toBe("REVIEW_BLOCK");
+    expect(salesCta.action.label).toBe("En espera de supervisor");
+    expect(salesCta.blockedReason).toContain("Faltan dos piezas");
+  });
+
+  it("confirms a draft only when it has at least one line", () => {
+    const ready = resolveSalesOrderPrimaryCta({
+      orderId: "ord-draft-ready",
+      roles: ["SALES_EXECUTIVE"],
+      flowStage: "captura",
+      hasAssemblyLines: true,
+    });
+    const empty = resolveSalesOrderPrimaryCta({
+      orderId: "ord-draft-empty",
+      roles: ["SALES_EXECUTIVE"],
+      flowStage: "captura",
+      hasProductLines: false,
+      hasAssemblyLines: false,
+    });
+
+    expect(ready.code).toBe("CONFIRM_ORDER");
+    expect(ready.action.label).toBe("Confirmar pedido");
+    expect(empty.code).toBe("REVIEW_BLOCK");
+    expect(empty.action.label).toBe("Agregar productos");
   });
 
   it("allows assembly CTA for warehouse operator when assembly is pending", () => {
@@ -352,7 +490,7 @@ describe("sales internal order flow stage", () => {
           flowStage: "captura",
           listLabel: "Captura",
           detailTimelineLabel: "Captura",
-          nextAction: "Revisar bloqueo",
+          nextAction: "Agregar productos",
           filterBucket: "Borrador / Captura",
           deliveryEligibility: false,
           meaning: "capture",
@@ -395,7 +533,7 @@ describe("sales internal order flow stage", () => {
           flowStage: "en_surtido",
           listLabel: "En surtido",
           detailTimelineLabel: "Surtido / fulfillment",
-          nextAction: "Revisar bloqueo",
+          nextAction: "En espera de almacén",
           filterBucket: "En surtido",
           deliveryEligibility: false,
           meaning: "assigned / in fulfillment",
@@ -419,7 +557,7 @@ describe("sales internal order flow stage", () => {
           flowStage: "en_surtido",
           listLabel: "En surtido",
           detailTimelineLabel: "Surtido / fulfillment",
-          nextAction: "Revisar bloqueo",
+          nextAction: "En espera de almacén",
           filterBucket: "Parciales",
           deliveryEligibility: false,
           meaning: "partially fulfilled",
@@ -509,7 +647,7 @@ describe("sales internal order flow stage", () => {
           flowStage: "en_surtido",
           listLabel: "En surtido",
           detailTimelineLabel: "Surtido / fulfillment",
-          nextAction: "Revisar bloqueo",
+          nextAction: "En espera de almacén",
           filterBucket: "Bloqueados",
           deliveryEligibility: false,
           meaning: "blocked / missing data",

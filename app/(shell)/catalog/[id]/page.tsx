@@ -5,6 +5,7 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import ProductImage from "@/components/ProductImage";
 import { getEquivalentProducts } from "@/lib/product-equivalences";
 import { buttonStyles } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { buildTechnicalSpecRows, getTechnicalCompleteness, getTechnicalFieldLabel } from "@/lib/catalog/technical-specs";
 import {
     buildCommercialRequestHref,
@@ -91,7 +92,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
             attributes = { raw: product.attributes };
         }
     }
-    const equivalents = await getEquivalentProducts(product.id, { limit: 6, inStockOnly: false });
+    const equivalents = await getEquivalentProducts(product.id, { limit: 6, inStockOnly: false, includeReviewRequired: true });
     const publishedTechnicalSpecs = product.technicalSpecs.filter((row) => !row.source || row.source.status === "APPROVED");
     const hasPendingTechnicalSpecs = product.technicalSpecs.some((row) => row.source?.status === "PENDING_REVIEW")
         || product.technicalSpecCandidates.length > 0;
@@ -291,33 +292,34 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     {equivalents.length > 0 ? (
                         <div className="space-y-3">
                             {equivalents.map((equivalent) => (
-                                <div
-                                    key={equivalent.equivalenceId}
-                                    className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm space-y-3"
-                                >
+                                <div key={equivalent.equivalenceId} className="op-surface-muted rounded-xl border border-[var(--border-default)] p-4 text-sm space-y-3">
                                     <div className="flex items-start justify-between gap-3">
                                         <div>
-                                            <p className="font-semibold text-white">
+                                            <p className="font-semibold text-[var(--text-primary)]">
                                                 {equivalent.name}
                                             </p>
-                                            <p className="font-mono text-xs text-cyan-200">
+                                            <p className="font-mono text-xs text-[var(--text-muted)]">
                                                 {equivalent.sku}
                                             </p>
                                         </div>
-                                        <span className="text-xs text-emerald-200">
-                                            {equivalent.totalAvailable} disp.
-                                        </span>
+                                        <Badge variant={equivalent.technicalStatus === "APPROVED" ? "success" : equivalent.technicalStatus === "BLOCKED" ? "danger" : "warning"}>
+                                            {equivalent.technicalStatus === "APPROVED" ? "Aprobado" : equivalent.technicalStatus === "BLOCKED" ? "Bloqueado" : "Revisión técnica"}
+                                        </Badge>
                                     </div>
-                                    <p className="text-xs text-slate-300">
+                                    <p className="text-xs text-[var(--text-secondary)]">{equivalent.technicalExplanation}</p>
+                                    {equivalent.technicalSources.length > 0 ? (
+                                        <p className="text-xs text-[var(--text-muted)]">Fuente: {equivalent.technicalSources.join(", ")}</p>
+                                    ) : null}
+                                    <p className="text-xs text-[var(--text-secondary)]">
                                         {equivalent.locations.length > 0
                                             ? `Disponible en ${equivalent.locations[0].code} (${equivalent.locations[0].warehouseCode}) con ${equivalent.locations[0].available} unidades.`
                                             : "Equivalencia registrada sin stock disponible."}
                                     </p>
-                                    <div className="flex flex-wrap gap-2 text-[11px] text-slate-200">
-                                        {equivalent.brand ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.brand}</span> : null}
-                                        {equivalent.categoryName ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.categoryName}</span> : null}
-                                        {equivalent.basisNorm ? <span className="rounded bg-black/20 px-2 py-1">{equivalent.basisNorm}</span> : null}
-                                        {typeof equivalent.basisDash === "number" ? <span className="rounded bg-black/20 px-2 py-1">Dash {equivalent.basisDash}</span> : null}
+                                    <div className="flex flex-wrap gap-2 text-[11px] text-[var(--text-secondary)]">
+                                        {equivalent.brand ? <Badge variant="neutral">{equivalent.brand}</Badge> : null}
+                                        {equivalent.categoryName ? <Badge variant="neutral">{equivalent.categoryName}</Badge> : null}
+                                        {equivalent.basisNorm ? <Badge variant="neutral">{equivalent.basisNorm}</Badge> : null}
+                                        {typeof equivalent.basisDash === "number" ? <Badge variant="neutral">Dash {equivalent.basisDash}</Badge> : null}
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         <Link
@@ -326,12 +328,14 @@ export default async function ProductDetailPage({ params }: PageProps) {
                                         >
                                             Ver disponibilidad
                                         </Link>
-                                        <Link
-                                            href={buildCommercialRequestHref({ productId: equivalent.productId, sku: equivalent.sku, q: product.sku, source: "equivalences", equivalentProductId: product.id })}
-                                            className={buttonStyles({ size: "sm" })}
-                                        >
-                                            Crear pedido
-                                        </Link>
+                                        {equivalent.technicalStatus === "APPROVED" ? (
+                                            <Link
+                                                href={buildCommercialRequestHref({ productId: equivalent.productId, sku: equivalent.sku, q: product.sku, source: "equivalences", equivalentProductId: product.id })}
+                                                className={buttonStyles({ size: "sm" })}
+                                            >
+                                                Crear pedido
+                                            </Link>
+                                        ) : null}
                                     </div>
                                 </div>
                             ))}

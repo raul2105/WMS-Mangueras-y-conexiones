@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { FulfillmentOperationalMetrics } from '@/components/dashboard/fulfillment-operational-metrics';
 import type { FulfillmentOperationalMetrics as FulfillmentOperationalMetricsData } from '@/lib/dashboard/fulfillment-dashboard';
 import { auditActionLabel } from '@/lib/audit/action-labels';
+import { Badge } from '@/components/ui/badge';
 
 interface AdminHomeContentProps {
   activeUsersCount: number;
@@ -38,9 +39,9 @@ export function AdminHomeContent({
   operationalMetrics,
 }: AdminHomeContentProps) {
   const stats = [
-    { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-blue-600', href: '/users', live: true },
-    { label: 'Eventos de Auditoría', value: String(auditTotalCount), icon: AlertTriangle, color: 'text-orange-600', href: '/audit', live: true },
-    { label: 'Rastros Recientes', value: String(tracesRecentCount), icon: Database, color: 'text-purple-600', href: '/trace', live: true },
+    { label: 'Usuarios Activos', value: String(activeUsersCount), icon: Users, color: 'text-[var(--text-accent)]', iconBackground: 'bg-[var(--accent-soft)]', href: '/users', live: true },
+    { label: 'Eventos de Auditoría', value: String(auditTotalCount), icon: AlertTriangle, color: 'text-[var(--status-warning-text)]', iconBackground: 'bg-[var(--status-warning-bg)]', href: '/audit', live: true },
+    { label: 'Rastros registrados', value: String(tracesRecentCount), icon: Database, color: 'text-[var(--text-accent)]', iconBackground: 'bg-[var(--accent-soft)]', href: '/trace', live: true },
   ];
 
   return (
@@ -53,18 +54,18 @@ export function AdminHomeContent({
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-500">{stat.label}</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
+                    <p className="text-sm text-[var(--text-muted)]">{stat.label}</p>
+                    <p className="mt-1 text-2xl font-bold text-[var(--text-primary)]">{stat.value}</p>
                   </div>
-                  <div className={`p-3 bg-gray-100 rounded-lg ${stat.color}`}>
+                  <div className={`rounded-lg p-3 ${stat.iconBackground} ${stat.color}`}>
                     <stat.icon size={24} />
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   {stat.live ? (
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">Live</span>
+                    <Badge variant="success">Datos en vivo</Badge>
                   ) : (
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Demo</span>
+                    <Badge variant="neutral">Demostración</Badge>
                   )}
                 </div>
               </CardContent>
@@ -91,10 +92,10 @@ export function AdminHomeContent({
         <CardContent>
           <div className="space-y-3">
             {(recentAudits && recentAudits.length > 0 ? recentAudits : []).map((audit) => (
-              <div key={audit.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div key={audit.id} className="flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--surface-secondary)] p-3">
                 <div className="min-w-0">
-                  <p className="break-words font-medium">{auditActionLabel(audit.action)}</p>
-                  <p className="text-sm text-gray-500">
+                  <p className="break-words font-medium text-[var(--text-primary)]">{auditActionLabel(audit.action)}</p>
+                  <p className="text-sm text-[var(--text-muted)]">
                     {audit.actor ?? 'Sistema'} · {formatTimeAgo(audit.createdAt)}
                   </p>
                 </div>

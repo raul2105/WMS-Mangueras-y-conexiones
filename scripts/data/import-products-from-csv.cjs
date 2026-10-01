@@ -241,88 +241,94 @@ function asProductType(typeValue) {
   return allowed.has(t) ? t : null;
 }
 
-async function adjustInventoryWithMovement(prismaToUse, { productId, locationId, delta, reason }) {
-  if (!Number.isFinite(delta) || delta === 0) return;
+async function reconcileInventoryWithMovement(prismaToUse, { productId, locationId, desiredQty, reason, actor, actorUserId }) {
+  const existing = await prismaToUse.inventory.findUnique({
+    where: { productId_locationId: { productId, locationId } },
+    select: { id: true, quantity: true, reserved: true, available: true },
+  });
 
-  await prismaToUse.$transaction(async (tx) => {
-    const existing = await tx.inventory.findUnique({
-      where: { productId_locationId: { productId, locationId } },
-      select: { id: true, quantity: true, reserved: true, available: true },
+  const currentQty = existing?.quantity ?? 0;
+  const reserved = existing?.reserved ?? 0;
+  const delta = desiredQty - currentQty;
+  if (delta === 0) return false;
+
+  const nextQty = desiredQty;
+  if (nextQty < 0) {
+    throw new Error(`Negative stock detected for product ${productId} at ${locationId}`);
+  }
+  if (nextQty < reserved) {
+    throw new Error(`Reserved exceeds resulting stock for product ${productId} at ${locationId}`);
+  }
+
+  const nextAvailable = nextQty - reserved;
+  if (existing) {
+    const changed = await prismaToUse.inventory.updateMany({
+      where: {
+        id: existing.id,
+        quantity: existing.quantity,
+        reserved: existing.reserved,
+        available: existing.available,
+      },
+      data: { quantity: nextQty, available: nextAvailable },
     });
-
-    if (!existing && delta < 0) {
-      throw new Error(`Cannot reduce non-existing inventory for product ${productId} at ${locationId}`);
+    if (changed.count !== 1) {
+      throw new Error(`Inventory changed concurrently for product ${productId} at ${locationId}; retry the CSV import`);
     }
-
-    const currentQty = existing?.quantity ?? 0;
-    const reserved = existing?.reserved ?? 0;
-    const nextQty = currentQty + delta;
-    if (nextQty < 0) {
-      throw new Error(`Negative stock detected for product ${productId} at ${locationId}`);
-    }
-    if (nextQty < reserved) {
-      throw new Error(`Reserved exceeds resulting stock for product ${productId} at ${locationId}`);
-    }
-
-    const nextAvailable = nextQty - reserved;
-    if (existing) {
-      await tx.inventory.update({
-        where: { id: existing.id },
-        data: { quantity: nextQty, available: nextAvailable },
-      });
-    } else {
-      await tx.inventory.create({
-        data: {
-          productId,
-          locationId,
-          quantity: nextQty,
-          reserved: 0,
-          available: nextAvailable,
-        },
-      });
-    }
-
-    await tx.inventoryMovement.create({
+  } else {
+    await prismaToUse.inventory.create({
       data: {
         productId,
         locationId,
-        type: "ADJUSTMENT",
-        operatorName: "csv-import",
-        quantity: delta,
-        reference: "CSV_IMPORT",
-        notes: reason,
-        documentType: "CSV_IMPORT",
+        quantity: nextQty,
+        reserved: 0,
+        available: nextQty,
       },
     });
+  }
 
-    try {
-      await tx.auditLog.create({
-        data: {
-          entityType: "INVENTORY",
-          entityId: `${productId}:${locationId}`,
-          action: "IMPORT_CSV_ADJUST",
-          before: JSON.stringify({
-            quantity: currentQty,
-            reserved,
-            available: existing?.available ?? currentQty - reserved,
-          }),
-          after: JSON.stringify({
-            quantity: nextQty,
-            reserved,
-            available: nextAvailable,
-          }),
-          actor: "csv-import",
-          source: "scripts/data/import-products-from-csv.cjs",
-        },
-      });
-    } catch {
-      // Keep import flow resilient if audit table is unavailable.
-    }
+  await prismaToUse.inventoryMovement.create({
+    data: {
+      productId,
+      locationId,
+      type: "ADJUSTMENT",
+      operatorName: actor,
+      operatorUserId: actorUserId ?? null,
+      quantity: delta,
+      reference: "CSV_IMPORT",
+      notes: reason,
+      documentType: "CSV_IMPORT",
+    },
   });
+
+  await prismaToUse.auditLog.create({
+    data: {
+      entityType: "INVENTORY",
+      entityId: `${productId}:${locationId}`,
+      action: "IMPORT_CSV_ADJUST",
+      before: JSON.stringify({
+        quantity: currentQty,
+        reserved,
+        available: existing?.available ?? currentQty - reserved,
+      }),
+      after: JSON.stringify({
+        quantity: nextQty,
+        reserved,
+        available: nextAvailable,
+      }),
+      actor,
+      actorUserId: actorUserId ?? null,
+      source: "scripts/data/import-products-from-csv.cjs",
+    },
+  });
+  return true;
 }
 
-async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
+/**
+ * @param {{ filePath: string, dryRun: boolean, prismaClient?: any, actor?: string, actorUserId?: string | null, importLog?: { fileName: string, fileSize: number } }} options
+ */
+async function importProductsFromCsv({ filePath, dryRun, prismaClient, actor: actorInput = "csv-import", actorUserId = null, importLog = null }) {
   const prismaToUse = prismaClient ?? prisma;
+  const actor = String(actorInput ?? "csv-import").trim() || "csv-import";
   const csvPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
   if (!fs.existsSync(csvPath)) {
     throw new Error(`CSV file not found: ${csvPath}`);
@@ -502,105 +508,147 @@ async function importProductsFromCsv({ filePath, dryRun, prismaClient }) {
     };
   }
 
-  let upsertedProducts = 0;
-  let inventoryRowsUpdated = 0;
-  let referenceCodeConflicts = 0;
+  const result = await prismaToUse.$transaction(async (tx) => {
+    let upsertedProducts = 0;
+    let inventoryRowsUpdated = 0;
+    let referenceCodeConflicts = 0;
 
-  for (const sku of skus) {
-    const { productData, inventoryByLocation } = bySku.get(sku);
+    for (const sku of skus) {
+      const { productData, inventoryByLocation } = bySku.get(sku);
 
-    const categoryName = productData.category;
-    const category = categoryName
-      ? await prismaToUse.category.upsert({
-          where: { name: categoryName },
-          create: { name: categoryName },
-          update: {},
-        })
-      : null;
+      const beforeProduct = await tx.product.findUnique({
+        where: { sku: productData.sku },
+        select: { id: true, sku: true, name: true, type: true, brand: true, unitLabel: true, referenceCode: true, base_cost: true, price: true, categoryId: true, subcategory: true, attributes: true },
+      });
 
-    const safeReferenceCode = productData.referenceCode;
+      const categoryName = productData.category;
+      const category = categoryName
+        ? await tx.category.upsert({
+            where: { name: categoryName },
+            create: { name: categoryName },
+            update: {},
+          })
+        : null;
 
-    const product = await prismaToUse.product.upsert({
-      where: { sku: productData.sku },
-      create: {
-        sku: productData.sku,
-        referenceCode: safeReferenceCode,
-        imageUrl: productData.imageUrl,
-        name: productData.name,
-        description: productData.description,
-        type: productData.type,
-        brand: productData.brand,
-        unitLabel: productData.unitLabel,
-        base_cost: productData.base_cost,
-        price: productData.price,
-        attributes: productData.attributes,
-        subcategory: productData.subcategory,
-        ...(category ? { category: { connect: { id: category.id } } } : {}),
-      },
-      update: {
-        name: productData.name,
-        description: productData.description,
-        type: productData.type,
-        brand: productData.brand,
-        unitLabel: productData.unitLabel,
-        referenceCode: safeReferenceCode,
-        imageUrl: productData.imageUrl,
-        base_cost: productData.base_cost,
-        price: productData.price,
-        attributes: productData.attributes,
-        subcategory: productData.subcategory,
-        ...(category ? { category: { connect: { id: category.id } } } : { categoryId: null }),
-      },
-      select: { id: true },
-    });
+      const safeReferenceCode = productData.referenceCode;
 
-    await syncProductTechnicalAttributes(prismaToUse, product.id, productData.attributes);
+      const product = await tx.product.upsert({
+        where: { sku: productData.sku },
+        create: {
+          sku: productData.sku,
+          referenceCode: safeReferenceCode,
+          imageUrl: productData.imageUrl,
+          name: productData.name,
+          description: productData.description,
+          type: productData.type,
+          brand: productData.brand,
+          unitLabel: productData.unitLabel,
+          base_cost: productData.base_cost,
+          price: productData.price,
+          attributes: productData.attributes,
+          subcategory: productData.subcategory,
+          ...(category ? { category: { connect: { id: category.id } } } : {}),
+        },
+        update: {
+          name: productData.name,
+          description: productData.description,
+          type: productData.type,
+          brand: productData.brand,
+          unitLabel: productData.unitLabel,
+          referenceCode: safeReferenceCode,
+          imageUrl: productData.imageUrl,
+          base_cost: productData.base_cost,
+          price: productData.price,
+          attributes: productData.attributes,
+          subcategory: productData.subcategory,
+          ...(category ? { category: { connect: { id: category.id } } } : { categoryId: null }),
+        },
+        select: { id: true },
+      });
 
-    const existingInventory = await prismaToUse.inventory.findMany({
-      where: { productId: product.id },
-      select: { id: true, locationId: true, quantity: true, reserved: true },
-    });
-    const existingByLocation = new Map(existingInventory.map((row) => [row.locationId, row]));
+      await syncProductTechnicalAttributes(tx, product.id, productData.attributes);
 
-    const desiredByLocation = new Map();
-    for (const [locationId, qty] of inventoryByLocation.entries()) {
-      desiredByLocation.set(locationId, (desiredByLocation.get(locationId) ?? 0) + qty);
-    }
+      await tx.auditLog.create({
+        data: {
+          entityType: "PRODUCT",
+          entityId: product.id,
+          action: beforeProduct ? "IMPORT_UPDATE" : "IMPORT_CREATE",
+          before: beforeProduct ? JSON.stringify(beforeProduct) : null,
+          after: JSON.stringify({
+            sku: productData.sku,
+            name: productData.name,
+            type: productData.type,
+            brand: productData.brand,
+            unitLabel: productData.unitLabel,
+            referenceCode: productData.referenceCode,
+            base_cost: productData.base_cost,
+            price: productData.price,
+            categoryId: category?.id ?? null,
+            subcategory: productData.subcategory,
+            attributes: productData.attributes,
+          }),
+          actor,
+          actorUserId: actorUserId ?? null,
+          source: "scripts/data/import-products-from-csv.cjs",
+        },
+      });
 
-    for (const [locationId, desiredQty] of desiredByLocation.entries()) {
-      const existing = existingByLocation.get(locationId);
-      const currentQty = existing?.quantity ?? 0;
-      const delta = desiredQty - currentQty;
-      if (delta !== 0) {
-        await adjustInventoryWithMovement(prismaToUse, {
+      const desiredByLocation = new Map();
+      for (const [locationId, qty] of inventoryByLocation.entries()) {
+        desiredByLocation.set(locationId, (desiredByLocation.get(locationId) ?? 0) + qty);
+      }
+
+      for (const [locationId, desiredQty] of desiredByLocation.entries()) {
+        const changed = await reconcileInventoryWithMovement(tx, {
           productId: product.id,
           locationId,
-          delta,
+          desiredQty,
           reason: "Import CSV",
+          actor,
+          actorUserId,
         });
-        inventoryRowsUpdated++;
+        if (changed) {
+          inventoryRowsUpdated++;
+        }
       }
-      existingByLocation.delete(locationId);
+
+      // Locations omitted from the file are intentionally preserved. A catalog
+      // import must never zero live AWS inventory merely because a source file
+      // is partial; explicit stock corrections use the inventory adjustment flow.
+
+        upsertedProducts++;
     }
 
-    // Locations omitted from the file are intentionally preserved. A catalog
-    // import must never zero live AWS inventory merely because a source file
-    // is partial; explicit stock corrections use the inventory adjustment flow.
+    const log = await tx.importLog.create({
+      data: {
+        fileName: importLog?.fileName ?? path.basename(csvPath),
+        fileSize: importLog?.fileSize ?? raw.length,
+        rows: normalizedRows.length,
+        skus: skus.length,
+        dryRun: false,
+        status: "IMPORTED",
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        entityType: "IMPORT_LOG",
+        entityId: log.id,
+        action: "IMPORT_COMPLETED",
+        before: null,
+        after: JSON.stringify({ fileName: log.fileName, fileSize: log.fileSize, rows: log.rows, skus: log.skus, status: log.status }),
+        actor,
+        actorUserId: actorUserId ?? null,
+        source: "catalog.import-csv",
+      },
+    });
 
-    upsertedProducts++;
-  }
+    return { rows: normalizedRows.length, skus: skus.length, upsertedProducts, inventoryRowsUpdated, referenceCodeConflicts, dryRun: false };
+  }, { maxWait: 5000, timeout: 20000 });
 
   console.log(
-    `Imported: ${upsertedProducts} products; ${inventoryRowsUpdated} inventory adjustments; ${referenceCodeConflicts} referenceCode conflicts handled.`,
+    `Imported: ${result.upsertedProducts} products; ${result.inventoryRowsUpdated} inventory adjustments; ${result.referenceCodeConflicts} referenceCode conflicts handled.`,
   );
-  return {
-    rows: normalizedRows.length,
-    skus: skus.length,
-    upsertedProducts,
-    inventoryRowsUpdated,
-    referenceCodeConflicts,
-    dryRun: false,
-  };
+  return result;
 }
 
 async function main() {

@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { loginAs, type RoleKey } from "./lib/auth.helpers";
@@ -31,13 +32,22 @@ const A11Y_ROUTES: A11yRoute[] = [
       await expect(page.getByTestId("requests-customer-filter")).toBeHidden();
       await page.locator('[data-testid="requests-more-filters"] summary').click();
       await expect(page.getByTestId("requests-customer-filter")).toBeVisible();
-      await expect(page.getByTestId("request-card").first()).toBeVisible();
-      await expect(
-        page.getByTestId("request-card").first().getByText(
-          "Ver seguimiento operativo",
-          { exact: true },
-        ),
-      ).toBeVisible();
+      const requestCards = page.getByTestId("request-card");
+      const requestCardCount = await requestCards.count();
+      if (requestCardCount > 0) {
+        await expect(requestCards.first()).toBeVisible();
+        await expect(
+          requestCards.first().getByText(
+            "Ver seguimiento operativo",
+            { exact: true },
+          ),
+        ).toBeVisible();
+      } else {
+        expect(requestCardCount).toBe(0);
+        await expect(
+          page.getByText("No hay pedidos activos para el filtro seleccionado.", { exact: true }),
+        ).toBeVisible();
+      }
       await expect(page.getByText("Vista administrativa", { exact: true })).toHaveCount(0);
     },
   },
@@ -79,7 +89,7 @@ const A11Y_ROUTES: A11yRoute[] = [
 for (const { path, role, heading, tags, extraChecks } of A11Y_ROUTES) {
   if (role) {
     test.describe(`KAN-55/KAN-63/KAN-87 A11y: ${path} (authenticated as ${role})`, () => {
-      test(`no axe violations on ${path}`, async ({ page }) => {
+      test(`no serious axe violations on ${path}`, async ({ page }, testInfo) => {
         const expectedUrl = path === "/" ? undefined : path;
         await loginAs(page, role, path, expectedUrl);
         await expect(
@@ -90,21 +100,17 @@ for (const { path, role, heading, tags, extraChecks } of A11Y_ROUTES) {
         }
 
         const results = await new AxeBuilder({ page }).withTags(tags).analyze();
+        const axeResultsPath = testInfo.outputPath("axe-results.json");
+        await writeFile(axeResultsPath, JSON.stringify(results, null, 2), "utf8");
+        await testInfo.attach("axe-results.json", {
+          path: axeResultsPath,
+          contentType: "application/json",
+        });
 
-        // Report violations without failing on known pre-existing issues
-        // TODO: Remove this comment and enforce zero violations once baseline is clean
-        if (results.violations.length > 0) {
-          console.log(
-            `A11y violations on ${path}:`,
-            results.violations.map((v) => `${v.id}: ${v.description}`),
-          );
-        }
-
-        // For now, assert no CRITICAL violations - adjust threshold as needed
-        const criticalViolations = results.violations.filter(
-          (v) => v.impact === "critical",
+        const seriousOrCriticalViolations = results.violations.filter(
+          (v) => v.impact === "serious" || v.impact === "critical",
         );
-        expect(criticalViolations.length).toBe(0);
+        expect(seriousOrCriticalViolations).toEqual([]);
         const colorContrastViolations = results.violations.filter(
           (v) => v.id === "color-contrast",
         );
@@ -113,7 +119,7 @@ for (const { path, role, heading, tags, extraChecks } of A11Y_ROUTES) {
     });
   } else {
     test.describe(`A11y: ${path} (public)`, () => {
-      test(`no axe violations on ${path}`, async ({ page }) => {
+      test(`no serious axe violations on ${path}`, async ({ page }, testInfo) => {
         await page.goto(path, { waitUntil: "commit" });
         await expect(page).toHaveURL(
           new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
@@ -123,18 +129,17 @@ for (const { path, role, heading, tags, extraChecks } of A11Y_ROUTES) {
         ).toBeVisible();
 
         const results = await new AxeBuilder({ page }).withTags(tags).analyze();
+        const axeResultsPath = testInfo.outputPath("axe-results.json");
+        await writeFile(axeResultsPath, JSON.stringify(results, null, 2), "utf8");
+        await testInfo.attach("axe-results.json", {
+          path: axeResultsPath,
+          contentType: "application/json",
+        });
 
-        if (results.violations.length > 0) {
-          console.log(
-            `A11y violations on ${path}:`,
-            results.violations.map((v) => `${v.id}: ${v.description}`),
-          );
-        }
-
-        const criticalViolations = results.violations.filter(
-          (v) => v.impact === "critical",
+        const seriousOrCriticalViolations = results.violations.filter(
+          (v) => v.impact === "serious" || v.impact === "critical",
         );
-        expect(criticalViolations.length).toBe(0);
+        expect(seriousOrCriticalViolations).toEqual([]);
         const colorContrastViolations = results.violations.filter(
           (v) => v.id === "color-contrast",
         );

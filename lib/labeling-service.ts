@@ -48,7 +48,7 @@ type CreateLocationTraceInput = {
 const DEFAULT_COMPANY_NAME = process.env.WMS_COMPANY_NAME?.trim() || "SCMayher";
 const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() || "http://localhost:3002";
 
-const DEFAULT_TEMPLATES: Array<Prisma.LabelTemplateCreateInput> = [
+const DEFAULT_TEMPLATES: Array<Prisma.LabelTemplateCreateManyInput> = [
   { code: "RECEIPT_STANDARD", name: "Recepcion estandar", labelType: "RECEIPT", isDefault: true, definitionJson: JSON.stringify({ variant: "standard" }) },
   { code: "RECEIPT_COMPACT", name: "Recepcion compacta", labelType: "RECEIPT", definitionJson: JSON.stringify({ variant: "compact" }) },
   { code: "PICKING_STANDARD", name: "Picking estandar", labelType: "PICKING", isDefault: true, definitionJson: JSON.stringify({ variant: "standard" }) },
@@ -93,21 +93,24 @@ export function generateTraceId(labelType: LabelType): string {
 }
 
 export async function ensureDefaultLabelTemplates(db: Db) {
-  // A transaction client shares one database connection. Keep the template
-  // upserts serial so an operational pick does not queue concurrent writes on
-  // that connection while it is holding inventory reservations.
-  for (const tpl of DEFAULT_TEMPLATES) {
-    await db.labelTemplate.upsert({
-      where: { code: tpl.code },
-      update: {
-        name: tpl.name,
-        labelType: tpl.labelType,
-        isActive: true,
-        definitionJson: tpl.definitionJson,
-        isDefault: tpl.isDefault ?? false,
-      },
-      create: tpl,
-    });
+  const existing = await db.labelTemplate.findMany({
+    where: { code: { in: DEFAULT_TEMPLATES.map((template) => template.code) } },
+    select: { code: true },
+  });
+  const existingCodes = new Set(existing.map((template) => template.code));
+  const missing = DEFAULT_TEMPLATES.filter((template) => !existingCodes.has(template.code));
+  if (missing.length === 0) return;
+
+  // Install only absent defaults. PostgreSQL's conflict-ignore insert handles
+  // concurrent first use; the SQLite development adapter creates only the
+  // missing rows and safely fails closed on a simultaneous unique-key race.
+  if (/^postgres(?:ql)?:\/\//i.test(process.env.DATABASE_URL ?? "")) {
+    await db.labelTemplate.createMany({ data: missing, skipDuplicates: true });
+    return;
+  }
+
+  for (const template of missing) {
+    await db.labelTemplate.create({ data: template });
   }
 }
 

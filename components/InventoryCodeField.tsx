@@ -185,7 +185,7 @@ export default function InventoryCodeField({
 
       {remoteSuggestions.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs text-slate-500">Coincidencias operativas</p>
+          <p className="text-xs text-[var(--text-muted)]">Coincidencias operativas</p>
           <div className="grid grid-cols-1 gap-2">
             {remoteSuggestions.map((option) => (
               <button
@@ -203,11 +203,11 @@ export default function InventoryCodeField({
                   <div className="min-w-0">
                     <p className="font-mono text-sm text-cyan-300">{option.sku}</p>
                     <p className="text-sm text-slate-200 truncate">{option.name}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--text-muted)]">
                       {[option.referenceCode, option.brand, option.category?.name, option.subcategory].filter(Boolean).join(" • ")}
                     </p>
                   </div>
-                  <span className={`text-xs font-semibold ${typeof option.totalAvailable === "number" && option.totalAvailable > 0 ? "text-green-400" : "text-slate-500"}`}>
+                  <span className={`text-xs font-semibold ${typeof option.totalAvailable === "number" && option.totalAvailable > 0 ? "text-green-400" : "text-[var(--text-muted)]"}`}>
                     {typeof option.totalAvailable === "number" ? `${option.totalAvailable} disp.` : "--"}
                   </span>
                 </div>
@@ -235,7 +235,7 @@ export default function InventoryCodeField({
               </div>
             </div>
           ) : (
-            <p className="text-slate-500">{lookupError ?? "Escribe al menos 3 caracteres para ver coincidencias."}</p>
+            <p className="text-[var(--text-muted)]">{lookupError ?? "Escribe al menos 3 caracteres para ver coincidencias."}</p>
           )}
         </div>
       )}

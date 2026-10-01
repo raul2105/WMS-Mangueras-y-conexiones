@@ -112,7 +112,7 @@ async function createSalesRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.new.create");
   const rbacPerf = startPerf("action.production.requests.new.create.rbac");
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   rbacPerf.end();
 
   const sessionPerf = startPerf(
@@ -128,6 +128,8 @@ async function createSalesRequest(formData: FormData) {
   const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
   const lineKind = String(formData.get("lineKind") ?? "").trim();
+  const equivalenceOriginalProductId = String(formData.get("equivalenceOriginalProductId") ?? "").trim();
+  const equivalenceSelectedProductId = String(formData.get("equivalenceSelectedProductId") ?? "").trim();
   const orderLinesInput = parseOrderLines(String(formData.get("orderLines") ?? ""));
   const lineProductId = String(formData.get("lineProductId") ?? "").trim();
   const lineRequestedQtyRaw = String(formData.get("lineRequestedQty") ?? "").trim();
@@ -173,8 +175,48 @@ async function createSalesRequest(formData: FormData) {
     redirect(`/production/requests/new?error=${encodeURIComponent(message)}`);
   }
 
+  if (Boolean(equivalenceOriginalProductId) !== Boolean(equivalenceSelectedProductId)) {
+    redirect(`/production/requests/new?error=${encodeURIComponent("El contexto de equivalencia está incompleto. Vuelve a seleccionar el producto")}`);
+  }
+  let trustedEquivalenceOriginalProductId: string | null = null;
+  let trustedEquivalenceSelectedProductId: string | null = null;
+  if (equivalenceOriginalProductId && equivalenceSelectedProductId) {
+    const activeEquivalence = await prisma.productEquivalence.findFirst({
+      where: {
+        active: true,
+        OR: [
+          { productId: equivalenceOriginalProductId, equivProductId: equivalenceSelectedProductId },
+          { productId: equivalenceSelectedProductId, equivProductId: equivalenceOriginalProductId },
+        ],
+      },
+      select: { productId: true, equivProductId: true },
+    });
+    if (!activeEquivalence) {
+      redirect(`/production/requests/new?error=${encodeURIComponent("La equivalencia ya no está activa. Vuelve a seleccionarla")}`);
+    }
+    trustedEquivalenceOriginalProductId = activeEquivalence.productId === equivalenceOriginalProductId
+      ? activeEquivalence.productId
+      : activeEquivalence.equivProductId;
+    trustedEquivalenceSelectedProductId = activeEquivalence.productId === equivalenceSelectedProductId
+      ? activeEquivalence.productId
+      : activeEquivalence.equivProductId;
+    if (trustedEquivalenceOriginalProductId !== equivalenceOriginalProductId
+      || trustedEquivalenceSelectedProductId !== equivalenceSelectedProductId) {
+      redirect(`/production/requests/new?error=${encodeURIComponent("El producto seleccionado no coincide con la equivalencia activa")}`);
+    }
+  }
+
+  let equivalenceContextAttached = !equivalenceOriginalProductId;
+  const linesWithEquivalenceContext = orderLinesInput?.success
+    ? orderLinesInput.data.map((line) => {
+        if (line.kind !== "PRODUCT" || line.productId !== trustedEquivalenceSelectedProductId) return line;
+        equivalenceContextAttached = true;
+        return { ...line, equivalenceOriginalProductId: trustedEquivalenceOriginalProductId };
+      })
+    : null;
+
   let initialProductLine:
-    | { productId: string; requestedQty: number; notes?: string | null }
+    | { productId: string; requestedQty: number; notes?: string | null; equivalenceOriginalProductId?: string | null }
     | null = null;
   if (lineKind === "PRODUCT" && lineProductId) {
     const lineProduct = await getProductSearchSelection(prisma, lineProductId);
@@ -204,6 +246,17 @@ async function createSalesRequest(formData: FormData) {
     redirect(`/production/requests/new?error=${encodeURIComponent("Selecciona un producto para crear el pedido")}`);
   }
 
+  if (!orderLinesInput?.success && initialProductLine && equivalenceOriginalProductId) {
+    if (lineProductId !== equivalenceSelectedProductId) {
+      redirect(`/production/requests/new?error=${encodeURIComponent("El producto no coincide con la equivalencia seleccionada")}`);
+    }
+    initialProductLine.equivalenceOriginalProductId = trustedEquivalenceOriginalProductId;
+    equivalenceContextAttached = true;
+  }
+  if (!equivalenceContextAttached) {
+    redirect(`/production/requests/new?error=${encodeURIComponent("La equivalencia no corresponde a una línea del pedido")}`);
+  }
+
   const assemblyInput = !orderLinesInput?.success && lineKind === "ASSEMBLY"
     ? salesInternalOrderAssemblyCreateSchema.safeParse({
         warehouseId,
@@ -214,6 +267,11 @@ async function createSalesRequest(formData: FormData) {
         assemblyQuantityRaw: String(formData.get("assemblyQuantity") ?? "").trim(),
         sourceDocumentRef: String(formData.get("sourceDocumentRef") ?? "").trim() || undefined,
         notes: String(formData.get("assemblyNotes") ?? "").trim() || undefined,
+        workingPressureBarRaw: String(formData.get("workingPressureBar") ?? "").trim(),
+        operatingTemperatureCRaw: String(formData.get("operatingTemperatureC") ?? "").trim(),
+        medium: String(formData.get("medium") ?? "").trim() || undefined,
+        application: String(formData.get("application") ?? "").trim() || undefined,
+        assemblyMethod: String(formData.get("assemblyMethod") ?? "").trim() || undefined,
       })
     : null;
 
@@ -271,10 +329,14 @@ async function createSalesRequest(formData: FormData) {
       notes: notes || null,
       requestedByUserId: ctx.user?.id ?? null,
       requestedByRoles: ctx.roles,
+      auditActor: {
+        actorUserId: authorizedSession.user.id,
+        actor: authorizedSession.user.name ?? authorizedSession.user.email ?? authorizedSession.user.id,
+      },
       initialProductLine,
     };
     const created = orderLinesInput?.success
-      ? await createSalesRequestWithLines(prisma, { ...requestArgs, lines: orderLinesInput.data })
+      ? await createSalesRequestWithLines(prisma, { ...requestArgs, lines: linesWithEquivalenceContext ?? orderLinesInput.data })
       : assemblyInput?.success
       ? await createSalesRequestWithAssembly(prisma, {
           ...requestArgs,
@@ -287,6 +349,11 @@ async function createSalesRequest(formData: FormData) {
             assemblyQuantity: assemblyInput.data.assemblyQuantityRaw,
             sourceDocumentRef: assemblyInput.data.sourceDocumentRef ?? null,
             notes: assemblyInput.data.notes ?? null,
+            workingPressureBar: assemblyInput.data.workingPressureBarRaw,
+            operatingTemperatureC: assemblyInput.data.operatingTemperatureCRaw,
+            medium: assemblyInput.data.medium ?? null,
+            application: assemblyInput.data.application ?? null,
+            assemblyMethod: assemblyInput.data.assemblyMethod ?? null,
           },
         })
       : await createSalesRequestDraftHeader(prisma, requestArgs);
@@ -463,6 +530,7 @@ export default async function NewProductionRequestPage({
           warehouses={warehouses}
           selectedProduct={selectedProduct}
           originalProduct={originalProduct}
+          equivalenceOriginalProductId={originalProduct?.id}
           hasCommercialContext={hasCommercialContext}
           displayQuery={displayQuery}
           sourceLabel={sourceLabel}

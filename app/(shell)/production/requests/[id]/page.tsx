@@ -40,7 +40,10 @@ import {
   summarizePickListStatus,
   summarizeProductionStatus,
 } from "@/lib/sales/internal-orders";
-import { getSalesConsoleTimelineItems } from "@/lib/sales/console";
+import {
+  getSalesConsoleTimelineItems,
+  resolveSalesConsolePrimaryActionState,
+} from "@/lib/sales/console";
 import { hasWarehouseFulfillmentOwnership } from "@/lib/sales/fulfillment-readiness";
 import {
   firstErrorMessage,
@@ -56,6 +59,10 @@ import { getRequestId } from "@/lib/request-meta";
 
 export const dynamic = "force-dynamic";
 
+function trustedAuditActor(user: { id: string; name?: string | null; email?: string | null }) {
+  return { actorUserId: user.id, actor: user.name ?? user.email ?? user.id };
+}
+
 function isNextRedirectError(error: unknown) {
   return Boolean(
     error &&
@@ -70,7 +77,7 @@ async function confirmRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.confirm");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -84,6 +91,7 @@ async function confirmRequest(formData: FormData) {
     await confirmSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
       confirmedByUserId: sessionCtx.user?.id ?? null,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
 
@@ -109,7 +117,7 @@ async function cancelRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.cancel");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderCancellationSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -125,6 +133,7 @@ async function cancelRequest(formData: FormData) {
       orderId: parsed.data.orderId,
       cancelledByUserId: sessionCtx.user?.id ?? null,
       reason: parsed.data.reason,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
 
@@ -150,7 +159,7 @@ async function takeRequest(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.pull");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderTransitionSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -167,6 +176,7 @@ async function takeRequest(formData: FormData) {
     await pullSalesRequestOrder(prisma, {
       orderId: parsed.data.orderId,
       assignedToUserId: sessionCtx.user.id,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
@@ -213,7 +223,7 @@ async function markDelivered(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.delivered");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderDeliverySchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -241,6 +251,7 @@ async function markDelivered(formData: FormData) {
       notes: parsed.data.notes,
       evidenceUrl: parsed.data.evidenceUrl,
       exceptionReason: parsed.data.exceptionReason,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
     });
     servicePerf.end({ requestId, orderId: parsed.data.orderId });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true });
@@ -260,7 +271,7 @@ async function markPreparedForDelivery(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.prepare_delivery");
   const requestId = await getRequestId();
-  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const authorizedSession = await (await import("@/lib/rbac")).requirePermission("production.execute");
   const sessionCtx = await getSessionContext();
   const parsed = salesInternalOrderPreparationSchema.safeParse({
     orderId: String(formData.get("orderId") ?? "").trim(),
@@ -276,6 +287,7 @@ async function markPreparedForDelivery(formData: FormData) {
     const result = await markSalesRequestPreparedForDelivery(prisma, {
       ...parsed.data,
       preparedByUserId: sessionCtx.user.id,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     perf.end({ requestId, orderId: parsed.data.orderId, ok: true, alreadyPrepared: result.alreadyPrepared });
     redirect(`/production/requests/${parsed.data.orderId}?ok=${encodeURIComponent(result.alreadyPrepared ? result.warning : "Pedido preparado para entrega")}`);
@@ -289,7 +301,7 @@ async function markPreparedForDelivery(formData: FormData) {
 
 async function resolveOperationalException(formData: FormData) {
   "use server";
-  await requireSalesAssignmentAccess();
+  const authorizedSession = await requireSalesAssignmentAccess();
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   const exceptionId = String(formData.get("exceptionId") ?? "").trim();
@@ -305,6 +317,7 @@ async function resolveOperationalException(formData: FormData) {
       decidedByUserId: sessionCtx.user.id,
       resolution: resolution as typeof allowedResolutions[number],
       notes,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent(result.returnId ? "Cancelación aprobada; falta reversión física" : "Excepción operativa resuelta")}`);
   } catch (error) {
@@ -315,7 +328,7 @@ async function resolveOperationalException(formData: FormData) {
 
 async function receiveReturn(formData: FormData) {
   "use server";
-  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const authorizedSession = await (await import("@/lib/rbac")).requirePermission("production.execute");
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   const returnId = String(formData.get("returnId") ?? "").trim();
@@ -329,6 +342,7 @@ async function receiveReturn(formData: FormData) {
     await receiveSalesRequestReturn(prisma, {
       returnId,
       receivedByUserId: sessionCtx.user.id,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
       items: itemIds.map((itemId, index) => ({
         itemId,
         disposition: dispositions[index] as "RESTOCK" | "REPAIR" | "SCRAP" | "REJECT",
@@ -344,12 +358,16 @@ async function receiveReturn(formData: FormData) {
 
 async function finalizeCancellation(formData: FormData) {
   "use server";
-  await requireSalesAssignmentAccess();
+  const authorizedSession = await requireSalesAssignmentAccess();
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   if (!sessionCtx.user?.id || !orderId) redirect(`/production/requests?error=${encodeURIComponent("Sesión o pedido inválido")}`);
   try {
-    await finalizeSalesRequestCancellationAfterReversal(prisma, { orderId, cancelledByUserId: sessionCtx.user.id });
+    await finalizeSalesRequestCancellationAfterReversal(prisma, {
+      orderId,
+      cancelledByUserId: sessionCtx.user.id,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
+    });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Cancelación confirmada después de la reversión física")}`);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -359,13 +377,18 @@ async function finalizeCancellation(formData: FormData) {
 
 async function requestCustomerReturn(formData: FormData) {
   "use server";
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
   const sessionCtx = await getSessionContext();
   const orderId = String(formData.get("orderId") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
   if (!sessionCtx.user?.id || !orderId || !reason) redirect(`/production/requests/${orderId}?error=${encodeURIComponent("La devolución requiere un motivo")}`);
   try {
-    await requestSalesRequestCustomerReturn(prisma, { orderId, requestedByUserId: sessionCtx.user.id, reason });
+    await requestSalesRequestCustomerReturn(prisma, {
+      orderId,
+      requestedByUserId: sessionCtx.user.id,
+      reason,
+      auditActor: authorizedSession.user ? trustedAuditActor(authorizedSession.user) : undefined,
+    });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Devolución solicitada; pendiente de recepción e inspección")}`);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -377,7 +400,7 @@ async function addProductLine(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.add_line");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const productId = String(formData.get("productId") ?? "").trim();
@@ -401,6 +424,7 @@ async function addProductLine(formData: FormData) {
       productId: parsed.data.productId,
       requestedQty: parsed.data.requestedQtyRaw,
       notes: parsed.data.notes ?? null,
+      auditActor: trustedAuditActor(authorizedSession.user),
     });
     servicePerf.end({ requestId, orderId, productId });
     perf.end({ requestId, orderId, productId, ok: true });
@@ -417,7 +441,7 @@ async function deleteLine(formData: FormData) {
   "use server";
   const perf = startPerf("action.production.requests.detail.delete_line");
   const requestId = await getRequestId();
-  await requireSalesWriteAccess();
+  const authorizedSession = await requireSalesWriteAccess();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const lineId = String(formData.get("lineId") ?? "").trim();
@@ -427,7 +451,7 @@ async function deleteLine(formData: FormData) {
 
   try {
     const servicePerf = startPerf("action.production.requests.detail.delete_line.service");
-    await deleteSalesRequestLine(prisma, { orderId, lineId });
+    await deleteSalesRequestLine(prisma, { orderId, lineId, auditActor: trustedAuditActor(authorizedSession.user) });
     servicePerf.end({ requestId, orderId, lineId });
     perf.end({ requestId, orderId, lineId, ok: true });
     redirect(`/production/requests/${orderId}?ok=${encodeURIComponent("Línea eliminada")}`);
@@ -772,15 +796,27 @@ export default async function ProductionRequestDetailPage({
     hasCompletedDirectPick,
     hasCompletedConfiguredAssembly,
   });
-  const canConfirmDelivery = deliveredEligibility.canMarkDelivered && (
+  const activeException = order.operationalExceptions.find(
+    (exception: any) => exception.status === "OPEN",
+  ) ?? null;
+  const canConfirmDelivery = !activeException && deliveredEligibility.canMarkDelivered && (
     (order.assignedToUserId === sessionCtx.user?.id && sessionCtx.roles.includes("SALES_EXECUTIVE"))
     || sessionCtx.roles.includes("MANAGER")
     || sessionCtx.roles.includes("SYSTEM_ADMIN")
   );
+  const hasPhysicalFulfillmentOwner = hasWarehouseFulfillmentOwnership(order);
+  const canOverridePreparation = sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN");
+  const currentUserId = sessionCtx.user?.id ?? null;
+  const currentUserOwnsPhysicalWork = Boolean(currentUserId && (
+    order.warehouseAssigneeUserId === currentUserId
+    || order.warehouseClaimedByUserId === currentUserId
+  ));
+  const preparationNeedsSupervisorOverride = !currentUserOwnsPhysicalWork && canOverridePreparation;
   const canPrepareForDelivery =
+    !activeException &&
     (sessionCtx.roles.includes("WAREHOUSE_OPERATOR") || sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN")) &&
     orderStatus === "CONFIRMADA" &&
-    hasWarehouseFulfillmentOwnership(order) &&
+    (currentUserOwnsPhysicalWork || canOverridePreparation) &&
     hasCompletedDirectPick &&
     hasCompletedConfiguredAssembly &&
     !order.preparedForDeliveryAt &&
@@ -798,8 +834,19 @@ export default async function ProductionRequestDetailPage({
     hasAssemblyLines: configuredLines.length > 0,
     hasCompletedConfiguredAssembly,
     assemblyHref,
+    activeException,
     takeEligibility,
     deliveredEligibility,
+  });
+  const primaryActionState = resolveSalesConsolePrimaryActionState({
+    flowNarrative,
+    canExecuteSalesActions: canRenderWriteActions,
+    canExecuteProductionActions: canOperateDirectPick,
+    canResolveExceptions: canManageAssignments,
+    deliveryBlockedReason: canConfirmDelivery ? null : "La entrega corresponde al ejecutivo responsable o a supervisión.",
+    preparationBlockedReason: !hasPhysicalFulfillmentOwner && !canOverridePreparation
+      ? "Falta asignar o tomar el trabajo físico antes de preparar el pedido."
+      : deliveryLocations.length === 0 ? "No hay un área de entrega activa configurada para este almacén." : null,
   });
   const timeline = getSalesConsoleTimelineItems({
     createdAt: order.createdAt,
@@ -856,59 +903,51 @@ export default async function ProductionRequestDetailPage({
       ) : null}
 
       <section className="glass-card space-y-4 text-sm text-[var(--text-secondary)]" data-testid="request-work-summary">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-2">
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado del pedido</h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[var(--text-muted)]">Etapa actual:</span>
-                <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
-              </div>
-              <p>Compromiso: {formatDate(order.dueDate)} · Responsable comercial: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
-              <p>Responsable físico: {order.warehouseAssigneeUser?.name ?? order.warehouseClaimedByUser?.name ?? order.warehouseAssigneeUser?.email ?? order.warehouseClaimedByUser?.email ?? "Sin asignar"}</p>
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Estado del pedido</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[var(--text-muted)]">Etapa actual:</span>
+              <Badge variant={flowNarrative.flowBadgeVariant}>{flowNarrative.flowStageLabel}</Badge>
+              {activeException ? <Badge variant="danger">Excepción abierta</Badge> : null}
             </div>
-            <div className="flex flex-wrap gap-3">
-              <Link href="/production/requests" className={buttonStyles({ variant: "secondary" })}>
-                ← Pedidos
-              </Link>
-            </div>
-          </div>
-
-          <div className="op-next-action">
-            <p className="op-label">{flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "Pedido finalizado" : "Siguiente paso"}</p>
-            <p className="mt-1 font-semibold text-[var(--text-primary)]">
-              {flowNarrative.nextRecommendedAction.blockedReason ? (
-                flowNarrative.nextRecommendedAction.label
-              ) : (
-                <Link href={flowNarrative.nextRecommendedAction.href} className="text-[var(--accent)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-surface)]">
-                  {flowNarrative.nextRecommendedAction.label}
-                </Link>
-              )}
-            </p>
-            {flowNarrative.nextRecommendedAction.blockedReason ? (
-              <p className="mt-1 text-xs text-[var(--status-warning-text)]">
-                {flowNarrative.nextRecommendedAction.blockedReason}
+            <p>Compromiso: {formatDate(order.dueDate)} · Responsable comercial: {order.assignedToUser?.name ?? order.assignedToUser?.email ?? "Sin asignar"}</p>
+            <p>Responsable físico: {order.warehouseAssigneeUser?.name ?? order.warehouseClaimedByUser?.name ?? order.warehouseAssigneeUser?.email ?? order.warehouseClaimedByUser?.email ?? "Sin asignar"}</p>
+            {activeException ? (
+              <p className="text-[var(--status-danger-text)]">
+                Bloqueo: {activeException.type === "SHORTAGE" ? "Faltante operativo" : "Solicitud de cancelación"} · Dueño de decisión: Manager / Administrador
               </p>
             ) : null}
           </div>
 
+          <div className="op-next-action">
+            <p className="op-label">{flowNarrative.flowStage === "entregado" || flowNarrative.flowStage === "cancelado" ? "Pedido finalizado" : "Siguiente paso"}</p>
+            <p className="mt-1 font-semibold text-[var(--text-primary)]">{primaryActionState.label}</p>
+            <p className={`mt-1 text-xs ${primaryActionState.state === "blocked" ? "text-[var(--status-warning-text)]" : "text-[var(--text-muted)]"}`}>
+              {primaryActionState.blockedReason ?? primaryActionState.reason}
+            </p>
+          </div>
+
           <div className="flex flex-wrap gap-3">
+            {primaryActionState.state === "allowed" && ["OPERATE_PICK", "COMPLETE_ASSEMBLY", "RESOLVE_EXCEPTION"].includes(primaryActionState.code) ? (
+              <Link href={primaryActionState.href} className={buttonStyles()}>
+                {primaryActionState.label}
+              </Link>
+            ) : null}
             {canRenderWriteActions ? (
               <>
-                {order.status === "BORRADOR" ? (
+                {primaryActionState.state === "allowed" && primaryActionState.code === "CONFIRM_ORDER" ? (
                   <form action={confirmRequest}>
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button type="submit" className="btn-primary" disabled={order.lines.length === 0}>
-                      Confirmar pedido
-                    </button>
+                    <button type="submit" className="btn-primary">{primaryActionState.label}</button>
                   </form>
                 ) : null}
-                {takeEligibility.canTakeOrder ? (
+                {primaryActionState.state === "allowed" && primaryActionState.code === "TAKE_ORDER" ? (
                   <form action={takeRequest}>
                     <input type="hidden" name="orderId" value={order.id} />
-                    <button type="submit" className="btn-secondary">{takeEligibility.takeActionLabel ?? "Tomar pedido"}</button>
+                    <button type="submit" className="btn-primary">{primaryActionState.label}</button>
                   </form>
                 ) : null}
-                {canConfirmDelivery ? (
+                {primaryActionState.state === "allowed" && primaryActionState.code === "MARK_DELIVERED" && canConfirmDelivery ? (
                   <form action={markDelivered} className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] p-4">
                     <input type="hidden" name="orderId" value={order.id} />
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -942,11 +981,9 @@ export default async function ProductionRequestDetailPage({
             </a>
           ) : null}
               </>
-            ) : (
-              <p className="text-sm text-[var(--text-muted)]">Este rol puede revisar el pedido, pero no ejecutar acciones de escritura.</p>
-            )}
+            ) : null}
           </div>
-          {canPrepareForDelivery ? (
+          {primaryActionState.state === "allowed" && primaryActionState.code === "PREPARE_DELIVERY" && canPrepareForDelivery ? (
             <form action={markPreparedForDelivery} className="rounded-lg border border-[var(--status-success-border)] bg-[var(--status-success-bg)] p-4" data-testid="prepare-for-delivery-form">
               <input type="hidden" name="orderId" value={order.id} />
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -962,8 +999,8 @@ export default async function ProductionRequestDetailPage({
                   </select>
                 </label>
                 <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
-                  Nota (opcional)
-                  <input name="notes" maxLength={500} placeholder="Ej. esperando recolección del cliente" className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
+                  {preparationNeedsSupervisorOverride ? "Motivo de override *" : "Nota (opcional)"}
+                  <input name="notes" maxLength={500} required={preparationNeedsSupervisorOverride} placeholder={preparationNeedsSupervisorOverride ? "Explica por qué supervisión cubre la preparación" : "Ej. esperando recolección del cliente"} className="mt-1 block w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]" />
                 </label>
                 <label className="min-w-56 flex-1 text-sm font-medium text-[var(--text-primary)]">
                   URL de evidencia (opcional)
@@ -1001,7 +1038,7 @@ export default async function ProductionRequestDetailPage({
             </div>
           ) : null}
           {order.operationalExceptions.length > 0 ? (
-            <div className="space-y-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4" data-testid="operational-exceptions">
+            <div id="excepciones" className="scroll-mt-24 space-y-3 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-4" data-testid="operational-exceptions">
               <h3 className="font-semibold text-[var(--status-warning-text)]">Excepciones operativas</h3>
               {order.operationalExceptions.map((exception: any) => (
                 <div key={exception.id} className="rounded-md border border-[var(--status-warning-border)] bg-[var(--bg-surface)] p-3 text-sm">

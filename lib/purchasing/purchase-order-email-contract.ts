@@ -4,13 +4,16 @@ import type {
   PurchaseOrderDocumentSnapshot,
 } from "@/lib/purchasing/purchase-order-document-service";
 
-export type PurchaseOrderEmailSendState = "NOT_SENT" | "SENT" | "RESENT" | "FAILED";
+export type PurchaseOrderEmailSendState = "NOT_SENT" | "SENT" | "RESENT" | "FAILED" | "SENDING" | "SEND_UNKNOWN";
+export const STALE_PURCHASE_ORDER_EMAIL_CLAIM_MS = 120_000;
 
 export const PURCHASE_ORDER_EMAIL_SEND_STATE_LABELS: Record<PurchaseOrderEmailSendState, string> = {
   NOT_SENT: "No enviado",
   SENT: "Enviado",
   RESENT: "Reenviado",
   FAILED: "Fallido",
+  SENDING: "Envío en curso",
+  SEND_UNKNOWN: "Resultado incierto",
 };
 
 function normalizeText(value: string | null | undefined) {
@@ -228,8 +231,8 @@ export function buildPurchaseOrderEmailContract(input: {
     : null;
 
   const providerNote = providerConfigured
-    ? "El proveedor de correo está configurado para la siguiente fase."
-    : "El envío real por correo no está configurado en este entorno. KAN-85 lo habilitará.";
+    ? "Se enviará desde la cuenta Gmail conectada de este Manager."
+    : "Conecta tu cuenta Gmail para enviar órdenes de compra.";
 
   return {
     purchaseOrderId: input.purchaseOrder.id,
@@ -242,7 +245,7 @@ export function buildPurchaseOrderEmailContract(input: {
     recipientEmail,
     subject,
     body,
-    canSend: providerConfigured && blockedReasons.length === 0,
+    canSend: providerConfigured && blockedReasons.length === 0 && sendState !== "SENDING",
     blockedReasons,
     document,
     lastAttemptAt: normalizeDateTime(input.purchaseOrder.emailLastAttemptAt),

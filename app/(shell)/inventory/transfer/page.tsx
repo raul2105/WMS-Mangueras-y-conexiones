@@ -6,7 +6,6 @@ import { getSessionContext } from "@/lib/auth/session-context";
 import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import InventoryCodeField from "@/components/InventoryCodeField";
 import { firstErrorMessage, transferStockSchema } from "@/lib/schemas/wms";
-import { createAuditLogSafe } from "@/lib/audit-log";
 import { resolveProductInput } from "@/lib/product-search";
 import { buttonStyles } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
+import { lockAndAssertActiveInventoryLocations } from "@/lib/inventory-active-location";
 
 export const dynamic = "force-dynamic";
 
@@ -90,29 +90,27 @@ async function transferStock(formData: FormData) {
   const service = new InventoryService(prisma);
 
   try {
-    await service.transferStock(product.id, fromLocation.id, toLocation.id, parsed.data.quantityRaw, reference, {
-      notes,
-      fromLocationCode,
-      toLocationCode,
-      operatorName: actor.operatorName,
-      operatorUserId: actor.actorUserId,
-      actor: actor.actorName,
-      actorUserId: actor.actorUserId,
-      source: "inventory/transfer",
-    });
+    await prisma.$transaction(async (tx) => {
+      await lockAndAssertActiveInventoryLocations(tx, [fromLocation.id, toLocation.id]);
+      await service.transferStock(product.id, fromLocation.id, toLocation.id, parsed.data.quantityRaw, reference, {
+        tx,
+        notes,
+        fromLocationCode,
+        toLocationCode,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
+        source: "inventory/transfer",
+      });
+    }, { timeout: 20000 });
 
-    await createAuditLogSafe({
-      entityType: "INVENTORY_MOVEMENT",
-      entityId: `${product.id}:${fromLocation.id}->${toLocation.id}`,
-      action: "TRANSFER_FORM_SUBMIT",
-      after: { quantity: parsed.data.quantityRaw, fromLocationCode, toLocationCode, reference },
-      source: "inventory/transfer",
-      actor: actor.actorName,
-      actorUserId: actor.actorUserId,
-    });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {
+        LOCATION_NOT_FOUND: "La ubicación ya no existe; recarga el formulario",
+        LOCATION_INACTIVE: error.message,
+        WAREHOUSE_INACTIVE: error.message,
         INSUFFICIENT_AVAILABLE: "Stock disponible insuficiente en la ubicación origen",
         INVENTORY_NOT_FOUND: "No hay inventario en la ubicación origen para ese producto",
         INVALID_TRANSFER: "La ubicación origen y destino no pueden ser la misma",
@@ -137,7 +135,7 @@ export default async function TransferPage({
   const actor = resolveAuthenticatedActor(await getSessionContext());
   const [locations, products, recentReferences] = await Promise.all([
     prisma.location.findMany({
-      where: { isActive: true },
+      where: { isActive: true, warehouse: { isActive: true } },
       orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
       select: {
         code: true,

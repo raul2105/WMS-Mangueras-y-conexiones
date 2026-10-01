@@ -9,6 +9,7 @@ import {
   assignSalesRequestPickTasks,
   claimSalesRequestPickTasks,
   confirmSalesRequestOrder,
+  deleteSalesRequestLine,
   confirmSalesRequestPickTasksBatch,
   createSalesRequestDraftHeader,
   markSalesRequestPreparedForDelivery,
@@ -153,7 +154,26 @@ async function createUserWithRole(args: { email: string; name: string; roleCode:
   return user;
 }
 
-async function prepareOrderForDelivery(orderId: string, preparedByUserId: string) {
+async function prepareOrderForDelivery(orderId: string, requestedActorUserId: string, physicalOwnerUserId?: string) {
+  const requestedActor = await prisma.user.findUnique({
+    where: { id: requestedActorUserId },
+    select: { id: true, userRoles: { select: { role: { select: { code: true } } } } },
+  });
+  const explicitPhysicalOwner = physicalOwnerUserId ? await prisma.user.findUnique({
+    where: { id: physicalOwnerUserId },
+    select: { id: true, userRoles: { select: { role: { select: { code: true } } } } },
+  }) : null;
+  if (physicalOwnerUserId && !explicitPhysicalOwner?.userRoles.some(({ role }) => role.code === "WAREHOUSE_OPERATOR")) {
+    throw new Error("El responsable físico explícito debe ser WAREHOUSE_OPERATOR");
+  }
+  const preparedBy = explicitPhysicalOwner
+    ?? (requestedActor?.userRoles.some(({ role }) => role.code === "WAREHOUSE_OPERATOR")
+    ? requestedActor
+    : await createUserWithRole({
+      email: "sales-request-test-physical-owner@scmayher.com",
+      name: "Responsable físico de prueba",
+      roleCode: "WAREHOUSE_OPERATOR",
+    }));
   const order = await prisma.salesInternalOrder.findUnique({
     where: { id: orderId },
     select: { warehouseId: true },
@@ -167,9 +187,13 @@ async function prepareOrderForDelivery(orderId: string, preparedByUserId: string
     select: { id: true },
   });
   if (!deliveryLocation) throw new Error("Área de entrega de prueba no encontrada");
+  await prisma.salesInternalOrder.update({
+    where: { id: orderId },
+    data: { warehouseClaimedByUserId: preparedBy.id, warehouseClaimedAt: new Date() },
+  });
   return markSalesRequestPreparedForDelivery(prisma, {
     orderId,
-    preparedByUserId,
+    preparedByUserId: preparedBy.id,
     preparedLocationId: deliveryLocation.id,
   });
 }
@@ -188,6 +212,164 @@ afterAll(async () => {
 });
 
 describe("sales request service", () => {
+  it("validates trusted actor identity and blocks edits to another sales executive's draft", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-draft-owner@scmayher.com",
+      name: "Trusted Manager",
+      roleCode: "MANAGER",
+    });
+    const salesA = await createUserWithRole({
+      email: "sales-a-draft-owner@scmayher.com",
+      name: "Trusted Sales A",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const salesB = await createUserWithRole({
+      email: "sales-b-draft-owner@scmayher.com",
+      name: "Trusted Sales B",
+      roleCode: "SALES_EXECUTIVE",
+    });
+    const { warehouse, productA } = await createRequestFixture();
+    const order = await createSalesRequestDraftHeader(prisma, {
+      customerName: "Owned draft",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      requestedByUserId: salesA.id,
+      auditActor: { actorUserId: manager.id, actor: "forged manager label" },
+    });
+
+    await expect(addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 1,
+      auditActor: { actorUserId: salesB.id, actor: "Trusted Sales A" },
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 1,
+      auditActor: { actorUserId: salesA.id, actor: "forged manager label" },
+    })).resolves.toBeDefined();
+    const addAudit = await prisma.auditLog.findFirst({
+      where: { entityType: "SALES_INTERNAL_ORDER", entityId: order.id, action: "ADD_PRODUCT_LINE" },
+      select: { actor: true, actorUserId: true },
+    });
+    expect(addAudit).toEqual({ actor: salesA.name, actorUserId: salesA.id });
+
+    await expect(createSalesRequestDraftHeader(prisma, {
+      customerName: "Spoofed requester",
+      warehouseId: warehouse.id,
+      dueDate: new Date("2026-04-30T00:00:00.000Z"),
+      requestedByUserId: salesB.id,
+      auditActor: { actorUserId: salesA.id, actor: salesA.name },
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 1,
+      auditActor: { actorUserId: "missing-user", actor: "Trusted Sales A" },
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("snapshots an approved equivalence and exact technical-rule evidence when a draft line is added", async () => {
+    const manager = await createUserWithRole({
+      email: "manager-equivalence-snapshot@scmayher.com",
+      name: "Snapshot Manager",
+      roleCode: "MANAGER",
+    });
+    const { order, warehouse, storageA, staging } = await createRequestFixture();
+    const [original, substitute] = await Promise.all([
+      prisma.product.create({ data: { sku: "SNAP-HOSE-ORIGINAL", name: "Original hose", type: "HOSE", brand: "Brand A", attributes: JSON.stringify({ series: "A", dash: "-08" }) }, select: { id: true } }),
+      prisma.product.create({ data: { sku: "SNAP-HOSE-SUBSTITUTE", name: "Substitute hose", type: "HOSE", brand: "Brand B", attributes: JSON.stringify({ series: "B", dash: "-08" }) }, select: { id: true } }),
+    ]);
+    const source = await prisma.productTechnicalSource.create({
+      data: {
+        supplierName: "Fabricante documentado",
+        documentRef: "CROSS-BRAND-DOCUMENT-01",
+        documentVersion: "Rev. 4",
+        status: "APPROVED",
+        reviewedAt: new Date(),
+        reviewedByUserId: manager.id,
+      },
+      select: { id: true },
+    });
+    const equivalence = await prisma.productEquivalence.create({
+      data: { productId: original.id, equivProductId: substitute.id, basisNorm: "ISO 12345", basisDash: 8, sourceSheet: "Hoja 5", active: true },
+      select: { id: true },
+    });
+    await prisma.inventory.create({
+      data: { productId: substitute.id, locationId: storageA.id, quantity: 3, reserved: 0, available: 3 },
+    });
+    const inactiveStorage = await prisma.location.create({
+      data: { code: "STO-SNAPSHOT-INACTIVE", name: "Inactive storage", zone: "X", usageType: "STORAGE", isActive: false, warehouseId: warehouse.id },
+      select: { id: true },
+    });
+    await prisma.inventory.createMany({
+      data: [
+        { productId: substitute.id, locationId: staging.id, quantity: 5, reserved: 0, available: 5 },
+        { productId: substitute.id, locationId: inactiveStorage.id, quantity: 7, reserved: 0, available: 7 },
+      ],
+    });
+    const rule = await prisma.productCompatibilityRule.create({
+      data: {
+        productId: original.id,
+        compatibleProductId: substitute.id,
+        ruleType: "PRODUCT_SUBSTITUTION",
+        description: "Combinación publicada explícitamente por el fabricante.",
+        severity: "ALLOW",
+        decision: "APPROVED",
+        governanceStatus: "APPROVED",
+        ruleRevision: 7,
+        active: true,
+        sourceId: source.id,
+        validFrom: new Date("2026-01-01T00:00:00.000Z"),
+        validTo: new Date("2027-01-01T00:00:00.000Z"),
+      },
+      select: { id: true },
+    });
+
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: substitute.id,
+      requestedQty: 3,
+      equivalenceOriginalProductId: original.id,
+      auditActor: { actorUserId: manager.id, actor: "forged name" },
+    });
+    const line = await prisma.salesInternalOrderLine.findFirst({
+      where: { orderId: order.id, productId: substitute.id },
+      select: { technicalSelectionSnapshot: true },
+    });
+    const snapshot = JSON.parse(line?.technicalSelectionSnapshot ?? "null");
+    expect(snapshot).toMatchObject({
+      version: 1,
+      actor: { userId: manager.id, name: manager.name },
+      originalProduct: { id: original.id, sku: "SNAP-HOSE-ORIGINAL" },
+      selectedProduct: { id: substitute.id, sku: "SNAP-HOSE-SUBSTITUTE" },
+      equivalence: { id: equivalence.id, basisDash: 8 },
+      technicalRules: [{ id: rule.id, revision: 7, source: { id: source.id, documentRef: "CROSS-BRAND-DOCUMENT-01", documentVersion: "Rev. 4" } }],
+      context: { requestedQty: 3, warehouseId: warehouse.id, availableAtSelection: 3 },
+    });
+    expect(typeof snapshot.context.evaluatedAt).toBe("string");
+
+    await prisma.productCompatibilityRule.update({ where: { id: rule.id }, data: { maxWorkingPressureBar: 240 } });
+    await expect(addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: substitute.id,
+      requestedQty: 1,
+      equivalenceOriginalProductId: original.id,
+      auditActor: { actorUserId: manager.id, actor: manager.name },
+    })).rejects.toMatchObject({ code: "EQUIVALENCE_REQUIRES_REVIEW" });
+    await prisma.productCompatibilityRule.update({ where: { id: rule.id }, data: { maxWorkingPressureBar: null, validTo: new Date("2020-01-01T00:00:00.000Z") } });
+    await expect(addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: substitute.id,
+      requestedQty: 1,
+      equivalenceOriginalProductId: original.id,
+      auditActor: { actorUserId: manager.id, actor: manager.name },
+    })).rejects.toMatchObject({ code: "EQUIVALENCE_REQUIRES_REVIEW" });
+  });
+
   it("switches open tasks to manager-required mode through an explicit audited transition", async () => {
     const { order, productA } = await createRequestFixture();
     const manager = await createUserWithRole({
@@ -326,14 +508,39 @@ describe("sales request service", () => {
     expect(inventoryB?.available).toBe(5);
   });
 
+  it("prefers an active staging location by usage over a shipping zone or a misleading legacy code", async () => {
+    const { order, warehouse, productA, storageA, staging } = await createRequestFixture();
+    await prisma.location.update({ where: { id: staging.id }, data: { code: "CUSTOM-FLOOR-STAGING" } });
+    await prisma.location.createMany({ data: [
+      { code: "STAGING-SURT", name: "Legacy name, storage use", zone: "A", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      { code: "SHIP-SURT", name: "Shipping zone", zone: "SHIP", usageType: "SHIPPING", isActive: true, warehouseId: warehouse.id },
+    ] });
+    await addSalesRequestProductLine(prisma, { orderId: order.id, productId: productA.id, requestedQty: 4 });
+    const pickList = await prisma.salesInternalOrderPickList.findFirstOrThrow({
+      where: { orderId: order.id }, include: { tasks: true },
+    });
+    expect(pickList.targetLocationId).toBe(staging.id);
+    expect(pickList.tasks).toHaveLength(1);
+    expect(pickList.tasks[0]).toMatchObject({ sourceLocationId: storageA.id, targetLocationId: staging.id, reservedQty: 4 });
+    expect(await prisma.inventory.findUniqueOrThrow({
+      where: { productId_locationId: { productId: productA.id, locationId: storageA.id } },
+    })).toMatchObject({ quantity: 10, reserved: 4, available: 6 });
+  });
+
   it("creates the request header and initial product line atomically when a product draft is provided", async () => {
     const { warehouse, productA } = await createRequestFixture();
+    const manager = await createUserWithRole({
+      email: "sales-request-audit-actor@scmayher.com",
+      name: "Auditor autenticado",
+      roleCode: "MANAGER",
+    });
 
     const created = await createSalesRequestDraftHeader(prisma, {
       customerName: "Cliente con línea inicial",
       warehouseId: warehouse.id,
       dueDate: new Date("2026-04-30T00:00:00.000Z"),
       notes: "Pedido con línea sugerida",
+      auditActor: { actorUserId: manager.id, actor: manager.name },
       initialProductLine: {
         productId: productA.id,
         requestedQty: 2,
@@ -361,6 +568,11 @@ describe("sales request service", () => {
       where: { orderId: created.id },
       select: { id: true, status: true },
     });
+    const audits = await prisma.auditLog.findMany({
+      where: { entityType: "SALES_INTERNAL_ORDER", entityId: created.id },
+      orderBy: { createdAt: "asc" },
+      select: { action: true, actor: true, actorUserId: true },
+    });
 
     expect(saved?.lines).toHaveLength(1);
     expect(saved?.lines[0]?.productId).toBe(productA.id);
@@ -368,16 +580,25 @@ describe("sales request service", () => {
     expect(saved?.lines[0]?.notes).toBe("Línea comercial inicial");
     expect(saved?.lines[0]?.product?.sku).toBe("SKU-SURT-01");
     expect(pickList?.status).toBe("DRAFT");
+    expect(audits).toHaveLength(3);
+    expect(audits.every((audit) => audit.actor === manager.name && audit.actorUserId === manager.id)).toBe(true);
   });
 
   it("keeps header-only creation valid when no initial product is provided", async () => {
     const { warehouse } = await createRequestFixture();
+    const manager = await createUserWithRole({
+      email: "sales-request-header-owner@scmayher.com",
+      name: "Solicitante autenticado",
+      roleCode: "MANAGER",
+    });
 
     const created = await createSalesRequestDraftHeader(prisma, {
       customerName: "Cliente sin línea inicial",
       warehouseId: warehouse.id,
       dueDate: new Date("2026-04-30T00:00:00.000Z"),
       notes: "Pedido manual",
+      requestedByUserId: manager.id,
+      auditActor: { actorUserId: manager.id, actor: manager.name },
     });
 
     const saved = await prisma.salesInternalOrder.findUnique({
@@ -392,6 +613,11 @@ describe("sales request service", () => {
 
     expect(saved?.id).toBe(created.id);
     expect(saved?.lines).toHaveLength(0);
+    const audit = await prisma.auditLog.findFirst({
+      where: { entityType: "SALES_INTERNAL_ORDER", entityId: created.id, action: "CREATE_REQUEST_DRAFT" },
+      select: { actor: true, actorUserId: true },
+    });
+    expect(audit).toMatchObject({ actor: manager.name, actorUserId: manager.id });
   });
 
   it("falls back to header-only creation when the initial product context cannot be resolved", async () => {
@@ -423,8 +649,39 @@ describe("sales request service", () => {
     expect(saved?.lines).toHaveLength(0);
   });
 
+  it("audits product-line deletion with the authenticated actor", async () => {
+    const { order, productA } = await createRequestFixture();
+    const manager = await createUserWithRole({
+      email: "sales-request-delete-actor@scmayher.com",
+      name: "Manager de líneas",
+      roleCode: "MANAGER",
+    });
+    const auditActor = { actorUserId: manager.id, actor: manager.name };
+    await addSalesRequestProductLine(prisma, {
+      orderId: order.id,
+      productId: productA.id,
+      requestedQty: 1,
+      auditActor,
+    });
+    const line = await prisma.salesInternalOrderLine.findFirstOrThrow({ where: { orderId: order.id } });
+
+    await deleteSalesRequestLine(prisma, { orderId: order.id, lineId: line.id, auditActor });
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { entityType: "SALES_INTERNAL_ORDER", entityId: order.id, action: "DELETE_REQUEST_LINE" },
+      select: { actor: true, actorUserId: true },
+    });
+    expect(audit).toMatchObject({ actor: manager.name, actorUserId: manager.id });
+    expect(await prisma.salesInternalOrderLine.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
   it("releases reserved shortfall when a direct pick task is confirmed as partial", async () => {
     const { order, productA, storageA, staging } = await createRequestFixture();
+    const manager = await createUserWithRole({
+      email: "sales-request-release-actor@scmayher.com",
+      name: "Manager liberador",
+      roleCode: "MANAGER",
+    });
     const operator = await createUserWithRole({
       email: "operator-partial-pick@scmayher.com",
       name: "Operador surtido",
@@ -436,10 +693,11 @@ describe("sales request service", () => {
       productId: productA.id,
       requestedQty: 4,
       notes: "Parcial",
+      auditActor: { actorUserId: manager.id, actor: manager.name },
     });
 
     await confirmSalesRequestOrder(prisma, { orderId: order.id });
-    await releaseSalesRequestPickList(prisma, order.id);
+    await releaseSalesRequestPickList(prisma, order.id, { actorUserId: manager.id, actor: manager.name });
 
     const pickList = await prisma.salesInternalOrderPickList.findFirst({
       where: { orderId: order.id },
@@ -449,6 +707,17 @@ describe("sales request service", () => {
     expect(pickList).toBeTruthy();
     expect(pickList?.status).toBe("RELEASED");
     expect(pickList?.tasks).toHaveLength(1);
+    const actorAudits = await prisma.auditLog.findMany({
+      where: {
+        entityType: "SALES_INTERNAL_ORDER",
+        entityId: order.id,
+        action: { in: ["ADD_PRODUCT_LINE", "RELEASE_DIRECT_PICKLIST"] },
+      },
+      orderBy: { createdAt: "asc" },
+      select: { action: true, actor: true, actorUserId: true },
+    });
+    expect(actorAudits).toHaveLength(2);
+    expect(actorAudits.every((audit) => audit.actor === manager.name && audit.actorUserId === manager.id)).toBe(true);
 
     await claimSalesRequestPickTasks(prisma, {
       orderId: order.id,
@@ -1386,6 +1655,8 @@ describe("sales request service", () => {
     expect(deliveryAudits).toHaveLength(1);
   });
 
+  // On AWS RDS the four-user/two-order setup requires many serial round-trips;
+  // reserve the longer deadline for fixture preparation before the concurrency race.
   it("prevents over-delivery when two different orders consume the same inventory row concurrently", async () => {
     const manager = await createUserWithRole({
       email: "manager-deliver-shared@scmayher.com",
@@ -1511,7 +1782,7 @@ describe("sales request service", () => {
     expect(sharedInventory?.quantity).toBe(1);
     expect(sharedInventory?.available).toBe(1);
     expect(sharedInventory?.reserved).toBe(0);
-  });
+  }, 60_000);
 
   it("runs full operational flow: manager request -> sales pull -> direct pick + assembly -> delivered", async () => {
     const manager = await createUserWithRole({
@@ -1688,7 +1959,7 @@ describe("sales request service", () => {
       tasks: assemblyTasks.map((task) => ({ taskId: task.id, pickedQty: 1 })),
     });
     await closeAssemblyWorkOrderConsume(prisma, production.id, "Operador Full Flow", warehouseOperator.id);
-    await prepareOrderForDelivery(order.id, sales.id);
+    await prepareOrderForDelivery(order.id, sales.id, warehouseOperator.id);
 
     await markSalesRequestDelivered(prisma, {
       orderId: order.id,

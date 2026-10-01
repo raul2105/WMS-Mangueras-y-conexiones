@@ -121,7 +121,7 @@ describe("purchase order email contract", () => {
     expect(contract.document?.versionNumber).toBe(1);
     expect(contract.document?.attachmentFilename).toBe("OC-2026-0042.pdf");
     expect(contract.sendStateLabel).toBe("No enviado");
-    expect(contract.providerNote).toContain("KAN-85");
+    expect(contract.providerNote).toContain("Conecta tu cuenta Gmail");
     expect(contract.canSend).toBe(false);
   });
 
@@ -180,14 +180,18 @@ describe("purchase order email contract", () => {
     expect(getPurchaseOrderEmailStateLabel("SENT")).toBe("Enviado");
     expect(getPurchaseOrderEmailStateLabel("RESENT")).toBe("Reenviado");
     expect(getPurchaseOrderEmailStateLabel("FAILED")).toBe("Fallido");
+    expect(getPurchaseOrderEmailStateLabel("SENDING")).toBe("Envío en curso");
+    expect(getPurchaseOrderEmailStateLabel("SEND_UNKNOWN")).toBe("Resultado incierto");
 
     const helperContent = readWorkspaceFile("lib/purchasing/purchase-order-email-contract.ts");
     const pageContent = readWorkspaceFile("app/(shell)/purchasing/orders/[id]/page.tsx");
 
     expect(helperContent).toContain("Orden de Compra");
-    expect(helperContent).toContain("El envío real por correo no está configurado en este entorno");
+    expect(helperContent).toContain("Se enviará desde la cuenta Gmail conectada de este Manager.");
     expect(pageContent).toContain("Correo al proveedor");
     expect(pageContent).toContain("Vista previa del cuerpo");
+    expect(pageContent).toContain("confirmUnknownResend");
+    expect(pageContent).toContain("/purchasing/email");
     expect(pageContent).toContain("Envío por correo deshabilitado");
     expect(pageContent).not.toContain("KAN-");
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, type Mock } from "vitest";
-import { sendPurchaseOrderEmail } from "@/lib/purchasing/purchase-order-email-service";
+import { getEmailService, markStalePurchaseOrderEmailAttemptUnknown, sendPurchaseOrderEmail } from "@/lib/purchasing/purchase-order-email-service";
 import { buildPurchaseOrderEmailContract } from "@/lib/purchasing/purchase-order-email-contract";
 
 vi.mock("@/lib/prisma", () => ({
@@ -7,12 +7,17 @@ vi.mock("@/lib/prisma", () => ({
     purchaseOrder: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     purchaseOrderEmailAttempt: {
       count: vi.fn(),
       create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
       findFirst: vi.fn(),
     },
+    auditLog: { create: vi.fn() },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -30,7 +35,13 @@ vi.mock("@/lib/email/provider", () => ({
   createFakeEmailProvider: vi.fn(),
 }));
 
-vi.mock("@/lib/purchasing/purchase-order-email-contract", () => ({
+vi.mock("@/lib/email/gmail-connection", () => ({
+  getGmailAccessTokenForUser: vi.fn(),
+  getGmailConnectionStatus: vi.fn(),
+}));
+
+vi.mock("@/lib/purchasing/purchase-order-email-contract", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/purchasing/purchase-order-email-contract")>(),
   buildPurchaseOrderEmailContract: vi.fn(),
 }));
 
@@ -38,6 +49,7 @@ import prisma from "@/lib/prisma";
 import { loadLatestPurchaseOrderDocument, parsePurchaseOrderDocumentSnapshot } from "@/lib/purchasing/purchase-order-document-service";
 import { buildPurchaseOrderPdf } from "@/lib/purchasing/purchase-order-pdf";
 import { getEmailProvider, createFakeEmailProvider } from "@/lib/email/provider";
+import { getGmailAccessTokenForUser, getGmailConnectionStatus } from "@/lib/email/gmail-connection";
 
 describe("purchase order email service", () => {
   const mockOrder = {
@@ -45,6 +57,7 @@ describe("purchase order email service", () => {
     folio: "OC-2026-0042",
     status: "CONFIRMADA",
     emailSendState: "NOT_SENT",
+    updatedAt: new Date("2026-06-05T11:30:00.000Z"),
     emailRecipientSnapshot: null,
     emailSubjectSnapshot: null,
     emailBodySnapshot: null,
@@ -140,7 +153,13 @@ describe("purchase order email service", () => {
     (prisma.purchaseOrderEmailAttempt.count as Mock).mockResolvedValue(0);
     (prisma.purchaseOrderEmailAttempt.findFirst as Mock).mockResolvedValue(null);
     (prisma.purchaseOrderEmailAttempt.create as Mock).mockResolvedValue({ id: "attempt-1" });
+    (prisma.purchaseOrderEmailAttempt.update as Mock).mockResolvedValue({});
+    (prisma.purchaseOrderEmailAttempt.updateMany as Mock).mockResolvedValue({ count: 1 });
     (prisma.purchaseOrder.update as Mock).mockResolvedValue({});
+    (prisma.purchaseOrder.updateMany as Mock).mockResolvedValue({ count: 1 });
+    (prisma.auditLog.create as Mock).mockResolvedValue({});
+    (prisma.$transaction as Mock).mockImplementation(async (work: (tx: unknown) => Promise<unknown>) => work(prisma));
+    (getGmailConnectionStatus as Mock).mockResolvedValue({ connected: false });
   });
 
   it("should send email successfully with fake provider", async () => {
@@ -166,25 +185,137 @@ describe("purchase order email service", () => {
       data: expect.objectContaining({
         purchaseOrderId: "po-1",
         attemptNumber: 1,
-        sendState: "SENT",
+        sendState: "SENDING",
         recipientEmail: "compras@proveedor.test",
+        senderEmail: "mailer@wms.invalid",
+        provider: "fake",
       }),
+    }));
+    expect(prisma.purchaseOrderEmailAttempt.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ sendState: "SENT", providerMessageId: "fake-msg-123" }),
     }));
   });
 
-  it("should fail when provider is not configured", async () => {
-    (getEmailProvider as Mock).mockReturnValue(null);
-    (createFakeEmailProvider as Mock).mockReturnValue({ 
-      provider: { providerId: "fake", send: vi.fn() }, 
-      sentEmails: [] 
+  it("does not use an environment provider when the Manager has no personal Gmail connection", async () => {
+    const result = await sendPurchaseOrderEmail({
+      purchaseOrderId: "po-1",
+      triggeredByUserId: "user-1",
     });
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe("GMAIL_NOT_CONNECTED");
+    expect(getEmailProvider).not.toHaveBeenCalled();
+    expect(getGmailAccessTokenForUser).not.toHaveBeenCalled();
+  });
+
+  it("resolves a Gmail provider and sender only for the requested Manager", async () => {
+    (getGmailConnectionStatus as Mock).mockResolvedValue({ connected: true, status: "CONNECTED", email: "manager@example.test", connectedAt: new Date() });
+    (getGmailAccessTokenForUser as Mock).mockResolvedValue("user-scoped-access-token");
+
+    const emailService = await getEmailService("manager-7");
+
+    expect(emailService?.senderEmail).toBe("manager@example.test");
+    expect(emailService?.provider.providerId).toBe("gmail");
+    expect(getGmailConnectionStatus).toHaveBeenCalledWith("manager-7");
+    expect(getGmailAccessTokenForUser).toHaveBeenCalledWith("manager-7", "manager@example.test");
+  });
+
+  it("requires an explicit manual confirmation before retrying an uncertain send", async () => {
+    (prisma.purchaseOrder.findUnique as Mock).mockResolvedValue({ ...mockOrder, emailSendState: "SEND_UNKNOWN" });
+
+    const result = await sendPurchaseOrderEmail({ purchaseOrderId: "po-1", triggeredByUserId: "user-1" }, { provider: fakeProvider });
+
+    expect(result).toMatchObject({ success: false, errorCode: "SEND_RESULT_UNKNOWN", sendState: "SEND_UNKNOWN" });
+    expect(fakeProvider.send).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("records an acknowledged uncertain retry with a distinct manual-resend source", async () => {
+    (prisma.purchaseOrder.findUnique as Mock).mockResolvedValue({ ...mockOrder, emailSendState: "SEND_UNKNOWN" });
+    (prisma.purchaseOrderEmailAttempt.count as Mock).mockResolvedValue(1);
 
     const result = await sendPurchaseOrderEmail({
       purchaseOrderId: "po-1",
       triggeredByUserId: "user-1",
-    }, { provider: { providerId: "fake", send: vi.fn() } });
+      confirmUnknownResend: true,
+    }, { provider: fakeProvider });
 
-    expect(result.success).toBe(false);
+    expect(result.sendState).toBe("RESENT");
+    expect(prisma.purchaseOrderEmailAttempt.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ attemptNumber: 2, triggerSource: "MANUAL_RESEND_UNCERTAIN" }),
+    }));
+  });
+
+  it("serializes concurrent sends with a durable order claim", async () => {
+    (prisma.purchaseOrder.updateMany as Mock).mockResolvedValue({ count: 0 });
+
+    const result = await sendPurchaseOrderEmail({ purchaseOrderId: "po-1", triggeredByUserId: "user-1" }, { provider: fakeProvider });
+
+    expect(result).toMatchObject({ success: false, errorCode: "SEND_IN_PROGRESS", sendState: "SENDING" });
+    expect(fakeProvider.send).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrderEmailAttempt.create).not.toHaveBeenCalled();
+  });
+
+  it("reconciles only a stale sending claim without sending and records the reviewing Manager", async () => {
+    (prisma.purchaseOrder.findUnique as Mock).mockResolvedValue({
+      id: "po-1",
+      emailSendState: "SENDING",
+      emailSendClaimToken: "claim-1",
+      emailSendClaimedAt: new Date(Date.now() - 180_000),
+    });
+    (prisma.purchaseOrderEmailAttempt.findFirst as Mock).mockResolvedValue({ id: "attempt-stale" });
+
+    const result = await markStalePurchaseOrderEmailAttemptUnknown({
+      purchaseOrderId: "po-1",
+      reconciledByUserId: "manager-1",
+    });
+
+    expect(result).toEqual({ reconciled: true, status: "RECONCILED" });
+    expect(prisma.purchaseOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ emailSendClaimToken: "claim-1", emailSendState: "SENDING" }),
+      data: expect.objectContaining({ emailSendState: "SEND_UNKNOWN", emailSendClaimToken: null }),
+    }));
+    expect(prisma.purchaseOrderEmailAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "attempt-stale", sendState: "SENDING" },
+      data: expect.objectContaining({ sendState: "SEND_UNKNOWN", errorCode: "STALE_SEND_REQUIRES_REVIEW" }),
+    }));
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ actorUserId: "manager-1", action: "RECONCILE_PURCHASE_ORDER_EMAIL_UNKNOWN" }),
+    }));
+    expect(fakeProvider.send).not.toHaveBeenCalled();
+  });
+
+  it("does not reconcile a recent sending claim", async () => {
+    (prisma.purchaseOrder.findUnique as Mock).mockResolvedValue({
+      id: "po-1",
+      emailSendState: "SENDING",
+      emailSendClaimToken: "claim-1",
+      emailSendClaimedAt: new Date(Date.now() - 30_000),
+    });
+
+    const result = await markStalePurchaseOrderEmailAttemptUnknown({ purchaseOrderId: "po-1", reconciledByUserId: "manager-1" });
+
+    expect(result).toEqual({ reconciled: false, status: "NOT_STALE" });
+    expect(prisma.purchaseOrder.updateMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("releases a stale claim with no attempt row after a crash before attempt persistence", async () => {
+    (prisma.purchaseOrder.findUnique as Mock).mockResolvedValue({
+      id: "po-1",
+      emailSendState: "SENDING",
+      emailSendClaimToken: "orphan-claim",
+      emailSendClaimedAt: new Date(Date.now() - 180_000),
+    });
+    (prisma.purchaseOrderEmailAttempt.findFirst as Mock).mockResolvedValue(null);
+
+    const result = await markStalePurchaseOrderEmailAttemptUnknown({ purchaseOrderId: "po-1", reconciledByUserId: "manager-1" });
+
+    expect(result).toEqual({ reconciled: true, status: "RECONCILED" });
+    expect(prisma.purchaseOrderEmailAttempt.updateMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ before: expect.stringContaining('"attemptId":null') }),
+    }));
   });
 
   it("should fail when supplier email is missing", async () => {
@@ -234,11 +365,13 @@ describe("purchase order email service", () => {
     }, { provider: failingProvider });
 
     expect(result.success).toBe(false);
-    expect(result.sendState).toBe("FAILED");
-    expect(result.errorCode).toBe("PROVIDER_ERROR");
+    expect(result.sendState).toBe("SEND_UNKNOWN");
+    expect(result.errorCode).toBe("PROVIDER_RESULT_UNKNOWN");
+    expect(result.errorMessage).not.toContain("SES rate limit");
   });
 
   it("should mark as RESEND on second attempt", async () => {
+    (prisma.purchaseOrder.findUnique as Mock).mockResolvedValue({ ...mockOrder, emailSendState: "SENT" });
     (prisma.purchaseOrderEmailAttempt.count as Mock).mockResolvedValue(1);
     (prisma.purchaseOrderEmailAttempt.findFirst as Mock).mockResolvedValue({ attemptNumber: 1 });
 
@@ -249,5 +382,8 @@ describe("purchase order email service", () => {
 
     expect(result.success).toBe(true);
     expect(result.sendState).toBe("RESENT");
+    expect(prisma.purchaseOrderEmailAttempt.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ triggerSource: "MANUAL_RESEND" }),
+    }));
   });
 });

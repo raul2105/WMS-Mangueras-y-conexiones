@@ -14,13 +14,10 @@ type AuditPayload = {
 
 type AuditDb = PrismaClient | Prisma.TransactionClient;
 
-function safeStringify(value: unknown) {
+function serializeAuditValue(value: unknown) {
   if (value === undefined) return null;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
+  // An unreadable change must not silently become a successful empty audit.
+  return JSON.stringify(value);
 }
 
 export async function createAuditLog(payload: AuditPayload, db: AuditDb = prisma) {
@@ -29,8 +26,8 @@ export async function createAuditLog(payload: AuditPayload, db: AuditDb = prisma
       entityType: payload.entityType,
       entityId: payload.entityId ?? null,
       action: payload.action,
-      before: safeStringify(payload.before),
-      after: safeStringify(payload.after),
+      before: serializeAuditValue(payload.before),
+      after: serializeAuditValue(payload.after),
       actor: payload.actor ?? null,
       actorUserId: payload.actorUserId ?? null,
       source: payload.source ?? null,

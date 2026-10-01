@@ -2,7 +2,9 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
-import { createAuditLogSafe } from "@/lib/audit-log";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import { syncProductTechnicalAttributes } from "@/lib/product-attributes";
 import { buildTechnicalSpecRows, supersedePendingTechnicalSourcesForProduct, syncProductTechnicalSpecCandidates, syncProductTechnicalSpecs, validateTechnicalAttributesJson, validateTechnicalSpecRows } from "@/lib/catalog/technical-specs";
 import { TAXONOMY, UNIT_LABELS } from "@/lib/catalog-taxonomy";
@@ -20,6 +22,7 @@ interface PageProps {
 async function updateProduct(id: string, formData: FormData) {
   "use server";
   await (await import("@/lib/rbac")).requirePermission("catalog.edit");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
 
   const name = String(formData.get("name") ?? "").trim();
   const type = String(formData.get("type") ?? "").trim().toUpperCase();
@@ -120,21 +123,6 @@ async function updateProduct(id: string, formData: FormData) {
     }
   }
 
-  let categoryId: string | null = null;
-  if (categoryRaw) {
-    const existing = await prisma.category.findFirst({ where: { name: categoryRaw }, select: { id: true } });
-    if (existing) {
-      categoryId = existing.id;
-    } else {
-      try {
-        const created = await prisma.category.create({ data: { name: categoryRaw }, select: { id: true } });
-        categoryId = created.id;
-      } catch {
-        // ignore race condition on category creation
-      }
-    }
-  }
-
   const before = currentProduct;
 
   const hasTechnicalSourceSupplier = Boolean(technicalSourceSupplier);
@@ -143,6 +131,9 @@ async function updateProduct(id: string, formData: FormData) {
     redirect(`/catalog/${id}/edit?error=${encodeURIComponent("La fuente técnica requiere proveedor y documento")}`);
   }
   const hasTechnicalSource = hasTechnicalSourceSupplier && hasTechnicalSourceDocument;
+  if (hasTechnicalSource && !technicalSourceVersion) {
+    redirect(`/catalog/${id}/edit?error=${encodeURIComponent("La fuente técnica requiere versión o fecha documental")}`);
+  }
   const replacingPublishedImage = Boolean(
     resolvedImageUrl
       && hasTechnicalSource
@@ -152,35 +143,29 @@ async function updateProduct(id: string, formData: FormData) {
     ? currentProduct.assets[0]?.url ?? currentProduct.imageUrl ?? null
     : resolvedImageUrl;
 
-  await prisma.product.update({
-    where: { id },
-    data: {
-      name,
-      type: normalizedType,
-      description,
-      brand,
-      unitLabel,
-      purchaseUnitLabel,
-      purchaseUnitFactor,
-      referenceCode: referenceCode || null,
-      imageUrl: publishedImageUrl || null,
-      subcategory,
-      base_cost: Number.isFinite(base_cost ?? NaN) ? base_cost : null,
-      purchaseMoq: Number.isFinite(purchaseMoq ?? NaN) ? purchaseMoq : null,
-      price: Number.isFinite(price ?? NaN) ? price : null,
-      attributes: hasTechnicalSource ? currentProduct.attributes : attributesRaw,
-      categoryId: categoryId ?? null,
-      primarySupplierId,
-      supplierBrandId,
-    },
-  });
+  await prisma.$transaction(async (tx) => {
+    const category = categoryRaw
+      ? await tx.category.upsert({ where: { name: categoryRaw }, create: { name: categoryRaw }, update: {}, select: { id: true } })
+      : null;
+    const after = await tx.product.update({
+      where: { id },
+      data: {
+        name, type: normalizedType, description, brand, unitLabel, purchaseUnitLabel, purchaseUnitFactor,
+        referenceCode: referenceCode || null, imageUrl: publishedImageUrl || null, subcategory,
+        base_cost: Number.isFinite(base_cost ?? NaN) ? base_cost : null,
+        purchaseMoq: Number.isFinite(purchaseMoq ?? NaN) ? purchaseMoq : null,
+        price: Number.isFinite(price ?? NaN) ? price : null,
+        attributes: hasTechnicalSource ? currentProduct.attributes : attributesRaw,
+        categoryId: category?.id ?? null, primarySupplierId, supplierBrandId,
+      },
+    });
 
-  if (!hasTechnicalSource) {
-    await supersedePendingTechnicalSourcesForProduct(prisma, id);
-    await syncProductTechnicalAttributes(prisma, id, attributesRaw);
-  }
-  const technicalSource = hasTechnicalSource
-    ? await prisma.productTechnicalSource.create({
+    if (!hasTechnicalSource) {
+      await supersedePendingTechnicalSourcesForProduct(tx, id);
+      await syncProductTechnicalAttributes(tx, id, attributesRaw);
+    }
+    const technicalSource = hasTechnicalSource
+      ? await tx.productTechnicalSource.create({
         data: {
           supplierName: technicalSourceSupplier,
           documentRef: technicalSourceDocument,
@@ -189,33 +174,19 @@ async function updateProduct(id: string, formData: FormData) {
           status: "PENDING_REVIEW",
         },
         select: { id: true },
-      })
-    : null;
-  if (technicalSource) {
-    await syncProductTechnicalSpecCandidates(prisma, id, normalizedType, attributesRaw, technicalSource.id);
-  } else {
-    await syncProductTechnicalSpecs(prisma, id, normalizedType, attributesRaw, null);
-  }
-  if (replacingPublishedImage && resolvedImageUrl && technicalSource) {
-    await prisma.productAsset.create({
-      data: {
-        productId: id,
-        url: resolvedImageUrl,
-        brandSnapshot: brand,
-        sourceId: technicalSource.id,
-        validationStatus: "PENDING",
-      },
-    });
-  }
-
-    await createAuditLogSafe({
-    entityType: "PRODUCT",
-    entityId: id,
-      before,
-      action: "UPDATE_PRODUCT",
-    after: { name, type: normalizedType, brand, unitLabel, purchaseUnitLabel, purchaseUnitFactor, primarySupplierId, supplierBrandId },
-    source: "catalog/edit",
-    actor: "system",
+        })
+      : null;
+    if (technicalSource) await syncProductTechnicalSpecCandidates(tx, id, normalizedType, attributesRaw, technicalSource.id);
+    else await syncProductTechnicalSpecs(tx, id, normalizedType, attributesRaw, null);
+    if (replacingPublishedImage && resolvedImageUrl && technicalSource) {
+      await tx.productAsset.create({
+        data: { productId: id, url: resolvedImageUrl, brandSnapshot: brand, sourceId: technicalSource.id, validationStatus: "PENDING" },
+      });
+    }
+    await createAuditLogRequiredWithDb({
+      entityType: "PRODUCT", entityId: id, before, action: "UPDATE_PRODUCT", after,
+      source: "catalog/edit", actor: actor.actorName, actorUserId: actor.actorUserId,
+    }, tx);
   });
 
   const { emitSyncEventSafe } = await import("@/lib/sync/sync-events");
@@ -393,7 +364,7 @@ export default async function ProductEditPage({ params, searchParams }: PageProp
             <p className="text-sm font-semibold text-white md:col-span-2">Nueva fuente técnica curada</p>
             <label className="space-y-1"><span className="text-xs text-slate-400">Proveedor / marca fuente</span><input name="technicalSourceSupplier" className="w-full px-4 py-3 glass rounded-lg" placeholder="Gates, Parker, Dixon..." /></label>
             <label className="space-y-1"><span className="text-xs text-slate-400">Documento o ficha</span><input name="technicalSourceDocument" className="w-full px-4 py-3 glass rounded-lg" placeholder="Código de catálogo / PDF" /></label>
-            <label className="space-y-1"><span className="text-xs text-slate-400">Versión / fecha</span><input name="technicalSourceVersion" className="w-full px-4 py-3 glass rounded-lg" placeholder="2026-01" /></label>
+            <label className="space-y-1"><span className="text-xs text-slate-400">Versión / fecha</span><input name="technicalSourceVersion" className="w-full px-4 py-3 glass rounded-lg" placeholder="2026-01" /><span className="text-xs text-slate-500">Obligatoria cuando captures proveedor y documento.</span></label>
             <label className="space-y-1"><span className="text-xs text-slate-400">URL de origen</span><input name="technicalSourceUrl" className="w-full px-4 py-3 glass rounded-lg" placeholder="https://..." /></label>
             <p className="text-xs text-slate-500 md:col-span-2">Los cambios quedan pendientes de revisión antes de usarse como fuente de promesa o compatibilidad.</p>
           </div>

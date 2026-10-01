@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { InventoryService, InventoryServiceError } from "../lib/inventory-service";
 import { importProductsFromCsv } from "../scripts/data/import-products-from-csv.cjs";
 
-const shouldRunSqliteSuite = process.env.RUN_POSTGRES_TESTS !== "1";
-const describeSqlite = shouldRunSqliteSuite ? describe : describe.skip;
+const csvFixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "wms-inventory-fixtures-"));
 
 const prisma = new PrismaClient();
 
@@ -75,9 +75,13 @@ beforeEach(async () => {
 afterAll(async () => {
   await resetDb();
   await prisma.$disconnect();
+  for (const filename of fs.readdirSync(csvFixtureDirectory)) {
+    fs.unlinkSync(path.join(csvFixtureDirectory, filename));
+  }
+  fs.rmdirSync(csvFixtureDirectory);
 });
 
-describeSqlite("InventoryService integrity", () => {
+describe("InventoryService integrity", () => {
   it("receive increments quantity", async () => {
     const { product, location } = await createBaseData();
     const service = new InventoryService(prisma);
@@ -111,11 +115,12 @@ describeSqlite("InventoryService integrity", () => {
     ).rejects.toMatchObject({ code: "INSUFFICIENT_AVAILABLE" });
   });
 
-  it("import creates location and uses locationId", async () => {
-    const csvPath = path.join(process.cwd(), "data", "products.test.csv");
+  it("import uses the registered location and preserves its warehouse relation", async () => {
+    const { warehouse, location: registeredLocation } = await createBaseData();
+    const csvPath = path.join(csvFixtureDirectory, "products.test.csv");
     const csvContent = [
       "sku,name,type,description,brand,base_cost,price,category,quantity,location,attributes,referenceCode,imageUrl",
-      "SKU-IMP-01,Producto Importado,HOSE,Desc,Marca,10,20,Categoria,7,LOC-NEW,{},REF-01,",
+      `SKU-IMP-01,Producto Importado,HOSE,Desc,Marca,10,20,Categoria,7,${registeredLocation.code},{},REF-01,`,
     ].join("\n");
 
     fs.writeFileSync(csvPath, csvContent, "utf8");
@@ -123,12 +128,13 @@ describeSqlite("InventoryService integrity", () => {
     await importProductsFromCsv({ filePath: csvPath, dryRun: false, prismaClient: prisma });
 
     const location = await prisma.location.findUnique({
-      where: { code: "LOC-NEW" },
+      where: { code: registeredLocation.code },
       include: { warehouse: true },
     });
 
     expect(location).toBeTruthy();
-    expect(location?.warehouse.code).toBe("DEFAULT");
+    expect(location?.id).toBe(registeredLocation.id);
+    expect(location?.warehouse.id).toBe(warehouse.id);
 
     const product = await prisma.product.findUnique({
       where: { sku: "SKU-IMP-01" },
@@ -141,11 +147,26 @@ describeSqlite("InventoryService integrity", () => {
 
     expect(inv).toBeTruthy();
     expect(inv?.locationId).toBe(location?.id);
+    expect(inv?.quantity).toBe(7);
 
     fs.unlinkSync(csvPath);
   });
 
-  it("import handles referenceCode conflicts by clearing duplicated value", async () => {
+  it("import rejects an unregistered location without creating product or inventory", async () => {
+    const csvPath = path.join(csvFixtureDirectory, "products.unknown-location.csv");
+    fs.writeFileSync(csvPath, [
+      "sku,name,type,quantity,location",
+      "SKU-UNKNOWN,Producto importado,HOSE,7,LOC-UNKNOWN",
+    ].join("\n"), "utf8");
+    await expect(importProductsFromCsv({ filePath: csvPath, dryRun: false, prismaClient: prisma }))
+      .rejects.toThrow('unknown location "LOC-UNKNOWN"');
+    expect(await prisma.product.count()).toBe(0);
+    expect(await prisma.inventory.count()).toBe(0);
+    expect(await prisma.location.count()).toBe(0);
+  });
+
+  it("import rejects an existing referenceCode conflict without changing its owner", async () => {
+    const { location } = await createBaseData();
     await prisma.product.create({
       data: {
         sku: "SKU-EXIST-REF",
@@ -155,48 +176,51 @@ describeSqlite("InventoryService integrity", () => {
       },
     });
 
-    const csvPath = path.join(process.cwd(), "data", "products.ref-conflict.csv");
+    const csvPath = path.join(csvFixtureDirectory, "products.ref-conflict.csv");
     const csvContent = [
       "sku,name,type,description,brand,base_cost,price,category,quantity,location,attributes,referenceCode,imageUrl",
-      "SKU-NEW-REF,Producto Nuevo,HOSE,Desc,Marca,10,20,Categoria,5,LOC-RC-01,{},REF-DUP-01,",
+      `SKU-NEW-REF,Producto Nuevo,HOSE,Desc,Marca,10,20,Categoria,5,${location.code},{},REF-DUP-01,`,
     ].join("\n");
 
     fs.writeFileSync(csvPath, csvContent, "utf8");
 
-    await importProductsFromCsv({ filePath: csvPath, dryRun: false, prismaClient: prisma });
+    await expect(importProductsFromCsv({ filePath: csvPath, dryRun: false, prismaClient: prisma }))
+      .rejects.toThrow("referenceCode REF-DUP-01 already belongs to sku SKU-EXIST-REF");
 
     const imported = await prisma.product.findUnique({
       where: { sku: "SKU-NEW-REF" },
       select: { referenceCode: true },
     });
 
-    expect(imported).toBeTruthy();
-    expect(imported?.referenceCode).toBeNull();
+    expect(imported).toBeNull();
+    expect((await prisma.product.findUnique({ where: { sku: "SKU-EXIST-REF" } }))?.referenceCode).toBe("REF-DUP-01");
+    expect(await prisma.inventory.count()).toBe(0);
 
     fs.unlinkSync(csvPath);
   });
 
-  it("import handles duplicate referenceCode inside csv without failing", async () => {
-    const csvPath = path.join(process.cwd(), "data", "products.ref-dup-in-csv.csv");
+  it("import rejects duplicate referenceCode inside CSV before applying any row", async () => {
+    const { location } = await createBaseData();
+    const csvPath = path.join(csvFixtureDirectory, "products.ref-dup-in-csv.csv");
     const csvContent = [
       "sku,name,type,description,brand,base_cost,price,category,quantity,location,attributes,referenceCode,imageUrl",
-      "SKU-CSV-REF-1,Producto 1,HOSE,Desc,Marca,10,20,Categoria,2,LOC-CSV-01,{},REF-CSV-DUP,",
-      "SKU-CSV-REF-2,Producto 2,HOSE,Desc,Marca,10,20,Categoria,3,LOC-CSV-01,{},REF-CSV-DUP,",
+      `SKU-CSV-REF-1,Producto 1,HOSE,Desc,Marca,10,20,Categoria,2,${location.code},{},REF-CSV-DUP,`,
+      `SKU-CSV-REF-2,Producto 2,HOSE,Desc,Marca,10,20,Categoria,3,${location.code},{},REF-CSV-DUP,`,
     ].join("\n");
 
     fs.writeFileSync(csvPath, csvContent, "utf8");
 
-    await importProductsFromCsv({ filePath: csvPath, dryRun: false, prismaClient: prisma });
+    await expect(importProductsFromCsv({ filePath: csvPath, dryRun: false, prismaClient: prisma }))
+      .rejects.toThrow("referenceCode REF-CSV-DUP already appears on sku SKU-CSV-REF-1");
 
     const [first, second] = await Promise.all([
       prisma.product.findUnique({ where: { sku: "SKU-CSV-REF-1" }, select: { referenceCode: true } }),
       prisma.product.findUnique({ where: { sku: "SKU-CSV-REF-2" }, select: { referenceCode: true } }),
     ]);
 
-    expect(first).toBeTruthy();
-    expect(second).toBeTruthy();
-    expect(first?.referenceCode).toBe("REF-CSV-DUP");
-    expect(second?.referenceCode).toBeNull();
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+    expect(await prisma.inventory.count()).toBe(0);
 
     fs.unlinkSync(csvPath);
   });

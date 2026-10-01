@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
+import { expect } from "vitest";
 
 type IsolationState = {
   initializedSchemas: Set<string>;
@@ -85,7 +87,7 @@ async function ensureSchemaExists(adminUrl: string, schema: string) {
   });
 
   try {
-    await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+    await prisma.$executeRawUnsafe("CREATE SCHEMA " + JSON.stringify(schema));
   } finally {
     await prisma.$disconnect();
   }
@@ -100,8 +102,18 @@ async function setupWorkerSchemaIsolation() {
   if (!/^postgres(ql)?:\/\//i.test(baseDatabaseUrl)) return;
 
   const runId = String(process.env.WMS_TEST_RUN_ID ?? "").trim() || "adhoc";
-  const poolId = String(process.env.VITEST_POOL_ID ?? process.env.VITEST_WORKER_ID ?? "0").trim() || "0";
-  const schema = `t_${runId}_w${poolId}`.replace(/[^a-zA-Z0-9_]/g, "_");
+  const testPath = expect.getState().testPath;
+  if (!testPath) {
+    throw new Error("Vitest no proporcionó testPath; se cancela la prueba PostgreSQL para evitar compartir esquema.");
+  }
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const relativeTestPath = path.relative(repoRoot, testPath).replaceAll("\\", "/").toLowerCase();
+  if (relativeTestPath.startsWith("../") || path.isAbsolute(relativeTestPath)) {
+    throw new Error("El archivo de prueba está fuera del repositorio; no se crea esquema PostgreSQL.");
+  }
+  const fileHash = createHash("sha256").update(relativeTestPath).digest("hex").slice(0, 16);
+  const normalizedRunId = runId.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 24) || "adhoc";
+  const schema = "t_" + normalizedRunId + "_f" + fileHash;
 
   const state = getIsolationState();
   if (state.initializedSchemas.has(schema)) {
@@ -115,7 +127,6 @@ async function setupWorkerSchemaIsolation() {
   process.env.DATABASE_URL = workerDatabaseUrl;
   await ensureSchemaExists(adminUrl, schema);
 
-  const repoRoot = path.resolve(__dirname, "..", "..");
   execFileSync(
     process.execPath,
     [

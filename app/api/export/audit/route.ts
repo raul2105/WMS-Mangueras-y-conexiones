@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/rbac";
+import { escapeCsvCell } from "@/lib/exports/csv";
 
 export const dynamic = "force-dynamic";
-
-function escapeCSV(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  const str = String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
 
 export async function GET(request: NextRequest) {
   await requirePermission("audit.view");
@@ -62,7 +54,7 @@ export async function GET(request: NextRequest) {
       row.before ?? "",
       row.after ?? "",
     ]
-      .map(escapeCSV)
+      .map(escapeCsvCell)
       .join(","),
   );
 

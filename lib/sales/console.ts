@@ -224,6 +224,9 @@ export function resolveSalesConsolePrimaryActionState(input: {
   flowNarrative: SalesOrderFlowNarrative;
   canExecuteSalesActions: boolean;
   canExecuteProductionActions: boolean;
+  canResolveExceptions?: boolean;
+  deliveryBlockedReason?: string | null;
+  preparationBlockedReason?: string | null;
 }): SalesConsolePrimaryActionState {
   const { primaryCta } = input.flowNarrative;
 
@@ -239,17 +242,22 @@ export function resolveSalesConsolePrimaryActionState(input: {
     };
   }
 
-  const needsSalesWrite = primaryCta.code === "TAKE_ORDER" || primaryCta.code === "MARK_DELIVERED";
-  const canExecute = needsSalesWrite ? input.canExecuteSalesActions : input.canExecuteProductionActions;
+  const needsSalesWrite = primaryCta.code === "CONFIRM_ORDER" || primaryCta.code === "TAKE_ORDER" || primaryCta.code === "MARK_DELIVERED";
+  const transitionBlockedReason = primaryCta.code === "MARK_DELIVERED"
+    ? input.deliveryBlockedReason
+    : primaryCta.code === "PREPARE_DELIVERY" ? input.preparationBlockedReason : null;
+  const canExecute = primaryCta.code === "RESOLVE_EXCEPTION"
+    ? input.canResolveExceptions === true
+    : needsSalesWrite ? input.canExecuteSalesActions : input.canExecuteProductionActions;
 
-  if (primaryCta.isAllowed && canExecute) {
+  if (primaryCta.isAllowed && canExecute && !transitionBlockedReason) {
     return {
       state: "allowed",
       label: primaryCta.action.label,
       reason: primaryCta.reason,
       href: primaryCta.action.href,
       code: primaryCta.code,
-      requiresFormSubmit: primaryCta.code === "TAKE_ORDER",
+      requiresFormSubmit: primaryCta.code === "CONFIRM_ORDER" || primaryCta.code === "TAKE_ORDER",
     };
   }
 
@@ -261,7 +269,7 @@ export function resolveSalesConsolePrimaryActionState(input: {
     state: "blocked",
     label: primaryCta.action.label,
     reason: primaryCta.reason,
-    blockedReason: primaryCta.blockedReason ?? fallbackReason,
+    blockedReason: transitionBlockedReason ?? primaryCta.blockedReason ?? fallbackReason,
     href: primaryCta.action.href,
     code: primaryCta.code,
     requiresFormSubmit: false,

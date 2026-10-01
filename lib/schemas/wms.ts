@@ -16,6 +16,25 @@ const decimalText = (label: string, allowNegative = false) =>
       allowNegative ? `${label} no puede ser 0` : `${label} debe ser mayor a 0`
     );
 
+const optionalDecimalText = (label: string, nonNegative = false) =>
+  z.preprocess(
+    (value) => {
+      const text = String(value ?? "").trim();
+      return text ? Number(text.replace(",", ".")) : null;
+    },
+    z.number({ invalid_type_error: `${label} es invalido` }).finite(`${label} es invalido`)
+      .refine((value) => !nonNegative || value >= 0, `${label} debe ser mayor o igual a 0`)
+      .nullable(),
+  );
+
+const assemblyOperatingContextShape = {
+  workingPressureBarRaw: optionalDecimalText("Presion de trabajo", true),
+  operatingTemperatureCRaw: optionalDecimalText("Temperatura de operacion"),
+  medium: z.string().trim().max(120).optional(),
+  application: z.string().trim().max(160).optional(),
+  assemblyMethod: z.string().trim().max(120).optional(),
+};
+
 export const receiveStockSchema = z.object({
   code: requiredText("Codigo"),
   warehouseId: requiredText("Almacen"),
@@ -83,6 +102,7 @@ export const assemblyConfigSchema = z.object({
   assemblyQuantityRaw: decimalText("Cantidad de ensambles"),
   sourceDocumentRef: z.string().trim().max(120).optional(),
   notes: z.string().trim().max(1000).optional(),
+  ...assemblyOperatingContextShape,
 });
 
 export const assemblyConsumeSchema = z.object({
@@ -352,6 +372,7 @@ export const salesInternalOrderAssemblyLineCreateSchema = z.object({
   assemblyQuantityRaw: decimalText("Cantidad de ensambles"),
   sourceDocumentRef: z.string().trim().max(120).optional(),
   notes: z.string().trim().max(1000).optional(),
+  ...assemblyOperatingContextShape,
 });
 
 export const salesInternalOrderAssemblyCreateSchema =
@@ -375,6 +396,11 @@ export const salesInternalOrderLinesCreateSchema = z
         assemblyQuantity: z.number().finite().positive("La cantidad debe ser mayor que cero"),
         sourceDocumentRef: z.string().trim().max(120).optional(),
         notes: z.string().trim().max(1000).optional(),
+        workingPressureBar: z.number().finite().nonnegative().nullable().optional(),
+        operatingTemperatureC: z.number().finite().nullable().optional(),
+        medium: z.string().trim().max(120).optional(),
+        application: z.string().trim().max(160).optional(),
+        assemblyMethod: z.string().trim().max(120).optional(),
       }),
     ]),
   )

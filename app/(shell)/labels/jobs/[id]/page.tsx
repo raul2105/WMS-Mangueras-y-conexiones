@@ -1,30 +1,90 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { createReprintJob, ensureDefaultLabelTemplates, markLabelPrintJobStatus } from "@/lib/labeling-service";
+import { createReprintJob, ensureDefaultLabelTemplates } from "@/lib/labeling-service";
 import LabelPrintClientActions from "@/components/LabelPrintClientActions";
 import { hasPermissionInSession } from "@/lib/auth/session-context";
+import { pageGuard } from "@/components/rbac/PageGuard";
+import { requirePermission } from "@/lib/rbac";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { sanitizeCallbackUrl } from "@/lib/auth/callback-url";
 
 export const dynamic = "force-dynamic";
 
 async function markPrinted(formData: FormData) {
   "use server";
+  const authorizedSession = await requirePermission("labels.manage");
+  const actorUserId = authorizedSession.user?.id;
+  if (!actorUserId) redirect("/login");
+  const actor = authorizedSession.user?.name?.trim() || authorizedSession.user?.email?.trim() || actorUserId;
   const jobId = String(formData.get("jobId") ?? "").trim();
-  const next = String(formData.get("next") ?? "").trim();
+  const next = sanitizeCallbackUrl(String(formData.get("next") ?? ""));
   if (!jobId) return;
-  await markLabelPrintJobStatus(prisma, jobId, "PRINTED");
-  redirect(next || `/labels/jobs/${jobId}`);
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.labelPrintJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, status: true, printedAt: true, exportedAt: true, traceRecordId: true, labelTemplateId: true },
+    });
+    if (!before) return;
+    if (before.status === "PRINTED") return;
+    const changed = await tx.labelPrintJob.updateMany({
+      where: { id: jobId, status: before.status, printedAt: before.printedAt },
+      data: { status: "PRINTED", printedAt: new Date() },
+    });
+    if (changed.count === 0) {
+      const current = await tx.labelPrintJob.findUnique({ where: { id: jobId }, select: { status: true } });
+      if (current?.status === "PRINTED") return;
+      throw new Error("La etiqueta cambió mientras se actualizaba. Recarga la página e inténtalo de nuevo.");
+    }
+    const after = await tx.labelPrintJob.findUnique({
+      where: { id: jobId },
+      select: { status: true, printedAt: true, exportedAt: true, traceRecordId: true, labelTemplateId: true },
+    });
+    if (!after) throw new Error("No se pudo confirmar el estado actualizado de la etiqueta.");
+    await createAuditLogRequiredWithDb({
+      entityType: "LABEL_PRINT_JOB",
+      entityId: jobId,
+      action: "MARK_PRINTED",
+      before,
+      after: { status: after.status, printedAt: after.printedAt, exportedAt: after.exportedAt, traceRecordId: after.traceRecordId, labelTemplateId: after.labelTemplateId },
+      actor,
+      actorUserId,
+      source: "labels.jobs.mark-printed",
+    }, tx);
+  });
+  redirect(next !== "/" ? next : `/labels/jobs/${jobId}`);
 }
 
 async function reprintWithTemplate(formData: FormData) {
   "use server";
+  const authorizedSession = await requirePermission("labels.manage");
+  const actorUserId = authorizedSession.user?.id;
+  if (!actorUserId) redirect("/login");
+  const actor = authorizedSession.user?.name?.trim() || authorizedSession.user?.email?.trim() || actorUserId;
   const traceRecordId = String(formData.get("traceRecordId") ?? "").trim();
   const templateCode = String(formData.get("templateCode") ?? "").trim();
-  const requestedBy = String(formData.get("requestedBy") ?? "").trim();
-  const next = String(formData.get("next") ?? "").trim();
+  const next = sanitizeCallbackUrl(String(formData.get("next") ?? ""));
   if (!traceRecordId) return;
-  const { job } = await createReprintJob(prisma, traceRecordId, templateCode || null, requestedBy || null);
-  const query = next ? `?next=${encodeURIComponent(next)}` : "";
+  const { job } = await prisma.$transaction(async (tx) => {
+    const result = await createReprintJob(tx, traceRecordId, templateCode || null, actor);
+    await createAuditLogRequiredWithDb({
+      entityType: "LABEL_PRINT_JOB",
+      entityId: result.job.id,
+      action: "REPRINT_CREATED",
+      before: null,
+      after: {
+        traceRecordId: result.job.traceRecordId,
+        labelTemplateId: result.job.labelTemplateId,
+        status: result.job.status,
+        requestedBy: actor,
+      },
+      actor,
+      actorUserId,
+      source: "labels.jobs.reprint",
+    }, tx);
+    return result;
+  });
+  const query = next !== "/" ? `?next=${encodeURIComponent(next)}` : "";
   redirect(`/labels/jobs/${job.id}${query}`);
 }
 
@@ -35,6 +95,7 @@ export default async function LabelJobPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ next?: string }>;
 }) {
+  await pageGuard("labels.manage");
   const { id } = await params;
   const sp = await searchParams;
   const job = await prisma.labelPrintJob.findUnique({
@@ -97,15 +158,6 @@ export default async function LabelJobPage({
                 <option key={template.code} value={template.code}>{template.name}</option>
               ))}
             </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs text-slate-400">Operador</span>
-            <input
-              name="requestedBy"
-              defaultValue={job.requestedBy ?? job.traceRecord.operatorName ?? ""}
-              className="px-3 py-2 glass rounded-lg"
-              placeholder="Nombre del operador"
-            />
           </label>
           <button type="submit" className="btn-primary">Reimprimir</button>
         </form>

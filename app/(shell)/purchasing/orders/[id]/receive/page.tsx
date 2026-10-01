@@ -1,14 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import { getSessionContext } from "@/lib/auth/session-context";
 import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
-import InventoryService from "@/lib/inventory-service";
-import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { firstErrorMessage, purchaseReceiptOperationSchema, purchaseReceiptLineDiscrepancySchema } from "@/lib/schemas/wms";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PurchaseReceiptForm } from "@/components/purchasing/PurchaseReceiptForm";
+import { commitPurchaseOrderReceipt, isReceivingLocation } from "@/lib/purchasing/purchase-order-receiving";
 import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 const RECEIPT_QUEUE_HREF = "/purchasing/orders?preset=por_recibir";
@@ -39,9 +37,9 @@ async function receiveItems(orderId: string, formData: FormData) {
 
   const receivingLocation = await prisma.location.findUnique({
     where: { id: locationId },
-    select: { code: true, isActive: true },
+    select: { isActive: true, usageType: true, warehouseId: true, warehouse: { select: { isActive: true } } },
   });
-  if (!receivingLocation?.isActive || !receivingLocation.code.startsWith("RECV")) {
+  if (!isReceivingLocation(receivingLocation ? { ...receivingLocation, warehouseIsActive: receivingLocation.warehouse.isActive } : null)) {
     redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Selecciona una zona de recepción autorizada")}`);
   }
 
@@ -51,6 +49,7 @@ async function receiveItems(orderId: string, formData: FormData) {
       id: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       lines: {
         select: {
           id: true,
@@ -67,6 +66,10 @@ async function receiveItems(orderId: string, formData: FormData) {
 
   if (!order) {
     redirect("/purchasing/orders");
+  }
+
+  if (order.deliveryWarehouseId && receivingLocation?.warehouseId !== order.deliveryWarehouseId) {
+    redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Selecciona una zona del almacén destino de la OC")}`);
   }
 
   if (!["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status)) {
@@ -154,109 +157,21 @@ async function receiveItems(orderId: string, formData: FormData) {
     redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Ingresa al menos una cantidad mayor a 0")}`);
   }
 
-  const inventory = new InventoryService(prisma);
-
   let receiptId: string;
   try {
-    receiptId = await prisma.$transaction(async (tx) => {
-      const receipt = await tx.purchaseReceipt.create({
-        data: {
-          purchaseOrderId: orderId,
-          locationId,
-          referenceDoc,
-          notes,
-        },
-      });
-      const qtyOrderedMap = new Map(order.lines.map(l => [l.id, l.qtyOrdered]));
-
-      for (const item of linesToReceive) {
-        const receiptLine = await tx.purchaseReceiptLine.create({
-          data: {
-            purchaseReceiptId: receipt.id,
-            purchaseOrderLineId: item.lineId,
-            productId: item.productId,
-            qtyReceived: item.qtyReceived,
-            qtyDamaged: item.qtyDamaged,
-            qtyMissing: item.qtyMissing,
-            qtyRejected: item.qtyRejected,
-            qtySurplusReported: item.qtySurplusReported,
-            discrepancyReason: item.discrepancyReason,
-          },
-        });
-
-        const qtyOrderedForLine = qtyOrderedMap.get(item.lineId) ?? 0;
-        const maxAllowedCurrent = qtyOrderedForLine - item.qtyReceived;
-        const updated = await tx.purchaseOrderLine.updateMany({
-          where: {
-            id: item.lineId,
-            qtyReceived: { lte: maxAllowedCurrent },
-          },
-          data: { qtyReceived: { increment: item.qtyReceived } },
-        });
-        if (updated.count === 0) {
-          throw new Error(`Cantidad excede pendiente para la línea ${item.lineId} (concurrencia)`);
-        }
-
-        if (item.qtyReceived === 0) continue;
-
-        const purchaseLine = order.lines.find((line) => line.id === item.lineId);
-        const baseQuantity = item.qtyReceived * (purchaseLine?.purchaseUnitFactor ?? 1);
-        const movement = await inventory.receiveStock(item.productId, locationId, baseQuantity, order.folio, {
-          tx,
-          source: "purchasing/receive",
-          actor: actor.actorName,
-          actorUserId: actor.actorUserId,
-          operatorName: actor.operatorName,
-          operatorUserId: actor.actorUserId,
-          notes: referenceDoc ? `Recepción OC ${order.folio} — ${referenceDoc}` : `Recepción OC ${order.folio}`,
-          documentType: "PURCHASE_RECEIPT",
-          documentId: receipt.id,
-          documentLineId: receiptLine.id,
-        });
-
-        if (!movement.movementId) {
-          throw new Error("No se pudo crear movimiento de inventario de recepción");
-        }
-
-        await createMovementTraceAndLabelJob(tx, {
-          movementId: movement.movementId,
-          labelType: "RECEIPT",
-          sourceEntityType: "PURCHASE_RECEIPT_LINE",
-          sourceEntityId: receiptLine.id,
-          operatorName: actor.operatorName,
-          operatorUserId: actor.actorUserId,
-        });
-      }
-
-      const updatedLines = await tx.purchaseOrderLine.findMany({
-        where: { purchaseOrderId: orderId },
-        select: { qtyOrdered: true, qtyReceived: true },
-      });
-      const allDone = updatedLines.every((line) => line.qtyReceived >= line.qtyOrdered - 1e-8);
-      const anyDone = updatedLines.some((line) => line.qtyReceived > 0);
-      const newStatus = allDone ? "RECIBIDA" : anyDone ? "PARCIAL" : order.status;
-
-      await tx.purchaseOrder.update({
-        where: { id: orderId },
-        data: { status: newStatus as never },
-      });
-
-      await createAuditLogSafeWithDb({
-        entityType: "PURCHASE_ORDER",
-        entityId: orderId,
-        action: "RECEIVE",
-        after: {
-          locationId,
-          referenceDoc,
-          lines: linesToReceive,
-          newStatus,
-          operatorAlias: parsedHeader.data.operatorName?.trim() || null,
-        },
-        actor: actor.actorName,
-        actorUserId: actor.actorUserId,
-      }, tx);
-      return receipt.id;
-    }, { timeout: 20000 });
+    receiptId = await commitPurchaseOrderReceipt({
+      prismaClient: prisma,
+      orderId,
+      locationId,
+      referenceDoc,
+      notes,
+      lines: linesToReceive,
+      actor: {
+        name: actor.actorName,
+        userId: actor.actorUserId,
+        operatorName: parsedHeader.data.operatorName?.trim() || null,
+      },
+    });
 
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al registrar recepción";
@@ -286,6 +201,7 @@ export default async function ReceivePage({
       id: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       supplier: { select: { name: true, code: true, businessName: true } },
       lines: {
         select: {
@@ -314,7 +230,12 @@ export default async function ReceivePage({
   }
 
   const locations = await prisma.location.findMany({
-    where: { isActive: true, code: { startsWith: "RECV" } },
+    where: {
+      isActive: true,
+      usageType: "RECEIVING",
+      warehouse: { isActive: true },
+      ...(order.deliveryWarehouseId ? { warehouseId: order.deliveryWarehouseId } : {}),
+    },
     orderBy: [{ warehouse: { name: "asc" } }, { code: "asc" }],
     select: { id: true, code: true, warehouse: { select: { name: true } } },
   });

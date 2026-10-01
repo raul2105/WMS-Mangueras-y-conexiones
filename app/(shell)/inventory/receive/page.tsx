@@ -14,6 +14,7 @@ import { resolveProductInput } from "@/lib/product-search";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
+import { lockAndAssertActiveInventoryLocations } from "@/lib/inventory-active-location";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ async function receiveStock(formData: FormData) {
     locationId,
     reference,
     operatorName: actor.operatorName ?? "",
-    notes,
+    notes: notes ?? undefined,
     quantityRaw: qtyRaw,
   });
 
@@ -153,6 +154,10 @@ async function receiveStock(formData: FormData) {
 
   try {
     createdJobId = await prisma.$transaction(async (tx) => {
+      const [lockedLocation] = await lockAndAssertActiveInventoryLocations(tx, [location.id]);
+      if (warehouseId && lockedLocation.warehouseId !== warehouseId) {
+        throw new InventoryServiceError("WAREHOUSE_MISMATCH", "La ubicación no pertenece al almacén seleccionado");
+      }
       const result = await service.receiveStock(product.id, location.id, quantity, reference, {
         tx,
         notes,
@@ -194,7 +199,13 @@ async function receiveStock(formData: FormData) {
     }, { timeout: 20000 });
   } catch (error) {
     if (error instanceof InventoryServiceError) {
-      redirect(`/inventory/receive?error=${encodeURIComponent("No se pudo registrar la entrada")}`);
+      const messages: Record<string, string> = {
+        LOCATION_NOT_FOUND: "La ubicación ya no existe; recarga el formulario",
+        LOCATION_INACTIVE: error.message,
+        WAREHOUSE_INACTIVE: error.message,
+        WAREHOUSE_MISMATCH: "La ubicación no pertenece al almacén seleccionado",
+      };
+      redirect(`/inventory/receive?error=${encodeURIComponent(messages[error.code] ?? "No se pudo registrar la entrada")}`);
     }
     redirect(`/inventory/receive?error=${encodeURIComponent("Ocurrio un error inesperado al registrar la entrada")}`);
   }

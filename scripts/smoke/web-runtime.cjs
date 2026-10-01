@@ -116,7 +116,17 @@ async function run() {
   assert(health.response.ok, `Health check falló con status ${health.response.status}.`);
   assert(health.json?.ok === true, "Health payload no contiene ok=true.");
   assert(typeof health.json?.db === "string", "Health payload no contiene campo db.");
-  console.log(`[smoke:web] health OK (db=${health.json.db})`);
+  assert(typeof health.json?.environment === "string", "Health payload no contiene environment.");
+  assert(typeof health.json?.commitSha === "string", "Health payload no contiene commitSha.");
+  assert(typeof health.json?.releaseId === "string", "Health payload no contiene releaseId.");
+  const expectedCommitSha = getEnv("WMS_EXPECTED_COMMIT_SHA");
+  if (expectedCommitSha) {
+    assert(
+      health.json.commitSha === expectedCommitSha || health.json.commitSha.startsWith(expectedCommitSha),
+      `SHA desplegado ${health.json.commitSha} no coincide con el esperado ${expectedCommitSha}.`,
+    );
+  }
+  console.log(`[smoke:web] health OK (db=${health.json.db}, release=${health.json.releaseId}, sha=${health.json.commitSha})`);
 
   const email = getEnv("WMS_SMOKE_AUTH_EMAIL");
   const password = getEnv("WMS_SMOKE_AUTH_PASSWORD");

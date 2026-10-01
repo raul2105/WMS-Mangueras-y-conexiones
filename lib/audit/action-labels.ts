@@ -13,9 +13,12 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   RESOLVE_OPERATIONAL_EXCEPTION: "Resolver excepción operativa",
   REVALIDATE_COMMERCIAL_PROMISE: "Revalidar promesa comercial",
   RESERVE_STOCK: "Reservar inventario",
+  RELEASE_RESERVED_STOCK: "Liberar inventario reservado",
+  MOVE_RESERVED_STOCK_TO_LOCATION: "Mover inventario reservado",
   MARK_DELIVERED_TO_CUSTOMER: "Registrar entrega al cliente",
 };
 
 export function auditActionLabel(action: string) {
-  return AUDIT_ACTION_LABELS[action] ?? action.replaceAll("_", " ").toLowerCase();
+  const normalizedAction = action.trim().toUpperCase().replaceAll(/[\s-]+/g, "_");
+  return AUDIT_ACTION_LABELS[normalizedAction] ?? action.replaceAll("_", " ").toLowerCase();
 }

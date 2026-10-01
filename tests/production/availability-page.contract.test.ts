@@ -21,6 +21,9 @@ describe("production availability page contract", () => {
     expect(content).toContain("Sin disponibilidad");
     expect(content).toContain("Limitado");
     expect(content).toContain("Disponible");
+    expect(content).toContain('className="grid gap-3 xl:hidden"');
+    expect(content).toContain('className="hidden xl:block"');
+    expect(content).not.toContain('className="grid gap-3 md:hidden"');
 
     expect(content).not.toContain("Siguiente acción");
     expect(content).not.toContain("Ir al catálogo");

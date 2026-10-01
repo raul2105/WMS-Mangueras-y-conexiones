@@ -18,6 +18,11 @@ import {
   CheckCircle,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS,
+  SALES_ORDER_FLOW_STAGE_LABELS,
+  type SalesOrderFlowStage,
+} from "@/lib/sales/internal-orders";
 
 interface SalesHomeClientProps {
   stats: {
@@ -33,46 +38,10 @@ interface SalesHomeClientProps {
     id: string;
     code: string;
     customerName: string;
-    status: string;
+    status: SalesOrderFlowStage;
     dueDate: string;
     nextAction: string;
   }>;
-}
-
-function getStageBadgeVariant(variant: string) {
-  switch (variant) {
-    case "accent":
-      return "accent";
-    case "warning":
-      return "warning";
-    case "success":
-      return "success";
-    case "danger":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
-
-function getStatusBadgeVariant(status: string) {
-  switch (status) {
-    case "entregado":
-      return "success";
-    case "cancelado":
-      return "danger";
-    case "captura":
-      return "warning";
-    case "por_asignar":
-      return "warning";
-    case "en_surtido":
-      return "info";
-    case "preparar_entrega":
-      return "warning";
-    case "listo_entrega":
-      return "success";
-    default:
-      return "neutral";
-  }
 }
 
 export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
@@ -190,8 +159,8 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
                       <action.icon size={20} className="text-gray-700" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{action.label}</p>
-                      <p className="text-sm text-gray-500 truncate">{action.description}</p>
+                      <p className="font-medium text-gray-900">{action.label}</p>
+                      <p className="text-sm leading-snug text-gray-500">{action.description}</p>
                     </div>
                     <ChevronRight size={18} className="text-gray-400 shrink-0 mt-1" />
                   </div>
@@ -204,7 +173,7 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
 
       {/* Work Summary */}
       <SectionCard title="Mi trabajo activo">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {workStages.map((stage) => (
             <Link key={stage.key} href={stage.href}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
@@ -215,12 +184,12 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <p className="font-medium text-gray-900 truncate">{stage.label}</p>
-                        <Badge variant={getStageBadgeVariant(stage.variant)} className="text-xs">
+                        <p className="font-medium leading-snug text-gray-900">{stage.label}</p>
+                        <Badge variant={stage.variant} className="text-xs">
                           {stage.count}
                         </Badge>
                       </div>
-                      <p className="text-xs text-gray-500 truncate mt-1">{stage.description}</p>
+                      <p className="mt-1 text-xs leading-snug text-gray-500">{stage.description}</p>
                     </div>
                   </div>
                 </CardContent>
@@ -251,23 +220,20 @@ export function SalesHomeClient({ stats, recentOrders }: SalesHomeClientProps) {
                     href={`/production/requests/${order.id}`}
                     className="block hover:bg-gray-50 transition-colors"
                   >
-                    <div className="p-4 flex items-center justify-between gap-4">
+                    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-gray-900 truncate">
                           {order.code} · {order.customerName}
                         </p>
-                        <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
                           <span>Entrega: {order.dueDate}</span>
                           <span>•</span>
                           <span>{order.nextAction}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap shrink-0">
-                        <Badge variant={getStatusBadgeVariant(order.status)}>
-                          {order.status}
-                        </Badge>
-                        <Badge variant={getStageBadgeVariant(order.status)}>
-                          {order.status.replace("_", " ")}
+                      <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                        <Badge variant={SALES_ORDER_FLOW_STAGE_BADGE_VARIANTS[order.status]}>
+                          {SALES_ORDER_FLOW_STAGE_LABELS[order.status]}
                         </Badge>
                       </div>
                     </div>

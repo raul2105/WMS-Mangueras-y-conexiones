@@ -2,11 +2,20 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
 async function createWarehouse(formData: FormData) {
   "use server";
+  await requirePermission("warehouse.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
+  if (!actor.actorUserId || !actor.actorName) {
+    redirect(`/warehouse/new?error=${encodeURIComponent("Sesión inválida para registrar el almacén")}`);
+  }
 
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
@@ -28,14 +37,21 @@ async function createWarehouse(formData: FormData) {
     redirect(`/warehouse/new?error=${encodeURIComponent(`El código ${code} ya existe`)}`);
   }
 
-  await prisma.warehouse.create({
-    data: {
-      code,
-      name,
-      description,
-      address,
-      isActive,
-    },
+  await prisma.$transaction(async (tx) => {
+    const warehouse = await tx.warehouse.create({
+      data: { code, name, description, address, isActive },
+      select: { id: true },
+    });
+    await createAuditLogRequiredWithDb({
+      entityType: "WAREHOUSE",
+      entityId: warehouse.id,
+      action: "CREATE",
+      source: "warehouse/create",
+      before: null,
+      after: { id: warehouse.id, code, name, description, address, isActive },
+      actor: actor.actorName,
+      actorUserId: actor.actorUserId,
+    }, tx);
   });
 
   redirect("/warehouse");

@@ -11,7 +11,7 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const vitestCli = path.join(repoRoot, "node_modules", "vitest", "vitest.mjs");
 const args = process.argv.slice(2);
 const runId = process.env.WMS_TEST_RUN_ID || `run_${Date.now()}_${randomUUID().slice(0, 8)}`;
-const normalizedRunId = runId.replace(/[^a-zA-Z0-9_]/g, "_");
+const normalizedRunId = runId.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 24) || "adhoc";
 const forceSerial = process.env.WMS_POSTGRES_FORCE_SERIAL === "1";
 const hasWorkerOverride = args.some((arg) => arg === "--maxWorkers" || arg.startsWith("--maxWorkers="));
 const finalArgs = forceSerial && !hasWorkerOverride ? ["--maxWorkers=1", ...args] : args;
@@ -29,7 +29,7 @@ async function cleanupIsolatedSchemas() {
     datasources: { db: { url: adminUrl } },
   });
 
-  const schemaPattern = `^t_${normalizedRunId}_w[0-9]+$`;
+  const schemaPattern = `^t_${normalizedRunId}_f[0-9a-f]{16}$`;
   try {
     const rows = await prisma.$queryRawUnsafe(
       "SELECT nspname FROM pg_namespace WHERE nspname ~ $1",
@@ -52,7 +52,39 @@ async function cleanupIsolatedSchemas() {
   }
 }
 
+async function assertRunIdIsUnused() {
+  const adminUrl = withSchema(databaseUrl, "public");
+  const prisma = new PrismaClient({
+    datasources: { db: { url: adminUrl } },
+  });
+  const schemaPattern = `^t_${normalizedRunId}_f[0-9a-f]{16}$`;
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      "SELECT nspname FROM pg_namespace WHERE nspname ~ $1",
+      schemaPattern
+    );
+    if (rows.length > 0) {
+      throw new Error(
+        `El run ID ${normalizedRunId} ya tiene ${rows.length} esquema(s); use otro ID. No se limpiaron datos existentes.`
+      );
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function main() {
+  let testsStarted = false;
+  let cleanupError = null;
+  try {
+    await assertRunIdIsUnused();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[test] preflight failed: ${message}`);
+    process.exit(1);
+  }
+
   const result = spawnSync(process.execPath, [vitestCli, ...finalArgs], {
     cwd: repoRoot,
     env: {
@@ -63,15 +95,17 @@ async function main() {
     },
     stdio: "inherit",
   });
+  testsStarted = true;
 
-  let cleanupError = null;
-  try {
-    const cleanedCount = await cleanupIsolatedSchemas();
-    console.log(`[test] cleaned ${cleanedCount} isolated schemas for ${runId}`);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[test] failed to cleanup isolated schemas for ${runId}: ${message}`);
-    cleanupError = error;
+  if (testsStarted) {
+    try {
+      const cleanedCount = await cleanupIsolatedSchemas();
+      console.log(`[test] cleaned ${cleanedCount} isolated schemas for ${normalizedRunId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[test] failed to cleanup isolated schemas for ${normalizedRunId}: ${message}`);
+      cleanupError = error;
+    }
   }
 
   if (result.error) {

@@ -12,7 +12,7 @@ describe("continuity validation coverage", () => {
     const runbook = read("docs/reconciliation/validation-runbook-2026-08-01.md");
     const detail = read("app/(shell)/production/requests/[id]/page.tsx");
 
-    expect(e2e).toContain("completes a direct-product order");
+    expect(e2e).toContain("V2/V6/V8 direct order reserves, fulfills under assignment, and prepares/delivers idempotently");
     expect(e2e).toContain("completes an assembly-only order");
     expect(e2e).toContain("maintains one continuous route from a mixed order to delivery");
     expect(detail).toContain('data-testid="prepare-for-delivery-form"');

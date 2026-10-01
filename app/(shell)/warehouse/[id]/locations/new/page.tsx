@@ -2,11 +2,21 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import type { LocationUsageType } from "@prisma/client";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
 async function createLocation(formData: FormData) {
   "use server";
+  await requirePermission("location.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
+  if (!actor.actorUserId || !actor.actorName) {
+    redirect(`/warehouse?error=${encodeURIComponent("Sesión inválida para registrar la ubicación")}`);
+  }
 
   const warehouseId = String(formData.get("warehouseId") ?? "").trim();
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
@@ -17,6 +27,8 @@ async function createLocation(formData: FormData) {
   const level = String(formData.get("level") ?? "").trim() || null;
   const capacityRaw = String(formData.get("capacity") ?? "").trim();
   const capacity = capacityRaw ? Number(capacityRaw.replace(",", ".")) : null;
+  const usageTypeRaw = String(formData.get("usageType") ?? "").trim();
+  const usageTypes = ["STORAGE", "RECEIVING", "SHIPPING", "STAGING", "WIP"] as const;
   const isActive = formData.get("isActive") === "on";
 
   if (!warehouseId || !code || !name) {
@@ -26,14 +38,20 @@ async function createLocation(formData: FormData) {
   if (capacityRaw && (capacity === null || !Number.isFinite(capacity) || capacity < 0)) {
     redirect(`/warehouse/${warehouseId}/locations/new?error=${encodeURIComponent("Capacidad inválida")}`);
   }
+  if (!(usageTypes as readonly string[]).includes(usageTypeRaw)) {
+    redirect(`/warehouse/${warehouseId}/locations/new?error=${encodeURIComponent("Selecciona un uso operativo válido")}`);
+  }
+  if (!/^[A-Z0-9-]{1,80}$/.test(code) || name.length > 160) {
+    redirect(`/warehouse/${warehouseId}/locations/new?error=${encodeURIComponent("Código o nombre inválido")}`);
+  }
 
   const warehouse = await prisma.warehouse.findUnique({
     where: { id: warehouseId },
-    select: { id: true },
+    select: { id: true, isActive: true },
   });
 
-  if (!warehouse) {
-    redirect(`/warehouse?error=${encodeURIComponent("Almacén no encontrado")}`);
+  if (!warehouse?.isActive) {
+    redirect(`/warehouse/${warehouseId}/locations/new?error=${encodeURIComponent("Solo puedes crear ubicaciones en un almacén activo")}`);
   }
 
   const existing = await prisma.location.findUnique({
@@ -45,18 +63,36 @@ async function createLocation(formData: FormData) {
     redirect(`/warehouse/${warehouseId}/locations/new?error=${encodeURIComponent(`La ubicación ${code} ya existe`)}`);
   }
 
-  await prisma.location.create({
-    data: {
-      warehouseId: warehouse.id,
-      code,
-      name,
-      zone,
-      aisle,
-      rack,
-      level,
-      capacity,
-      isActive,
-    },
+  await prisma.$transaction(async (tx) => {
+    const currentWarehouse = await tx.warehouse.findUnique({ where: { id: warehouse.id }, select: { id: true, isActive: true } });
+    if (!currentWarehouse?.isActive) throw new Error("El almacén ya no está activo");
+    const duplicate = await tx.location.findUnique({ where: { code }, select: { id: true } });
+    if (duplicate) throw new Error(`La ubicación ${code} ya existe`);
+    const location = await tx.location.create({
+      data: {
+        warehouseId: currentWarehouse.id,
+        code,
+        name,
+        zone,
+        aisle,
+        rack,
+        level,
+        capacity,
+        isActive,
+        usageType: usageTypeRaw as LocationUsageType,
+      },
+      select: { id: true },
+    });
+    await createAuditLogRequiredWithDb({
+      entityType: "LOCATION",
+      entityId: location.id,
+      action: "CREATE",
+      source: "warehouse/location-create",
+      before: null,
+      after: { id: location.id, warehouseId: currentWarehouse.id, code, name, usageType: usageTypeRaw, zone, aisle, rack, level, capacity, isActive },
+      actor: actor.actorName,
+      actorUserId: actor.actorUserId,
+    }, tx);
   });
 
   redirect(`/warehouse/${warehouseId}`);
@@ -75,11 +111,14 @@ export default async function NewLocationPage({
 
   const warehouse = await prisma.warehouse.findUnique({
     where: { id },
-    select: { id: true, name: true, code: true },
+    select: { id: true, name: true, code: true, isActive: true },
   });
 
   if (!warehouse) {
     redirect(`/warehouse?error=${encodeURIComponent("Almacén no encontrado")}`);
+  }
+  if (!warehouse.isActive) {
+    redirect(`/warehouse/${warehouse.id}?error=${encodeURIComponent("Activa el almacén antes de crear ubicaciones")}`);
   }
 
   return (
@@ -126,6 +165,18 @@ export default async function NewLocationPage({
               className="w-full px-4 py-3 glass rounded-lg"
               placeholder="Rack A - Nivel 4"
             />
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm text-slate-400">Uso operativo *</span>
+            <select name="usageType" required defaultValue="STORAGE" className="w-full px-4 py-3 glass rounded-lg">
+              <option value="STORAGE">Almacenamiento</option>
+              <option value="RECEIVING">Recepción de compras</option>
+              <option value="SHIPPING">Embarque</option>
+              <option value="STAGING">Consolidación / staging</option>
+              <option value="WIP">Trabajo en proceso (WIP)</option>
+            </select>
+            <span className="text-xs text-slate-500">El uso determina en qué operaciones aparece esta ubicación.</span>
           </label>
 
           <label className="space-y-1">

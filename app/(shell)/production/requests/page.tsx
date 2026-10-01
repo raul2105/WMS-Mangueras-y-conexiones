@@ -9,6 +9,7 @@ import { buttonStyles } from "@/components/ui/button";
 import { isSystemAdmin } from "@/lib/rbac/permissions";
 import {
   hasProductionCockpitAccess,
+  hasSalesAssignmentAccess,
   hasSalesWriteAccess,
   requireSalesWriteAccess,
 } from "@/lib/rbac/sales";
@@ -279,6 +280,12 @@ export default async function ProductionRequestsPage({
     assignedToUser: { select: { name: true, email: true } },
     warehouseAssigneeUser: { select: { name: true, email: true } },
     warehouseClaimedByUser: { select: { name: true, email: true } },
+    operationalExceptions: {
+      where: { status: "OPEN" },
+      orderBy: { reportedAt: "desc" },
+      take: 1,
+      select: { type: true, reason: true, reportedAt: true },
+    },
     _count: { select: { lines: true, pickLists: true } },
     lines: {
       orderBy: { createdAt: "asc" },
@@ -602,7 +609,24 @@ export default async function ProductionRequestsPage({
           : sessionCtx.user?.id
             ? prisma.salesInternalOrder.count({
                 where: {
-                  AND: [activeWorkWhere, { assignedToUserId: sessionCtx.user.id }],
+                  AND: [
+                    activeWorkWhere,
+                    {
+                      OR: [
+                        { warehouseClaimedByUserId: sessionCtx.user.id },
+                        {
+                          warehouseClaimedByUserId: null,
+                          warehouseAssigneeUserId: sessionCtx.user.id,
+                        },
+                        {
+                          warehouseClaimedByUserId: null,
+                          warehouseAssigneeUserId: null,
+                          assignedToUserId: sessionCtx.user.id,
+                          pulledAt: { not: null },
+                        },
+                      ],
+                    },
+                  ],
                 },
               })
         : 0,
@@ -666,6 +690,13 @@ export default async function ProductionRequestsPage({
     (order) =>
       order.status === "CANCELADA" || Boolean(order.deliveredToCustomerAt),
   );
+  const warehouseIds = [...new Set(orders.map((order) => order.warehouse?.id).filter((id): id is string => Boolean(id)))];
+  const deliveryWarehouseIds = new Set(warehouseIds.length > 0
+    ? (await prisma.location.findMany({
+        where: { warehouseId: { in: warehouseIds }, isActive: true, usageType: { in: ["STAGING", "SHIPPING"] } },
+        select: { warehouseId: true },
+      })).map(({ warehouseId }) => warehouseId)
+    : []);
   const activeFilters = [
     statusFilter
       ? {
@@ -868,7 +899,7 @@ export default async function ProductionRequestsPage({
       <section className="space-y-3">
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-sm">
           <div
-            className="flex flex-wrap gap-2 pb-1"
+            className="flex flex-wrap gap-2"
             data-testid="requests-quick-filters"
           >
             {quickFilters.map((filter) => (
@@ -1063,6 +1094,14 @@ export default async function ProductionRequestsPage({
             });
             const operationalState = getOperationalUxState({
               blockingCause: "NONE",
+              activeException: order.operationalExceptions[0]
+                ? {
+                    label: order.operationalExceptions[0].type === "SHORTAGE"
+                      ? "Faltante operativo"
+                      : "Solicitud de cancelación",
+                    reason: order.operationalExceptions[0].reason,
+                  }
+                : null,
               isPartial: latestPickStatus === "PARTIAL",
               assemblyBlocked: configuredLines.length > 0 && !hasCompletedConfiguredAssembly,
               isUnreleased: productLines.length > 0 && (!latestPickStatus || latestPickStatus === "DRAFT"),
@@ -1090,6 +1129,7 @@ export default async function ProductionRequestsPage({
               hasAssemblyLines: configuredLines.length > 0,
               hasCompletedConfiguredAssembly,
               assemblyHref,
+              activeException: order.operationalExceptions[0] ?? null,
               takeEligibility,
               deliveredEligibility,
             });
@@ -1105,6 +1145,13 @@ export default async function ProductionRequestsPage({
               flowNarrative,
               canExecuteSalesActions: canRenderWriteActions,
               canExecuteProductionActions: canOperateProductionActions,
+              canResolveExceptions: hasSalesAssignmentAccess({ roles: sessionCtx.roles }),
+              deliveryBlockedReason: order.assignedToUserId === sessionCtx.user?.id || hasSalesAssignmentAccess({ roles: sessionCtx.roles })
+                ? null : "La entrega corresponde al ejecutivo responsable o a supervisión.",
+              preparationBlockedReason: !getWarehouseOwnershipId(order)
+                ? "Falta asignar o tomar el trabajo físico antes de preparar el pedido."
+                : order.warehouse?.id && deliveryWarehouseIds.has(order.warehouse.id)
+                  ? null : "No hay un área de entrega activa configurada para este almacén.",
             });
             const dueDateMs = order.dueDate
               ? new Date(order.dueDate).getTime()
@@ -1186,7 +1233,7 @@ export default async function ProductionRequestsPage({
                         : "--"}
                     </p>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                      <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {flowNarrative.nextRecommendedAction.label}</span>
+                      <span><span className="font-medium text-[var(--text-primary)]">Siguiente:</span> {primaryActionState.label}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Compromiso:</span> {formatDate(order.dueDate)}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Owner comercial:</span> {order.assignedToUser ? (order.assignedToUser.name ?? order.assignedToUser.email ?? "--") : "Sin asignar"}</span>
                       <span><span className="font-medium text-[var(--text-primary)]">Tarea física:</span> {order.warehouseClaimedByUser ? (order.warehouseClaimedByUser.name ?? order.warehouseClaimedByUser.email ?? "Tomada") : order.warehouseAssigneeUser ? (order.warehouseAssigneeUser.name ?? order.warehouseAssigneeUser.email ?? "Asignada") : "Sin tomar"}</span>

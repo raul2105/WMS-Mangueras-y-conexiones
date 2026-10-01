@@ -31,7 +31,12 @@ export default function AppTopbar({
             type="button"
             aria-label="Abrir navegacion"
             className={cn(buttonStyles({ variant: "secondary", size: "sm" }), "md:hidden")}
-            onClick={onOpenMobileNav}
+            onClick={(event) => {
+              // Touch browsers do not always focus a clicked button. Establish
+              // the return target before the dialog captures previous focus.
+              event.currentTarget.focus();
+              onOpenMobileNav();
+            }}
           >
             <MenuIcon className="h-4 w-4" />
           </button>

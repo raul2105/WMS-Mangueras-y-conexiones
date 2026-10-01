@@ -93,6 +93,7 @@ describePostgres("users admin service integration (postgres)", () => {
 
   beforeEach(async () => {
     requirePermissionMock.mockClear();
+    requirePermissionMock.mockResolvedValue({ user: { id: sessionAdminUserId } });
     getSessionContextMock.mockResolvedValue({
       session: { user: { id: sessionAdminUserId, email: `${runId}-session-admin@scmayher.com`, name: "Session Admin", roles: ["SYSTEM_ADMIN"] } },
       user: { id: sessionAdminUserId, email: `${runId}-session-admin@scmayher.com`, name: "Session Admin", roles: ["SYSTEM_ADMIN"] },
@@ -320,5 +321,9 @@ describePostgres("users admin service integration (postgres)", () => {
     expect(persisted?.passwordHash).toBeTruthy();
     expect(await bcrypt.compare(newPassword, String(persisted?.passwordHash))).toBe(true);
     expect(audit).toBeTruthy();
+    expect(audit?.actorUserId).toBe(sessionAdminUserId);
+    expect(audit?.actor).toBeTruthy();
+    expect(audit?.after).not.toContain(newPassword);
+    expect(audit?.after).not.toContain(String(persisted?.passwordHash));
   });
 });

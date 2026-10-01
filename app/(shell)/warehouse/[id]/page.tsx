@@ -13,11 +13,21 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }
 
-export default async function WarehouseDetailPage({ params }: PageProps) {
+const LOCATION_USAGE_LABELS = {
+  STORAGE: "Almacenamiento",
+  RECEIVING: "Recepción de compras",
+  SHIPPING: "Embarque",
+  STAGING: "Consolidación / staging",
+  WIP: "Trabajo en proceso (WIP)",
+} as const;
+
+export default async function WarehouseDetailPage({ params, searchParams }: PageProps) {
   await pageGuard("warehouse.manage");
   const { id } = await params;
+  const sp = await searchParams;
   if (!id) {
     notFound();
   }
@@ -51,6 +61,7 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
       level: true,
       capacity: true,
       isActive: true,
+      usageType: true,
       _count: {
         select: { inventory: true },
       },
@@ -90,12 +101,23 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
             <Link href={`/warehouse/${warehouse.id}/edit`} className={buttonStyles({ variant: "secondary" })}>
               Editar
             </Link>
-            <Link href={`/warehouse/${warehouse.id}/locations/new`} className={buttonStyles()}>
-              + Nueva ubicación
-            </Link>
+            {warehouse.isActive ? (
+              <Link href={`/warehouse/${warehouse.id}/locations/new`} className={buttonStyles()}>
+                + Nueva ubicación
+              </Link>
+            ) : null}
           </>
         }
       />
+
+      {sp.error ? (
+        <div role="alert" className="rounded-[var(--radius-md)] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-3 text-sm text-[var(--status-warning-text)]">{sp.error}</div>
+      ) : null}
+      {!warehouse.isActive ? (
+        <div className="rounded-[var(--radius-md)] border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] p-3 text-sm text-[var(--status-warning-text)]">
+          Este almacén está inactivo; reactívalo antes de crear ubicaciones.
+        </div>
+      ) : null}
 
       {warehouse.address ? (
         <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface-secondary)] px-4 py-3 text-sm text-[var(--text-secondary)]">
@@ -114,11 +136,11 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
           <EmptyState
             title="No hay ubicaciones en este almacén"
             description="Crea la primera ubicación para empezar a organizar el inventario."
-            actions={
+            actions={warehouse.isActive ? (
               <Link href={`/warehouse/${warehouse.id}/locations/new`} className={buttonStyles({ size: "sm" })}>
                 + Crear ubicación
               </Link>
-            }
+            ) : undefined}
             compact
           />
         ) : (
@@ -155,6 +177,10 @@ export default async function WarehouseDetailPage({ params }: PageProps) {
                         <div>
                           <dt className="text-xs text-[var(--text-muted)]">Nivel</dt>
                           <dd className="text-[var(--text-secondary)]">{location.level || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-[var(--text-muted)]">Uso operativo</dt>
+                          <dd className="text-[var(--text-secondary)]">{LOCATION_USAGE_LABELS[location.usageType]}</dd>
                         </div>
                         <div>
                           <dt className="text-xs text-[var(--text-muted)]">Capacidad</dt>

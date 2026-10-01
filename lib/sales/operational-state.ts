@@ -67,7 +67,7 @@ const BLOCKING_STATE: Record<Exclude<FulfillmentBlockingCause, "NONE">, Operatio
   },
 };
 
-export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause" | "isPartial" | "assemblyBlocked" | "isUnreleased"> & { latestPickStatus?: string | null; canMarkDelivered?: boolean; needsDeliveryPreparation?: boolean; isDelivered?: boolean; isCancelled?: boolean; hasLines?: boolean }): OperationalUxState {
+export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause" | "isPartial" | "assemblyBlocked" | "isUnreleased"> & { activeException?: { label: string; reason?: string | null } | null; latestPickStatus?: string | null; canMarkDelivered?: boolean; needsDeliveryPreparation?: boolean; isDelivered?: boolean; isCancelled?: boolean; hasLines?: boolean }): OperationalUxState {
   if (signals.isDelivered) {
     return { key: "delivered", label: "Entregado", description: "Pedido finalizado; consulta el historial si necesitas comprobarlo.", nextAction: "Ver historial", variant: "success" };
   }
@@ -76,6 +76,18 @@ export function getOperationalUxState(signals: Pick<QueueSignals, "blockingCause
   }
   if (signals.hasLines === false) {
     return { key: "capture", label: "Completar pedido", description: "Agrega un producto o ensamble antes de confirmar.", nextAction: "Agregar productos", variant: "neutral" };
+  }
+  if (signals.activeException) {
+    const reason = signals.activeException.reason?.trim();
+    return {
+      key: "blocked",
+      label: "Bloqueado",
+      description: reason
+        ? `${signals.activeException.label}: ${reason}`
+        : `${signals.activeException.label} pendiente de decisión.`,
+      nextAction: "Resolver excepción",
+      variant: "danger",
+    };
   }
   if (signals.canMarkDelivered) {
     return {

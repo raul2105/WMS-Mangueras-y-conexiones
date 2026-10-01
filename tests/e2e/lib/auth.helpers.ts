@@ -9,7 +9,7 @@ const CREDENTIAL_ENV_BY_ROLE = {
 
 // The checked-in Prisma seed provides deterministic credentials for a local
 // checkout. CI/AWS always supplies role-specific secrets; this fallback exists
-// only for local E2E runs and can be disabled with WMS_E2E_USE_SEEDED_CREDENTIALS=0.
+// only for an explicit local opt-in; AWS always requires private credentials.
 const LOCAL_SEEDED_CREDENTIALS = {
   SYSTEM_ADMIN: { email: "admin@scmayher.com", password: "Admin123*" },
   MANAGER: { email: "manager@scmayher.com", password: "Manager123*" },
@@ -22,7 +22,10 @@ function credentialFromEnv(role: keyof typeof CREDENTIAL_ENV_BY_ROLE) {
   const email = process.env[emailKey];
   const password = process.env[passwordKey];
   if (email && password) return { email, password };
-  if (!process.env.CI && process.env.WMS_E2E_USE_SEEDED_CREDENTIALS !== "0") {
+  const target = process.env.WMS_LIVE_BASE_URL;
+  const localTarget = !target || ["localhost", "127.0.0.1", "[::1]"].includes(new URL(target).hostname);
+  if (!process.env.CI && localTarget && process.env.WMS_E2E_USE_SEEDED_CREDENTIALS === "1"
+      && process.env.WMS_AWS_ACCEPTANCE_E2E !== "1" && process.env.WMS_AWS_WRITE_E2E !== "1") {
     return LOCAL_SEEDED_CREDENTIALS[role];
   }
   if (!email || !password) {
@@ -51,7 +54,7 @@ export const EXPECTED_HOME: Record<RoleKey, string> = {
 
 const EXPECTED_USER_META = {
   SYSTEM_ADMIN: { name: "Admin Principal", navItems: 8 },
-  MANAGER: { name: "Manager WMS", navItems: 7 },
+  MANAGER: { name: "Manager WMS", navItems: 8 },
   WAREHOUSE_OPERATOR: { name: "Operador Almacen", navItems: 5 },
   SALES_EXECUTIVE: { name: "Ejecutivo Ventas", navItems: 4 },
 } as const;
@@ -76,6 +79,12 @@ export async function loginAs(
   expectedUrl = EXPECTED_HOME[role],
 ) {
   const user = USERS[role];
+  // A workflow may switch actors on the same page. Always establish the
+  // requested identity instead of reusing the previous actor's session.
+  // Unmount the previous actor before clearing cookies: an in-flight session
+  // request must not restore that actor's cookie during the next sign-in.
+  await page.goto("about:blank");
+  await page.context().clearCookies();
   // Warm auth endpoints before the first browser login on a fresh dev server.
   // This avoids flaky first-request failures while webpack compiles auth routes.
   await page.request.get("/api/auth/session");
@@ -91,6 +100,10 @@ export async function loginAs(
   }
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page).toHaveURL(buildUrlExpectation(expectedUrl));
+
+  // Credentials sign-in can retain an existing App Router layout. Load the
+  // destination document afresh before asserting the authenticated actor.
+  await page.reload();
 
   const expectedUser = EXPECTED_USER[role];
   await expect(page.getByRole("banner")).toContainText(expectedUser.name);

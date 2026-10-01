@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 async function createOrder(formData: FormData) {
   "use server";
-  await (await import("@/lib/rbac")).requirePermission("production.execute");
+  const session = await (await import("@/lib/rbac")).requirePermission("production.execute");
 
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const status = "BORRADOR";
@@ -72,7 +72,7 @@ async function createOrder(formData: FormData) {
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.productionOrder.create({
+    const order = await tx.productionOrder.create({
       data: {
         code,
         status: parsed.data.status,
@@ -86,7 +86,7 @@ async function createOrder(formData: FormData) {
 
     await createAuditLogSafeWithDb({
       entityType: "PRODUCTION_ORDER",
-      entityId: code,
+      entityId: order.id,
       action: "CREATE_ORDER",
       after: {
         code,
@@ -96,7 +96,8 @@ async function createOrder(formData: FormData) {
         dueDate: dueDate ? dueDate.toISOString() : null,
       },
       source: "production/orders/new/generic",
-      actor: "system",
+      actor: session.user.name ?? session.user.email ?? session.user.id,
+      actorUserId: session.user.id,
     }, tx);
   });
 

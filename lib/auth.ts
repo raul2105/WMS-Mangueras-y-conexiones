@@ -6,21 +6,60 @@ import authConfig from "@/auth.config";
 import prisma from "@/lib/prisma";
 import { startPerf } from "@/lib/perf";
 import { getPermissionsForRoles } from "@/lib/rbac/role-permissions";
+import { getCredentialVersion } from "@/lib/auth/credential-version";
 
 function buildAuthUser(
   user: {
     id: string;
     name: string;
     email: string;
+    passwordHash: string;
   },
   roles: string[],
 ): NextAuthUser {
   const permissions = getPermissionsForRoles(roles);
-  return { id: user.id, name: user.name, email: user.email, roles, permissions };
+  return { id: user.id, name: user.name, email: user.email, roles, permissions, credentialVersion: getCredentialVersion(user.passwordHash) };
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+  callbacks: {
+    ...authConfig.callbacks,
+    async jwt(args) {
+      const token = await authConfig.callbacks.jwt(args);
+      const userId = String(token.uid ?? token.sub ?? "");
+      if (!userId) return null;
+
+      // Tokens identify the account; the database remains authoritative for
+      // deactivation and role revocation on every server session validation.
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true, name: true, email: true, isActive: true, passwordHash: true,
+          userRoles: {
+            where: { role: { isActive: true } },
+            select: { role: { select: { code: true } } },
+          },
+        },
+      });
+      if (!currentUser?.isActive) return null;
+
+      const credentialVersion = getCredentialVersion(currentUser.passwordHash);
+      const authenticatedVersion = args.user?.credentialVersion ?? token.credentialVersion;
+      // Legacy sessions must sign in again. A reset invalidates every earlier
+      // session, including a password change racing the initial JWT issuance.
+      if (authenticatedVersion !== credentialVersion) return null;
+      token.credentialVersion = credentialVersion;
+
+      const roles = currentUser.userRoles.map((entry) => entry.role.code);
+      token.uid = currentUser.id;
+      token.name = currentUser.name;
+      token.email = currentUser.email;
+      token.roles = roles;
+      token.permVersion = [...roles].sort().join("|");
+      return token;
+    },
+  },
   providers: [
     Credentials({
       name: "Credentials",
@@ -37,12 +76,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        // Fetch user and roles in parallel — roles query uses email filter
-        // so it can run concurrently before we have the userId.
+        // Authenticate before fetching roles so invalid attempts use only one
+        // database operation and do not occupy both serverless pool slots.
         const userPerf = startPerf("auth.authorize.user_minimal");
-        const rolePerf = startPerf("auth.authorize.roles");
-        const [user, userRoles] = await Promise.all([
-          prisma.user.findUnique({
+        const user = await prisma.user.findUnique({
             where: { email },
             select: {
               id: true,
@@ -51,23 +88,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               isActive: true,
               passwordHash: true,
             },
-          }),
-          prisma.userRole.findMany({
-            where: {
-              user: { email },
-              role: { isActive: true },
-            },
-            select: {
-              role: {
-                select: {
-                  code: true,
-                },
-              },
-            },
-          }),
-        ]);
+          });
         userPerf.end({ found: Boolean(user) });
-        rolePerf.end({ roleCount: userRoles.length });
 
         if (!user || !user.isActive) {
           perf.end({ ok: false, reason: "user_not_active" });
@@ -82,6 +104,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
+        const rolePerf = startPerf("auth.authorize.roles");
+        const userRoles = await prisma.userRole.findMany({
+          where: { userId: user.id, role: { isActive: true } },
+          select: { role: { select: { code: true } } },
+        });
+        rolePerf.end({ roleCount: userRoles.length });
         const roles = userRoles.map((entry) => entry.role.code);
         const authUser = buildAuthUser(user, roles);
         perf.end({ ok: true, roleCount: authUser.roles.length, permissionCount: authUser.permissions.length });

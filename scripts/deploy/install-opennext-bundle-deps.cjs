@@ -53,13 +53,29 @@ function copyBinSymlinks(tempInstallDir, outputDir) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const outputDir = args["--output-dir"];
+const outputDirArg = args["--output-dir"];
 const packagesArg = args["--packages"];
 
-if (!outputDir || !packagesArg) {
+if (!outputDirArg || !packagesArg) {
   console.error("Usage: node scripts/deploy/install-opennext-bundle-deps.cjs --output-dir <dir> --packages <pkg1,pkg2> [--os linux] [--arch arm64] [--target 18] [--libc glibc]");
   process.exit(1);
 }
+
+const repoRoot = fs.realpathSync(path.resolve(__dirname, "..", ".."));
+const openNextRoot = path.join(repoRoot, ".open-next");
+const outputDir = path.resolve(outputDirArg);
+function assertInside(root, target) {
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Refusing filesystem mutation outside the intended directory: ${target}`);
+  }
+}
+assertInside(openNextRoot, outputDir);
+// Resolve every existing parent before copying/removing to reject redirected paths.
+let existingParent = outputDir;
+while (!fs.existsSync(existingParent)) existingParent = path.dirname(existingParent);
+const realParent = fs.realpathSync(existingParent);
+if (realParent !== openNextRoot) assertInside(openNextRoot, realParent);
 
 const packages = packagesArg
   .split(",")
@@ -79,10 +95,7 @@ if (args["--os"]) {
   npmArgs.push(`--os=${args["--os"]}`);
 }
 if (args["--arch"]) {
-  npmArgs.push(`--arch=${args["--arch"]}`);
-}
-if (args["--target"]) {
-  npmArgs.push(`--target=${args["--target"]}`);
+  npmArgs.push(`--cpu=${args["--arch"]}`);
 }
 if (args["--libc"]) {
   npmArgs.push(`--libc=${args["--libc"]}`);
@@ -92,15 +105,34 @@ npmArgs.push(...packages);
 
 try {
   fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tempInstallDir, "package.json"),
+    `${JSON.stringify({ name: "open-next-bundle-deps", private: true }, null, 2)}\n`,
+    "utf8",
+  );
 
-  const result = spawnSync("npm", npmArgs, {
+  let npmExecutable = "npm";
+  if (process.platform === "win32") {
+    const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+    if (!fs.existsSync(npmCli)) {
+      throw new Error(`npm CLI not found at ${npmCli}`);
+    }
+    npmExecutable = process.execPath;
+    npmArgs.unshift(npmCli);
+  }
+
+  const result = spawnSync(npmExecutable, npmArgs, {
     cwd: tempInstallDir,
     env: {
       ...process.env,
+      npm_config_platform: args["--os"] || process.platform,
+      npm_config_arch: args["--arch"] || process.arch,
+      npm_config_libc: args["--libc"] || "",
+      npm_config_target: args["--target"] || process.versions.node,
       SHARP_IGNORE_GLOBAL_LIBVIPS: "1",
     },
     stdio: "inherit",
-    shell: true,
+    shell: false,
   });
 
   if (result.error) {
@@ -110,12 +142,23 @@ try {
     process.exit(result.status ?? 1);
   }
 
-  fs.cpSync(path.join(tempInstallDir, "node_modules"), path.join(outputDir, "node_modules"), {
+  const installedModulesDir = path.join(tempInstallDir, "node_modules");
+  if (!fs.existsSync(installedModulesDir)) {
+    throw new Error(`npm completed without creating ${installedModulesDir}`);
+  }
+
+  const outputModulesDir = path.join(outputDir, "node_modules");
+  assertInside(openNextRoot, outputModulesDir);
+  if (fs.existsSync(outputModulesDir)) assertInside(openNextRoot, fs.realpathSync(outputModulesDir));
+  fs.rmSync(outputModulesDir, { recursive: true, force: true });
+  fs.cpSync(installedModulesDir, outputModulesDir, {
     recursive: true,
     force: true,
     dereference: true,
   });
   copyBinSymlinks(tempInstallDir, outputDir);
 } finally {
+  assertInside(fs.realpathSync(os.tmpdir()), fs.realpathSync(tempInstallDir));
+  if (!path.basename(tempInstallDir).startsWith("open-next-install-")) throw new Error("Temporary cleanup guard failed");
   fs.rmSync(tempInstallDir, { recursive: true, force: true });
 }

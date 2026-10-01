@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { isIPv4, isIPv6 } from "node:net";
+import { resolve6 } from "node:dns/promises";
 
 export type EmailProvider = {
   /**
@@ -146,7 +148,10 @@ function createSesProvider(config: {
   const awsSes = require("@aws-sdk/client-ses");
 
   // Use IAM role / default credential chain if explicit keys not provided
-  const clientConfig: Record<string, unknown> = { region: config.region };
+  const clientConfig: Record<string, unknown> = {
+    region: config.region,
+    ...(process.env.WMS_IPV6_EGRESS === "1" ? { useDualstackEndpoint: true } : {}),
+  };
   if (config.accessKeyId && config.secretAccessKey) {
     clientConfig.credentials = { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey };
   }
@@ -206,6 +211,10 @@ function createSmtpProvider(config: {
   return {
     providerId: "smtp",
     async send(input) {
+      if (process.env.WMS_IPV6_EGRESS === "1") {
+        await assertSmtpHostSupportsIpv6(config.host);
+      }
+
       const result = await transporter.sendMail({
         from: config.fromName ? `"${config.fromName}" <${config.fromEmail}>` : config.fromEmail,
         to: input.to,
@@ -224,6 +233,30 @@ function createSmtpProvider(config: {
       return { messageId: result.messageId ?? `smtp-${Date.now()}` };
     },
   };
+}
+
+async function assertSmtpHostSupportsIpv6(host: string): Promise<void> {
+  if (isIPv6(host)) return;
+  if (isIPv4(host)) {
+    throw smtpIpv6EgressError();
+  }
+
+  try {
+    const addresses = await resolve6(host);
+    if (addresses.length > 0) return;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENODATA" && code !== "ENOTFOUND") throw error;
+  }
+
+  throw smtpIpv6EgressError();
+}
+
+function smtpIpv6EgressError(): Error {
+  return new Error(
+    "SMTP_HOST no publica una dirección IPv6 utilizable y este entorno no ofrece egreso IPv4. " +
+      "Revise la configuración o use un proveedor SMTP compatible con IPv6; para un host IPv4-only se requiere habilitar egreso IPv4."
+  );
 }
 
 /**

@@ -383,7 +383,7 @@ test.describe.serial("mixed sales order continuity", () => {
     }
   });
 
-  test("KAN-16 keyboard-first V2/V6/V8 direct request keeps the full operational assertions", async ({ browser, page }) => {
+  test("V2/V6/V8 direct order reserves, fulfills under assignment, and prepares/delivers idempotently (KAN-16 keyboard-first)", async ({ browser, page }) => {
     await loginAs(page, "SALES_EXECUTIVE", "/production/requests/new", "/production/requests/new");
     const customerSearch = page.getByLabel("Selecciona o crea el cliente");
     const continueToProduct = page.getByRole("button", { name: "Continuar a producto →" });

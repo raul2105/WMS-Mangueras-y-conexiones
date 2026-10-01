@@ -10,11 +10,40 @@ type ProbeRole = "SALES_EXECUTIVE" | "WAREHOUSE_OPERATOR";
 async function actionFields(page: Page, button: RegExp) {
   const form = page.locator("form").filter({ has: page.getByRole("button", { name: button }) });
   await expect(form).toHaveCount(1);
-  const fields = await form.locator('input[type="hidden"]').evaluateAll(inputs => Object.fromEntries(
-    inputs.map(input => [(input as HTMLInputElement).name, (input as HTMLInputElement).value]),
-  ));
-  expect(Object.keys(fields).some(key => key.startsWith("$ACTION_")), "Real server-rendered action metadata is required").toBe(true);
-  return fields as Record<string, string>;
+  const descriptor = await form.evaluate(element => ({
+    actionUrl: (element as HTMLFormElement).action,
+    hiddenEntries: Array.from(element.querySelectorAll<HTMLInputElement>('input[type="hidden"]'))
+      .filter(input => input.name)
+      .map(input => [input.name, input.value] as [string, string]),
+  }));
+  expect(descriptor.hiddenEntries.some(([key]) => key.startsWith("$ACTION_")), "Real server-rendered action metadata is required").toBe(true);
+  return descriptor;
+}
+
+function multipartActionData(hiddenEntries: Array<[string, string]>, overrides: Record<string, MultipartValue>) {
+  const data = new FormData();
+  for (const [key, value] of hiddenEntries) data.append(key, value);
+  for (const [key, value] of Object.entries(overrides)) {
+    data.delete(key);
+    if (typeof value === "object") {
+      data.append(key, new File([new Uint8Array(value.buffer)], value.name, { type: value.mimeType }));
+    } else {
+      data.append(key, value);
+    }
+  }
+  return data;
+}
+
+function addRenderNonce(actionUrl: string, renderedPageUrl: string) {
+  const target = new URL(actionUrl, renderedPageUrl);
+  const nonce = new URL(renderedPageUrl).searchParams.get("e2eNonce");
+  if (nonce && !target.searchParams.has("e2eNonce")) target.searchParams.set("e2eNonce", nonce);
+  return target.toString();
+}
+
+function cacheBustedRoute(route: string) {
+  const separator = route.includes("?") ? "&" : "?";
+  return `${route}${separator}e2eNonce=${randomUUID()}`;
 }
 
 test("direct Server Action requests enforce permissions before import, warehouse, location and label mutations", async ({ browser }, testInfo) => {
@@ -162,11 +191,12 @@ test("direct Server Action requests enforce permissions before import, warehouse
     };
 
     for (const entry of cases) {
-      await adminPage.goto(entry.route);
-      const baseFields = await actionFields(adminPage, entry.button);
+      await adminPage.goto(cacheBustedRoute(entry.route));
+      const descriptor = await actionFields(adminPage, entry.button);
+      const actionUrl = addRenderNonce(descriptor.actionUrl, adminPage.url());
       const headers = { origin: new URL(adminPage.url()).origin, referer: adminPage.url() };
-      const control = await admin.request.post(entry.route, {
-        multipart: { ...baseFields, ...entry.control }, headers, maxRedirects: 0,
+      const control = await admin.request.post(actionUrl, {
+        multipart: multipartActionData(descriptor.hiddenEntries, entry.control), headers, maxRedirects: 0,
       });
       expect(control.status(), `Authorized control for ${entry.route} must reach the action successfully`).toBeLessThan(400);
       const controlLocation = control.headers().location ?? "";
@@ -176,8 +206,8 @@ test("direct Server Action requests enforce permissions before import, warehouse
       expect(afterAdminControl.importedSku).toBeNull();
 
       for (const actor of entry.deniedRoles) {
-        const denied = await contextsByRole[actor].request.post(entry.route, {
-          multipart: { ...baseFields, ...entry.denied(actor) }, headers, maxRedirects: 0,
+        const denied = await contextsByRole[actor].request.post(actionUrl, {
+          multipart: multipartActionData(descriptor.hiddenEntries, entry.denied(actor)), headers, maxRedirects: 0,
         });
         // Valid inputs and the successful authorized control distinguish permission rejection from form validation.
         expect(denied.status(), `${actor} must be rejected by the Server Action guard for ${entry.route}`).toBeGreaterThanOrEqual(400);
@@ -187,11 +217,12 @@ test("direct Server Action requests enforce permissions before import, warehouse
     }
 
     // Positive and concurrent permission control: exactly one audit records the authorized print transition.
-    await adminPage.goto(`/labels/jobs/${jobId}`);
-    const printFields = await actionFields(adminPage, /^Marcar impresa$/);
+    await adminPage.goto(cacheBustedRoute(`/labels/jobs/${jobId}`));
+    const printDescriptor = await actionFields(adminPage, /^Marcar impresa$/);
+    const printUrl = addRenderNonce(printDescriptor.actionUrl, adminPage.url());
     const printHeaders = { origin: new URL(adminPage.url()).origin, referer: adminPage.url() };
-    const printed = await Promise.all([0, 1].map(() => admin.request.post(`/labels/jobs/${jobId}`, {
-      multipart: { ...printFields, jobId, next: `/labels/jobs/${jobId}` }, headers: printHeaders, maxRedirects: 0,
+    const printed = await Promise.all([0, 1].map(() => admin.request.post(printUrl, {
+      multipart: multipartActionData(printDescriptor.hiddenEntries, { jobId, next: `/labels/jobs/${jobId}` }), headers: printHeaders, maxRedirects: 0,
     })));
     for (const response of printed) expect(response.status()).toBe(303);
     expect((await db.labelPrintJob.findUniqueOrThrow({ where: { id: jobId } })).status).toBe("PRINTED");

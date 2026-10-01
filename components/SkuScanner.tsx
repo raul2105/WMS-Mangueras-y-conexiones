@@ -81,7 +81,7 @@ export default function SkuScanner({ onDetected, className }: Props) {
             Detener
           </button>
         )}
-        <span className="text-xs text-slate-500">Lee códigos QR o de barras para llenar el SKU/Referencia.</span>
+        <span className="text-xs text-[var(--text-muted)]">Lee códigos QR o de barras para llenar el SKU/Referencia.</span>
       </div>
 
       {error && <p className="text-sm text-red-400 mt-2">{error}</p>}
@@ -89,7 +89,7 @@ export default function SkuScanner({ onDetected, className }: Props) {
       {isScanning && (
         <div className="mt-3 glass rounded-xl p-3">
           <video ref={videoRef} className="w-full rounded-lg" muted playsInline />
-          <p className="text-xs text-slate-500 mt-2">Apunta al código…</p>
+          <p className="text-xs text-[var(--text-muted)] mt-2">Apunta al código…</p>
         </div>
       )}
     </div>

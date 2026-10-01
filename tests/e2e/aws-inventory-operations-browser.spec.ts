@@ -272,13 +272,17 @@ test.describe.serial("AWS inventory operations through browser", () => {
 
     await loginAs(page, "WAREHOUSE_OPERATOR", "/inventory/receive", "/inventory/receive");
     await page.goto("/inventory/receive");
-    await page.evaluate(() => window.localStorage.setItem("wms-theme", "dark"));
-    await page.reload();
+    const themeToggle = page.locator("header").getByRole("button", { name: "Cambiar tema" });
+    await expect(themeToggle).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", /^(dark|light)$/);
+    if (await page.locator("html").getAttribute("data-theme") !== "dark") {
+      await themeToggle.click();
+    }
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.getByRole("heading", { name: "Recepción (Entrada)" })).toBeVisible();
     await expectPreState("before-receive", 0, 0, 0);
     await auditForm(page);
-    await page.getByRole("button", { name: "Cambiar tema" }).click();
+    await themeToggle.click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await auditForm(page);
     await page.locator('input[name="code"]').fill(fixture.sku);

@@ -806,12 +806,17 @@ export default async function ProductionRequestDetailPage({
   );
   const hasPhysicalFulfillmentOwner = hasWarehouseFulfillmentOwnership(order);
   const canOverridePreparation = sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN");
-  const preparationNeedsSupervisorOverride = !hasPhysicalFulfillmentOwner && canOverridePreparation;
+  const currentUserId = sessionCtx.user?.id ?? null;
+  const currentUserOwnsPhysicalWork = Boolean(currentUserId && (
+    order.warehouseAssigneeUserId === currentUserId
+    || order.warehouseClaimedByUserId === currentUserId
+  ));
+  const preparationNeedsSupervisorOverride = !currentUserOwnsPhysicalWork && canOverridePreparation;
   const canPrepareForDelivery =
     !activeException &&
     (sessionCtx.roles.includes("WAREHOUSE_OPERATOR") || sessionCtx.roles.includes("MANAGER") || sessionCtx.roles.includes("SYSTEM_ADMIN")) &&
     orderStatus === "CONFIRMADA" &&
-    (hasPhysicalFulfillmentOwner || canOverridePreparation) &&
+    (currentUserOwnsPhysicalWork || canOverridePreparation) &&
     hasCompletedDirectPick &&
     hasCompletedConfiguredAssembly &&
     !order.preparedForDeliveryAt &&

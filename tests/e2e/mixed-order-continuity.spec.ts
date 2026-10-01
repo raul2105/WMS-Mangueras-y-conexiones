@@ -64,14 +64,21 @@ async function loginFresh(page: Page, role: "MANAGER" | "SALES_EXECUTIVE" | "WAR
 }
 
 async function loginWithCredentials(page: Page, email: string, password: string, callbackUrl: string) {
+  // Match loginAs: unmount the prior role before clearing its cookies so an
+  // in-flight session request cannot restore the previous identity.
+  await page.goto("about:blank");
   await page.context().clearCookies();
-  await page.goto(`/logout?e2eNonce=${Date.now()}`);
-  await page.context().clearCookies();
-  await page.goto(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}&e2eNonce=${Date.now()}`);
+  await page.request.get("/api/auth/session");
+  await page.request.get("/api/auth/csrf");
+  const cacheBuster = process.env.WMS_E2E_NO_CACHE === "1" ? `&e2eNonce=${Date.now()}` : "";
+  await page.goto(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}${cacheBuster}`);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Contrasena").fill(password);
   await page.getByRole("button", { name: "Iniciar sesion" }).click();
   await expect(page).toHaveURL(new RegExp(callbackUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await page.reload();
+  await expect(page.getByRole("banner")).toContainText(email);
+  await page.waitForLoadState("networkidle");
 }
 
 async function cleanupFixture() {

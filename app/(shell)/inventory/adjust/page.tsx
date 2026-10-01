@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { lockAndAssertActiveInventoryLocations } from "@/lib/inventory-active-location";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,7 @@ async function adjustStock(formData: FormData) {
 
   try {
     createdJobId = await prisma.$transaction(async (tx) => {
+      await lockAndAssertActiveInventoryLocations(tx, [location.id]);
       const result = await service.adjustStock(product.id, location.id, parsed.data.deltaRaw, reason, {
         tx,
         operatorName: actor.operatorName,
@@ -117,6 +119,9 @@ async function adjustStock(formData: FormData) {
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {
+        LOCATION_NOT_FOUND: "La ubicación ya no existe; recarga el formulario",
+        LOCATION_INACTIVE: error.message,
+        WAREHOUSE_INACTIVE: error.message,
         NEGATIVE_STOCK: "El ajuste resultaría en stock negativo",
         RESERVED_EXCEEDS_QUANTITY: "El ajuste resultaría en stock menor al reservado",
         INVALID_QTY: "Cantidad de ajuste inválida",
@@ -144,7 +149,7 @@ export default async function AdjustPage({
   const actor = resolveAuthenticatedActor(await getSessionContext());
   const [locations, products] = await Promise.all([
     prisma.location.findMany({
-      where: { isActive: true },
+      where: { isActive: true, warehouse: { isActive: true } },
       orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
       select: {
         code: true,

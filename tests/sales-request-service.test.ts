@@ -508,6 +508,25 @@ describe("sales request service", () => {
     expect(inventoryB?.available).toBe(5);
   });
 
+  it("prefers an active staging location by usage over a shipping zone or a misleading legacy code", async () => {
+    const { order, warehouse, productA, storageA, staging } = await createRequestFixture();
+    await prisma.location.update({ where: { id: staging.id }, data: { code: "CUSTOM-FLOOR-STAGING" } });
+    await prisma.location.createMany({ data: [
+      { code: "STAGING-SURT", name: "Legacy name, storage use", zone: "A", usageType: "STORAGE", isActive: true, warehouseId: warehouse.id },
+      { code: "SHIP-SURT", name: "Shipping zone", zone: "SHIP", usageType: "SHIPPING", isActive: true, warehouseId: warehouse.id },
+    ] });
+    await addSalesRequestProductLine(prisma, { orderId: order.id, productId: productA.id, requestedQty: 4 });
+    const pickList = await prisma.salesInternalOrderPickList.findFirstOrThrow({
+      where: { orderId: order.id }, include: { tasks: true },
+    });
+    expect(pickList.targetLocationId).toBe(staging.id);
+    expect(pickList.tasks).toHaveLength(1);
+    expect(pickList.tasks[0]).toMatchObject({ sourceLocationId: storageA.id, targetLocationId: staging.id, reservedQty: 4 });
+    expect(await prisma.inventory.findUniqueOrThrow({
+      where: { productId_locationId: { productId: productA.id, locationId: storageA.id } },
+    })).toMatchObject({ quantity: 10, reserved: 4, available: 6 });
+  });
+
   it("creates the request header and initial product line atomically when a product draft is provided", async () => {
     const { warehouse, productA } = await createRequestFixture();
     const manager = await createUserWithRole({

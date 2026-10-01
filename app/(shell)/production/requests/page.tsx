@@ -609,7 +609,24 @@ export default async function ProductionRequestsPage({
           : sessionCtx.user?.id
             ? prisma.salesInternalOrder.count({
                 where: {
-                  AND: [activeWorkWhere, { assignedToUserId: sessionCtx.user.id }],
+                  AND: [
+                    activeWorkWhere,
+                    {
+                      OR: [
+                        { warehouseClaimedByUserId: sessionCtx.user.id },
+                        {
+                          warehouseClaimedByUserId: null,
+                          warehouseAssigneeUserId: sessionCtx.user.id,
+                        },
+                        {
+                          warehouseClaimedByUserId: null,
+                          warehouseAssigneeUserId: null,
+                          assignedToUserId: sessionCtx.user.id,
+                          pulledAt: { not: null },
+                        },
+                      ],
+                    },
+                  ],
                 },
               })
         : 0,

@@ -446,11 +446,19 @@ async function ensureWarehouseFulfillmentTarget(tx: Tx, warehouseId: string) {
     where: {
       warehouseId,
       code: stagingCode,
+      usageType: "STAGING",
       isActive: true,
     },
     select: { id: true, code: true, name: true, usageType: true },
   });
   if (staging) return staging;
+
+  const configuredStaging = await tx.location.findFirst({
+    where: { warehouseId, usageType: "STAGING", isActive: true },
+    orderBy: { code: "asc" },
+    select: { id: true, code: true, name: true, usageType: true },
+  });
+  if (configuredStaging) return configuredStaging;
 
   const shipping = await tx.location.findFirst({
     where: {

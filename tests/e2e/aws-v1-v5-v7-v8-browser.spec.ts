@@ -2,17 +2,19 @@ import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { InventoryService } from "@/lib/inventory-service";
 import { addSalesRequestProductLine, confirmSalesRequestOrder, createSalesRequestDraftHeader, releaseSalesRequestPickList } from "@/lib/sales/request-service";
 import { loginAs, USERS } from "./lib/auth.helpers";
+import { createAwsFixtureEvidence } from "./lib/aws-fixture-evidence";
 
 const prisma = new PrismaClient();
 const enabled = process.env.WMS_AWS_WRITE_E2E === "1";
 const secondaryPassword = randomUUID();
 const tag = `QA-GATES-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
+let evidence: Awaited<ReturnType<typeof createAwsFixtureEvidence>> | null = null;
 
 const fixture = {
   warehouseId: "",
@@ -29,6 +31,24 @@ const fixture = {
 };
 
 type GateOrder = { id: string; code: string; taskId: string; sourceLocationId: string; targetLocationId: string };
+
+async function captureBeforeManifest() {
+  const [{ schema }] = await prisma.$queryRaw<Array<{ schema: string }>>`SELECT current_schema() AS schema`;
+  const locationCodes = [`${tag}-STO`, `${tag}-STG`, `${tag}-SHIP`];
+  const [warehouses, customers, products, locations, secondaryUsers] = await Promise.all([
+    prisma.warehouse.findMany({ where: { code: fixture.warehouseCode }, select: { id: true, code: true } }),
+    prisma.customer.findMany({ where: { code: `${tag}-C` }, select: { id: true, code: true } }),
+    prisma.product.findMany({ where: { sku: fixture.productSku }, select: { id: true, sku: true } }),
+    prisma.location.findMany({ where: { code: { in: locationCodes } }, select: { id: true, code: true } }),
+    prisma.user.findMany({ where: { email: `${tag.toLowerCase()}-operator@qa.invalid` }, select: { id: true, email: true } }),
+  ]);
+  return {
+    phase: "before", capturedAt: new Date().toISOString(), schema, uniqueTag: tag,
+    keys: { warehouseCode: fixture.warehouseCode, customerCode: `${tag}-C`, sku: fixture.productSku, locationCodes, secondaryUserEmail: `${tag.toLowerCase()}-operator@qa.invalid` },
+    records: { warehouses, customers, products, locations, secondaryUsers },
+    counts: { warehouses: warehouses.length, customers: customers.length, products: products.length, locations: locations.length, secondaryUsers: secondaryUsers.length },
+  };
+}
 
 async function loginWithCredentials(page: Page, email: string, password: string, callbackUrl: string) {
   await page.context().clearCookies();
@@ -70,28 +90,70 @@ async function cleanupFixture() {
   const orderIds = [...new Set([...fixture.orderIds, ...scopedOrders.map(({ id }) => id)])];
   const locationIds = [fixture.storageLocationId, fixture.stagingLocationId, fixture.shippingLocationId].filter(Boolean);
   const inventoryEntityIds = fixture.productId ? locationIds.map((locationId) => `${fixture.productId}:${locationId}`) : [];
-  const childEntityIds = orderIds.length
-    ? (await prisma.salesInternalOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } } }))
-      .flatMap((order) => [order.id, ...order.lines.map(({ id }) => id), ...order.pickLists.flatMap((pickList) => [pickList.id, ...pickList.tasks.map(({ id }) => id)])])
+  const scopedOrdersWithChildren = orderIds.length
+    ? await prisma.salesInternalOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, lines: { select: { id: true } }, pickLists: { select: { id: true, tasks: { select: { id: true } } } } } })
     : [];
-  const traceIds = fixture.warehouseId
-    ? (await prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } })).map(({ id }) => id)
+  const exceptions = orderIds.length
+    ? await prisma.salesInternalOrderException.findMany({ where: { orderId: { in: orderIds } }, select: { id: true, returns: { select: { id: true, items: { select: { id: true } } } } } })
     : [];
-  if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { traceRecordId: { in: traceIds } } });
+  const exceptionIds = exceptions.map(({ id }) => id);
+  const returnIds = exceptions.flatMap(({ returns }) => returns.map(({ id }) => id));
+  const returnItemIds = exceptions.flatMap(({ returns }) => returns.flatMap(({ items }) => items.map(({ id }) => id)));
+  const lineIds = scopedOrdersWithChildren.flatMap((order) => order.lines.map(({ id }) => id));
+  const pickListIds = scopedOrdersWithChildren.flatMap((order) => order.pickLists.map(({ id }) => id));
+  const pickTaskIds = scopedOrdersWithChildren.flatMap((order) => order.pickLists.flatMap(({ tasks }) => tasks.map(({ id }) => id)));
+  const movementScope = [
+    ...(orderIds.length ? [{ documentId: { in: orderIds } }] : []),
+    ...(fixture.productId ? [{ productId: fixture.productId }] : []),
+    ...(locationIds.length ? [{ locationId: { in: locationIds } }] : []),
+  ];
+  const [inventoryRows, movementRows, traceRows] = await Promise.all([
+    fixture.productId ? prisma.inventory.findMany({ where: { productId: fixture.productId }, select: { id: true, productId: true, locationId: true, quantity: true, reserved: true, available: true } }) : Promise.resolve([]),
+    movementScope.length ? prisma.inventoryMovement.findMany({ where: { OR: movementScope }, select: { id: true, documentId: true, productId: true, locationId: true, type: true, quantity: true } }) : Promise.resolve([]),
+    fixture.warehouseId ? prisma.traceRecord.findMany({ where: { warehouseId: fixture.warehouseId }, select: { id: true } }) : Promise.resolve([]),
+  ]);
+  const traceIds = traceRows.map(({ id }) => id);
+  const labelJobs = traceIds.length ? await prisma.labelPrintJob.findMany({ where: { traceRecordId: { in: traceIds } }, select: { id: true, traceRecordId: true } }) : [];
+  const productIds = fixture.productId ? [fixture.productId] : [];
+  const orderEventIds = [...orderIds];
+  const syncEventWhere: Prisma.SyncEventWhereInput = {
+    OR: [
+      ...(inventoryEntityIds.length ? [{ entityType: "INVENTORY", entityId: { in: inventoryEntityIds } }] : []),
+      ...(orderEventIds.length ? [{ entityType: "ORDER", entityId: { in: orderEventIds } }] : []),
+      ...(productIds.length ? [{ entityType: "PRODUCT", entityId: { in: productIds } }] : []),
+    ],
+  };
+  const syncEvents = syncEventWhere.OR?.length ? await prisma.syncEvent.findMany({ where: syncEventWhere, select: { id: true, entityType: true, entityId: true, action: true, status: true } }) : [];
+  const childEntityIds = [
+    ...scopedOrdersWithChildren.flatMap((order) => [order.id, ...order.lines.map(({ id }) => id), ...order.pickLists.flatMap((pickList) => [pickList.id, ...pickList.tasks.map(({ id }) => id)])]),
+    ...exceptionIds, ...returnIds, ...returnItemIds,
+  ];
+  const auditEntityIds = [...new Set([
+    ...childEntityIds, ...inventoryEntityIds, ...productIds, ...locationIds,
+    fixture.warehouseId, fixture.customerId, fixture.secondaryOperatorId,
+    ...movementRows.map(({ id }) => id),
+  ].filter((value): value is string => Boolean(value)))];
+  const auditRows = auditEntityIds.length ? await prisma.auditLog.findMany({ where: { entityId: { in: auditEntityIds } }, select: { id: true, entityType: true, entityId: true, action: true, actorUserId: true } }) : [];
+  const duringIds = {
+    warehouseIds: fixture.warehouseId ? [fixture.warehouseId] : [], customerIds: fixture.customerId ? [fixture.customerId] : [],
+    productIds, locationIds, salesOrderIds: orderIds, salesOrderLineIds: lineIds, pickListIds, pickTaskIds,
+    exceptionIds, returnIds, returnItemIds, inventoryIds: inventoryRows.map(({ id }) => id), movementIds: movementRows.map(({ id }) => id),
+    traceIds, labelPrintJobIds: labelJobs.map(({ id }) => id), userIds: fixture.secondaryOperatorId ? [fixture.secondaryOperatorId] : [],
+    userRoles: fixture.secondaryOperatorId ? await prisma.userRole.findMany({ where: { userId: fixture.secondaryOperatorId }, select: { userId: true, roleId: true } }) : [],
+    auditEntityIds, auditLogIds: auditRows.map(({ id }) => id), syncEventIds: syncEvents.map(({ id }) => id),
+    inventoryEntityIds, orderEventIds, productEventIds: productIds,
+  };
+  const duringCounts = Object.fromEntries(Object.entries(duringIds).map(([key, ids]) => [key, Array.isArray(ids) ? ids.length : 0]));
+  const [{ schema }] = await prisma.$queryRaw<Array<{ schema: string }>>`SELECT current_schema() AS schema`;
+  await evidence?.write("during", { phase: "during", capturedAt: new Date().toISOString(), schema, uniqueTag: tag, ids: duringIds, counts: duringCounts });
+
+  if (traceIds.length) await prisma.labelPrintJob.deleteMany({ where: { id: { in: labelJobs.map(({ id }) => id) } } });
   if (traceIds.length) await prisma.traceRecord.deleteMany({ where: { id: { in: traceIds } } });
-  if (childEntityIds.length || inventoryEntityIds.length) {
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: [...childEntityIds, ...inventoryEntityIds] } } });
-  }
+  if (auditEntityIds.length) await prisma.auditLog.deleteMany({ where: { entityId: { in: auditEntityIds } } });
+  if (syncEventWhere.OR?.length) await prisma.syncEvent.deleteMany({ where: syncEventWhere });
+  if (movementRows.length) await prisma.inventoryMovement.deleteMany({ where: { id: { in: movementRows.map(({ id }) => id) } } });
   if (orderIds.length) {
-    await prisma.inventoryMovement.deleteMany({ where: { documentId: { in: orderIds } } });
     await prisma.salesInternalOrder.deleteMany({ where: { id: { in: orderIds } } });
-  }
-  if (fixture.warehouseId) {
-    await prisma.auditLog.deleteMany({ where: { entityId: fixture.warehouseId } });
-    await prisma.inventoryMovement.deleteMany({ where: { OR: [...(locationIds.length ? [{ locationId: { in: locationIds } }] : []), ...(fixture.productId ? [{ productId: fixture.productId }] : [])] } });
-    if (fixture.productId && locationIds.length) {
-      await prisma.syncEvent.deleteMany({ where: { entityType: "INVENTORY", entityId: { in: locationIds.map((locationId) => `${fixture.productId}:${locationId}`) } } });
-    }
   }
   if (fixture.productId) {
     await prisma.inventory.deleteMany({ where: { productId: fixture.productId } });
@@ -103,6 +165,30 @@ async function cleanupFixture() {
     await prisma.warehouse.delete({ where: { id: fixture.warehouseId } });
   }
   if (fixture.secondaryOperatorId) await prisma.user.delete({ where: { id: fixture.secondaryOperatorId } });
+
+  const afterCounts = {
+    warehouses: fixture.warehouseId ? await prisma.warehouse.count({ where: { id: fixture.warehouseId } }) : 0,
+    customers: fixture.customerId ? await prisma.customer.count({ where: { id: fixture.customerId } }) : 0,
+    products: productIds.length ? await prisma.product.count({ where: { id: { in: productIds } } }) : 0,
+    locations: locationIds.length ? await prisma.location.count({ where: { id: { in: locationIds } } }) : 0,
+    salesOrders: orderIds.length ? await prisma.salesInternalOrder.count({ where: { id: { in: orderIds } } }) : 0,
+    salesOrderLines: lineIds.length ? await prisma.salesInternalOrderLine.count({ where: { id: { in: lineIds } } }) : 0,
+    pickLists: pickListIds.length ? await prisma.salesInternalOrderPickList.count({ where: { id: { in: pickListIds } } }) : 0,
+    pickTasks: pickTaskIds.length ? await prisma.salesInternalOrderPickTask.count({ where: { id: { in: pickTaskIds } } }) : 0,
+    exceptions: exceptionIds.length ? await prisma.salesInternalOrderException.count({ where: { id: { in: exceptionIds } } }) : 0,
+    returns: returnIds.length ? await prisma.salesInternalOrderReturn.count({ where: { id: { in: returnIds } } }) : 0,
+    returnItems: returnItemIds.length ? await prisma.salesInternalOrderReturnItem.count({ where: { id: { in: returnItemIds } } }) : 0,
+    inventory: inventoryRows.length ? await prisma.inventory.count({ where: { id: { in: inventoryRows.map(({ id }) => id) } } }) : 0,
+    movements: movementRows.length ? await prisma.inventoryMovement.count({ where: { id: { in: movementRows.map(({ id }) => id) } } }) : 0,
+    traces: traceIds.length ? await prisma.traceRecord.count({ where: { id: { in: traceIds } } }) : 0,
+    labelPrintJobs: labelJobs.length ? await prisma.labelPrintJob.count({ where: { id: { in: labelJobs.map(({ id }) => id) } } }) : 0,
+    secondaryUsers: fixture.secondaryOperatorId ? await prisma.user.count({ where: { id: fixture.secondaryOperatorId } }) : 0,
+    userRoles: Array.isArray(duringIds.userRoles) && duringIds.userRoles.length ? await prisma.userRole.count({ where: { OR: duringIds.userRoles } }) : 0,
+    audits: auditEntityIds.length ? await prisma.auditLog.count({ where: { entityId: { in: auditEntityIds } } }) : 0,
+    syncEvents: syncEventWhere.OR?.length ? await prisma.syncEvent.count({ where: syncEventWhere }) : 0,
+  };
+  await evidence?.write("after", { phase: "after", capturedAt: new Date().toISOString(), schema, uniqueTag: tag, ids: duringIds, counts: afterCounts, zeroResiduals: Object.values(afterCounts).every((count) => count === 0) });
+  expect(Object.values(afterCounts)).toEqual(Array(Object.keys(afterCounts).length).fill(0));
 }
 
 test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
@@ -112,6 +198,11 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
   );
 
   test.beforeAll(async () => {
+    evidence = await createAwsFixtureEvidence("aws-v1-v5-v7-v8", tag);
+    const before = await captureBeforeManifest();
+    await evidence.write("before", before);
+    expect(Object.values(before.counts)).toEqual(Array(Object.keys(before.counts).length).fill(0));
+
     const warehouse = await prisma.warehouse.create({
       data: { code: fixture.warehouseCode, name: `Almacén ${tag}`, isActive: true },
     });
@@ -150,8 +241,11 @@ test.describe.serial("AWS dev browser gates V1/V5/V7/V8", () => {
   });
 
   test.afterAll(async () => {
-    await cleanupFixture();
-    await prisma.$disconnect();
+    try {
+      await cleanupFixture();
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   test("V1 browser escribe una reserva y revalida disponibilidad actual", async ({ page }) => {
@@ -556,7 +650,7 @@ test.describe.serial("AWS browser governance KAN-19/21", () => {
     await page.goto("/catalog/compatibility");
     await expectCatalogAccessibilityBothThemes(page);
     const reviewedCard = page.locator("article").filter({ hasText: "PRODUCT_SUBSTITUTION" }).filter({ hasText: governanceFixture.hoseSku });
-    await reviewedCard.locator('select[name="decision"]').selectOption("APPROVED");
+    await reviewedCard.getByLabel("Decisión técnica para publicar", { exact: true }).selectOption("APPROVED");
     await reviewedCard.getByRole("button", { name: "Publicar decisión (Admin)" }).click();
     await expect(page).toHaveURL(/\/catalog\/compatibility\?success=approved/);
     rule = await governancePrisma.productCompatibilityRule.findUniqueOrThrow({ where: { id: rule.id } });

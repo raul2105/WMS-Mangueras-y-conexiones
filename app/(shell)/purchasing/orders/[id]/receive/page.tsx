@@ -6,7 +6,7 @@ import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
 import { firstErrorMessage, purchaseReceiptOperationSchema, purchaseReceiptLineDiscrepancySchema } from "@/lib/schemas/wms";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { PurchaseReceiptForm } from "@/components/purchasing/PurchaseReceiptForm";
-import { commitPurchaseOrderReceipt } from "@/lib/purchasing/purchase-order-receiving";
+import { commitPurchaseOrderReceipt, isReceivingLocation } from "@/lib/purchasing/purchase-order-receiving";
 import { getPurchaseUnitPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
 
 const RECEIPT_QUEUE_HREF = "/purchasing/orders?preset=por_recibir";
@@ -37,9 +37,9 @@ async function receiveItems(orderId: string, formData: FormData) {
 
   const receivingLocation = await prisma.location.findUnique({
     where: { id: locationId },
-    select: { code: true, isActive: true },
+    select: { isActive: true, usageType: true, warehouseId: true, warehouse: { select: { isActive: true } } },
   });
-  if (!receivingLocation?.isActive || !receivingLocation.code.startsWith("RECV")) {
+  if (!isReceivingLocation(receivingLocation ? { ...receivingLocation, warehouseIsActive: receivingLocation.warehouse.isActive } : null)) {
     redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Selecciona una zona de recepción autorizada")}`);
   }
 
@@ -49,6 +49,7 @@ async function receiveItems(orderId: string, formData: FormData) {
       id: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       lines: {
         select: {
           id: true,
@@ -65,6 +66,10 @@ async function receiveItems(orderId: string, formData: FormData) {
 
   if (!order) {
     redirect("/purchasing/orders");
+  }
+
+  if (order.deliveryWarehouseId && receivingLocation?.warehouseId !== order.deliveryWarehouseId) {
+    redirect(`/purchasing/orders/${orderId}/receive?error=${encodeURIComponent("Selecciona una zona del almacén destino de la OC")}`);
   }
 
   if (!["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status)) {
@@ -196,6 +201,7 @@ export default async function ReceivePage({
       id: true,
       folio: true,
       status: true,
+      deliveryWarehouseId: true,
       supplier: { select: { name: true, code: true, businessName: true } },
       lines: {
         select: {
@@ -224,7 +230,12 @@ export default async function ReceivePage({
   }
 
   const locations = await prisma.location.findMany({
-    where: { isActive: true, code: { startsWith: "RECV" } },
+    where: {
+      isActive: true,
+      usageType: "RECEIVING",
+      warehouse: { isActive: true },
+      ...(order.deliveryWarehouseId ? { warehouseId: order.deliveryWarehouseId } : {}),
+    },
     orderBy: [{ warehouse: { name: "asc" } }, { code: "asc" }],
     select: { id: true, code: true, warehouse: { select: { name: true } } },
   });

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { LocationUsageType, PrismaClient } from "@prisma/client";
 import { createAuditLogSafeWithDb } from "@/lib/audit-log";
 import InventoryService from "@/lib/inventory-service";
 import { createMovementTraceAndLabelJob } from "@/lib/labeling-service";
@@ -13,6 +13,14 @@ export type PurchaseReceiptCommitLine = {
   qtySurplusReported: number;
   discrepancyReason: string | null;
 };
+
+export function isReceivingLocation(location: {
+  isActive: boolean;
+  usageType: LocationUsageType;
+  warehouseIsActive: boolean;
+} | null | undefined) {
+  return Boolean(location?.isActive && location.usageType === "RECEIVING" && location.warehouseIsActive);
+}
 
 export async function commitPurchaseOrderReceipt(input: {
   prismaClient: PrismaClient;
@@ -34,15 +42,17 @@ export async function commitPurchaseOrderReceipt(input: {
           id: true,
           folio: true,
           status: true,
+          deliveryWarehouseId: true,
           lines: {
             select: { id: true, productId: true, qtyOrdered: true, qtyReceived: true, purchaseUnitFactor: true },
           },
         },
       }),
-      tx.location.findUnique({ where: { id: input.locationId }, select: { code: true, isActive: true } }),
+      tx.location.findUnique({ where: { id: input.locationId }, select: { isActive: true, usageType: true, warehouseId: true, warehouse: { select: { isActive: true } } } }),
     ]);
     if (!order) throw new Error("La orden de compra ya no está disponible");
-    if (!receivingLocation?.isActive || !receivingLocation.code.startsWith("RECV")) {
+    if (!isReceivingLocation(receivingLocation ? { ...receivingLocation, warehouseIsActive: receivingLocation.warehouse.isActive } : null)
+      || (order.deliveryWarehouseId && receivingLocation?.warehouseId !== order.deliveryWarehouseId)) {
       throw new Error("Selecciona una zona de recepción autorizada");
     }
     if (!["CONFIRMADA", "EN_TRANSITO", "PARCIAL"].includes(order.status)) {

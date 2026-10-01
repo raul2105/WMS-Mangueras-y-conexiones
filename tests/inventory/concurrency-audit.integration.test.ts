@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { InventoryService, InventoryServiceError } from "@/lib/inventory-service";
+import { lockAndAssertActiveInventoryLocations } from "@/lib/inventory-active-location";
 
 const describePostgres = process.env.RUN_POSTGRES_TESTS === "1" ? describe : describe.skip;
 let prisma: PrismaClient;
@@ -120,6 +121,34 @@ beforeAll(async () => { prisma = new PrismaClient(); await prisma.$connect(); },
 afterAll(async () => { await prisma.$disconnect(); }, 60_000);
 
 describePostgres("inventory concurrency, CAS and audit atomicity (PostgreSQL)", () => {
+  it("rejects receive into inactive locations or warehouses without changing stock or audit", async () => {
+    for (const inactiveTarget of ["location", "warehouse"] as const) {
+      const input = await fixture();
+      try {
+        if (inactiveTarget === "location") {
+          await prisma.location.update({ where: { id: input.source.id }, data: { isActive: false } });
+        } else {
+          await prisma.warehouse.update({ where: { id: input.warehouse.id }, data: { isActive: false } });
+        }
+
+        const inactiveCode = inactiveTarget === "location" ? "LOCATION_INACTIVE" : "WAREHOUSE_INACTIVE";
+        await expect(prisma.$transaction(async (tx) => {
+          await lockAndAssertActiveInventoryLocations(tx, [input.source.id]);
+          await new InventoryService(prisma).receiveStock(input.product.id, input.source.id, 2, input.token, {
+            ...auditActor(input),
+            tx,
+          });
+        })).rejects.toMatchObject({ code: inactiveCode });
+
+        expect(await prisma.inventory.findUniqueOrThrow({
+          where: { productId_locationId: { productId: input.product.id, locationId: input.source.id } },
+        })).toMatchObject({ quantity: 5, reserved: 0, available: 5 });
+        expect(await prisma.inventoryMovement.count({ where: { productId: input.product.id } })).toBe(0);
+        expect(await prisma.auditLog.count({ where: { actorUserId: input.user.id } })).toBe(0);
+      } finally { await cleanup(input); }
+    }
+  }, 30_000);
+
   it("serializes concurrent receives and preserves before/after actor evidence", async () => {
     const input = await fixture();
     try {

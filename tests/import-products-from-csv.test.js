@@ -65,6 +65,12 @@ function createMockPrisma(locationCodes = []) {
     },
     inventory: {
       findMany: async () => [],
+      findUnique: async () => null,
+      update: async () => null,
+      create: async () => null,
+    },
+    inventoryMovement: {
+      create: async () => null,
     },
     productTechnicalAttribute: {
       deleteMany: async () => {},
@@ -73,25 +79,12 @@ function createMockPrisma(locationCodes = []) {
       },
     },
     importLog: {
-      create: async () => {},
+      create: async ({ data }) => ({ id: "import-log-1", ...data }),
     },
     auditLog: {
       create: async () => {},
     },
-    $transaction: async (callback) =>
-      callback({
-        inventory: {
-          findUnique: async () => null,
-          update: async () => null,
-          create: async () => null,
-        },
-        inventoryMovement: {
-          create: async () => null,
-        },
-        auditLog: {
-          create: async () => null,
-        },
-      }),
+    $transaction: async (callback) => callback(mock),
   };
 
   return { mock, state };
@@ -109,7 +102,10 @@ async function runImport(content, options = {}) {
     return await importProductsFromCsv({
       filePath,
       dryRun: options.dryRun ?? false,
-      prismaClient: prisma,
+      prismaClient: options.prismaClient ?? prisma,
+      actor: options.actor,
+      actorUserId: options.actorUserId,
+      importLog: options.importLog,
     });
   } finally {
     try {
@@ -408,18 +404,33 @@ describe("KAN-97 flat attr_* columns", () => {
 describeDb("KAN-95 import-products-from-csv", () => {
   it("succeeds in dry-run with the sample CSV", async () => {
     await seedWarehouseWithLocations(["A-12-04", "B-01-01"]);
+    const before = await Promise.all([
+      prisma.product.count(),
+      prisma.inventory.count(),
+      prisma.inventoryMovement.count(),
+      prisma.importLog.count(),
+      prisma.auditLog.count(),
+    ]);
 
     const result = await importProductsFromCsv({
       filePath: path.join(process.cwd(), "data", "products.sample.csv"),
       dryRun: true,
       prismaClient: prisma,
     });
+    const after = await Promise.all([
+      prisma.product.count(),
+      prisma.inventory.count(),
+      prisma.inventoryMovement.count(),
+      prisma.importLog.count(),
+      prisma.auditLog.count(),
+    ]);
 
     expect(result).toMatchObject({
       rows: 3,
       skus: 3,
       dryRun: true,
     });
+    expect(after).toEqual(before);
   });
 
   it("serves the official sample CSV route as text/csv", async () => {
@@ -636,6 +647,150 @@ describeDb("KAN-95 import-products-from-csv", () => {
     });
 
     expect(inventories.map((row) => row.quantity)).toEqual([4, 5]);
+  });
+
+  it("audits import writes with the authenticated actor and rolls back all writes when audit fails", async () => {
+    const locationCode = `LOC-${crypto.randomUUID().slice(0, 8)}`;
+    await seedWarehouseWithLocations([locationCode]);
+    const actor = await prisma.user.create({
+      data: {
+        email: `qa-import-${crypto.randomUUID()}@example.invalid`,
+        name: "Operador importación QA",
+        passwordHash: "unused-test-hash",
+      },
+    });
+    const actorName = `qa-import-actor-${crypto.randomUUID().replaceAll("-", "")}`;
+    const successfulFileName = `qa-import-${crypto.randomUUID()}.csv`;
+
+    try {
+      await runImport(
+        csv(csvRow(["SKU-IMPORT-AUDIT", "Producto Audit", "HOSE", "Desc", "Marca", "pieza", "10", "20", "", "", "3", locationCode, "{}", "REF-IMPORT-AUDIT", ""])),
+        {
+          actor: actorName,
+          actorUserId: actor.id,
+          importLog: { fileName: successfulFileName, fileSize: 256 },
+        },
+      );
+
+      const successfulAudits = await prisma.auditLog.findMany({
+        where: { actorUserId: actor.id, entityType: { in: ["PRODUCT", "INVENTORY", "IMPORT_LOG"] } },
+        select: { entityType: true, actor: true, source: true },
+      });
+      expect(new Set(successfulAudits.map((row) => row.entityType))).toEqual(new Set(["PRODUCT", "INVENTORY", "IMPORT_LOG"]));
+      expect(successfulAudits.every((row) => row.actor === actorName && row.source)).toBe(true);
+      expect(await prisma.importLog.findFirst({ where: { fileName: successfulFileName, status: "IMPORTED" } })).not.toBeNull();
+      const importedProduct = await prisma.product.findUniqueOrThrow({ where: { sku: "SKU-IMPORT-AUDIT" }, select: { id: true } });
+      expect(await prisma.inventoryMovement.findFirst({
+        where: { productId: importedProduct.id, reference: "CSV_IMPORT" },
+        select: { operatorName: true, operatorUserId: true },
+      })).toEqual({ operatorName: actorName, operatorUserId: actor.id });
+
+      const [{ schema }] = await prisma.$queryRaw`SELECT current_schema() AS schema`;
+      if (!/^t_[a-zA-Z0-9_]+_f[0-9a-f]{16}$/.test(schema)) {
+        throw new Error("CSV import audit fault injection requires an isolated AWS test schema");
+      }
+      const triggerName = `qa_import_${crypto.randomUUID().replaceAll("-", "")}`;
+      await prisma.$executeRawUnsafe(
+        `CREATE FUNCTION "${schema}"."${triggerName}"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'QA import audit unavailable'; END; $$`,
+      );
+      try {
+        await prisma.$executeRawUnsafe(
+          `CREATE TRIGGER "${triggerName}" BEFORE INSERT ON "${schema}"."AuditLog" FOR EACH ROW WHEN (NEW."actor" = '${actorName}' AND NEW."entityType" = 'INVENTORY') EXECUTE FUNCTION "${schema}"."${triggerName}"()`,
+        );
+        const failedFileName = `qa-import-rollback-${crypto.randomUUID()}.csv`;
+        await expect(
+          runImport(
+            csv(csvRow(["SKU-IMPORT-ROLLBACK", "Debe revertirse", "HOSE", "Desc", "Marca", "pieza", "10", "20", "", "", "4", locationCode, "{}", "REF-IMPORT-ROLLBACK", ""])),
+            {
+              actor: actorName,
+              actorUserId: actor.id,
+              importLog: { fileName: failedFileName, fileSize: 256 },
+            },
+          ),
+        ).rejects.toThrow(/QA import audit unavailable/);
+        expect(await prisma.product.findUnique({ where: { sku: "SKU-IMPORT-ROLLBACK" } })).toBeNull();
+        expect(await prisma.inventory.count({ where: { product: { sku: "SKU-IMPORT-ROLLBACK" } } })).toBe(0);
+        expect(await prisma.inventoryMovement.count({ where: { reference: "CSV_IMPORT", operatorName: actorName, quantity: 4 } })).toBe(0);
+        expect(await prisma.importLog.count({ where: { fileName: failedFileName } })).toBe(0);
+        expect(await prisma.auditLog.count({ where: { actorUserId: actor.id } })).toBe(successfulAudits.length);
+      } finally {
+        await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."AuditLog"`);
+        await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${triggerName}"()`);
+      }
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { actorUserId: actor.id } });
+      await prisma.user.delete({ where: { id: actor.id } });
+    }
+  });
+
+  it("aborts a CSV reconciliation when stock changes after its snapshot", async () => {
+    const locationCode = `LOC-${crypto.randomUUID().slice(0, 8)}`;
+    await seedWarehouseWithLocations([locationCode]);
+    const location = await prisma.location.findUniqueOrThrow({ where: { code: locationCode }, select: { id: true } });
+    const product = await prisma.product.create({
+      data: { sku: "SKU-IMPORT-CAS", name: "Nombre original", type: "HOSE" },
+    });
+    const inventory = await prisma.inventory.create({
+      data: { productId: product.id, locationId: location.id, quantity: 5, reserved: 0, available: 5 },
+    });
+    const actorName = `qa-import-cas-${crypto.randomUUID().replaceAll("-", "")}`;
+    const fileName = `qa-import-cas-${crypto.randomUUID()}.csv`;
+    let externalChangeApplied = false;
+
+    const racingPrisma = new Proxy(prisma, {
+      get(target, property) {
+        if (property === "$transaction") {
+          return (callback, options) => target.$transaction((tx) => callback(new Proxy(tx, {
+            get(transaction, transactionProperty) {
+              if (transactionProperty === "inventory") {
+                const inventoryDelegate = transaction.inventory;
+                return new Proxy(inventoryDelegate, {
+                  get(delegate, method) {
+                    if (method === "findUnique") {
+                      return async (args) => {
+                        const snapshot = await delegate.findUnique(args);
+                        if (!externalChangeApplied) {
+                          externalChangeApplied = true;
+                          await prisma.inventory.update({
+                            where: { id: inventory.id },
+                            data: { quantity: 6, available: 6 },
+                          });
+                        }
+                        return snapshot;
+                      };
+                    }
+                    const value = Reflect.get(delegate, method, delegate);
+                    return typeof value === "function" ? value.bind(delegate) : value;
+                  },
+                });
+              }
+              const value = Reflect.get(transaction, transactionProperty, transaction);
+              return typeof value === "function" ? value.bind(transaction) : value;
+            },
+          })), options);
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await expect(
+      runImport(
+        csv(csvRow(["SKU-IMPORT-CAS", "Nombre importado", "HOSE", "Desc", "Marca", "pieza", "10", "20", "", "", "8", locationCode, "{}", "REF-IMPORT-CAS", ""])),
+        {
+          prismaClient: racingPrisma,
+          actor: actorName,
+          importLog: { fileName, fileSize: 256 },
+        },
+      ),
+    ).rejects.toThrow(/changed concurrently/i);
+
+    expect(externalChangeApplied).toBe(true);
+    expect(await prisma.product.findUniqueOrThrow({ where: { id: product.id }, select: { name: true } })).toEqual({ name: "Nombre original" });
+    expect(await prisma.inventory.findUniqueOrThrow({ where: { id: inventory.id }, select: { quantity: true, available: true } })).toEqual({ quantity: 6, available: 6 });
+    expect(await prisma.inventoryMovement.count({ where: { productId: product.id, reference: "CSV_IMPORT" } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { actor: actorName } })).toBe(0);
+    expect(await prisma.importLog.count({ where: { fileName } })).toBe(0);
   });
 
   it("fails on repeated SKU with conflicting product-level fields", async () => {

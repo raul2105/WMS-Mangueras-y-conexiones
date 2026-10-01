@@ -2,6 +2,10 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { pageGuard } from "@/components/rbac/PageGuard";
+import { createAuditLogRequiredWithDb } from "@/lib/audit-log";
+import { resolveAuthenticatedActor } from "@/lib/auth/authenticated-actor";
+import { getSessionContext } from "@/lib/auth/session-context";
+import { requirePermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +16,11 @@ interface PageProps {
 
 async function updateWarehouse(id: string, formData: FormData) {
   "use server";
+  await requirePermission("warehouse.manage");
+  const actor = resolveAuthenticatedActor(await getSessionContext());
+  if (!actor.actorUserId || !actor.actorName) {
+    redirect(`/warehouse/${id}/edit?error=${encodeURIComponent("Sesión inválida para actualizar el almacén")}`);
+  }
 
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim() || null;
@@ -22,10 +31,33 @@ async function updateWarehouse(id: string, formData: FormData) {
     redirect(`/warehouse/${id}/edit?error=${encodeURIComponent("El nombre es obligatorio")}`);
   }
 
-  await prisma.warehouse.update({
-    where: { id },
-    data: { name, description, address, isActive },
+  const updated = await prisma.$transaction(async (tx) => {
+    const current = await tx.warehouse.findUnique({ where: { id } });
+    if (!current) return false;
+    const result = await tx.warehouse.updateMany({
+      where: {
+        id,
+        name: current.name,
+        description: current.description,
+        address: current.address,
+        isActive: current.isActive,
+      },
+      data: { name, description, address, isActive },
+    });
+    if (result.count !== 1) throw new Error("El almacén cambió durante la edición; vuelve a consultar e inténtalo de nuevo");
+    await createAuditLogRequiredWithDb({
+      entityType: "WAREHOUSE",
+      entityId: id,
+      action: "UPDATE",
+      source: "warehouse/update",
+      before: { name: current.name, description: current.description, address: current.address, isActive: current.isActive },
+      after: { name, description, address, isActive },
+      actor: actor.actorName,
+      actorUserId: actor.actorUserId,
+    }, tx);
+    return true;
   });
+  if (!updated) notFound();
 
   redirect(`/warehouse/${id}`);
 }

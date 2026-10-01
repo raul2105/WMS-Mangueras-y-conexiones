@@ -7,7 +7,7 @@ on:
     branches: [ main, develop ]
   schedule:
     # 10:17 America/Mexico_City (UTC-6), Monday through Saturday.
-    # DEV starts at 08:00; avoid testing during its overnight/Sunday shutdown.
+    # The canonical runtime is continuous production; its physical stack keeps the DEV name.
     - cron: "17 16 * * 1-6"
   workflow_dispatch:
 

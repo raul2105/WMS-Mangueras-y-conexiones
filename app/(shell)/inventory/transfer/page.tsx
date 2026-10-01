@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { pageGuard } from "@/components/rbac/PageGuard";
 import { getQuantityPolicy, quantityValidationMessage } from "@/lib/quantity-policy";
+import { lockAndAssertActiveInventoryLocations } from "@/lib/inventory-active-location";
 
 export const dynamic = "force-dynamic";
 
@@ -89,20 +90,27 @@ async function transferStock(formData: FormData) {
   const service = new InventoryService(prisma);
 
   try {
-    await service.transferStock(product.id, fromLocation.id, toLocation.id, parsed.data.quantityRaw, reference, {
-      notes,
-      fromLocationCode,
-      toLocationCode,
-      operatorName: actor.operatorName,
-      operatorUserId: actor.actorUserId,
-      actor: actor.actorName,
-      actorUserId: actor.actorUserId,
-      source: "inventory/transfer",
-    });
+    await prisma.$transaction(async (tx) => {
+      await lockAndAssertActiveInventoryLocations(tx, [fromLocation.id, toLocation.id]);
+      await service.transferStock(product.id, fromLocation.id, toLocation.id, parsed.data.quantityRaw, reference, {
+        tx,
+        notes,
+        fromLocationCode,
+        toLocationCode,
+        operatorName: actor.operatorName,
+        operatorUserId: actor.actorUserId,
+        actor: actor.actorName,
+        actorUserId: actor.actorUserId,
+        source: "inventory/transfer",
+      });
+    }, { timeout: 20000 });
 
   } catch (error) {
     if (error instanceof InventoryServiceError) {
       const messages: Record<string, string> = {
+        LOCATION_NOT_FOUND: "La ubicación ya no existe; recarga el formulario",
+        LOCATION_INACTIVE: error.message,
+        WAREHOUSE_INACTIVE: error.message,
         INSUFFICIENT_AVAILABLE: "Stock disponible insuficiente en la ubicación origen",
         INVENTORY_NOT_FOUND: "No hay inventario en la ubicación origen para ese producto",
         INVALID_TRANSFER: "La ubicación origen y destino no pueden ser la misma",
@@ -127,7 +135,7 @@ export default async function TransferPage({
   const actor = resolveAuthenticatedActor(await getSessionContext());
   const [locations, products, recentReferences] = await Promise.all([
     prisma.location.findMany({
-      where: { isActive: true },
+      where: { isActive: true, warehouse: { isActive: true } },
       orderBy: [{ warehouse: { code: "asc" } }, { code: "asc" }],
       select: {
         code: true,

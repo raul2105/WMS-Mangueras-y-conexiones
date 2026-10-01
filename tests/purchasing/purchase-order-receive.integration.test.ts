@@ -71,6 +71,7 @@ describePostgres("purchase order receive integration", () => {
         name: "Ubicación Test",
         zone: "A",
         isActive: true,
+        usageType: "RECEIVING",
         warehouseId: warehouse.id,
       },
     });
@@ -133,6 +134,51 @@ describePostgres("purchase order receive integration", () => {
       order,
       orderLines,
     };
+  }
+
+  async function expectRejectedWithoutReceipt(input: {
+    order: { id: string; folio: string };
+    line: { id: string; productId: string };
+    locationId: string;
+    actor: { id: string; name: string };
+  }) {
+    await expect(commitPurchaseOrderReceipt({
+      prismaClient: prisma,
+      orderId: input.order.id,
+      locationId: input.locationId,
+      referenceDoc: `DENIED-${unique()}`,
+      notes: "Prueba de ubicación no autorizada",
+      lines: [{
+        lineId: input.line.id,
+        productId: input.line.productId,
+        qtyReceived: 2,
+        qtyDamaged: 0,
+        qtyMissing: 0,
+        qtyRejected: 0,
+        qtySurplusReported: 0,
+        discrepancyReason: null,
+      }],
+      actor: { name: input.actor.name, userId: input.actor.id, operatorName: input.actor.name },
+    })).rejects.toThrow("Selecciona una zona de recepción autorizada");
+
+    const [line, order, receipts, stock, movements, audits, traces, labelJobs] = await Promise.all([
+      prisma.purchaseOrderLine.findUniqueOrThrow({ where: { id: input.line.id } }),
+      prisma.purchaseOrder.findUniqueOrThrow({ where: { id: input.order.id } }),
+      prisma.purchaseReceipt.count({ where: { purchaseOrderId: input.order.id } }),
+      prisma.inventory.findUnique({ where: { productId_locationId: { productId: input.line.productId, locationId: input.locationId } } }),
+      prisma.inventoryMovement.count({ where: { reference: input.order.folio, type: "IN" } }),
+      prisma.auditLog.count({ where: { entityType: "PURCHASE_ORDER", entityId: input.order.id, action: "RECEIVE" } }),
+      prisma.traceRecord.count({ where: { productId: input.line.productId } }),
+      prisma.labelPrintJob.count({ where: { traceRecord: { productId: input.line.productId } } }),
+    ]);
+    expect(line.qtyReceived).toBe(0);
+    expect(order.status).toBe("CONFIRMADA");
+    expect(receipts).toBe(0);
+    expect(stock).toBeNull();
+    expect(movements).toBe(0);
+    expect(audits).toBe(0);
+    expect(traces).toBe(0);
+    expect(labelJobs).toBe(0);
   }
 
   beforeEach(async () => {
@@ -240,6 +286,84 @@ describePostgres("purchase order receive integration", () => {
     expect(movements).toHaveLength(1);
     expect(movements[0]).toMatchObject({ quantity: 6, operatorUserId: actor.id, documentId: receiptId });
     expect(audits.some((audit) => audit.action === "RECEIVE" && audit.actorUserId === actor.id)).toBe(true);
+  });
+
+  it("accepts a custom location code when the active location is semantically RECEIVING", async () => {
+    const { order, orderLines, location, productA } = await createFixture();
+    const actor = await prisma.user.create({
+      data: { email: `qa-custom-receiving-${unique()}@example.invalid`, name: "Operador recepción custom QA", passwordHash: "unused-test-hash" },
+    });
+    actorUserIds.push(actor.id);
+    const customCode = `QA-${unique()}-RECV`;
+    await prisma.location.update({ where: { id: location.id }, data: { code: customCode } });
+
+    const receiptId = await commitPurchaseOrderReceipt({
+      prismaClient: prisma,
+      orderId: order.id,
+      locationId: location.id,
+      referenceDoc: "CUSTOM-RECEIVING-CODE",
+      notes: "El código no determina el uso de la ubicación",
+      lines: [{ lineId: orderLines[0].id, productId: productA.id, qtyReceived: 2, qtyDamaged: 0, qtyMissing: 0, qtyRejected: 0, qtySurplusReported: 0, discrepancyReason: null }],
+      actor: { name: actor.name, userId: actor.id, operatorName: actor.name },
+    });
+
+    const [savedLocation, line, stock, receipt, movements, audits] = await Promise.all([
+      prisma.location.findUniqueOrThrow({ where: { id: location.id } }),
+      prisma.purchaseOrderLine.findUniqueOrThrow({ where: { id: orderLines[0].id } }),
+      prisma.inventory.findUniqueOrThrow({ where: { productId_locationId: { productId: productA.id, locationId: location.id } } }),
+      prisma.purchaseReceipt.findUniqueOrThrow({ where: { id: receiptId } }),
+      prisma.inventoryMovement.findMany({ where: { documentId: receiptId, type: "IN" } }),
+      prisma.auditLog.findMany({ where: { entityType: "PURCHASE_ORDER", entityId: order.id, action: "RECEIVE" } }),
+    ]);
+    expect(savedLocation).toMatchObject({ code: customCode, usageType: "RECEIVING", isActive: true });
+    expect(line.qtyReceived).toBe(2);
+    expect(stock).toMatchObject({ quantity: 2, available: 2, reserved: 0 });
+    expect(receipt.locationId).toBe(location.id);
+    expect(movements).toHaveLength(1);
+    expect(audits).toHaveLength(1);
+  });
+
+  it.each(["STORAGE", "STAGING", "SHIPPING"] as const)(
+    "rejects RECV-prefixed %s locations without receipt side effects",
+    async (usageType) => {
+      const { order, orderLines, location } = await createFixture();
+      const actor = await prisma.user.create({
+        data: { email: `qa-denied-${usageType.toLowerCase()}-${unique()}@example.invalid`, name: "Operador recepción QA", passwordHash: "unused-test-hash" },
+      });
+      actorUserIds.push(actor.id);
+      await prisma.location.update({
+        where: { id: location.id },
+        data: { code: `RECV-${unique()}`, usageType },
+      });
+      await expectRejectedWithoutReceipt({ order, line: orderLines[0], locationId: location.id, actor });
+    },
+  );
+
+  it("rejects a RECEIVING location whose warehouse is inactive without receipt side effects", async () => {
+    const { order, orderLines, location, warehouse } = await createFixture();
+    const actor = await prisma.user.create({
+      data: { email: `qa-denied-inactive-warehouse-${unique()}@example.invalid`, name: "Operador recepción QA", passwordHash: "unused-test-hash" },
+    });
+    actorUserIds.push(actor.id);
+    await prisma.warehouse.update({ where: { id: warehouse.id }, data: { isActive: false } });
+    await expectRejectedWithoutReceipt({ order, line: orderLines[0], locationId: location.id, actor });
+  });
+
+  it("rejects a RECEIVING location in a warehouse different from the PO destination", async () => {
+    const { order, orderLines, warehouse, productA } = await createFixture();
+    const actor = await prisma.user.create({
+      data: { email: `qa-denied-wrong-destination-${unique()}@example.invalid`, name: "Operador recepción QA", passwordHash: "unused-test-hash" },
+    });
+    actorUserIds.push(actor.id);
+    const otherWarehouse = await prisma.warehouse.create({
+      data: { code: `WH-OTHER-${unique()}`, name: "Almacén destino distinto", address: "Carretera 2", isActive: true },
+    });
+    const otherLocation = await prisma.location.create({
+      data: { code: `CUSTOM-IN-${unique()}`, name: "Recepción alterna", zone: "B", usageType: "RECEIVING", isActive: true, warehouseId: otherWarehouse.id },
+    });
+    expect(order.deliveryWarehouseId).toBe(warehouse.id);
+    await expectRejectedWithoutReceipt({ order, line: orderLines[0], locationId: otherLocation.id, actor });
+    expect(await prisma.inventory.findUnique({ where: { productId_locationId: { productId: productA.id, locationId: otherLocation.id } } })).toBeNull();
   });
 
   it("allows only one concurrent receipt commit and rolls back the losing CAS attempt", async () => {
@@ -799,8 +923,8 @@ describePostgres("purchase order receive integration", () => {
     const updatedLines = await prisma.purchaseOrderLine.findMany({
       where: { purchaseOrderId: order.id },
     });
-    expect(updatedLines[0].qtyReceived).toBe(10);
-    expect(updatedLines[1].qtyReceived).toBe(0);
+    expect(updatedLines.find(line => line.id === orderLines[0].id)?.qtyReceived).toBe(orderLines[0].qtyOrdered);
+    expect(updatedLines.find(line => line.id === orderLines[1].id)?.qtyReceived).toBe(0);
   });
 
   it("over-receipt fails with conditional update returning count 0", async () => {

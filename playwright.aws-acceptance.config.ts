@@ -2,12 +2,12 @@ import "dotenv/config";
 import { defineConfig, devices } from "@playwright/test";
 
 if (process.env.WMS_AWS_ACCEPTANCE_E2E !== "1") {
-  throw new Error("Set WMS_AWS_ACCEPTANCE_E2E=1 for the authorized AWS DEV acceptance lane.");
+  throw new Error("Set WMS_AWS_ACCEPTANCE_E2E=1 for the authorized canonical AWS acceptance lane.");
 }
 
 const baseURL = process.env.WMS_LIVE_BASE_URL ?? "https://d2b1ltxtvypxr4.cloudfront.net";
 if (new URL(baseURL).origin !== "https://d2b1ltxtvypxr4.cloudfront.net") {
-  throw new Error("The acceptance lane must target the canonical AWS DEV runtime.");
+  throw new Error("The acceptance lane must target the canonical AWS runtime.");
 }
 
 const writeEnabled = process.env.WMS_AWS_WRITE_E2E === "1";
@@ -19,7 +19,7 @@ if (writeEnabled) {
     database.pathname !== "/wms" ||
     ![null, "public"].includes(database.searchParams.get("schema"))
   ) {
-    throw new Error("Browser writes require the canonical DEV database and public schema.");
+    throw new Error("Browser writes require the canonical AWS database and public schema.");
   }
 }
 
@@ -40,6 +40,9 @@ export default defineConfig({
       "purchasing-pdf-flow.spec.ts",
       "purchasing-replenishment-receipt.spec.ts",
       "aws-audit-actor-filter.spec.ts",
+      "aws-warehouse-ownership-summary.spec.ts",
+      "aws-server-action-permissions.spec.ts",
+      "aws-inventory-operations-browser.spec.ts",
     ] : []),
   ],
   timeout: 240000,
@@ -48,7 +51,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   workers: 1,
-  outputDir: "output/aws-acceptance/artifacts",
+  outputDir: process.env.WMS_AWS_ARTIFACT_DIR ?? "output/aws-acceptance/artifacts",
   reporter: [
     ["html", { open: "never", outputFolder: "output/aws-acceptance/report" }],
     ["json", { outputFile: "output/aws-acceptance/results.json" }],
